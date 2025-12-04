@@ -1,13 +1,11 @@
 {
-  "lerna": "8.1.2",
-  "version": "0.1.0-alpha.1",
-  "npmClient": "yarn",
-  "packages": [
-    "packages/*"
-  ],
-  "command": {
-    "version": {
-      "message": "chore(release): publish %s"
-    }
-  }
+	"lerna": "8.1.2",
+	"version": "0.1.0-alpha.2",
+	"npmClient": "yarn",
+	"packages": ["packages/*"],
+	"command": {
+		"version": {
+			"message": "chore(release): publish %s"
+		}
+	}
 }
