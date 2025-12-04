@@ -1,6 +1,6 @@
 # Kamado
 
-[![npm version](https://badge.fury.io/js/kamado.svg)](https://www.npmjs.com/package/kamado) |
+[![npm version](https://badge.fury.io/js/kamado.svg)](https://www.npmjs.com/package/kamado)
 
 ![kamado](https://cdn.jsdelivr.net/gh/d-zero-dev/kamado@main/assets/kamado_logo.png)
 
@@ -12,7 +12,7 @@ Kamado is a static site build tool similar to 11ty, but aims for a simpler desig
 
 **The biggest feature of Kamado is that it requires absolutely no runtime.** No client-side runtime (hydration) is needed. Because it generates pure static HTML, it achieves persistence and robustness. It generates HTML that will work just the same 10 years, or even 20 years from now.
 
-### Difference from 11ty
+### Difference from 11ty/Astro
 
 - Simpler design
 - **No Runtime** - No client-side runtime (hydration) needed

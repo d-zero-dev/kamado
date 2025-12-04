@@ -1,6 +1,6 @@
 # Kamado
 
-[![npm version](https://badge.fury.io/js/kamado.svg)](https://www.npmjs.com/package/kamado) |
+[![npm version](https://badge.fury.io/js/kamado.svg)](https://www.npmjs.com/package/kamado)
 
 ![kamado](https://cdn.jsdelivr.net/gh/d-zero-dev/kamado@main/assets/kamado_logo.png)
 
@@ -12,7 +12,7 @@ Kamadoは11tyに似た静的サイトビルドツールですが、よりシン�
 
 **Kamadoの最大の特徴は、ランタイムを一切必要としないことです。** クライアントサイドのランタイム（ハイドレーション）は不要です。純粋な静的HTMLを生成するため、永続性と堅牢性を実現しています。10年後、20年後も同じように動作するHTMLを生成します。
 
-### 11tyとの違い
+### 11ty/Astroとの違い
 
 - よりシンプルな設計
 - **ランタイム不要** - クライアントサイドランタイム（ハイドレーション）不要
