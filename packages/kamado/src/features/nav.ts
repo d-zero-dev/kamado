@@ -7,16 +7,29 @@ import { pathListToTree } from '@d-zero/shared/path-list-to-tree';
 
 import { getTitleFromStaticFile } from './title.js';
 
+/**
+ * Options for getting navigation tree
+ */
 export type GetNavTreeOptions = {
+	/**
+	 * List of glob patterns for files to ignore
+	 */
 	readonly ignoreGlobs?: string[];
 };
 
 /**
- *
- * @param currentPage
- * @param pages
- * @param optimizeTitle
- * @param options
+ * Gets navigation tree corresponding to the current page
+ * @param currentPage - Current page file
+ * @param pages - List of all page files (with titles)
+ * @param optimizeTitle - Function to optimize titles (optional)
+ * @param options - Options for getting navigation tree
+ * @returns Navigation tree node (third-level ancestor node) or null if current page is at level 2 or below
+ * @example
+ * ```typescript
+ * const navTree = getNavTree(currentPage, pageList, undefined, {
+ *   ignoreGlobs: ['./drafts'],
+ * });
+ * ```
  */
 export function getNavTree(
 	currentPage: CompilableFile,
@@ -54,9 +67,10 @@ export function getNavTree(
 }
 
 /**
- * ツリーから現在のページのノードを見つける
- * @param currentUrl
- * @param tree
+ * Finds the node corresponding to the current page in the tree
+ * @param currentUrl - Current page URL
+ * @param tree - Navigation tree
+ * @returns Found node or null if not found
  */
 function findCurrentNode(currentUrl: string, tree: Node): Node | null {
 	if (tree.url === currentUrl) {
@@ -72,21 +86,22 @@ function findCurrentNode(currentUrl: string, tree: Node): Node | null {
 }
 
 /**
- * 指定された深さの祖先ノードを見つける
- * @param currentUrl
- * @param tree
- * @param targetDepth
+ * Finds ancestor node at the specified depth
+ * @param currentUrl - Current page URL
+ * @param tree - Navigation tree
+ * @param targetDepth - Target depth to find ancestor
+ * @returns Found ancestor node or null if not found
  */
 function findAncestorAtDepth(
 	currentUrl: string,
 	tree: Node,
 	targetDepth: number,
 ): Node | null {
-	// 現在のノードが目的の深さで、かつ現在のURLの祖先である場合
+	// If the current node is at the target depth and is an ancestor of the current URL
 	if (tree.depth === targetDepth && (tree.url === currentUrl || tree.isAncestor)) {
 		return tree;
 	}
-	// 子ノードを再帰的に探索
+	// Recursively search child nodes
 	for (const child of tree.children) {
 		const found = findAncestorAtDepth(currentUrl, child, targetDepth);
 		if (found) {
@@ -97,31 +112,32 @@ function findAncestorAtDepth(
 }
 
 /**
- * 現在のページに対応する第3階層のナビゲーションツリーを返す
+ * Returns the third-level navigation tree corresponding to the current page
  *
- * 注意: 仕様書の「第N階層」とpath-list-to-treeの「depth」は以下のように対応する:
- * - 仕様の第1階層 (/) = depth 0
- * - 仕様の第2階層 (/about/) = depth 1
- * - 仕様の第3階層 (/about/history/) = depth 2
- * - 仕様の第4階層 (/about/history/2025/) = depth 3
- * つまり、仕様の「第N階層」= depth (N-1)
- * @param currentUrl
- * @param tree
+ * Note: The relationship between specification "level N" and path-list-to-tree "depth" is as follows:
+ * - Specification level 1 (/) = depth 0
+ * - Specification level 2 (/about/) = depth 1
+ * - Specification level 3 (/about/history/) = depth 2
+ * - Specification level 4 (/about/history/2025/) = depth 3
+ * In other words, specification "level N" = depth (N-1)
+ * @param currentUrl - Current page URL
+ * @param tree - Navigation tree
+ * @returns Third-level ancestor node or null if current page is at level 2 or below
  */
 function getParentNodeTree(currentUrl: string, tree: Node): Node | null {
-	// 現在のページのノードを見つける
+	// Find the node for the current page
 	const currentNode = findCurrentNode(currentUrl, tree);
 
 	if (!currentNode) {
 		return null;
 	}
 
-	// 仕様の第2階層以下 (depth <= 1) の場合はnullを返す（ナビゲーション非表示）
+	// If the current node is at the 2nd level or below (depth <= 1), return null (navigation not displayed)
 	if (currentNode.depth <= 1) {
 		return null;
 	}
 
-	// 仕様の第3階層 (depth === 2) の祖先ノードを見つける
+	// Find the 3rd level (depth === 2) ancestor node
 	const level3Ancestor = findAncestorAtDepth(currentUrl, tree, 2);
 
 	return level3Ancestor;

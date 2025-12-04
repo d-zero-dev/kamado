@@ -5,9 +5,10 @@ import fs from 'node:fs';
 const titleCache = new Map<string, string>();
 
 /**
- *
- * @param page
- * @param optimizeTitle
+ * Gets page title
+ * @param page - Page file
+ * @param optimizeTitle - Function to optimize title (optional)
+ * @returns Page title (from metadata.title, HTML <title> tag, or file slug as fallback)
  */
 export async function getTitle(
 	page: CompilableFile,
@@ -28,9 +29,10 @@ export async function getTitle(
 }
 
 /**
- *
- * @param filePath
- * @param optimizeTitle
+ * Gets title from static HTML file
+ * @param filePath - HTML file path
+ * @param optimizeTitle - Function to optimize title (optional)
+ * @returns Title (null if not found)
  */
 export function getTitleFromStaticFile(
 	filePath: string,
@@ -50,9 +52,10 @@ export function getTitleFromStaticFile(
 }
 
 /**
- *
- * @param content
- * @param optimizeTitle
+ * Extracts title from HTML content using DOM parsing
+ * @param content - HTML content
+ * @param optimizeTitle - Function to optimize title (optional)
+ * @returns Extracted title string (empty string if not found)
  */
 function getTitleFromDOM(content: string, optimizeTitle?: (title: string) => string) {
 	const title = /<title>(.*?)<\/title>/i.exec(content)?.[1]?.trim() || '';

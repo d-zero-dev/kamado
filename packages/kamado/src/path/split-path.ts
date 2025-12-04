@@ -1,10 +1,12 @@
 import path from 'node:path';
 
 /**
- *
- * @param filePath
- * @param baseDir
- * @param cwd
+ * Splits file path and gets relative path information
+ * @param filePath - Absolute file path
+ * @param baseDir - Base directory (defaults to cwd if omitted)
+ * @param cwd - Current working directory (defaults to process.cwd())
+ * @returns Path information object
+ * @throws Error if filePath is not absolute
  */
 export function splitPath(filePath: string, baseDir?: string, cwd = process.cwd()) {
 	if (!path.isAbsolute(filePath)) {

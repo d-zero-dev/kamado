@@ -20,9 +20,24 @@ interface GetAssetsOptions {
 }
 
 /**
- *
- * @param type
- * @param options
+ * Gets asset files of the specified type
+ * @param type - Output file type
+ * @param options - Options for getting assets
+ * @param options.inputDir - Input directory path
+ * @param options.outputDir - Output directory path
+ * @param options.extensions - Mapping of extensions to output file types
+ * @param options.glob - Glob pattern for search targets (if omitted, searches all files matching the type in inputDir)
+ * @returns List of asset files
+ * @throws Error if a file type is not supported (via getFile)
+ * @example
+ * ```typescript
+ * const pages = await getAssetGroup('page', {
+ *   inputDir: './src',
+ *   outputDir: './dist',
+ *   extensions: { pug: 'page', html: 'page' },
+ *   glob: './src/pages/*.pug',
+ * });
+ * ```
  */
 export async function getAssetGroup(
 	type: OutputFileType,

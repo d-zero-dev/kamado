@@ -24,12 +24,12 @@ async function sizeOf(filePath: string): Promise<ImageSize> {
 }
 
 /**
- *
- * @param elements
- * @param options
- * @param options.rootDir
- * @param options.selector
- * @param options.ext
+ * Automatically adds width/height attributes to image elements
+ * @param elements - Array of DOM elements
+ * @param options - Options for adding image sizes
+ * @param options.rootDir - Root directory for image files
+ * @param options.selector - Selector for target image elements
+ * @param options.ext - List of image extensions to target (default: ['png', 'jpg', 'jpeg', 'webp', 'avif', 'svg'])
  */
 export async function imageSizes(
 	elements: Element[],

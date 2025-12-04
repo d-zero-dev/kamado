@@ -1,17 +1,54 @@
 import type { BreadcrumbItem } from './breadcrumbs.js';
 
+/**
+ * Options for generating title list
+ */
 export type TitleListOptions = {
+	/**
+	 * Separator between titles
+	 * @default ' | '
+	 */
 	readonly separator?: string;
+	/**
+	 * Base URL (items with this URL are excluded)
+	 * @default '/'
+	 */
 	readonly baseURL?: string;
+	/**
+	 * String to prepend to title
+	 * @default ''
+	 */
 	readonly prefix?: string;
+	/**
+	 * String to append to title
+	 * @default options.siteName
+	 */
 	readonly suffix?: string;
+	/**
+	 * Site name
+	 */
 	readonly siteName?: string;
+	/**
+	 * Fallback string when title is empty
+	 * @default options.siteName
+	 */
 	readonly fallback?: string;
 };
 
 /**
- * @param breadcrumbs
- * @param options
+ * Generates title string from breadcrumb list
+ * @param breadcrumbs - Array of breadcrumb items
+ * @param options - Options for generating title list
+ * @returns Generated title string
+ * @example
+ * ```typescript
+ * const title = titleList(breadcrumbs, {
+ *   separator: ' | ',
+ *   siteName: 'My Site',
+ *   prefix: '📄 ',
+ * });
+ * // Returns: "📄 Page Title | Section | My Site"
+ * ```
  */
 export function titleList(breadcrumbs: BreadcrumbItem[], options: TitleListOptions = {}) {
 	const {

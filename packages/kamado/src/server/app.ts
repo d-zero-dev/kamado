@@ -10,8 +10,8 @@ import open from 'open';
 import { setRoute } from './route.js';
 
 /**
- *
- * @param config
+ * Starts the development server
+ * @param config - Configuration object
  */
 export async function start(config: Config) {
 	const app = new Hono();

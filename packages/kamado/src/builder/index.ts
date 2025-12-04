@@ -12,15 +12,30 @@ import { mergeConfig } from '../config/merge.js';
 import { getAssetGroup } from '../data/assets.js';
 import { filePathColorizer } from '../stdout/color.js';
 
+/**
+ * Build configuration options
+ */
 interface BuildConfig {
+	/**
+	 * Project root directory
+	 */
 	readonly rootDir?: string;
+	/**
+	 * Glob pattern for build targets
+	 */
 	readonly targetGlob?: string;
+	/**
+	 * Whether to enable verbose logging
+	 */
 	readonly verbose?: boolean;
 }
 
 /**
- *
- * @param buildConfig
+ * Builds the project
+ * @param buildConfig - Build configuration (merge of UserConfig and BuildConfig)
+ * @param buildConfig.rootDir - Project root directory
+ * @param buildConfig.targetGlob - Glob pattern for build targets
+ * @param buildConfig.verbose - Whether to enable verbose logging
  */
 export async function build(buildConfig: UserConfig & BuildConfig) {
 	const config = await mergeConfig(buildConfig, buildConfig.rootDir);

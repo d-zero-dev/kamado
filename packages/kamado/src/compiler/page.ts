@@ -27,13 +27,34 @@ import { domSerialize } from '../utils/dom.js';
 
 import { createCompiler } from './index.js';
 
+/**
+ * Options for the page compiler
+ */
 export interface PageCompilerOptions {
+	/**
+	 * Global data configuration
+	 */
 	readonly globalData?: {
+		/**
+		 * Directory path where global data files are stored
+		 */
 		readonly dir?: string;
+		/**
+		 * Additional global data
+		 */
 		readonly data?: Record<string, unknown>;
 	};
+	/**
+	 * Layout file configuration
+	 */
 	readonly layouts?: {
+		/**
+		 * Directory path where layout files are stored
+		 */
 		readonly dir?: string;
+		/**
+		 * Map of layout files
+		 */
 		readonly files?: Record<string, FileObject>;
 		/**
 		 * @default 'content'
@@ -47,22 +68,65 @@ export interface PageCompilerOptions {
 		 */
 		readonly contentVariableName?: string;
 	};
+	/**
+	 * Path alias for Pug templates (used as basedir)
+	 */
 	readonly pathAlias?: string;
+	/**
+	 * Configuration for automatically adding width/height attributes to images
+	 * @default true
+	 */
 	readonly imageSizes?: ImageSizesOptions | boolean;
+	/**
+	 * HTML minifier options
+	 * @default true
+	 */
 	readonly minifier?: HMTOptions;
+	/**
+	 * Prettier options
+	 * @default true
+	 */
 	readonly prettier?: PrettierOptions | boolean;
+	/**
+	 * Line break configuration
+	 */
 	readonly lineBreak?: '\n' | '\r\n';
+	/**
+	 * Whether to enable character entity conversion
+	 */
 	readonly characterEntities?: boolean;
+	/**
+	 * Function to optimize titles
+	 */
 	readonly optimizeTitle?: (title: string) => string;
+	/**
+	 * Hook function called before DOM serialization
+	 * @param content - HTML content
+	 * @param isServe - Whether running on development server
+	 * @returns Processed HTML content
+	 */
 	readonly beforeSerialize?: (
 		content: string,
 		isServe: boolean,
 	) => Promise<string> | string;
+	/**
+	 * Hook function called after DOM serialization
+	 * @param elements - Array of DOM elements
+	 * @param window - Window object
+	 * @param isServe - Whether running on development server
+	 */
 	readonly afterSerialize?: (
 		elements: readonly Element[],
 		window: Window,
 		isServe: boolean,
 	) => Promise<void> | void;
+	/**
+	 * Final HTML content replacement processing
+	 * @param content - HTML content
+	 * @param paths - Path information
+	 * @param isServe - Whether running on development server
+	 * @returns Replaced HTML content
+	 */
 	readonly replace?: (
 		content: string,
 		paths: Paths,
@@ -70,18 +134,60 @@ export interface PageCompilerOptions {
 	) => Promise<string> | string;
 }
 
+/**
+ * Options for automatic image size addition
+ */
 export interface ImageSizesOptions {
+	/**
+	 * Root directory for image files
+	 */
 	readonly rootDir?: string;
+	/**
+	 * Selector for target image elements
+	 */
 	readonly selector?: string;
+	/**
+	 * List of image extensions to target
+	 * @default ['png', 'jpg', 'jpeg', 'webp', 'avif', 'svg']
+	 */
 	readonly ext?: readonly string[];
 }
 
+/**
+ * File path information
+ */
 export interface Paths {
+	/**
+	 * Output file path
+	 */
 	readonly filePath: string;
+	/**
+	 * Output file directory path
+	 */
 	readonly dirPath: string;
+	/**
+	 * Relative path from base directory ('.' if dirPath equals base directory)
+	 */
 	readonly relativePathFromBase: string;
 }
 
+/**
+ * Page compiler
+ * Compiles Pug templates to HTML, applies layouts, and formats the output.
+ * @example
+ * ```typescript
+ * const config = {
+ *   compilers: {
+ *     page: pageCompiler({
+ *       layouts: { dir: './layouts' },
+ *       globalData: { dir: './data' },
+ *       imageSizes: true,
+ *     }),
+ *   },
+ * };
+ * ```
+ * @throws Error if page compilation fails or layout is not found
+ */
 export const pageCompiler = createCompiler<PageCompilerOptions>(
 	(options) => async (config) => {
 		const layoutsFromDir = await getLayouts({
@@ -200,12 +306,13 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(
 );
 
 /**
- *
- * @param content
- * @param inputPath
- * @param outputPath
- * @param config
- * @param options
+ * Formats HTML content
+ * @param content - HTML content to format
+ * @param inputPath - Input file path
+ * @param outputPath - Output file path
+ * @param config - Configuration object
+ * @param options - Page compiler options
+ * @returns Formatted HTML content or ArrayBuffer
  */
 async function formatHtml(
 	content: string,
@@ -316,8 +423,10 @@ interface GetLayoutsOptions {
 }
 
 /**
- *
- * @param options
+ * Gets layout files
+ * @param options - Options for getting layouts
+ * @param options.dir - Directory path where layout files are stored
+ * @returns Map of layout files (empty object if dir is not provided)
  */
 export async function getLayouts(options: GetLayoutsOptions) {
 	if (!options.dir) {
@@ -336,8 +445,9 @@ export async function getLayouts(options: GetLayoutsOptions) {
 }
 
 /**
- *
- * @param filePath
+ * Gets a single layout file
+ * @param filePath - Path to the layout file
+ * @returns Object containing the layout file (keyed by filename)
  */
 function getLayout(filePath: string): Record<string, FileObject> {
 	const name = path.basename(filePath);

@@ -4,22 +4,52 @@ import path from 'node:path';
 
 import { getTitle } from './title.js';
 
+/**
+ * Breadcrumb item
+ */
 export type BreadcrumbItem = {
+	/**
+	 * Title
+	 */
 	readonly title: string | undefined;
+	/**
+	 * Link URL
+	 */
 	readonly href: string;
+	/**
+	 * Hierarchy depth
+	 */
 	readonly depth: number;
 };
 
+/**
+ * Options for getting breadcrumbs
+ */
 export type GetBreadcrumbsOptions = {
+	/**
+	 * Base URL
+	 * @default '/'
+	 */
 	readonly baseURL?: string;
+	/**
+	 * Function to optimize titles
+	 */
 	readonly optimizeTitle?: (title: string) => string;
 };
 
 /**
- *
- * @param page
- * @param allPages
- * @param options
+ * Gets breadcrumb list for a page
+ * @param page - Target page file
+ * @param allPages - List of all page files
+ * @param options - Options for getting breadcrumbs
+ * @returns Array of breadcrumb items
+ * @example
+ * ```typescript
+ * const breadcrumbs = await getBreadcrumbs(currentPage, allPages, {
+ *   baseURL: '/',
+ *   optimizeTitle: (title) => title.trim(),
+ * });
+ * ```
  */
 export async function getBreadcrumbs(
 	page: CompilableFile,
@@ -46,9 +76,10 @@ export async function getBreadcrumbs(
 }
 
 /**
- *
- * @param basePagePathStem
- * @param targetPathStem
+ * Checks if target path is an ancestor of base path
+ * @param basePagePathStem - Base page path stem
+ * @param targetPathStem - Target path stem to check
+ * @returns True if target is an ancestor (index file) or the same path
  */
 function isAncestor(basePagePathStem: string, targetPathStem: string) {
 	const dirname = path.dirname(targetPathStem);

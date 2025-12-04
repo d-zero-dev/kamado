@@ -19,10 +19,12 @@ interface RouteOptions {
 const CHECK_MARK = c.green('✔');
 
 /**
- *
- * @param app
- * @param config
- * @param options
+ * Sets routes for the application
+ * @param app - Hono application instance
+ * @param config - Configuration object
+ * @param options - Options for route configuration
+ * @param options.verbose - Whether to enable verbose logging
+ * @returns Application after route configuration
  */
 export async function setRoute(app: Hono, config: Config, options: RouteOptions = {}) {
 	const hostname =
@@ -131,8 +133,9 @@ export async function setRoute(app: Hono, config: Config, options: RouteOptions 
 }
 
 /**
- *
- * @param filePath
+ * Reads a file and returns its ArrayBuffer
+ * @param filePath - Path to the file to read
+ * @returns ArrayBuffer of the file content, or null if file cannot be read
  */
 async function readFile(filePath: string) {
 	const buffer = await fs.readFile(filePath).catch(() => null);
@@ -145,4 +148,7 @@ async function readFile(filePath: string) {
 	return null;
 }
 
+/**
+ * Return type of setRoute function
+ */
 export type AppType = ReturnType<typeof setRoute>;

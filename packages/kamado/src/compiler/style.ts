@@ -10,11 +10,37 @@ import { createBanner, type CreateBanner } from './banner.js';
 
 import { createCompiler } from './index.js';
 
+/**
+ * Options for the style compiler
+ */
 export interface StyleCompilerOptions {
+	/**
+	 * Map of path aliases
+	 * Key is alias name, value is actual path
+	 */
 	readonly alias?: Record<string, string>;
+	/**
+	 * Banner configuration
+	 * Can specify CreateBanner function or string
+	 */
 	readonly banner?: CreateBanner | string;
 }
 
+/**
+ * Style compiler
+ * Processes CSS/SCSS/SASS files with PostCSS and adds a banner before compiling.
+ * @example
+ * ```typescript
+ * const config = {
+ *   compilers: {
+ *     style: styleCompiler({
+ *       alias: { '@': './src/styles' },
+ *       banner: 'Generated file',
+ *     }),
+ *   },
+ * };
+ * ```
+ */
 export const styleCompiler = createCompiler<StyleCompilerOptions>((options) => () => {
 	return async (file) => {
 		// Configure plugins with alias resolver for postcss-import

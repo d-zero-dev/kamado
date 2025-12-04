@@ -5,9 +5,10 @@ import type {
 } from '../files/types.js';
 
 /**
- *
- * @param type
- * @param extensions
+ * Extracts list of extensions corresponding to the specified output file type
+ * @param type - Output file type
+ * @param extensions - Mapping of extensions to output file types
+ * @returns Array of corresponding extensions
  */
 export function extractExtensions(
 	type: OutputFileType,

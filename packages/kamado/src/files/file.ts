@@ -13,9 +13,22 @@ interface GetFileOptions {
 }
 
 /**
- *
- * @param filePath
- * @param options
+ * Creates a CompilableFile object from a file path
+ * @param filePath - File path
+ * @param options - Options for getting the file
+ * @param options.inputDir - Input directory path
+ * @param options.outputDir - Output directory path
+ * @param options.extensions - Mapping of extensions to output file types
+ * @returns CompilableFile object
+ * @throws Error if the file type is not supported (not found in extensions mapping)
+ * @example
+ * ```typescript
+ * const file = getFile('./src/pages/index.pug', {
+ *   inputDir: './src',
+ *   outputDir: './dist',
+ *   extensions: { pug: 'page', html: 'page' },
+ * });
+ * ```
  */
 export function getFile(filePath: string, options: GetFileOptions): CompilableFile {
 	const extension = path.extname(filePath).toLowerCase();
@@ -71,8 +84,9 @@ export function getFile(filePath: string, options: GetFileOptions): CompilableFi
 }
 
 /**
- *
- * @param outputFileType
+ * Detects output file extension based on output file type
+ * @param outputFileType - Output file type
+ * @returns File extension string (e.g., '.html', '.css', '.js', or empty string)
  */
 function detectOutputExtension(outputFileType: OutputFileType) {
 	switch (outputFileType) {

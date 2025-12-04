@@ -12,15 +12,28 @@ type ColorsNames = {
 };
 
 /**
- * Colorize the file path.
- * @param options
- * @param options.rootDir
- * @param options.cwd
- * @param options.enable
- * @param options.colors
- * @param options.colors.underDir
- * @param options.colors.dir
- * @param options.colors.name
+ * Generates a function to colorize file paths
+ * @param options - Options for colorization
+ * @param options.rootDir - Root directory
+ * @param options.cwd - Current working directory
+ * @param options.enable - Whether to enable colorization
+ * @param options.colors - Color settings
+ * @param options.colors.underDir - Color for paths above root directory
+ * @param options.colors.dir - Color for directory names
+ * @param options.colors.name - Color for file names (configurable per extension)
+ * @returns Function that takes a file path and returns colorized string
+ * @throws Error if the returned function is called with a non-absolute file path
+ * @example
+ * ```typescript
+ * const colorize = filePathColorizer({
+ *   rootDir: './src',
+ *   colors: {
+ *     dir: c.cyan,
+ *     name: { '.ts': c.yellow, '.js': c.green },
+ *   },
+ * });
+ * const colored = colorize('/path/to/file.ts');
+ * ```
  */
 export function filePathColorizer(options?: {
 	readonly rootDir: string;
