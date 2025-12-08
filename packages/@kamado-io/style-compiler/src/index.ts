@@ -1,14 +1,12 @@
 import path from 'node:path';
 
 import cssnano from 'cssnano';
+import { createCompiler } from 'kamado/compiler';
+import { createBanner, type CreateBanner } from 'kamado/compiler/banner';
 import postcss from 'postcss';
 import postcssImport from 'postcss-import';
 // eslint-disable-next-line import-x/default
 import postcssLoadConfig from 'postcss-load-config';
-
-import { createBanner, type CreateBanner } from './banner.js';
-
-import { createCompiler } from './index.js';
 
 /**
  * Options for the style compiler

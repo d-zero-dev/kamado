@@ -1,8 +1,7 @@
-import type { Config } from '../config/types.js';
-import type { GetNavTreeOptions } from '../features/nav.js';
-import type { TitleListOptions } from '../features/title-list.js';
-import type { FileObject } from '../files/types.js';
 import type { Options as HMTOptions } from 'html-minifier-terser';
+import type { Config } from 'kamado/config';
+import type { GetNavTreeOptions, TitleListOptions } from 'kamado/features';
+import type { FileObject } from 'kamado/files';
 import type { Options as PrettierOptions } from 'prettier';
 
 import path from 'node:path';
@@ -11,21 +10,18 @@ import c from 'ansi-colors';
 import { characterEntities } from 'character-entities';
 import fg from 'fast-glob';
 import { minify } from 'html-minifier-terser';
+import { createCompiler } from 'kamado/compiler';
+import { getGlobalData } from 'kamado/data';
+import { getBreadcrumbs, getNavTree, titleList } from 'kamado/features';
+import { getFileContent } from 'kamado/files';
+import { domSerialize } from 'kamado/utils/dom';
 import {
 	format as prettierFormat,
 	resolveConfig as prettierResolveConfig,
 } from 'prettier';
 import pug from 'pug';
 
-import { getGlobalData } from '../data/global.js';
-import { getBreadcrumbs } from '../features/breadcrumbs.js';
-import { imageSizes } from '../features/image.js';
-import { getNavTree } from '../features/nav.js';
-import { titleList } from '../features/title-list.js';
-import { getFileContent } from '../files/file-content.js';
-import { domSerialize } from '../utils/dom.js';
-
-import { createCompiler } from './index.js';
+import { imageSizes, type ImageSizesOptions } from './image.js';
 
 /**
  * Options for the page compiler
@@ -132,25 +128,6 @@ export interface PageCompilerOptions {
 		paths: Paths,
 		isServe: boolean,
 	) => Promise<string> | string;
-}
-
-/**
- * Options for automatic image size addition
- */
-export interface ImageSizesOptions {
-	/**
-	 * Root directory for image files
-	 */
-	readonly rootDir?: string;
-	/**
-	 * Selector for target image elements
-	 */
-	readonly selector?: string;
-	/**
-	 * List of image extensions to target
-	 * @default ['png', 'jpg', 'jpeg', 'webp', 'avif', 'svg']
-	 */
-	readonly ext?: readonly string[];
 }
 
 /**

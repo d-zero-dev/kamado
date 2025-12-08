@@ -25,7 +25,8 @@
 		"up": "yarn upgrade-interactive --latest"
 	},
 	"workspaces": [
-		"packages/*"
+		"packages/*",
+		"packages/@kamado-io/*"
 	],
 	"config": {
 		"commitizen": {

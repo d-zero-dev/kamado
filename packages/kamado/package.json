@@ -14,11 +14,14 @@
 		"./build": "./dist/builder/index.js",
 		"./server": "./dist/server/app.js",
 		"./config": "./dist/config/index.js",
-		"./compiler/page": "./dist/compiler/page.js",
-		"./compiler/style": "./dist/compiler/style.js",
-		"./compiler/script": "./dist/compiler/script.js",
+		"./compiler": "./dist/compiler/index.js",
+		"./compiler/banner": "./dist/compiler/banner.js",
+		"./compiler/function-map": "./dist/compiler/function-map.js",
 		"./data": "./dist/data/index.js",
-		"./path": "./dist/path/index.js"
+		"./features": "./dist/features/index.js",
+		"./files": "./dist/files/index.js",
+		"./path": "./dist/path/index.js",
+		"./utils/dom": "./dist/utils/dom.js"
 	},
 	"scripts": {
 		"build": "tsc --project tsconfig.build.json",
@@ -36,28 +39,16 @@
 		"character-entities": "2.0.2",
 		"cli-meow-help": "4.0.0",
 		"cosmiconfig": "9.0.0",
-		"cssnano": "7.1.2",
 		"dayjs": "1.11.19",
-		"esbuild": "0.27.0",
 		"fast-glob": "3.3.3",
 		"gray-matter": "4.0.3",
 		"hono": "4.10.7",
-		"html-minifier-terser": "7.2.0",
-		"image-size": "2.0.2",
 		"jsdom": "27.2.0",
 		"meow": "14.0.0",
 		"open": "11.0.0",
-		"postcss": "8.5.6",
-		"postcss-import": "16.1.1",
-		"postcss-load-config": "6.0.1",
-		"prettier": "3.7.3",
-		"pug": "3.0.3",
 		"yaml": "2.8.2"
 	},
 	"devDependencies": {
-		"@types/html-minifier-terser": "7.0.2",
-		"@types/jsdom": "27.0.0",
-		"@types/postcss-import": "14.0.3",
-		"@types/pug": "2.0.10"
+		"@types/jsdom": "27.0.0"
 	}
 }

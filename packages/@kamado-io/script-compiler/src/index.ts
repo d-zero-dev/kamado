@@ -1,10 +1,8 @@
 import fs from 'node:fs/promises';
 
 import esbuild from 'esbuild';
-
-import { createBanner, type CreateBanner } from './banner.js';
-
-import { createCompiler } from './index.js';
+import { createCompiler } from 'kamado/compiler';
+import { createBanner, type CreateBanner } from 'kamado/compiler/banner';
 
 /**
  * Options for the script compiler

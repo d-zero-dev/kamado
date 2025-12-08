@@ -1,0 +1,33 @@
+{
+	"name": "@kamado-io/script-compiler",
+	"version": "0.1.0-alpha.3",
+	"description": "Script compiler for Kamado",
+	"author": "D-ZERO Co., Ltd.",
+	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	},
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"scripts": {
+		"build": "tsc --project tsconfig.build.json",
+		"dev": "tsc --watch --project tsconfig.build.json"
+	},
+	"files": [
+		"dist"
+	],
+	"dependencies": {
+		"esbuild": "0.27.0",
+		"kamado": "workspace:*"
+	},
+	"devDependencies": {
+		"typescript": "5.9.3"
+	}
+}

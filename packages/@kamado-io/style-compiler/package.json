@@ -1,0 +1,37 @@
+{
+	"name": "@kamado-io/style-compiler",
+	"version": "0.1.0-alpha.3",
+	"description": "Style compiler for Kamado",
+	"author": "D-ZERO Co., Ltd.",
+	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	},
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"scripts": {
+		"build": "tsc --project tsconfig.build.json",
+		"dev": "tsc --watch --project tsconfig.build.json"
+	},
+	"files": [
+		"dist"
+	],
+	"dependencies": {
+		"cssnano": "7.1.2",
+		"kamado": "workspace:*",
+		"postcss": "8.5.6",
+		"postcss-import": "16.1.1",
+		"postcss-load-config": "6.0.1"
+	},
+	"devDependencies": {
+		"@types/postcss-import": "14.0.3",
+		"typescript": "5.9.3"
+	}
+}

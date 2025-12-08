@@ -2122,6 +2122,51 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@kamado-io/page-compiler@workspace:packages/@kamado-io/page-compiler":
+  version: 0.0.0-use.local
+  resolution: "@kamado-io/page-compiler@workspace:packages/@kamado-io/page-compiler"
+  dependencies:
+    "@d-zero/shared": "npm:0.16.0"
+    "@types/html-minifier-terser": "npm:7.0.2"
+    "@types/jsdom": "npm:27.0.0"
+    "@types/pug": "npm:2.0.10"
+    ansi-colors: "npm:4.1.3"
+    character-entities: "npm:2.0.2"
+    fast-glob: "npm:3.3.3"
+    html-minifier-terser: "npm:7.2.0"
+    image-size: "npm:2.0.2"
+    jsdom: "npm:27.2.0"
+    kamado: "workspace:*"
+    prettier: "npm:3.7.3"
+    pug: "npm:3.0.3"
+    typescript: "npm:5.9.3"
+  languageName: unknown
+  linkType: soft
+
+"@kamado-io/script-compiler@workspace:packages/@kamado-io/script-compiler":
+  version: 0.0.0-use.local
+  resolution: "@kamado-io/script-compiler@workspace:packages/@kamado-io/script-compiler"
+  dependencies:
+    esbuild: "npm:0.27.0"
+    kamado: "workspace:*"
+    typescript: "npm:5.9.3"
+  languageName: unknown
+  linkType: soft
+
+"@kamado-io/style-compiler@workspace:packages/@kamado-io/style-compiler":
+  version: 0.0.0-use.local
+  resolution: "@kamado-io/style-compiler@workspace:packages/@kamado-io/style-compiler"
+  dependencies:
+    "@types/postcss-import": "npm:14.0.3"
+    cssnano: "npm:7.1.2"
+    kamado: "workspace:*"
+    postcss: "npm:8.5.6"
+    postcss-import: "npm:16.1.1"
+    postcss-load-config: "npm:6.0.1"
+    typescript: "npm:5.9.3"
+  languageName: unknown
+  linkType: soft
+
 "@keyv/bigmap@npm:^1.1.0":
   version: 1.3.0
   resolution: "@keyv/bigmap@npm:1.3.0"
@@ -8946,7 +8991,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"kamado@workspace:packages/kamado":
+"kamado@workspace:*, kamado@workspace:packages/kamado":
   version: 0.0.0-use.local
   resolution: "kamado@workspace:packages/kamado"
   dependencies:
@@ -8954,30 +8999,18 @@ __metadata:
     "@d-zero/roar": "npm:0.2.0"
     "@d-zero/shared": "npm:0.16.0"
     "@hono/node-server": "npm:1.19.6"
-    "@types/html-minifier-terser": "npm:7.0.2"
     "@types/jsdom": "npm:27.0.0"
-    "@types/postcss-import": "npm:14.0.3"
-    "@types/pug": "npm:2.0.10"
     ansi-colors: "npm:4.1.3"
     character-entities: "npm:2.0.2"
     cli-meow-help: "npm:4.0.0"
     cosmiconfig: "npm:9.0.0"
-    cssnano: "npm:7.1.2"
     dayjs: "npm:1.11.19"
-    esbuild: "npm:0.27.0"
     fast-glob: "npm:3.3.3"
     gray-matter: "npm:4.0.3"
     hono: "npm:4.10.7"
-    html-minifier-terser: "npm:7.2.0"
-    image-size: "npm:2.0.2"
     jsdom: "npm:27.2.0"
     meow: "npm:14.0.0"
     open: "npm:11.0.0"
-    postcss: "npm:8.5.6"
-    postcss-import: "npm:16.1.1"
-    postcss-load-config: "npm:6.0.1"
-    prettier: "npm:3.7.3"
-    pug: "npm:3.0.3"
     yaml: "npm:2.8.2"
   bin:
     kamado: ./dist/index.js

@@ -1,10 +1,27 @@
-import type { ImageSizesOptions } from '../compiler/page.js';
-
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { Cache } from '@d-zero/shared/cache';
 import { imageSize } from 'image-size';
+
+/**
+ * Options for automatic image size addition
+ */
+export interface ImageSizesOptions {
+	/**
+	 * Root directory for image files
+	 */
+	readonly rootDir?: string;
+	/**
+	 * Selector for target image elements
+	 */
+	readonly selector?: string;
+	/**
+	 * List of image extensions to target
+	 * @default ['png', 'jpg', 'jpeg', 'webp', 'avif', 'svg']
+	 */
+	readonly ext?: readonly string[];
+}
 
 type ImageSize = {
 	readonly width: number;

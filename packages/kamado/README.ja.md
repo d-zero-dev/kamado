@@ -73,9 +73,9 @@ import type { UserConfig } from 'kamado/config';
 
 import path from 'node:path';
 
-import { pageCompiler } from 'kamado/compiler/page';
-import { scriptCompiler } from 'kamado/compiler/script';
-import { styleCompiler } from 'kamado/compiler/style';
+import { pageCompiler } from '@kamado-io/page-compiler';
+import { scriptCompiler } from '@kamado-io/script-compiler';
+import { styleCompiler } from '@kamado-io/style-compiler';
 
 export const config: UserConfig = {
 	dir: {
