@@ -54,4 +54,3 @@ export const config: UserConfig = {
 ## License
 
 MIT
-
