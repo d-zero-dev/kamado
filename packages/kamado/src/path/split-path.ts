@@ -28,7 +28,7 @@ export interface SplitPathInfo {
  * @param baseDir - Base directory (defaults to cwd if omitted)
  * @param cwd - Current working directory (defaults to process.cwd())
  * @returns Path information object
- * @throws Error if filePath is not absolute
+ * @throws {Error} if filePath is not absolute
  */
 export function splitPath(
 	filePath: string,

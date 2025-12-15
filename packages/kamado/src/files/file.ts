@@ -22,7 +22,7 @@ interface GetFileOptions {
  * @param options.outputDir - Output directory path
  * @param options.extensions - Mapping of extensions to output file types
  * @returns CompilableFile object
- * @throws Error if the file type is not supported (not found in extensions mapping)
+ * @throws {Error} if the file type is not supported (not found in extensions mapping)
  * @example
  * ```typescript
  * const file = getFile('./src/pages/index.pug', {

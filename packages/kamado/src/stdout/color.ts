@@ -22,7 +22,7 @@ type ColorsNames = {
  * @param options.colors.dir - Color for directory names
  * @param options.colors.name - Color for file names (configurable per extension)
  * @returns Function that takes a file path and returns colorized string
- * @throws Error if the returned function is called with a non-absolute file path
+ * @throws {Error} if the returned function is called with a non-absolute file path
  * @example
  * ```typescript
  * const colorize = filePathColorizer({

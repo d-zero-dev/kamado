@@ -29,7 +29,7 @@ interface GetAssetsOptions {
  * @param options.extensions - Mapping of extensions to output file types (defaults to DEFAULT_EXTENSIONS)
  * @param options.glob - Glob pattern for search targets (if omitted, searches all files matching the type in inputDir)
  * @returns List of asset files
- * @throws Error if a file type is not supported (via getFile)
+ * @throws {Error} if a file type is not supported (via getFile)
  * @example
  * ```typescript
  * const pages = await getAssetGroup('page', {
