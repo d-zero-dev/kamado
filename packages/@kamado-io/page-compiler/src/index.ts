@@ -170,7 +170,7 @@ export interface Paths {
  *   },
  * };
  * ```
- * @throws Error if page compilation fails or layout is not found
+ * @throws {Error} if page compilation fails or layout is not found
  */
 export const pageCompiler = createCompiler<PageCompilerOptions>(
 	(options) => async (config) => {
