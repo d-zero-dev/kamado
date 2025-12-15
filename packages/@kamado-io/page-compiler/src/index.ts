@@ -96,6 +96,13 @@ export interface PageCompilerOptions {
 	 */
 	readonly optimizeTitle?: (title: string) => string;
 	/**
+	 * JSDOM URL configuration
+	 * Host URL to use for JSDOM's url option
+	 * If not specified, will use production domain from package.json in build mode,
+	 * or dev server URL in serve mode
+	 */
+	readonly host?: string;
+	/**
 	 * Hook function called before DOM serialization
 	 * @param content - HTML content
 	 * @param isServe - Whether running on development server
@@ -275,6 +282,7 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(
 				file.outputPath,
 				config,
 				options,
+				false,
 			);
 
 			return formattedHtml;
@@ -289,6 +297,7 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(
  * @param outputPath - Output file path
  * @param config - Configuration object
  * @param options - Page compiler options
+ * @param isServe - Whether running on development server
  * @returns Formatted HTML content or ArrayBuffer
  */
 async function formatHtml(
@@ -297,26 +306,43 @@ async function formatHtml(
 	outputPath: string,
 	config: Config,
 	options?: PageCompilerOptions,
+	isServe: boolean = false,
 ): Promise<string | ArrayBuffer> {
 	if (options?.beforeSerialize) {
-		content = await options.beforeSerialize(content, false);
+		content = await options.beforeSerialize(content, isServe);
+	}
+
+	// Determine URL for JSDOM
+	let jsdomUrl: string | undefined;
+	if (options?.host) {
+		jsdomUrl = options.host;
+	} else if (isServe) {
+		jsdomUrl = `http://${config.devServer.host}:${config.devServer.port}`;
+	} else {
+		jsdomUrl =
+			config.pkg.production?.baseURL ??
+			(config.pkg.production?.host ? `http://${config.pkg.production.host}` : undefined);
 	}
 
 	const imageSizesOption = options?.imageSizes ?? true;
 	if (imageSizesOption || options?.afterSerialize) {
-		content = await domSerialize(content, async (elements, window) => {
-			// Hooks
-			if (imageSizesOption) {
-				const options = typeof imageSizesOption === 'object' ? imageSizesOption : {};
-				const rootDir = path.resolve(config.dir.output);
-				await imageSizes(elements, {
-					rootDir,
-					...options,
-				});
-			}
+		content = await domSerialize(
+			content,
+			async (elements, window) => {
+				// Hooks
+				if (imageSizesOption) {
+					const options = typeof imageSizesOption === 'object' ? imageSizesOption : {};
+					const rootDir = path.resolve(config.dir.output);
+					await imageSizes(elements, {
+						rootDir,
+						...options,
+					});
+				}
 
-			await options?.afterSerialize?.(elements, window, false);
-		});
+				await options?.afterSerialize?.(elements, window, isServe);
+			},
+			jsdomUrl,
+		);
 	}
 
 	if (options?.characterEntities) {
