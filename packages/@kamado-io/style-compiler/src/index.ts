@@ -42,11 +42,9 @@ export interface StyleCompilerOptions {
 export const styleCompiler = createCompiler<StyleCompilerOptions>((options) => () => {
 	return async (file) => {
 		// Configure plugins with alias resolver for postcss-import
-		const plugins: postcss.AcceptedPlugin[] = [];
-
-		// Add postcss-import plugin with alias resolver
-		plugins.push(
+		const plugins: postcss.AcceptedPlugin[] = [
 			postcssImport({
+				// Add postcss-import plugin with alias resolver
 				resolve:
 					// Create alias resolver for postcss-import
 					(id: string, basedir: string) => {
@@ -76,7 +74,7 @@ export const styleCompiler = createCompiler<StyleCompilerOptions>((options) => (
 					},
 				],
 			}),
-		);
+		];
 
 		// Try to load PostCSS config from project root
 		let config;
