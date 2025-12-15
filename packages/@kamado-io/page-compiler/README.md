@@ -47,6 +47,7 @@ export const config: UserConfig = {
 - `lineBreak`: Line break configuration (`'\n'` or `'\r\n'`)
 - `characterEntities`: Whether to enable character entity conversion
 - `optimizeTitle`: Function to optimize titles
+- `host`: Host URL for JSDOM's url option (if not specified, uses production domain from package.json)
 - `beforeSerialize`: Hook function called before DOM serialization
 - `afterSerialize`: Hook function called after DOM serialization
 - `replace`: Final HTML content replacement processing
