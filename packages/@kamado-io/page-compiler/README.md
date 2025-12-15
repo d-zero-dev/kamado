@@ -51,6 +51,47 @@ export const config: UserConfig = {
 - `beforeSerialize`: Hook function called before DOM serialization
 - `afterSerialize`: Hook function called after DOM serialization
 - `replace`: Final HTML content replacement processing
+- `compileHooks`: Compilation hooks for customizing compile process
+  - `main`: Hooks for main content compilation
+    - `before`: Hook called before compilation (receives content and data, returns processed content)
+    - `after`: Hook called after compilation (receives HTML and data, returns processed HTML)
+    - `compiler`: Custom compiler function (replaces default Pug compiler)
+  - `layout`: Hooks for layout compilation
+    - `before`: Hook called before compilation (receives content and data, returns processed content)
+    - `after`: Hook called after compilation (receives HTML and data, returns processed HTML)
+    - `compiler`: Custom compiler function (replaces default Pug compiler)
+
+## Example: Using compileHooks
+
+```ts
+import { pageCompiler } from '@kamado-io/page-compiler';
+import type { UserConfig } from 'kamado/config';
+
+export const config: UserConfig = {
+	compilers: {
+		page: pageCompiler({
+			compileHooks: {
+				main: {
+					before: (content, data) => {
+						// Pre-process content before compilation
+						return content.replace(/<!--.*?-->/g, '');
+					},
+					after: (html, data) => {
+						// Post-process HTML after compilation
+						return html.replace(/<br\s*\/?>/g, '<br />');
+					},
+				},
+				layout: {
+					compiler: async (content, data, options) => {
+						// Use custom compiler for layouts
+						return await myCustomCompiler(content, data, options);
+					},
+				},
+			},
+		}),
+	},
+};
+```
 
 ## License
 
