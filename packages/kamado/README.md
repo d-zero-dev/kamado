@@ -159,6 +159,7 @@ Map file extensions to output types in `extensions`:
 - `globalData.data`: Additional global data
 - `layouts.dir`: Layout file directory
 - `pathAlias`: Path alias for template engines
+- `host`: Host URL for JSDOM's url option (if not specified, uses production domain from package.json)
 - `afterSerialize`: Hook after DOM serialization
 
 ##### styleCompiler

@@ -159,6 +159,7 @@ export default config;
 - `globalData.data`: 追加のグローバルデータ
 - `layouts.dir`: レイアウトファイルのディレクトリ
 - `pathAlias`: テンプレートエンジン向けのパスエイリアス
+- `host`: JSDOMのurlオプションに使用するホストURL（未指定の場合はpackage.jsonの本番ドメインを使用）
 - `afterSerialize`: DOMシリアライズ後のフック
 
 ##### styleCompiler
