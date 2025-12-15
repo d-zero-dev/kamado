@@ -32,7 +32,7 @@
 		"image-size": "2.0.2",
 		"jsdom": "27.2.0",
 		"kamado": "0.1.0-alpha.4",
-		"prettier": "3.7.3",
+		"prettier": "3.7.4",
 		"pug": "3.0.3"
 	},
 	"devDependencies": {
