@@ -279,9 +279,9 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(
 			...options?.globalData?.data,
 		};
 
-		return async (file, log) => {
+		return async (file, log, cache) => {
 			log?.(c.blue('Building...'));
-			const pageContent = await file.get();
+			const pageContent = await file.get(cache);
 			const { metaData, content: pageMainContent } = pageContent;
 
 			const breadcrumbs = await getBreadcrumbs(file, globalData?.allPages ?? [], {
