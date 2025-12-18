@@ -17,17 +17,20 @@ import { styleCompiler } from '@kamado-io/style-compiler';
 import type { UserConfig } from 'kamado/config';
 
 export const config: UserConfig = {
-	compilers: {
-		style: styleCompiler({
+	compilers: [
+		styleCompiler({
 			alias: { '@': './src/styles' },
 			banner: 'Generated file',
 		}),
-	},
+	],
 };
 ```
 
 ## Options
 
+- `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input` (default: `'**/*.css'`)
+- `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.{scss,sass}'` will ignore all `.scss` and `.sass` files.
+- `outputExtension` (optional): Output file extension (default: `'.css'`)
 - `alias`: Map of path aliases (key is alias name, value is actual path)
 - `banner`: Banner configuration (can specify CreateBanner function or string)
 
