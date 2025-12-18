@@ -1,9 +1,11 @@
+import type { CreateBanner } from 'kamado/compiler/banner';
+
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 import { createCompiler } from 'kamado/compiler';
-import { createBanner, type CreateBanner } from 'kamado/compiler/banner';
+import { createBanner } from 'kamado/compiler/banner';
 
 /**
  * Options for the script compiler
@@ -31,18 +33,20 @@ export interface ScriptCompilerOptions {
  * @example
  * ```typescript
  * const config = {
- *   compilers: {
- *     script: scriptCompiler({
+ *   compilers: [
+ *     scriptCompiler({
  *       alias: { '@': './src' },
  *       minifier: true,
  *       banner: 'Generated file',
  *     }),
- *   },
+ *   ],
  * };
  * ```
  */
-export const scriptCompiler = createCompiler<ScriptCompilerOptions>(
-	(options) => async () => {
+export const scriptCompiler = createCompiler<ScriptCompilerOptions>(() => ({
+	defaultFiles: '**/*.{js,ts,jsx,tsx,mjs,cjs}',
+	defaultOutputExtension: '.js',
+	compile: (options) => async () => {
 		/**
 		 * When loading kamado.config.ts via getConfig(cosmiconfig),
 		 * if that kamado.config.ts invokes this compiler,
@@ -71,4 +75,4 @@ export const scriptCompiler = createCompiler<ScriptCompilerOptions>(
 			return await fs.readFile(tmpFilePath, 'utf8');
 		};
 	},
-);
+}));
