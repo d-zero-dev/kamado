@@ -68,14 +68,19 @@ export function getFile(filePath: string, options: GetFileOptions): CompilableFi
 		outputFileType,
 		date: new Date(),
 		url,
-		async get() {
+		/**
+		 * Gets file content
+		 * @param cache - Whether to cache the file content (default: true)
+		 * @returns File content
+		 */
+		async get(cache = true) {
 			const dir = path.dirname(filePath);
 			const ext = path.extname(filePath);
 			const name = path.basename(filePath, ext);
 			const jsonFilePath = path.join(dir, `${name}.json`);
-			const jsonContent = await getFileContent(jsonFilePath).catch(() => null);
+			const jsonContent = await getFileContent(jsonFilePath, cache).catch(() => null);
 			const jsonData = jsonContent ? JSON.parse(jsonContent) : {};
-			const raw = await getFileContent(filePath);
+			const raw = await getFileContent(filePath, cache);
 			const { data, content } = grayMatter(raw);
 			return {
 				metaData: {

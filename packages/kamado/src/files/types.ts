@@ -73,9 +73,10 @@ export interface FileObject {
 	readonly inputPath: string;
 	/**
 	 * Gets file content
+	 * @param cache - Whether to cache the file content (default: true)
 	 * @returns File content
 	 */
-	get(): Promise<FileContent>;
+	get(cache?: boolean): Promise<FileContent>;
 }
 
 /**

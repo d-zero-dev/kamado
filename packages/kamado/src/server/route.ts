@@ -110,6 +110,8 @@ export async function setRoute(app: Hono, config: Config, options: RouteOptions 
 						options.verbose
 							? (message) => lanes.update(fileId, `%braille% ${fileName} ${message}`)
 							: undefined,
+						// Refresh the file content on each request
+						false,
 					),
 				).catch((error: unknown) => {
 					if (error instanceof Error) {

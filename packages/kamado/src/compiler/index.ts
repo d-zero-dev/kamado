@@ -33,11 +33,13 @@ export interface CompileFunction {
 	/**
 	 * @param compilableFile - File to compile
 	 * @param log - Log output function (optional)
+	 * @param cache - Whether to cache the file content (default: true)
 	 * @returns Compilation result (string or ArrayBuffer)
 	 */
 	(
 		compilableFile: CompilableFile,
 		log?: (message: string) => void,
+		cache?: boolean,
 	): Promise<string | ArrayBuffer> | string | ArrayBuffer;
 }
 
