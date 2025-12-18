@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import { createCompiler } from 'kamado/compiler';
 import { createBanner, type CreateBanner } from 'kamado/compiler/banner';
@@ -54,18 +56,19 @@ export const scriptCompiler = createCompiler<ScriptCompilerOptions>(
 				typeof options?.banner === 'string'
 					? options.banner
 					: createBanner(options?.banner?.());
+			const tmpFilePath = path.join(os.tmpdir(), file.outputPath);
 			await esbuild.build({
 				entryPoints: [file.inputPath],
 				bundle: true,
 				alias: options?.alias,
-				outfile: file.outputPath,
+				outfile: tmpFilePath,
 				minify: options?.minifier,
 				charset: 'utf8',
 				banner: {
 					js: banner,
 				},
 			});
-			return await fs.readFile(file.outputPath, 'utf8');
+			return await fs.readFile(tmpFilePath, 'utf8');
 		};
 	},
 );
