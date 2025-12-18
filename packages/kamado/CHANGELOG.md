@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [0.1.0-alpha.7](https://github.com/d-zero-dev/kamodo/compare/v0.1.0-alpha.6...v0.1.0-alpha.7) (2025-12-18)
+
+### Bug Fixes
+
+- **kamado:** add error handling for compile function ([d4140f6](https://github.com/d-zero-dev/kamodo/commit/d4140f64255efa13a4601946f82da4132c529100))
+
+### Features
+
+- **kamado:** add cache parameter to file content retrieval ([f94396d](https://github.com/d-zero-dev/kamodo/commit/f94396d489fec699ff0184928fdb2399cd18d511))
+
 # [0.1.0-alpha.6](https://github.com/d-zero-dev/kamodo/compare/v0.1.0-alpha.5...v0.1.0-alpha.6) (2025-12-15)
 
 **Note:** Version bump only for package kamado

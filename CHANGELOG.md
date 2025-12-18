@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [0.1.0-alpha.7](https://github.com/d-zero-dev/kamado/compare/v0.1.0-alpha.6...v0.1.0-alpha.7) (2025-12-18)
+
+### Bug Fixes
+
+- **kamado:** add error handling for compile function ([d4140f6](https://github.com/d-zero-dev/kamado/commit/d4140f64255efa13a4601946f82da4132c529100))
+- **script-compiler:** use temporary directory for esbuild output ([ffa9cbe](https://github.com/d-zero-dev/kamado/commit/ffa9cbef130ed703621f33069db5c6e51dc242e6))
+
+### Features
+
+- **kamado:** add cache parameter to file content retrieval ([f94396d](https://github.com/d-zero-dev/kamado/commit/f94396d489fec699ff0184928fdb2399cd18d511))
+- **page-compiler:** pass cache parameter to file.get() ([e895bff](https://github.com/d-zero-dev/kamado/commit/e895bffece2864e246e4a25bae386ab16df8659e))
+
 # [0.1.0-alpha.6](https://github.com/d-zero-dev/kamado/compare/v0.1.0-alpha.5...v0.1.0-alpha.6) (2025-12-15)
 
 ### Features

@@ -2123,7 +2123,7 @@ __metadata:
     html-minifier-terser: "npm:7.2.0"
     image-size: "npm:2.0.2"
     jsdom: "npm:27.3.0"
-    kamado: "npm:0.1.0-alpha.6"
+    kamado: "npm:0.1.0-alpha.7"
     prettier: "npm:3.7.4"
     typescript: "npm:5.9.3"
   languageName: unknown
@@ -2146,7 +2146,7 @@ __metadata:
   resolution: "@kamado-io/script-compiler@workspace:packages/@kamado-io/script-compiler"
   dependencies:
     esbuild: "npm:0.27.1"
-    kamado: "npm:0.1.0-alpha.6"
+    kamado: "npm:0.1.0-alpha.7"
     typescript: "npm:5.9.3"
   languageName: unknown
   linkType: soft
@@ -2157,7 +2157,7 @@ __metadata:
   dependencies:
     "@types/postcss-import": "npm:14.0.3"
     cssnano: "npm:7.1.2"
-    kamado: "npm:0.1.0-alpha.6"
+    kamado: "npm:0.1.0-alpha.7"
     postcss: "npm:8.5.6"
     postcss-import: "npm:16.1.1"
     postcss-load-config: "npm:6.0.1"
@@ -8971,7 +8971,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"kamado@npm:0.1.0-alpha.6, kamado@workspace:packages/kamado":
+"kamado@npm:0.1.0-alpha.7, kamado@workspace:packages/kamado":
   version: 0.0.0-use.local
   resolution: "kamado@workspace:packages/kamado"
   dependencies:

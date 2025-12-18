@@ -1,6 +1,6 @@
 {
 	"name": "@kamado-io/pug-compiler",
-	"version": "0.1.0-alpha.6",
+	"version": "0.1.0-alpha.7",
 	"description": "Pug compiler for Kamado",
 	"author": "D-ZERO Co., Ltd.",
 	"license": "MIT",
