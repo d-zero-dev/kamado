@@ -17,8 +17,8 @@ import { pageCompiler } from '@kamado-io/page-compiler';
 import type { UserConfig } from 'kamado/config';
 
 export const config: UserConfig = {
-	compilers: {
-		page: pageCompiler({
+	compilers: [
+		pageCompiler({
 			globalData: {
 				dir: './data',
 			},
@@ -27,12 +27,15 @@ export const config: UserConfig = {
 			},
 			imageSizes: true,
 		}),
-	},
+	],
 };
 ```
 
 ## Options
 
+- `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input` (default: `'**/*.html'`)
+- `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.tmp'` will ignore all `.tmp` files.
+- `outputExtension` (optional): Output file extension (default: `'.html'`)
 - `globalData`: Global data configuration
   - `dir`: Directory path where global data files are stored
   - `data`: Additional global data
@@ -70,8 +73,8 @@ import { pageCompiler } from '@kamado-io/page-compiler';
 import type { UserConfig } from 'kamado/config';
 
 export const config: UserConfig = {
-	compilers: {
-		page: pageCompiler({
+	compilers: [
+		pageCompiler({
 			compileHooks: {
 				main: {
 					before: (content, data) => {
@@ -92,7 +95,7 @@ export const config: UserConfig = {
 				},
 			},
 		}),
-	},
+	],
 };
 ```
 

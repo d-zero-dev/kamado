@@ -16,7 +16,7 @@ describe('page compiler', async () => {
 	 */
 	async function compilePage(page: CompilableFile, options: PageCompilerOptions) {
 		const pageC = pageCompiler(options);
-		const fn = await pageC(config);
+		const fn = await pageC.compiler(config);
 		return fn(page, () => '');
 	}
 
@@ -29,7 +29,6 @@ describe('page compiler', async () => {
 			filePathStem: '/path/to/page',
 			url: '/path/to/page',
 			extension: '.html',
-			outputFileType: 'page',
 			date: new Date(),
 			get: () =>
 				Promise.resolve({
@@ -51,7 +50,6 @@ describe('page compiler', async () => {
 			filePathStem: '/path/to/page',
 			url: '/path/to/page',
 			extension: '.pug',
-			outputFileType: 'page',
 			date: new Date(),
 			get: () =>
 				Promise.resolve({
@@ -75,7 +73,6 @@ describe('page compiler', async () => {
 			filePathStem: '/path/to/page',
 			url: '/path/to/page',
 			extension: '.pug',
-			outputFileType: 'page',
 			date: new Date(),
 			get: () =>
 				Promise.resolve({
@@ -111,7 +108,6 @@ describe('page compiler', async () => {
 			filePathStem: '/path/to/page',
 			url: '/path/to/page',
 			extension: '.pug',
-			outputFileType: 'page',
 			date: new Date(),
 			get: () =>
 				Promise.resolve({
@@ -167,7 +163,6 @@ describe('page compiler', async () => {
 			filePathStem: '/path/to/page',
 			url: '/path/to/page',
 			extension: '.pug',
-			outputFileType: 'page',
 			date: new Date(),
 			get: () =>
 				Promise.resolve({

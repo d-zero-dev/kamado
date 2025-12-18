@@ -250,19 +250,21 @@ export interface Paths {
  * @example
  * ```typescript
  * const config = {
- *   compilers: {
- *     page: pageCompiler({
+ *   compilers: [
+ *     pageCompiler({
  *       layouts: { dir: './layouts' },
  *       globalData: { dir: './data' },
  *       imageSizes: true,
  *     }),
- *   },
+ *   ],
  * };
  * ```
  * @throws {Error} if page compilation fails or layout is not found
  */
-export const pageCompiler = createCompiler<PageCompilerOptions>(
-	(options) => async (config) => {
+export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
+	defaultFiles: '**/*.html',
+	defaultOutputExtension: '.html',
+	compile: (options) => async (config: Config) => {
 		const layoutsFromDir = await getLayouts({
 			dir: options?.layouts?.dir,
 		});
@@ -279,7 +281,11 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(
 			...options?.globalData?.data,
 		};
 
-		return async (file, log, cache) => {
+		return async (
+			file: CompilableFile,
+			log?: (message: string) => void,
+			cache?: boolean,
+		) => {
 			log?.(c.blue('Building...'));
 			const pageContent = await file.get(cache);
 			const { metaData, content: pageMainContent } = pageContent;
@@ -417,7 +423,7 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(
 			return formattedHtml;
 		};
 	},
-);
+}));
 
 /**
  * Formats HTML content
