@@ -363,7 +363,7 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
 					throw new Error(`Layout not found: ${metaData.layout}`);
 				}
 
-				const { content: layoutContent } = await layout.get();
+				const { content: layoutContent } = await layout.get(cache);
 				const contentVariableName = options?.layouts?.contentVariableName ?? 'content';
 				const layoutCompileData: CompileData = {
 					...compileData,
