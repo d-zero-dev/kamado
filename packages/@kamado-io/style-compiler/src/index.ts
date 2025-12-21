@@ -43,7 +43,7 @@ export const styleCompiler = createCompiler<StyleCompilerOptions>(() => ({
 	defaultFiles: '**/*.css',
 	defaultOutputExtension: '.css',
 	compile: (options) => () => {
-		return async (file) => {
+		return async (file, _, cache) => {
 			// Configure plugins with alias resolver for postcss-import
 			const plugins: postcss.AcceptedPlugin[] = [
 				postcssImport({
@@ -104,7 +104,7 @@ export const styleCompiler = createCompiler<StyleCompilerOptions>(() => ({
 				}
 			}
 
-			const css = await file.get();
+			const css = await file.get(cache);
 
 			// Process CSS with PostCSS
 			const result = await postcss(plugins).process(css.content, {
