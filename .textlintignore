@@ -1,3 +1,4 @@
 CHANGELOG.md
 **/CHANGELOG.md
 .cursor/**/*
+.agent/**/*
