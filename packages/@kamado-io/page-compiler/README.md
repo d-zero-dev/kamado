@@ -49,12 +49,12 @@ export const config: UserConfig = {
 - `lineBreak`: Line break configuration (`'\n'` or `'\r\n'`)
 - `characterEntities`: Whether to enable character entity conversion
 - `optimizeTitle`: Function to optimize titles
-- `host`: Host URL for JSDOM's url option (if not specified, uses production domain from package.json)
-- `beforeSerialize`: Hook function called before DOM serialization
-- `afterSerialize`: Hook function called after DOM serialization
-- `replace`: Final HTML content replacement processing
+- `host`: Host URL for JSDOM's url option. If not specified, in build mode uses `production.baseURL` or `production.host` from package.json, in serve mode uses dev server URL (`http://${devServer.host}:${devServer.port}`)
+- `beforeSerialize`: Hook function called before DOM serialization `(content: string, isServe: boolean) => Promise<string> | string`
+- `afterSerialize`: Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean) => Promise<void> | void`
+- `replace`: Final HTML content replacement processing `(content: string, paths: Paths, isServe: boolean) => Promise<string> | string`
 - `compileHooks`: Compilation hooks for customizing compile process
-  - Can be an object or a function that returns an object (sync or async)
+  - Can be an object or a function `(options: PageCompilerOptions) => CompileHooksObject | Promise<CompileHooksObject>` that returns an object (sync or async)
   - `main`: Hooks for main content compilation
     - `before`: Hook called before compilation (receives content and data, returns processed content)
     - `after`: Hook called after compilation (receives HTML and data, returns processed HTML)
