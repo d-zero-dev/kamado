@@ -1011,12 +1011,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@d-zero/cspell-config@npm:5.0.0-alpha.75":
-  version: 5.0.0-alpha.75
-  resolution: "@d-zero/cspell-config@npm:5.0.0-alpha.75"
+"@d-zero/cspell-config@npm:5.0.0":
+  version: 5.0.0
+  resolution: "@d-zero/cspell-config@npm:5.0.0"
   dependencies:
     cspell: "npm:9.4.0"
-  checksum: 10c0/ce2051269bd30b271e299122f6498926e79acf82bf4dff7dc4a8469d9a0642df2a9057fdcddaf609e643399a549301cacd7567fb3da5f8ef7a815eba56fae247
+  checksum: 10c0/eaa1ab56b241b434cce1dda6dbec0579b96e7743c6a2869c3c81cfa0b9a558879d47bb03e3945bbd57017b4fe35ba5ef1716223370db9419635836cd8e7ba1b6
   languageName: node
   linkType: hard
 
@@ -8956,7 +8956,7 @@ __metadata:
   resolution: "kamado-monorepo@workspace:."
   dependencies:
     "@d-zero/commitlint-config": "npm:5.0.0-alpha.75"
-    "@d-zero/cspell-config": "npm:5.0.0-alpha.75"
+    "@d-zero/cspell-config": "npm:5.0.0"
     "@d-zero/eslint-config": "npm:5.0.0-alpha.75"
     "@d-zero/lint-staged-config": "npm:5.0.0-alpha.75"
     "@d-zero/prettier-config": "npm:5.0.0-alpha.75"
