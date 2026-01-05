@@ -1058,12 +1058,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@d-zero/lint-staged-config@npm:5.0.0-alpha.75":
-  version: 5.0.0-alpha.75
-  resolution: "@d-zero/lint-staged-config@npm:5.0.0-alpha.75"
+"@d-zero/lint-staged-config@npm:5.0.0":
+  version: 5.0.0
+  resolution: "@d-zero/lint-staged-config@npm:5.0.0"
   dependencies:
     lint-staged: "npm:16.2.7"
-  checksum: 10c0/f97f3f90fc6d9494096b2406f7b4cbf39eb6d81a3737c777a6bdac2e89abb23edd6c6d6d8457d90fa6f65213c081a373090393ab7b2f893450370dff7acb5a82
+  checksum: 10c0/0ac03442cdfb2b32e890f65859c53b537e2c4a240ab32164382c656b7c327824a1cffe07e043538dab9298d9a0f7ffee202c93bc438ac7951639fbaa5b438bbe
   languageName: node
   linkType: hard
 
@@ -8958,7 +8958,7 @@ __metadata:
     "@d-zero/commitlint-config": "npm:5.0.0-alpha.75"
     "@d-zero/cspell-config": "npm:5.0.0-alpha.75"
     "@d-zero/eslint-config": "npm:5.0.0-alpha.75"
-    "@d-zero/lint-staged-config": "npm:5.0.0-alpha.75"
+    "@d-zero/lint-staged-config": "npm:5.0.0"
     "@d-zero/prettier-config": "npm:5.0.0-alpha.75"
     "@d-zero/textlint-config": "npm:5.0.0-alpha.75"
     "@d-zero/tsconfig": "npm:0.5.0"
