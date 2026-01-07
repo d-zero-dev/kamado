@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [1.1.0](https://github.com/d-zero-dev/kamado/compare/v1.0.0...v1.1.0) (2026-01-07)
+
+### Bug Fixes
+
+- **kamado:** add error handling for missing config file ([7dcbe37](https://github.com/d-zero-dev/kamado/commit/7dcbe374d307475c56d55129d348a9fd1da45dfa))
+
+### Features
+
+- **kamado:** add --config CLI option to specify config file path ([893c8bc](https://github.com/d-zero-dev/kamado/commit/893c8bc731bb3c44d3cb5c87f83035f7b3efc3a4))
+- **kamado:** add pageList config option type definition ([e62f4ff](https://github.com/d-zero-dev/kamado/commit/e62f4ff3ab60c1e9dcfed5bc1e50ce245ee8c698))
+- **kamado:** add pageList to config merge ([8a4b904](https://github.com/d-zero-dev/kamado/commit/8a4b904be54d292c3d9927b6eeabc950735eba84))
+- **kamado:** add safe option to getTitle for error handling ([1323d7e](https://github.com/d-zero-dev/kamado/commit/1323d7e19b4f45964e34821997516d58c96e9a3f))
+- **kamado:** add urlToFile utility function for URL to CompilableFile conversion ([3442322](https://github.com/d-zero-dev/kamado/commit/34423222b658e0b11efe6bee4fd5647d3459bd4d))
+- **kamado:** implement pageList option in global data ([74f2e00](https://github.com/d-zero-dev/kamado/commit/74f2e002a7361f4c003a08aaa9f5354a1fbf1dcd))
+
 # [1.0.0](https://github.com/d-zero-dev/kamado/compare/v1.0.0-alpha.1...v1.0.0) (2026-01-05)
 
 **Note:** Version bump only for package kamado-monorepo
