@@ -40,31 +40,34 @@ export type GetBreadcrumbsOptions = {
 /**
  * Gets breadcrumb list for a page
  * @param page - Target page file
- * @param allPages - List of all page files
+ * @param pageList - List of all page files
  * @param options - Options for getting breadcrumbs
  * @returns Array of breadcrumb items
  * @example
  * ```typescript
- * const breadcrumbs = await getBreadcrumbs(currentPage, allPages, {
+ * const breadcrumbs = await getBreadcrumbs(currentPage, pageList, {
  *   baseURL: '/',
  *   optimizeTitle: (title) => title.trim(),
  * });
  * ```
  */
 export async function getBreadcrumbs(
-	page: CompilableFile,
-	allPages: readonly CompilableFile[],
+	page: CompilableFile & { title?: string },
+	pageList: readonly (CompilableFile & { title?: string })[],
 	options?: GetBreadcrumbsOptions,
 ): Promise<BreadcrumbItem[]> {
 	const baseURL = options?.baseURL ?? '/';
 	const optimizeTitle = options?.optimizeTitle;
 	const baseDepth = baseURL.split('/').filter(Boolean).length;
-	const pages = allPages.filter((item) =>
+	const pages = pageList.filter((item) =>
 		isAncestor(page.filePathStem, item.filePathStem),
 	);
 	const breadcrumbs = await Promise.all(
 		pages.map(async (item) => ({
-			title: await getTitle(item, optimizeTitle),
+			title:
+				item.title?.trim() ||
+				(await getTitle(item, optimizeTitle, true)) ||
+				'__NO_TITLE__',
 			href: item.url,
 			depth: item.url.split('/').filter(Boolean).length,
 		})),
