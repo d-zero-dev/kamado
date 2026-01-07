@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import path from 'node:path';
+
 import { roar } from '@d-zero/roar';
 import c from 'ansi-colors';
 
@@ -7,8 +9,6 @@ import { build } from './builder/index.js';
 import { getConfig } from './config/load.js';
 import { pathResolver } from './path/resolver.js';
 import { start } from './server/app.js';
-
-const config = await getConfig();
 
 const cli = roar({
 	name: 'kamado',
@@ -21,6 +21,11 @@ const cli = roar({
 		},
 	},
 	flags: {
+		config: {
+			type: 'string',
+			shortFlag: 'c',
+			desc: 'Path to config file',
+		},
 		verbose: {
 			type: 'boolean',
 			desc: 'Enable verbose logging',
@@ -32,6 +37,11 @@ const cli = roar({
 		return true;
 	},
 });
+
+const configPath = cli.flags.config
+	? path.resolve(process.cwd(), cli.flags.config)
+	: undefined;
+const config = await getConfig(configPath);
 
 switch (cli.command) {
 	case 'build': {
