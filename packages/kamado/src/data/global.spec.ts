@@ -73,7 +73,7 @@ describe('getAssetGroup with virtual file system', async () => {
 		expect(globalData.data2.name).toBe('John');
 
 		expect(
-			globalData.allPages.map((page) => {
+			globalData.pageAssetFiles.map((page) => {
 				// @ts-ignore
 				delete page.date;
 				// @ts-ignore

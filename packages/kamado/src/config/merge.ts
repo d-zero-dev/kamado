@@ -33,6 +33,7 @@ export async function mergeConfig(
 			host: 'localhost',
 			...config.devServer,
 		},
+		pageList: config.pageList,
 		compilers: config.compilers ?? [],
 		onBeforeBuild: config.onBeforeBuild,
 		onAfterBuild: config.onAfterBuild,

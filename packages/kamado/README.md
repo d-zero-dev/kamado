@@ -227,6 +227,41 @@ scriptCompiler({
 });
 ```
 
+#### Page List Configuration
+
+The `pageList` option allows you to customize the page list used for navigation, breadcrumbs, and other features that require a list of pages.
+
+```ts
+import { urlToFile, getFile } from 'kamado/files';
+
+export const config: UserConfig = {
+	// ... other config
+	pageList: async (pageAssetFiles, config) => {
+		// Filter pages (e.g., exclude drafts)
+		const filtered = pageAssetFiles.filter((page) => !page.url.includes('/drafts/'));
+
+		// Add external pages with custom titles
+		const externalPage = {
+			...urlToFile('/external-page/', {
+				inputDir: config.dir.input,
+				outputDir: config.dir.output,
+				outputExtension: '.html',
+			}),
+			title: 'External Page Title',
+		};
+
+		return [...filtered, externalPage];
+	},
+};
+```
+
+The function receives:
+
+- `pageAssetFiles`: Array of all page files found in the file system
+- `config`: The full configuration object
+
+Returns an array of `CompilableFile` objects, optionally with a `title` property. If `title` is provided, it will be used instead of extracting from the page content.
+
 #### Hook Functions
 
 - `onBeforeBuild`: Function executed before build

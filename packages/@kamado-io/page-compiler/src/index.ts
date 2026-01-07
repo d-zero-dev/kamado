@@ -290,7 +290,7 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
 			const pageContent = await file.get(cache);
 			const { metaData, content: pageMainContent } = pageContent;
 
-			const breadcrumbs = await getBreadcrumbs(file, globalData?.allPages ?? [], {
+			const breadcrumbs = await getBreadcrumbs(file, globalData?.pageList ?? [], {
 				baseURL: config.pkg.production?.baseURL,
 				optimizeTitle: options?.optimizeTitle,
 			});

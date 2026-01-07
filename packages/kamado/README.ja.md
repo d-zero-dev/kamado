@@ -227,6 +227,41 @@ scriptCompiler({
 });
 ```
 
+#### ページリスト設定
+
+`pageList`オプションを使用すると、ナビゲーション、パンくずリスト、その他ページリストを必要とする機能で使用されるページリストをカスタマイズできます。
+
+```ts
+import { urlToFile, getFile } from 'kamado/files';
+
+export const config: UserConfig = {
+	// ... その他の設定
+	pageList: async (pageAssetFiles, config) => {
+		// ページをフィルタリング（例: 下書きを除外）
+		const filtered = pageAssetFiles.filter((page) => !page.url.includes('/drafts/'));
+
+		// カスタムタイトル付きの外部ページを追加
+		const externalPage = {
+			...urlToFile('/external-page/', {
+				inputDir: config.dir.input,
+				outputDir: config.dir.output,
+				outputExtension: '.html',
+			}),
+			title: '外部ページのタイトル',
+		};
+
+		return [...filtered, externalPage];
+	},
+};
+```
+
+この関数は以下を受け取ります：
+
+- `pageAssetFiles`: ファイルシステムで見つかったすべてのページファイルの配列
+- `config`: 完全な設定オブジェクト
+
+`CompilableFile`オブジェクトの配列を返します。オプションで`title`プロパティを含めることができます。`title`が指定された場合、ページコンテンツからタイトルを抽出する代わりにその値が使用されます。
+
 #### フック関数
 
 - `onBeforeBuild`: ビルド前に実行される関数

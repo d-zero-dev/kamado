@@ -54,11 +54,11 @@ export interface GlobalData {
 		readonly [key: string]: any;
 	};
 	/**
-	 * List of all page files
+	 * List of all page asset files (from local file system)
 	 */
-	readonly allPages: CompilableFile[];
+	readonly pageAssetFiles: CompilableFile[];
 	/**
-	 * List of pages with titles
+	 * List of pages with titles (from user-defined page list)
 	 */
 	readonly pageList: (CompilableFile & { title: string })[];
 	/**
@@ -101,7 +101,7 @@ export async function getGlobalData(dir: string, config: Config): Promise<Global
 		(entry) => entry.outputExtension === '.html',
 	);
 
-	const allPages = pageCompilerEntry
+	const pageAssetFiles = pageCompilerEntry
 		? await getAssetGroup({
 				inputDir: config.dir.input,
 				outputDir: config.dir.output,
@@ -109,17 +109,22 @@ export async function getGlobalData(dir: string, config: Config): Promise<Global
 			})
 		: [];
 
+	const userDefinedPageList: (CompilableFile & { title?: string })[] = config.pageList
+		? await config.pageList(pageAssetFiles, config)
+		: pageAssetFiles;
+
 	const pageList = await Promise.all(
-		allPages.map(async (page) => ({
+		userDefinedPageList.map(async (page) => ({
 			...page,
-			title: (await getTitle(page)) || '__NO_TITLE__',
+			title:
+				page.title?.trim() || (await getTitle(page, undefined, true)) || '__NO_TITLE__',
 		})),
 	);
 
 	return {
 		pkg: config.pkg as unknown as GlobalData['pkg'],
 		...data,
-		allPages,
+		pageAssetFiles,
 		pageList,
 		filters: {
 			date: (date: dayjs.ConfigType, format: string) => dayjs(date).format(format),
