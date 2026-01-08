@@ -37,6 +37,8 @@ export type TitleListOptions = {
 
 /**
  * Generates title string from breadcrumb list
+ * @deprecated This function will be removed in the next major version (v2.0.0).
+ * Import from '@kamado-io/page-compiler' instead.
  * @param breadcrumbs - Array of breadcrumb items
  * @param options - Options for generating title list
  * @returns Generated title string

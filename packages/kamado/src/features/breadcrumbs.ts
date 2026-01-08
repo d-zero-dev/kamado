@@ -39,6 +39,8 @@ export type GetBreadcrumbsOptions = {
 
 /**
  * Gets breadcrumb list for a page
+ * @deprecated This function will be removed in the next major version (v2.0.0).
+ * Import from '@kamado-io/page-compiler' instead.
  * @param page - Target page file
  * @param pageList - List of all page files
  * @param options - Options for getting breadcrumbs

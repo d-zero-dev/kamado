@@ -6,6 +6,8 @@ const titleCache = new Map<string, string>();
 
 /**
  * Gets page title
+ * @deprecated This function will be removed in the next major version (v2.0.0).
+ * Import from '@kamado-io/page-compiler' instead.
  * @param page - Page file
  * @param optimizeTitle - Function to optimize title (optional)
  * @param safe - Whether to return an empty string if the page content is not found
@@ -40,6 +42,8 @@ export async function getTitle(
 
 /**
  * Gets title from static HTML file
+ * @deprecated This function will be removed in the next major version (v2.0.0).
+ * Import from '@kamado-io/page-compiler' instead.
  * @param filePath - HTML file path
  * @param optimizeTitle - Function to optimize title (optional)
  * @returns Title (null if not found)

@@ -19,6 +19,8 @@ export type GetNavTreeOptions = {
 
 /**
  * Gets navigation tree corresponding to the current page
+ * @deprecated This function will be removed in the next major version (v2.0.0).
+ * Import from '@kamado-io/page-compiler' instead.
  * @param currentPage - Current page file
  * @param pages - List of all page files (with titles)
  * @param optimizeTitle - Function to optimize titles (optional)
