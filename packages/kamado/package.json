@@ -44,9 +44,11 @@
 		"hono": "4.11.3",
 		"jsdom": "27.4.0",
 		"open": "11.0.0",
+		"picomatch": "4.0.3",
 		"yaml": "2.8.2"
 	},
 	"devDependencies": {
-		"@types/jsdom": "27.0.0"
+		"@types/jsdom": "27.0.0",
+		"@types/picomatch": "4.0.2"
 	}
 }

@@ -66,4 +66,51 @@ describe('getAssetGroup with virtual file system', () => {
 		expect(result[0]).toHaveProperty('filePathStem', '/about');
 		expect(result[0]).toHaveProperty('extension', '.html');
 	});
+
+	test('should filter files with glob option (AND condition)', async () => {
+		const result = await getAssetGroup({
+			inputDir: '/mock/input/dir',
+			outputDir: '/mock/output/dir',
+			compilerEntry: {
+				files: '**/*.{html,pug}',
+				outputExtension: '.html',
+				compiler: () => () => '',
+			},
+			glob: '**/index.*',
+		});
+
+		expect(result.map((f) => f.inputPath)).toStrictEqual(['/mock/input/dir/index.html']);
+	});
+
+	test('should filter files with glob option matching specific directory', async () => {
+		const result = await getAssetGroup({
+			inputDir: '/mock/input/dir',
+			outputDir: '/mock/output/dir',
+			compilerEntry: {
+				files: '**/*.{html,pug}',
+				outputExtension: '.html',
+				compiler: () => () => '',
+			},
+			glob: '**/subdir/**',
+		});
+
+		expect(result.map((f) => f.inputPath)).toStrictEqual([
+			'/mock/input/dir/subdir/page.html',
+		]);
+	});
+
+	test('should return empty array when glob matches no files', async () => {
+		const result = await getAssetGroup({
+			inputDir: '/mock/input/dir',
+			outputDir: '/mock/output/dir',
+			compilerEntry: {
+				files: '**/*.{html,pug}',
+				outputExtension: '.html',
+				compiler: () => () => '',
+			},
+			glob: '**/nonexistent.*',
+		});
+
+		expect(result).toStrictEqual([]);
+	});
 });

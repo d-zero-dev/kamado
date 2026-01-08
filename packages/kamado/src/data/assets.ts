@@ -4,6 +4,7 @@ import type { CompilableFile } from '../files/types.js';
 import path from 'node:path';
 
 import fg from 'fast-glob';
+import picomatch from 'picomatch';
 
 import { getFile } from '../files/file.js';
 
@@ -20,14 +21,13 @@ interface GetAssetsOptions {
  * @param options.inputDir - Input directory path
  * @param options.outputDir - Output directory path
  * @param options.compilerEntry - Compiler with metadata configuration
- * @param options.glob - Glob pattern for search targets (if omitted, uses compilerEntry.files)
+ * @param options.glob - Additional glob pattern to filter results (AND condition with compilerEntry.files)
  * @returns List of asset files
  */
 export async function getAssetGroup(
 	options: GetAssetsOptions,
 ): Promise<CompilableFile[]> {
-	const targetGlob =
-		options.glob ?? path.resolve(options.inputDir, options.compilerEntry.files);
+	const baseGlob = path.resolve(options.inputDir, options.compilerEntry.files);
 
 	const fgOptions: {
 		cwd: string;
@@ -39,7 +39,12 @@ export async function getAssetGroup(
 		fgOptions.ignore = [options.compilerEntry.ignore];
 	}
 
-	const filePaths = await fg(targetGlob, fgOptions);
+	let filePaths = await fg(baseGlob, fgOptions);
+
+	if (options.glob) {
+		const isMatch = picomatch(options.glob);
+		filePaths = filePaths.filter((filePath) => isMatch(filePath));
+	}
 
 	const results: CompilableFile[] = [];
 
