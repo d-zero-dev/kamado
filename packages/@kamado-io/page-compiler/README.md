@@ -49,6 +49,8 @@ export const config: UserConfig = {
 - `lineBreak`: Line break configuration (`'\n'` or `'\r\n'`)
 - `characterEntities`: Whether to enable character entity conversion
 - `optimizeTitle`: Function to optimize titles
+- `transformBreadcrumbItem`: Function to transform each breadcrumb item. Can add custom properties to breadcrumb items. `(item: BreadcrumbItem) => BreadcrumbItem`
+- `transformNavNode`: Function to transform each navigation node. Can add custom properties or filter nodes by returning `null`/`undefined`. `(node: NavNode) => NavNode | null | undefined`
 - `host`: Host URL for JSDOM's url option. If not specified, in build mode uses `production.baseURL` or `production.host` from package.json, in serve mode uses dev server URL (`http://${devServer.host}:${devServer.port}`)
 - `beforeSerialize`: Hook function called before DOM serialization `(content: string, isServe: boolean) => Promise<string> | string`
 - `afterSerialize`: Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean) => Promise<void> | void`
