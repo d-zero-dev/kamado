@@ -32,7 +32,7 @@
 		"image-size": "2.0.2",
 		"jsdom": "27.4.0",
 		"kamado": "1.2.0",
-		"prettier": "3.7.4"
+		"prettier": "3.8.0"
 	},
 	"devDependencies": {
 		"@types/html-minifier-terser": "7.0.2",
