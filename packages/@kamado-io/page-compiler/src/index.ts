@@ -387,14 +387,26 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
 			}
 
 			log?.(c.cyanBright('Formatting...'));
-			const formattedHtml = await formatHtml(
-				html,
-				file.inputPath,
-				file.outputPath,
-				config,
-				options,
-				false,
-			);
+			const formattedHtml = await formatHtml({
+				content: html,
+				inputPath: file.inputPath,
+				outputPath: file.outputPath,
+				outputDir: config.dir.output,
+				devServerHost: config.devServer.host,
+				devServerPort: config.devServer.port,
+				productionBaseURL: config.pkg.production?.baseURL,
+				productionHost: config.pkg.production?.host,
+				beforeSerialize: options?.beforeSerialize,
+				afterSerialize: options?.afterSerialize,
+				host: options?.host,
+				imageSizes: options?.imageSizes,
+				characterEntities: options?.characterEntities,
+				prettier: options?.prettier,
+				minifier: options?.minifier,
+				lineBreak: options?.lineBreak,
+				replace: options?.replace,
+				isServe: false,
+			});
 
 			return formattedHtml;
 		};

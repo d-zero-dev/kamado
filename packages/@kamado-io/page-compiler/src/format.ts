@@ -1,5 +1,4 @@
 import type { PageCompilerOptions } from './index.js';
-import type { Config } from 'kamado/config';
 
 import path from 'node:path';
 
@@ -14,6 +13,85 @@ import {
 import { imageSizes } from './image.js';
 
 /**
+ * Options for formatHtml function
+ */
+export interface FormatHtmlOptions {
+	/**
+	 * HTML content to format
+	 */
+	readonly content: string;
+	/**
+	 * Input file path
+	 */
+	readonly inputPath: string;
+	/**
+	 * Output file path
+	 */
+	readonly outputPath: string;
+	/**
+	 * Output directory path
+	 */
+	readonly outputDir: string;
+	/**
+	 * Development server host
+	 */
+	readonly devServerHost: string;
+	/**
+	 * Development server port
+	 */
+	readonly devServerPort: number;
+	/**
+	 * Production base URL
+	 */
+	readonly productionBaseURL?: string;
+	/**
+	 * Production host
+	 */
+	readonly productionHost?: string;
+	/**
+	 * Hook function called before DOM serialization
+	 */
+	readonly beforeSerialize?: PageCompilerOptions['beforeSerialize'];
+	/**
+	 * Hook function called after DOM serialization
+	 */
+	readonly afterSerialize?: PageCompilerOptions['afterSerialize'];
+	/**
+	 * JSDOM URL configuration
+	 */
+	readonly host?: string;
+	/**
+	 * Configuration for automatically adding width/height attributes to images
+	 */
+	readonly imageSizes?: PageCompilerOptions['imageSizes'];
+	/**
+	 * Whether to enable character entity conversion
+	 */
+	readonly characterEntities?: boolean;
+	/**
+	 * Prettier options
+	 */
+	readonly prettier?: PageCompilerOptions['prettier'];
+	/**
+	 * HTML minifier options
+	 */
+	readonly minifier?: PageCompilerOptions['minifier'];
+	/**
+	 * Line break configuration
+	 */
+	readonly lineBreak?: PageCompilerOptions['lineBreak'];
+	/**
+	 * Final HTML content replacement processing
+	 */
+	readonly replace?: PageCompilerOptions['replace'];
+	/**
+	 * Whether running on development server
+	 * @default false
+	 */
+	readonly isServe?: boolean;
+}
+
+/**
  * Formats HTML content by applying various transformations:
  * - DOM serialization (JSDOM) for image size insertion and custom manipulations
  * - Character entity conversion
@@ -22,60 +100,71 @@ import { imageSizes } from './image.js';
  * - HTML minification
  * - Line break normalization
  * - Custom content replacement
- * @param content - HTML content to format
- * @param inputPath - Input file path
- * @param outputPath - Output file path
- * @param config - Configuration object
- * @param options - Page compiler options
- * @param isServe - Whether running on development server
+ * @param options - Format options
  * @returns Formatted HTML content or ArrayBuffer
  */
 export async function formatHtml(
-	content: string,
-	inputPath: string,
-	outputPath: string,
-	config: Config,
-	options?: PageCompilerOptions,
-	isServe: boolean = false,
+	options: FormatHtmlOptions,
 ): Promise<string | ArrayBuffer> {
-	if (options?.beforeSerialize) {
-		content = await options.beforeSerialize(content, isServe);
+	const {
+		content: initialContent,
+		inputPath,
+		outputPath,
+		outputDir,
+		devServerHost,
+		devServerPort,
+		productionBaseURL,
+		productionHost,
+		beforeSerialize,
+		afterSerialize,
+		host,
+		imageSizes: imageSizesOption,
+		characterEntities: characterEntitiesOption,
+		prettier: prettierOption,
+		minifier: minifierOption,
+		lineBreak: lineBreakOption,
+		replace: replaceOption,
+		isServe = false,
+	} = options;
+	let content = initialContent;
+	if (beforeSerialize) {
+		content = await beforeSerialize(content, isServe);
 	}
 
 	// Determine URL for JSDOM
 	let jsdomUrl: string | undefined;
-	if (options?.host) {
-		jsdomUrl = options.host;
+	if (host) {
+		jsdomUrl = host;
 	} else if (isServe) {
-		jsdomUrl = `http://${config.devServer.host}:${config.devServer.port}`;
+		jsdomUrl = `http://${devServerHost}:${devServerPort}`;
 	} else {
 		jsdomUrl =
-			config.pkg.production?.baseURL ??
-			(config.pkg.production?.host ? `http://${config.pkg.production.host}` : undefined);
+			productionBaseURL ?? (productionHost ? `http://${productionHost}` : undefined);
 	}
 
-	const imageSizesOption = options?.imageSizes ?? true;
-	if (imageSizesOption || options?.afterSerialize) {
+	const imageSizesValue = imageSizesOption ?? true;
+	if (imageSizesValue || afterSerialize) {
 		content = await domSerialize(
 			content,
 			async (elements, window) => {
 				// Hooks
-				if (imageSizesOption) {
-					const options = typeof imageSizesOption === 'object' ? imageSizesOption : {};
-					const rootDir = path.resolve(config.dir.output);
+				if (imageSizesValue) {
+					const imageSizeOpts =
+						typeof imageSizesValue === 'object' ? imageSizesValue : {};
+					const rootDir = path.resolve(outputDir);
 					await imageSizes(elements, {
 						rootDir,
-						...options,
+						...imageSizeOpts,
 					});
 				}
 
-				await options?.afterSerialize?.(elements, window, isServe);
+				await afterSerialize?.(elements, window, isServe);
 			},
 			jsdomUrl,
 		);
 	}
 
-	if (options?.characterEntities) {
+	if (characterEntitiesOption) {
 		for (const [entity, char] of Object.entries(characterEntities)) {
 			let _entity = entity;
 			const codePoint = char.codePointAt(0);
@@ -99,9 +188,8 @@ export async function formatHtml(
 		content = '<!DOCTYPE html>\n' + content;
 	}
 
-	if (options?.prettier ?? true) {
-		const userPrettierConfig =
-			typeof options?.prettier === 'object' ? options.prettier : {};
+	if (prettierOption ?? true) {
+		const userPrettierConfig = typeof prettierOption === 'object' ? prettierOption : {};
 		const prettierConfig = await prettierResolveConfig(inputPath);
 		content = await prettierFormat(content, {
 			parser: 'html',
@@ -113,7 +201,7 @@ export async function formatHtml(
 		});
 	}
 
-	if (options?.minifier ?? true) {
+	if (minifierOption ?? true) {
 		content = await minify(content, {
 			collapseWhitespace: false,
 			collapseBooleanAttributes: true,
@@ -124,20 +212,20 @@ export async function formatHtml(
 			useShortDoctype: false,
 			minifyCSS: true,
 			minifyJS: true,
-			...options?.minifier,
+			...minifierOption,
 		});
 	}
 
-	if (options?.lineBreak) {
-		content = content.replaceAll(/\r?\n/g, options.lineBreak);
+	if (lineBreakOption) {
+		content = content.replaceAll(/\r?\n/g, lineBreakOption);
 	}
 
-	if (options?.replace) {
+	if (replaceOption) {
 		const filePath = outputPath;
 		const dirPath = path.dirname(filePath);
-		const relativePathFromBase = path.relative(dirPath, config.dir.output) || '.';
+		const relativePathFromBase = path.relative(dirPath, outputDir) || '.';
 
-		content = await options.replace(
+		content = await replaceOption(
 			content,
 			{
 				filePath,
