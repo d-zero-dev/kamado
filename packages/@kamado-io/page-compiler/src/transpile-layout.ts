@@ -3,6 +3,8 @@ import type { CompilableFile, FileObject } from 'kamado/files';
 
 import c from 'ansi-colors';
 
+import { transpile } from './transpile.js';
+
 /**
  * Transpiles layout using the provided compile hooks.
  * Executes the before hook, compiler, and after hook in sequence.
@@ -29,42 +31,16 @@ export async function transpileLayout(
 	compileHook: CompileHook | undefined,
 	log?: (message: string) => void,
 ): Promise<string> {
-	if (!compileHook) {
-		return layoutContent;
-	}
-
-	try {
-		let processedContent = layoutContent;
-
-		// Apply before hook
-		if (compileHook.before) {
-			processedContent = await compileHook.before(processedContent, layoutCompileData);
-		}
-
-		// Compile
-		let html: string;
-		if (compileHook.compiler) {
-			log?.(c.greenBright('Compiling layout...'));
-			html = await compileHook.compiler(
-				processedContent,
-				layoutCompileData,
-				layoutExtension,
-			);
-		} else {
-			// If no compiler is specified, use layout content as-is
-			html = processedContent;
-		}
-
-		// Apply after hook
-		if (compileHook.after) {
-			html = await compileHook.after(html, layoutCompileData);
-		}
-
-		return html;
-	} catch (error) {
-		log?.(c.red(`❌ Layout: ${layout.inputPath} (Content: ${file.inputPath})`));
-		throw new Error(`Failed to compile the layout: ${layout.inputPath}`, {
-			cause: error,
-		});
-	}
+	return transpile({
+		content: layoutContent,
+		compileData: layoutCompileData,
+		extension: layoutExtension,
+		compileHook,
+		log,
+		compileLogMessage: 'Compiling layout...',
+		compileLogColor: c.greenBright,
+		errorLogMessage: `Layout: ${layout.inputPath} (Content: ${file.inputPath})`,
+		errorMessage: `Failed to compile the layout: ${layout.inputPath}`,
+		useBeforeResultWhenNoCompiler: true, // Layout behavior: use before hook result
+	});
 }

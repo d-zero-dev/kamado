@@ -3,6 +3,8 @@ import type { CompilableFile } from 'kamado/files';
 
 import c from 'ansi-colors';
 
+import { transpile } from './transpile.js';
+
 /**
  * Transpiles main content using the provided compile hooks.
  * Executes the before hook, compiler, and after hook in sequence.
@@ -25,40 +27,16 @@ export async function transpileMainContent(
 	compileHook: CompileHook | undefined,
 	log?: (message: string) => void,
 ): Promise<string> {
-	if (!compileHook) {
-		return content;
-	}
-
-	try {
-		let processedContent = content;
-
-		// Apply before hook
-		if (compileHook.before) {
-			processedContent = await compileHook.before(processedContent, compileData);
-		}
-
-		// Compile
-		let mainContentHtml = content;
-		if (compileHook.compiler) {
-			log?.(c.yellowBright('Compiling main content...'));
-			mainContentHtml = await compileHook.compiler(
-				processedContent,
-				compileData,
-				file.extension,
-			);
-		}
-		// If no compiler is specified, pass through as-is
-
-		// Apply after hook
-		if (compileHook.after) {
-			mainContentHtml = await compileHook.after(mainContentHtml, compileData);
-		}
-
-		return mainContentHtml;
-	} catch (error) {
-		log?.(c.red(`❌ ${file.inputPath}`));
-		throw new Error(`Failed to compile the page: ${file.inputPath}`, {
-			cause: error,
-		});
-	}
+	return transpile({
+		content,
+		compileData,
+		extension: file.extension,
+		compileHook,
+		log,
+		compileLogMessage: 'Compiling main content...',
+		compileLogColor: c.yellowBright,
+		errorLogMessage: file.inputPath,
+		errorMessage: `Failed to compile the page: ${file.inputPath}`,
+		useBeforeResultWhenNoCompiler: false, // Main content behavior: ignore before hook result
+	});
 }
