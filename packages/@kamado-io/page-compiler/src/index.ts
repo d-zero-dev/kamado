@@ -401,8 +401,5 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
 	},
 }));
 
-// Re-export functions from separate files
-export { formatHtml } from './format.js';
+// Re-export for backward compatibility
 export { getLayouts, type GetLayoutsOptions } from './layouts.js';
-export { transpileLayout } from './transpile-layout.js';
-export { transpileMainContent } from './transpile-main.js';
