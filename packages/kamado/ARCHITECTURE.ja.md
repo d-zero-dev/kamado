@@ -11,6 +11,52 @@ Kamado は、「オンデマンドで HTML を焼き上げる」静的サイト�
     HTML、CSS、JavaScript などの各ファイル形式は、それぞれ独立した「コンパイラ」によって処理されます。
 3.  **No Runtime**:
     生成される成果物に Kamado 独自のクライアントサイド・ランタイムは含まれません。
+4.  **Config vs Context**:
+    Kamado はユーザー設定（`Config`）と実行時コンテキスト（`Context`）を分離しています。`Context`型は`Config`を拡張し、CLIコマンドによって実行時に設定される`mode`フィールド（`'build' | 'serve'`）を追加します。これにより、コンパイラやフックがビルドモードか開発サーバーモードかを検出できます。
+
+---
+
+## Config vs Context
+
+### Config
+
+`Config`は`kamado.config.ts`から提供されるユーザー設定を表します。以下を含みます：
+
+- ディレクトリ設定（`dir.input`、`dir.output`）
+- 開発サーバー設定（`devServer.host`、`devServer.port`）
+- Package.json情報（`pkg.production.baseURL`など）
+- コンパイラプラグイン
+- ライフサイクルフック
+
+### Context
+
+`Context`は`Config`を拡張し、実行時情報を追加します：
+
+```typescript
+export interface Context extends Config {
+	readonly mode: 'serve' | 'build';
+}
+```
+
+`mode`フィールドは**ユーザーが設定できません**。CLIコマンドによって自動的に設定されます：
+
+- `kamado build` → `mode: 'build'`
+- `kamado server` → `mode: 'serve'`
+
+### モードの伝播
+
+実行モードは以下のようにシステム全体に伝播します：
+
+1. **CLI**（`src/index.ts`）：ユーザーが`kamado build`または`kamado server`を実行
+2. **Builder/Server**（`src/builder/index.ts`または`src/server/app.ts`）：`Config`をスプレッドして`mode`を追加し、`Context`を作成
+3. **コンパイラ**：`Config`ではなく`Context`を受け取り、実行モードを検出可能
+4. **フック**：ライフサイクルフック（`onBeforeBuild`、`onAfterBuild`）とコンパイラフック（`beforeSerialize`、`afterSerialize`、`replace`）が実行モードを受け取る
+
+このアーキテクチャにより、以下のようなモード固有の動作が可能になります：
+
+- 開発サーバーモードでは開発サーバーURLを使用、ビルドモードでは本番URLを使用
+- フックでの異なるDOM操作動作
+- 実行コンテキストに基づく条件付き処理
 
 ---
 
@@ -98,7 +144,12 @@ graph TD
 Kamado の機能拡張は、`CompilerPlugin` を追加することで行います。
 
 ```typescript
-// Compiler インターフェースの概略
+// CompilerインターフェースはContextを受け取る
+export interface Compiler {
+	(context: Context): Promise<CompileFunction> | CompileFunction;
+}
+
+// CompileFunctionは個別のファイルコンパイルを処理
 export interface CompileFunction {
 	(
 		compilableFile: CompilableFile,
@@ -108,14 +159,18 @@ export interface CompileFunction {
 }
 ```
 
-コンパイラは `CompilableFile` オブジェクトを受け取り、変換後の内容を返します。この際、ソースコードの読み込みやキャッシュの管理は `CompilableFile` クラス（`src/files/`）が隠蔽します。
+`Compiler`は`Context`オブジェクト（`mode: 'serve' | 'build'`を含む）を受け取り、`CompileFunction`を返します。`CompileFunction`は`CompilableFile`オブジェクトを受け取り、変換後の内容を返します。この際、ソースコードの読み込みやキャッシュの管理は`CompilableFile`クラス（`src/files/`）が隠蔽します。
+
+**注意**: `Context`は`Config`を拡張しているため、パラメータ名として`Config`を使用している既存のカスタムコンパイラは変更なしで動作し続けます。ただし、`context.mode`にアクセスして実行モードを検出できます。
 
 ### ライフサイクルフック
 
 ユーザーは `kamado.config.ts` を通じてビルドの前後に任意の処理を挿入できます。
 
-- `onBeforeBuild`: ビルド開始前に実行（アセットの事前準備など）。
-- `onAfterBuild`: ビルド完了後に実行（サイトマップ生成、通知など）。
+- `onBeforeBuild(context: Context)`: ビルド開始前に実行（アセットの事前準備など）。`mode`フィールドを持つ`Context`を受け取ります。
+- `onAfterBuild(context: Context)`: ビルド完了後に実行（サイトマップ生成、通知など）。`mode`フィールドを持つ`Context`を受け取ります。
+
+両方のフックは`Config`ではなく`Context`を受け取るため、ビルドモードか開発サーバーモードかを検出できます。
 
 ---
 
