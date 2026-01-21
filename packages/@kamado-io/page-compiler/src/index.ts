@@ -9,22 +9,17 @@ import type { Options as PrettierOptions } from 'prettier';
 import path from 'node:path';
 
 import c from 'ansi-colors';
-import { characterEntities } from 'character-entities';
-import fg from 'fast-glob';
-import { minify } from 'html-minifier-terser';
 import { createCompiler } from 'kamado/compiler';
 import { getGlobalData } from 'kamado/data';
-import { getFileContent } from 'kamado/files';
-import { domSerialize } from 'kamado/utils/dom';
-import {
-	format as prettierFormat,
-	resolveConfig as prettierResolveConfig,
-} from 'prettier';
 
 import { getBreadcrumbs } from './features/breadcrumbs.js';
 import { getNavTree } from './features/nav.js';
 import { titleList } from './features/title-list.js';
-import { imageSizes, type ImageSizesOptions } from './image.js';
+import { formatHtml } from './format.js';
+import { type ImageSizesOptions } from './image.js';
+import { getLayouts } from './layouts.js';
+import { transpileLayout } from './transpile-layout.js';
+import { transpileMainContent } from './transpile-main.js';
 
 /**
  * Options for the page compiler
@@ -353,43 +348,18 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
 					? await options.compileHooks(options)
 					: options?.compileHooks;
 
-			let mainContentHtml = pageMainContent;
-
-			// Apply compileHooks for main content (extension-independent)
-			if (compileHooks?.main) {
-				try {
-					let content = pageMainContent;
-
-					// Apply before hook
-					if (compileHooks.main.before) {
-						content = await compileHooks.main.before(content, compileData);
-					}
-
-					// Compile
-					if (compileHooks.main.compiler) {
-						log?.(c.yellowBright('Compiling main content...'));
-						mainContentHtml = await compileHooks.main.compiler(
-							content,
-							compileData,
-							file.extension,
-						);
-					}
-					// If no compiler is specified, pass through as-is
-
-					// Apply after hook
-					if (compileHooks.main.after) {
-						mainContentHtml = await compileHooks.main.after(mainContentHtml, compileData);
-					}
-				} catch (error) {
-					log?.(c.red(`❌ ${file.inputPath}`));
-					throw new Error(`Failed to compile the page: ${file.inputPath}`, {
-						cause: error,
-					});
-				}
-			}
+			// Transpile main content
+			const mainContentHtml = await transpileMainContent(
+				pageMainContent,
+				compileData,
+				file,
+				compileHooks?.main,
+				log,
+			);
 
 			let html = mainContentHtml;
 
+			// Apply layout if specified
 			if (metaData?.layout) {
 				const layout = layouts[metaData.layout as string];
 				if (!layout) {
@@ -402,237 +372,54 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
 					...compileData,
 					[contentVariableName]: mainContentHtml,
 				};
+				const layoutExtension = path.extname(layout.inputPath).toLowerCase();
 
-				// Apply compileHooks for layout (extension-independent)
-				if (compileHooks?.layout) {
-					try {
-						let content = layoutContent;
-
-						// Apply before hook
-						if (compileHooks.layout.before) {
-							content = await compileHooks.layout.before(content, layoutCompileData);
-						}
-
-						// Compile
-						if (compileHooks.layout.compiler) {
-							log?.(c.greenBright('Compiling layout...'));
-							const layoutExtension = path.extname(layout.inputPath).toLowerCase();
-							html = await compileHooks.layout.compiler(
-								content,
-								layoutCompileData,
-								layoutExtension,
-							);
-						} else {
-							// If no compiler is specified, use layout content as-is
-							html = content;
-						}
-
-						// Apply after hook
-						if (compileHooks.layout.after) {
-							html = await compileHooks.layout.after(html, layoutCompileData);
-						}
-					} catch (error) {
-						log?.(c.red(`❌ Layout: ${layout.inputPath} (Content: ${file.inputPath})`));
-						throw new Error(`Failed to compile the layout: ${layout.inputPath}`, {
-							cause: error,
-						});
-					}
-				} else {
-					// If no compileHooks.layout, use layout content as-is
-					html = layoutContent;
-				}
+				// Transpile layout
+				html = await transpileLayout(
+					layoutContent,
+					layoutCompileData,
+					layoutExtension,
+					layout,
+					file,
+					compileHooks?.layout,
+					log,
+				);
 			}
 
 			log?.(c.cyanBright('Formatting...'));
-			const formattedHtml = await formatHtml(
-				html,
-				file.inputPath,
-				file.outputPath,
-				config,
-				options,
-				false,
-			);
+
+			// Determine URL for JSDOM
+			const isServe = false;
+			const url =
+				options?.host ??
+				(isServe
+					? `http://${config.devServer.host}:${config.devServer.port}`
+					: (config.pkg.production?.baseURL ??
+						(config.pkg.production?.host
+							? `http://${config.pkg.production.host}`
+							: undefined)));
+
+			const formattedHtml = await formatHtml({
+				content: html,
+				inputPath: file.inputPath,
+				outputPath: file.outputPath,
+				outputDir: config.dir.output,
+				url,
+				beforeSerialize: options?.beforeSerialize,
+				afterSerialize: options?.afterSerialize,
+				imageSizes: options?.imageSizes,
+				characterEntities: options?.characterEntities,
+				prettier: options?.prettier,
+				minifier: options?.minifier,
+				lineBreak: options?.lineBreak,
+				replace: options?.replace,
+				isServe,
+			});
 
 			return formattedHtml;
 		};
 	},
 }));
 
-/**
- * Formats HTML content
- * @param content - HTML content to format
- * @param inputPath - Input file path
- * @param outputPath - Output file path
- * @param config - Configuration object
- * @param options - Page compiler options
- * @param isServe - Whether running on development server
- * @returns Formatted HTML content or ArrayBuffer
- */
-async function formatHtml(
-	content: string,
-	inputPath: string,
-	outputPath: string,
-	config: Config,
-	options?: PageCompilerOptions,
-	isServe: boolean = false,
-): Promise<string | ArrayBuffer> {
-	if (options?.beforeSerialize) {
-		content = await options.beforeSerialize(content, isServe);
-	}
-
-	// Determine URL for JSDOM
-	let jsdomUrl: string | undefined;
-	if (options?.host) {
-		jsdomUrl = options.host;
-	} else if (isServe) {
-		jsdomUrl = `http://${config.devServer.host}:${config.devServer.port}`;
-	} else {
-		jsdomUrl =
-			config.pkg.production?.baseURL ??
-			(config.pkg.production?.host ? `http://${config.pkg.production.host}` : undefined);
-	}
-
-	const imageSizesOption = options?.imageSizes ?? true;
-	if (imageSizesOption || options?.afterSerialize) {
-		content = await domSerialize(
-			content,
-			async (elements, window) => {
-				// Hooks
-				if (imageSizesOption) {
-					const options = typeof imageSizesOption === 'object' ? imageSizesOption : {};
-					const rootDir = path.resolve(config.dir.output);
-					await imageSizes(elements, {
-						rootDir,
-						...options,
-					});
-				}
-
-				await options?.afterSerialize?.(elements, window, isServe);
-			},
-			jsdomUrl,
-		);
-	}
-
-	if (options?.characterEntities) {
-		for (const [entity, char] of Object.entries(characterEntities)) {
-			let _entity = entity;
-			const codePoint = char.codePointAt(0);
-			if (codePoint != null && codePoint < 127) {
-				continue;
-			}
-			if (/^[A-Z]+$/i.test(entity) && characterEntities[entity.toLowerCase()] === char) {
-				_entity = entity.toLowerCase();
-			}
-			content = content.replaceAll(char, `&${_entity};`);
-		}
-	}
-
-	if (
-		// Start with `<html` (For partial HTML)
-		/^<html(?:\s|>)/i.test(content.trim()) &&
-		// Not start with `<!doctype html`
-		!/^<!doctype html/i.test(content.trim())
-	) {
-		// eleventy-pug-plugin does not support `doctype` option
-		content = '<!DOCTYPE html>\n' + content;
-	}
-
-	if (options?.prettier ?? true) {
-		const userPrettierConfig =
-			typeof options?.prettier === 'object' ? options.prettier : {};
-		const prettierConfig = await prettierResolveConfig(inputPath);
-		content = await prettierFormat(content, {
-			parser: 'html',
-			printWidth: 100_000,
-			tabWidth: 2,
-			useTabs: false,
-			...prettierConfig,
-			...userPrettierConfig,
-		});
-	}
-
-	if (options?.minifier ?? true) {
-		content = await minify(content, {
-			collapseWhitespace: false,
-			collapseBooleanAttributes: true,
-			removeComments: false,
-			removeRedundantAttributes: true,
-			removeScriptTypeAttributes: true,
-			removeStyleLinkTypeAttributes: true,
-			useShortDoctype: false,
-			minifyCSS: true,
-			minifyJS: true,
-			...options?.minifier,
-		});
-	}
-
-	if (options?.lineBreak) {
-		content = content.replaceAll(/\r?\n/g, options.lineBreak);
-	}
-
-	if (options?.replace) {
-		const filePath = outputPath;
-		const dirPath = path.dirname(filePath);
-		const relativePathFromBase = path.relative(dirPath, config.dir.output) || '.';
-
-		content = await options.replace(
-			content,
-			{
-				filePath,
-				dirPath,
-				relativePathFromBase,
-			},
-			false,
-		);
-	}
-
-	return content;
-}
-
-interface GetLayoutsOptions {
-	dir?: string;
-}
-
-/**
- * Gets layout files
- * @param options - Options for getting layouts
- * @param options.dir - Directory path where layout files are stored
- * @returns Map of layout files (empty object if dir is not provided)
- */
-export async function getLayouts(options: GetLayoutsOptions) {
-	if (!options.dir) {
-		return {};
-	}
-
-	const layoutsFilePaths = await fg(path.resolve(options.dir, '*'));
-	let layouts: Record<string, FileObject> = {};
-	for (const layoutsFilePath of layoutsFilePaths) {
-		layouts = {
-			...layouts,
-			...getLayout(layoutsFilePath),
-		};
-	}
-	return layouts;
-}
-
-/**
- * Gets a single layout file
- * @param filePath - Path to the layout file
- * @returns Object containing the layout file (keyed by filename)
- */
-function getLayout(filePath: string): Record<string, FileObject> {
-	const name = path.basename(filePath);
-	return {
-		[name]: {
-			inputPath: filePath,
-			async get(cache = true) {
-				const content = await getFileContent(filePath, cache);
-				return {
-					metaData: {},
-					content,
-					raw: content,
-				};
-			},
-		},
-	};
-}
+// Re-export for backward compatibility
+export { getLayouts, type GetLayoutsOptions } from './layouts.js';

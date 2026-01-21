@@ -101,6 +101,49 @@ export const config: UserConfig = {
 };
 ```
 
+## Standalone API: formatHtml
+
+The `formatHtml` function is available as a standalone API for formatting HTML content outside of the Kamado build system.
+
+### Import
+
+```ts
+import { formatHtml, type FormatHtmlOptions } from '@kamado-io/page-compiler/format';
+```
+
+### Usage
+
+```ts
+const formattedHtml = await formatHtml({
+	content: '<html><body><h1>Hello</h1></body></html>',
+	inputPath: '/project/src/pages/about.html',
+	outputPath: '/project/dist/pages/about.html',
+	outputDir: '/project/dist', // Root output directory, not /project/dist/pages
+	url: 'https://example.com',
+	imageSizes: true,
+	prettier: true,
+	minifier: true,
+	isServe: false,
+});
+```
+
+### FormatHtmlOptions
+
+- `content` (required): HTML content to format
+- `inputPath` (required): Input file path (used for Prettier config resolution)
+- `outputPath` (required): Output file path. Full path to the output file (e.g., `/dist/pages/about.html`)
+- `outputDir` (required): Output directory root. Base directory for the build output (e.g., `/dist`). Used as the root for relative path calculations and image size detection. Note: This is NOT `path.dirname(outputPath)` - it's the root output directory that may be several levels up from the output file
+- `url` (optional): JSDOM URL configuration for DOM operations
+- `beforeSerialize` (optional): Hook function called before DOM serialization `(content: string, isServe: boolean) => Promise<string> | string`
+- `afterSerialize` (optional): Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean) => Promise<void> | void`
+- `imageSizes` (optional): Configuration for automatically adding width/height attributes to images (default: `true`)
+- `characterEntities` (optional): Whether to enable character entity conversion
+- `prettier` (optional): Prettier options (default: `true`)
+- `minifier` (optional): HTML minifier options (default: `true`)
+- `lineBreak` (optional): Line break configuration (`'\n'` or `'\r\n'`)
+- `replace` (optional): Final HTML content replacement processing `(content: string, paths: Paths, isServe: boolean) => Promise<string> | string`
+- `isServe` (optional): Whether running on development server (default: `false`)
+
 ## License
 
 MIT
