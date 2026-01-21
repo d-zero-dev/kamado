@@ -1,4 +1,4 @@
-import type { Config } from '../config/types.js';
+import type { Config, Context } from '../config/types.js';
 
 import path from 'node:path';
 
@@ -14,18 +14,25 @@ import { setRoute } from './route.js';
  * @param config - Configuration object
  */
 export async function start(config: Config) {
+	// Create execution context
+	const context: Context = {
+		...config,
+		mode: 'serve',
+	};
+
 	const app = new Hono();
 
-	await setRoute(app, config);
+	await setRoute(app, context);
 
 	serve({
 		fetch: app.fetch,
-		hostname: config.devServer.host,
-		port: config.devServer.port,
+		hostname: context.devServer.host,
+		port: context.devServer.port,
 	});
 
-	const location = `http://${config.devServer.host}:${config.devServer.port}`;
-	const relDocumentRoot = '.' + path.sep + path.relative(process.cwd(), config.dir.input);
+	const location = `http://${context.devServer.host}:${context.devServer.port}`;
+	const relDocumentRoot =
+		'.' + path.sep + path.relative(process.cwd(), context.dir.input);
 
 	process.stdout.write(`
   ${c.bold.greenBright('Kamado Dev Server: Ignition🔥')}
@@ -34,7 +41,7 @@ export async function start(config: Config) {
   ${c.blue('DocumentRoot')}: ${c.bold.gray(relDocumentRoot)}
 `);
 
-	if (config.devServer.open) {
+	if (context.devServer.open) {
 		await open(location);
 	}
 }

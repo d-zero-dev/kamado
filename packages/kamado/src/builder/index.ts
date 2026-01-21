@@ -1,4 +1,4 @@
-import type { UserConfig } from '../config/types.js';
+import type { UserConfig, Context } from '../config/types.js';
 import type { CompilableFile } from '../files/types.js';
 
 import fs from 'node:fs/promises';
@@ -40,26 +40,32 @@ interface BuildConfig {
 export async function build(buildConfig: UserConfig & BuildConfig) {
 	const config = await mergeConfig(buildConfig, buildConfig.rootDir);
 
+	// Create execution context
+	const context: Context = {
+		...config,
+		mode: 'build',
+	};
+
 	const startTime = Date.now();
 
-	if (config.onBeforeBuild && buildConfig.verbose) {
+	if (context.onBeforeBuild && buildConfig.verbose) {
 		// eslint-disable-next-line no-console
 		console.log('Before build...');
 	}
-	await config.onBeforeBuild?.(config);
+	await context.onBeforeBuild?.(context);
 
 	if (buildConfig.verbose) {
 		// eslint-disable-next-line no-console
 		console.log('Build started...');
 	}
 
-	const compileFunctionMap = await createCompileFunctionMap(config);
+	const compileFunctionMap = await createCompileFunctionMap(context);
 
 	const fileArrays = await Promise.all(
-		config.compilers.map((compilerEntry) =>
+		context.compilers.map((compilerEntry) =>
 			getAssetGroup({
-				inputDir: config.dir.input,
-				outputDir: config.dir.output,
+				inputDir: context.dir.input,
+				outputDir: context.dir.output,
 				compilerEntry,
 				glob: buildConfig.targetGlob,
 			}),
@@ -68,7 +74,7 @@ export async function build(buildConfig: UserConfig & BuildConfig) {
 	const allFiles = fileArrays.flat();
 
 	const f = filePathColorizer({
-		rootDir: config.dir.input,
+		rootDir: context.dir.input,
 	});
 
 	const CHECK_MARK = c.green('✔');
@@ -110,11 +116,11 @@ export async function build(buildConfig: UserConfig & BuildConfig) {
 		},
 	);
 
-	if (config.onAfterBuild && buildConfig.verbose) {
+	if (context.onAfterBuild && buildConfig.verbose) {
 		// eslint-disable-next-line no-console
 		console.log('After build...');
 	}
-	await config.onAfterBuild?.(config);
+	await context.onAfterBuild?.(context);
 
 	const endTime = Date.now();
 	// eslint-disable-next-line no-console

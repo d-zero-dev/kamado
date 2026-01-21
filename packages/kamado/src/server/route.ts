@@ -1,4 +1,4 @@
-import type { Config } from '../config/types.js';
+import type { Context } from '../config/types.js';
 import type { Hono } from 'hono';
 
 import fs from 'node:fs/promises';
@@ -22,17 +22,17 @@ const ERROR_MARK = c.red('✘');
 /**
  * Sets routes for the application
  * @param app - Hono application instance
- * @param config - Configuration object
+ * @param context - Execution context
  * @param options - Options for route configuration
  * @param options.verbose - Whether to enable verbose logging
  * @returns Application after route configuration
  */
-export async function setRoute(app: Hono, config: Config, options: RouteOptions = {}) {
+export async function setRoute(app: Hono, context: Context, options: RouteOptions = {}) {
 	const hostname =
-		config.devServer.host + (config.devServer.port ? `:${config.devServer.port}` : '');
+		context.devServer.host + (context.devServer.port ? `:${context.devServer.port}` : '');
 
-	const compilableFileMap = await getCompilableFileMap(config);
-	const compileFunctionMap = await createCompileFunctionMap(config);
+	const compilableFileMap = await getCompilableFileMap(context);
+	const compileFunctionMap = await createCompileFunctionMap(context);
 
 	const INDENT = '  ';
 
@@ -44,14 +44,14 @@ export async function setRoute(app: Hono, config: Config, options: RouteOptions 
 	let fileIdIterator = 0;
 
 	const f = filePathColorizer({
-		rootDir: config.dir.input,
+		rootDir: context.dir.input,
 	});
 
 	const routes = app.get('*', async (ctx) => {
 		const url = new URL(ctx.req.url, `http://${hostname}`);
 		const requestFilePath = urlToLocalPath(url.toString(), '.html');
 
-		const refLocalFilePath = path.resolve(config.dir.output, requestFilePath);
+		const refLocalFilePath = path.resolve(context.dir.output, requestFilePath);
 		let fileId = fileIds.get(refLocalFilePath) ?? fileIdIterator++;
 
 		const ext = path.extname(requestFilePath).toLowerCase();
