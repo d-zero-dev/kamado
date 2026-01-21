@@ -2,7 +2,7 @@ import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { GetNavTreeOptions, NavNode } from './features/nav.js';
 import type { TitleListOptions } from './features/title-list.js';
 import type { Options as HMTOptions } from 'html-minifier-terser';
-import type { Config } from 'kamado/config';
+import type { Context } from 'kamado/config';
 import type { CompilableFile, FileObject } from 'kamado/files';
 import type { Options as PrettierOptions } from 'prettier';
 
@@ -292,7 +292,7 @@ export interface Paths {
 export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
 	defaultFiles: '**/*.html',
 	defaultOutputExtension: '.html',
-	compile: (options) => async (config: Config) => {
+	compile: (options) => async (context: Context) => {
 		const layoutsFromDir = await getLayouts({
 			dir: options?.layouts?.dir,
 		});
@@ -302,7 +302,7 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
 		};
 
 		const globalDataFromDir = options?.globalData?.dir
-			? await getGlobalData(options?.globalData?.dir, config)
+			? await getGlobalData(options?.globalData?.dir, context)
 			: undefined;
 		const globalData = {
 			...globalDataFromDir,
@@ -319,7 +319,7 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
 			const { metaData, content: pageMainContent } = pageContent;
 
 			const breadcrumbs = getBreadcrumbs(file, globalData?.pageList ?? [], {
-				baseURL: config.pkg.production?.baseURL,
+				baseURL: context.pkg.production?.baseURL,
 				optimizeTitle: options?.optimizeTitle,
 				transformItem: options?.transformBreadcrumbItem,
 			});
@@ -336,7 +336,7 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
 					}),
 				titleList: (options: TitleListOptions) =>
 					titleList(breadcrumbs, {
-						siteName: config.pkg.production?.siteName,
+						siteName: context.pkg.production?.siteName,
 						...options,
 					}),
 				breadcrumbs,
@@ -389,21 +389,21 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
 			log?.(c.cyanBright('Formatting...'));
 
 			// Determine URL for JSDOM
-			const isServe = false;
+			const isServe = context.mode === 'serve';
 			const url =
 				options?.host ??
 				(isServe
-					? `http://${config.devServer.host}:${config.devServer.port}`
-					: (config.pkg.production?.baseURL ??
-						(config.pkg.production?.host
-							? `http://${config.pkg.production.host}`
+					? `http://${context.devServer.host}:${context.devServer.port}`
+					: (context.pkg.production?.baseURL ??
+						(context.pkg.production?.host
+							? `http://${context.pkg.production.host}`
 							: undefined)));
 
 			const formattedHtml = await formatHtml({
 				content: html,
 				inputPath: file.inputPath,
 				outputPath: file.outputPath,
-				outputDir: config.dir.output,
+				outputDir: context.dir.output,
 				url,
 				beforeSerialize: options?.beforeSerialize,
 				afterSerialize: options?.afterSerialize,

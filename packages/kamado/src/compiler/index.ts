@@ -1,4 +1,4 @@
-import type { Config } from '../config/types.js';
+import type { Context } from '../config/types.js';
 import type { CompilableFile } from '../files/types.js';
 
 /**
@@ -15,14 +15,14 @@ export interface CompilerPlugin<CompileOptions = void> {
 
 /**
  * Compiler interface
- * Function that takes configuration and returns a compile function
+ * Function that takes execution context and returns a compile function
  */
 export interface Compiler {
 	/**
-	 * @param config - Configuration object
+	 * @param context - Execution context (config + mode)
 	 * @returns Compile function
 	 */
-	(config: Config): Promise<CompileFunction> | CompileFunction;
+	(context: Context): Promise<CompileFunction> | CompileFunction;
 }
 
 /**

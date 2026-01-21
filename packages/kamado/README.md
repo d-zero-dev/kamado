@@ -120,11 +120,13 @@ export const config: UserConfig = {
 			},
 		}),
 	],
-	async onBeforeBuild(config) {
+	async onBeforeBuild(context) {
 		// Process before build
+		// context.mode is available: 'build' or 'serve'
 	},
-	async onAfterBuild() {
+	async onAfterBuild(context) {
 		// Process after build
+		// context.mode is available: 'build' or 'serve'
 	},
 };
 
@@ -165,7 +167,7 @@ The order of entries in the array determines the processing order.
 - `globalData.data`: Additional global data
 - `layouts.dir`: Layout file directory
 - `compileHooks`: Compilation hooks for customizing compile process (required for Pug templates)
-- `host`: Host URL for JSDOM's url option (if not specified, uses production domain from package.json)
+- `host`: Host URL for JSDOM's url option. If not specified, in build mode uses `production.baseURL` or `production.host` from package.json, in serve mode uses dev server URL (`http://${devServer.host}:${devServer.port}`)
 - `afterSerialize`: Hook after DOM serialization
 
 **Note**: `page-compiler` is a generic container compiler and does not compile Pug templates by default. To use Pug templates, install `@kamado-io/pug-compiler` and configure `compileHooks`. See [@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md) for details.
@@ -264,8 +266,8 @@ Returns an array of `CompilableFile` objects, optionally with a `title` property
 
 #### Hook Functions
 
-- `onBeforeBuild`: Function executed before build
-- `onAfterBuild`: Function executed after build
+- `onBeforeBuild`: Function executed before build. Receives `Context` (which extends `Config` with `mode: 'build' | 'serve'`)
+- `onAfterBuild`: Function executed after build. Receives `Context` (which extends `Config` with `mode: 'build' | 'serve'`)
 
 ### CLI Commands
 

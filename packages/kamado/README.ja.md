@@ -120,11 +120,13 @@ export const config: UserConfig = {
 			},
 		}),
 	],
-	async onBeforeBuild(config) {
+	async onBeforeBuild(context) {
 		// ビルド前の処理
+		// context.mode が利用可能: 'build' または 'serve'
 	},
-	async onAfterBuild() {
+	async onAfterBuild(context) {
 		// ビルド後の処理
+		// context.mode が利用可能: 'build' または 'serve'
 	},
 };
 
@@ -165,7 +167,7 @@ export default config;
 - `globalData.data`: 追加のグローバルデータ
 - `layouts.dir`: レイアウトファイルのディレクトリ
 - `compileHooks`: コンパイルプロセスをカスタマイズするコンパイルフック（Pugテンプレートを使用する場合は必須）
-- `host`: JSDOMのurlオプションに使用するホストURL（未指定の場合はpackage.jsonの本番ドメインを使用）
+- `host`: JSDOMのurlオプションに使用するホストURL。未指定の場合、ビルドモードではpackage.jsonの`production.baseURL`または`production.host`を使用、開発サーバーモードでは開発サーバーURL（`http://${devServer.host}:${devServer.port}`）を使用
 - `afterSerialize`: DOMシリアライズ後のフック
 
 **注意**: `page-compiler`は汎用コンテナコンパイラであり、デフォルトではPugテンプレートをコンパイルしません。Pugテンプレートを使用するには、`@kamado-io/pug-compiler`をインストールし、`compileHooks`を設定してください。詳細は[@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md)を参照してください。
@@ -264,8 +266,8 @@ export const config: UserConfig = {
 
 #### フック関数
 
-- `onBeforeBuild`: ビルド前に実行される関数
-- `onAfterBuild`: ビルド後に実行される関数
+- `onBeforeBuild`: ビルド前に実行される関数。`Context`（`Config`を拡張し`mode: 'build' | 'serve'`を含む）を受け取ります
+- `onAfterBuild`: ビルド後に実行される関数。`Context`（`Config`を拡張し`mode: 'build' | 'serve'`を含む）を受け取ります
 
 ### CLIコマンド
 

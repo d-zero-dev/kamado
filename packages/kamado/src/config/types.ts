@@ -46,6 +46,19 @@ export interface Config {
 }
 
 /**
+ * Execution context
+ * Config + execution mode information
+ * Created by CLI commands (build/serve)
+ */
+export interface Context extends Config {
+	/**
+	 * Execution mode (set by CLI)
+	 * Users cannot configure this - it's automatically set by the command
+	 */
+	readonly mode: 'serve' | 'build';
+}
+
+/**
  * Type for user-configurable settings
  * Partial version of Config
  */

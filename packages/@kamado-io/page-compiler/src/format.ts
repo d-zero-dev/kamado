@@ -201,7 +201,7 @@ export async function formatHtml(
 				dirPath,
 				relativePathFromBase,
 			},
-			false,
+			isServe,
 		);
 	}
 

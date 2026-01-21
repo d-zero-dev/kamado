@@ -11,6 +11,52 @@ This document explains Kamado's internal structure, the flow from CLI to build/s
     Each file format (HTML, CSS, JavaScript, etc.) is handled by an independent "compiler" plugin.
 3.  **No Runtime**:
     The generated output does not include any proprietary Kamado client-side runtime.
+4.  **Config vs Context**:
+    Kamado separates user configuration (`Config`) from runtime execution context (`Context`). The `Context` type extends `Config` and adds a `mode` field (`'build' | 'serve'`) that is set by CLI commands at runtime. This allows compilers and hooks to detect whether they are running in build mode or dev server mode.
+
+---
+
+## Config vs Context
+
+### Config
+
+`Config` represents the user-provided configuration from `kamado.config.ts`. It includes:
+
+- Directory settings (`dir.input`, `dir.output`)
+- Dev server settings (`devServer.host`, `devServer.port`)
+- Package.json information (`pkg.production.baseURL`, etc.)
+- Compiler plugins
+- Lifecycle hooks
+
+### Context
+
+`Context` extends `Config` and adds runtime execution information:
+
+```typescript
+export interface Context extends Config {
+	readonly mode: 'serve' | 'build';
+}
+```
+
+The `mode` field is **not user-configurable**. It is automatically set by the CLI command:
+
+- `kamado build` → `mode: 'build'`
+- `kamado server` → `mode: 'serve'`
+
+### Mode Propagation
+
+The execution mode flows through the system as follows:
+
+1. **CLI** (`src/index.ts`): User runs `kamado build` or `kamado server`
+2. **Builder/Server** (`src/builder/index.ts` or `src/server/app.ts`): Creates `Context` by spreading `Config` and adding `mode`
+3. **Compilers**: Receive `Context` instead of `Config`, allowing them to detect the execution mode
+4. **Hooks**: Lifecycle hooks (`onBeforeBuild`, `onAfterBuild`) and compiler hooks (`beforeSerialize`, `afterSerialize`, `replace`) receive the execution mode
+
+This architecture enables mode-specific behavior, such as:
+
+- Using dev server URLs in serve mode vs production URLs in build mode
+- Different DOM manipulation behavior in hooks
+- Conditional processing based on execution context
 
 ---
 
@@ -98,7 +144,12 @@ The map is built once at server startup and used for all subsequent requests.
 Kamado's features are extended by adding `CompilerPlugin`s.
 
 ```typescript
-// Summary of the Compiler interface
+// Compiler interface receives Context
+export interface Compiler {
+	(context: Context): Promise<CompileFunction> | CompileFunction;
+}
+
+// CompileFunction handles individual file compilation
 export interface CompileFunction {
 	(
 		compilableFile: CompilableFile,
@@ -108,14 +159,18 @@ export interface CompileFunction {
 }
 ```
 
-A compiler receives a `CompilableFile` object and returns the transformed content. The `CompilableFile` class (`src/files/`) handles file reading and cache management behind the scenes.
+The `Compiler` receives a `Context` object (which includes `mode: 'serve' | 'build'`) and returns a `CompileFunction`. The `CompileFunction` then receives a `CompilableFile` object and returns the transformed content. The `CompilableFile` class (`src/files/`) handles file reading and cache management behind the scenes.
+
+**Note**: Because `Context extends Config`, existing custom compilers that use `Config` as a parameter name will continue to work without changes. However, they can access `context.mode` to detect the execution mode.
 
 ### Lifecycle Hooks
 
 Users can insert custom logic before and after the build via `kamado.config.ts`.
 
-- `onBeforeBuild`: Executed before the build starts (e.g., preparing assets).
-- `onAfterBuild`: Executed after the build completes (e.g., generating sitemaps, notifications).
+- `onBeforeBuild(context: Context)`: Executed before the build starts (e.g., preparing assets). Receives `Context` with `mode` field.
+- `onAfterBuild(context: Context)`: Executed after the build completes (e.g., generating sitemaps, notifications). Receives `Context` with `mode` field.
+
+Both hooks receive `Context` instead of `Config`, allowing them to detect whether they are running in build or serve mode.
 
 ---
 
