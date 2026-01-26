@@ -104,6 +104,10 @@ export interface DevServerConfig {
 	 * Whether to automatically open browser on startup
 	 */
 	readonly open: boolean;
+	/**
+	 * Path to start the server
+	 */
+	readonly startPath?: string;
 }
 
 /**
