@@ -146,6 +146,7 @@ export default config;
 - `devServer.port`: サーバーのポート番号（デフォルト: `3000`）
 - `devServer.host`: サーバーのホスト名（デフォルト: `localhost`）
 - `devServer.open`: 起動時にブラウザを自動で開くか（デフォルト: `false`）
+- `devServer.startPath`: サーバー起動時にブラウザで開くカスタムパス（オプション、例: `'/__tmpl/'`）
 
 #### コンパイラ設定
 

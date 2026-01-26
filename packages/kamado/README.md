@@ -146,6 +146,7 @@ export default config;
 - `devServer.port`: Server port number (default: `3000`)
 - `devServer.host`: Server host name (default: `localhost`)
 - `devServer.open`: Whether to automatically open the browser on startup (default: `false`)
+- `devServer.startPath`: Custom path to open in the browser when starting the server (optional, e.g., `'/__tmpl/'`)
 
 #### Compiler Settings
 
