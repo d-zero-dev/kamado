@@ -66,7 +66,6 @@ export async function setRoute(app: Hono, context: Context, options: RouteOption
 				content,
 				{
 					path: requestFilePath,
-					contentType: ctx.res.headers.get('Content-Type') ?? undefined,
 					inputPath,
 					outputPath,
 					isServe: true,

@@ -299,7 +299,6 @@ export const config: UserConfig = {
 				name: 'inject-dev-script',
 				filter: {
 					include: '**/*.html',
-					contentType: 'text/html',
 				},
 				transform: (content) => {
 					if (typeof content !== 'string') {
@@ -352,7 +351,7 @@ export const config: UserConfig = {
 			{
 				name: 'css-source-comment',
 				filter: {
-					contentType: 'text/css',
+					include: '**/*.css',
 				},
 				transform: (content, ctx) => {
 					if (typeof content !== 'string') {
@@ -376,7 +375,6 @@ interface ResponseTransform {
 	filter?: {
 		include?: string | string[]; // Glob patterns to include
 		exclude?: string | string[]; // Glob patterns to exclude
-		contentType?: string | string[]; // Content-Type filter (supports wildcards)
 	};
 	transform: (
 		content: string | ArrayBuffer,
@@ -386,7 +384,6 @@ interface ResponseTransform {
 
 interface TransformContext {
 	path: string; // Request path
-	contentType: string | undefined; // Response Content-Type
 	inputPath?: string; // Original input file path (if available)
 	outputPath: string; // Output file path
 	isServe: boolean; // Always true in dev server
@@ -398,7 +395,6 @@ interface TransformContext {
 
 - `include`: Glob pattern(s) to match request paths (e.g., `'**/*.html'`, `['**/*.css', '**/*.js']`)
 - `exclude`: Glob pattern(s) to exclude (e.g., `'**/_*.html'` to skip files starting with `_`)
-- `contentType`: Content-Type filter(s) with wildcard support (e.g., `'text/html'`, `'text/*'`, `['text/html', 'application/json']`)
 
 **Important Notes:**
 
