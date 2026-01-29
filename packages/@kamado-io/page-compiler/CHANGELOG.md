@@ -3,6 +3,19 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [1.3.0](https://github.com/d-zero-dev/kamado/compare/v1.2.0...v1.3.0) (2026-01-29)
+
+### Bug Fixes
+
+- **page-compiler:** use Context to determine isServe flag correctly ([b4d4715](https://github.com/d-zero-dev/kamado/commit/b4d4715ee2db985a5023a7f6750ec682fd6157fe))
+
+### Features
+
+- **page-compiler:** add dev-transform utilities for Transform API ([629b48b](https://github.com/d-zero-dev/kamado/commit/629b48bc5e7608a7f828d899fa7ee5b34fa0966d))
+- **page-compiler:** add formatHtml to package.json exports ([093945f](https://github.com/d-zero-dev/kamado/commit/093945f0f2e0cba47f42e291a8549c40dbb2254a))
+- **page-compiler:** add TransformContext to afterSerialize hook ([086ecd1](https://github.com/d-zero-dev/kamado/commit/086ecd19663811ae60ad1d93a9111f8b2a4b66a9))
+- **page-compiler:** add TransformContext to beforeSerialize hook ([bcee5e6](https://github.com/d-zero-dev/kamado/commit/bcee5e64099b3d339b4e84e5dd13268423ee6188))
+
 # [1.2.0](https://github.com/d-zero-dev/kamado/compare/v1.1.0...v1.2.0) (2026-01-09)
 
 ### Features

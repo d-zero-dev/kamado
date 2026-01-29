@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [1.3.0](https://github.com/d-zero-dev/kamodo/compare/v1.2.0...v1.3.0) (2026-01-29)
+
+### Features
+
+- **kamado:** add response transform API for dev server ([4290f69](https://github.com/d-zero-dev/kamodo/commit/4290f69d90e735e602c32f66c15fddcfb408b0f9))
+- **kamado:** add server start path configuration ([a133234](https://github.com/d-zero-dev/kamodo/commit/a133234c7b44ea1e2c2617341f388d6f845bc610))
+- **kamado:** introduce Context type to separate config from execution mode ([9d47de5](https://github.com/d-zero-dev/kamodo/commit/9d47de5a1621077f1673ae894546e05e30994997))
+
 # [1.2.0](https://github.com/d-zero-dev/kamodo/compare/v1.1.0...v1.2.0) (2026-01-09)
 
 ### Bug Fixes
