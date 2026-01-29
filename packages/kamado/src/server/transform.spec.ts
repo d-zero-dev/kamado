@@ -65,6 +65,7 @@ describe('applyTransforms', () => {
 			const content = '<html>test</html>';
 			const context = createTransformContext({
 				context: createMockContext('build'),
+				isServe: false,
 			});
 			const transform: ResponseTransform = {
 				transform: () => 'modified',
