@@ -144,7 +144,7 @@ export async function formatHtml(
 					});
 				}
 
-				await afterSerialize?.(elements, window, isServe);
+				await afterSerialize?.(elements, window, isServe, transformContext);
 			},
 			url,
 		);

@@ -113,11 +113,13 @@ export interface PageCompilerOptions {
 	 * @param elements - Array of DOM elements
 	 * @param window - Window object
 	 * @param isServe - Whether running on development server
+	 * @param context - Transform context (provides path and config info)
 	 */
 	readonly afterSerialize?: (
 		elements: readonly Element[],
 		window: Window,
 		isServe: boolean,
+		context: TransformContext,
 	) => Promise<void> | void;
 	/**
 	 * Final HTML content replacement processing

@@ -144,4 +144,77 @@ describe('formatHtml', () => {
 			expect(result).toContain('<script>injected</script>');
 		});
 	});
+
+	describe('afterSerialize hook', () => {
+		test('receives TransformContext as fourth parameter', async () => {
+			let receivedContext: TransformContext | undefined;
+
+			const mockContext: Context = {
+				mode: 'build',
+				dir: {
+					root: '/test/root',
+					output: '/test/output',
+					public: '/test/public',
+				},
+				devServer: {
+					host: 'localhost',
+					port: 3000,
+				},
+				pkg: {},
+			} as Context;
+
+			await formatHtml({
+				content: '<html><head></head><body>test</body></html>',
+				inputPath: '/test/input/page.html',
+				outputPath: '/test/output/page.html',
+				outputDir: '/test/output',
+				isServe: false,
+				context: mockContext,
+				afterSerialize: (elements, window, isServe, context) => {
+					receivedContext = context;
+				},
+			});
+
+			expect(receivedContext).toBeDefined();
+			expect(receivedContext?.path).toBe('page.html');
+			expect(receivedContext?.inputPath).toBe('/test/input/page.html');
+			expect(receivedContext?.outputPath).toBe('/test/output/page.html');
+			expect(receivedContext?.isServe).toBe(false);
+			expect(receivedContext?.context).toBe(mockContext);
+		});
+
+		test('receives context with correct path in nested directory', async () => {
+			let receivedContext: TransformContext | undefined;
+
+			const mockContext: Context = {
+				mode: 'serve',
+				dir: {
+					root: '/test/root',
+					output: '/test/output',
+					public: '/test/public',
+				},
+				devServer: {
+					host: 'localhost',
+					port: 3000,
+				},
+				pkg: {},
+			} as Context;
+
+			await formatHtml({
+				content: '<html><head></head><body>test</body></html>',
+				inputPath: '/test/input/foo/bar/index.html',
+				outputPath: '/test/output/foo/bar/index.html',
+				outputDir: '/test/output',
+				isServe: true,
+				context: mockContext,
+				afterSerialize: (elements, window, isServe, context) => {
+					receivedContext = context;
+				},
+			});
+
+			expect(receivedContext?.path).toBe('foo/bar/index.html');
+			expect(receivedContext?.isServe).toBe(true);
+			expect(receivedContext?.context.mode).toBe('serve');
+		});
+	});
 });
