@@ -2,7 +2,7 @@ import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { GetNavTreeOptions, NavNode } from './features/nav.js';
 import type { TitleListOptions } from './features/title-list.js';
 import type { Options as HMTOptions } from 'html-minifier-terser';
-import type { Context } from 'kamado/config';
+import type { Context, TransformContext } from 'kamado/config';
 import type { CompilableFile, FileObject } from 'kamado/files';
 import type { Options as PrettierOptions } from 'prettier';
 
@@ -100,11 +100,13 @@ export interface PageCompilerOptions {
 	 * Hook function called before DOM serialization
 	 * @param content - HTML content
 	 * @param isServe - Whether running on development server
+	 * @param context - Transform context (provides path and config info)
 	 * @returns Processed HTML content
 	 */
 	readonly beforeSerialize?: (
 		content: string,
 		isServe: boolean,
+		context: TransformContext,
 	) => Promise<string> | string;
 	/**
 	 * Hook function called after DOM serialization
@@ -414,6 +416,7 @@ export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
 				lineBreak: options?.lineBreak,
 				replace: options?.replace,
 				isServe,
+				context,
 			});
 
 			return formattedHtml;
