@@ -103,7 +103,7 @@ export const config: UserConfig = {
 
 ## Development Transform Utilities
 
-The page-compiler package provides utilities for Kamado's Transform API, which allows you to modify response content during development server mode.
+The page-compiler package provides utilities for Kamado's Transform API, which allows you to modify response content during both development server mode and build time.
 
 ### Available Utilities
 
@@ -207,6 +207,72 @@ createSSIShim({
 });
 // In HTML: <!--#include virtual="/home/www/document_root/includes/header.html" -->
 // Will read from: {output}/includes/header.html
+```
+
+### Using Transform Utilities in Build Time
+
+Transform utilities can also be used during build time via the `beforeSerialize` hook. The hook receives a `TransformContext` as its third parameter, allowing you to use transform utilities in both development and build contexts.
+
+**Example: Using injectToHead in beforeSerialize**
+
+```ts
+import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
+import type { PageCompilerOptions } from '@kamado-io/page-compiler';
+
+const pageCompilerOptions: PageCompilerOptions = {
+	beforeSerialize: async (content, isServe, context) => {
+		// Apply injectToHead transform
+		const injectTransform = createInjectToHeadTransform({
+			content: isServe
+				? '<script src="/__dev-tools.js"></script>'
+				: '<meta name="build-time" content="' + Date.now() + '">',
+		});
+
+		return await injectTransform(content, context);
+	},
+};
+```
+
+**Example: Using createSSIShim in beforeSerialize**
+
+```ts
+import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
+import type { PageCompilerOptions } from '@kamado-io/page-compiler';
+
+const pageCompilerOptions: PageCompilerOptions = {
+	beforeSerialize: async (content, isServe, context) => {
+		// Apply SSI shim transform
+		const ssiTransform = createSSIShimTransform({
+			onError: (path) => `<!-- Failed to include: ${path} -->`,
+		});
+
+		return await ssiTransform(content, context);
+	},
+};
+```
+
+**Example: Combining multiple transforms**
+
+```ts
+import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
+import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
+import type { PageCompilerOptions } from '@kamado-io/page-compiler';
+
+const pageCompilerOptions: PageCompilerOptions = {
+	beforeSerialize: async (content, isServe, context) => {
+		// Apply SSI first
+		const ssiTransform = createSSIShimTransform();
+		let result = await ssiTransform(content, context);
+
+		// Then inject to head
+		const injectTransform = createInjectToHeadTransform({
+			content: '<meta name="generator" content="Kamado">',
+		});
+		result = await injectTransform(result, context);
+
+		return result;
+	},
+};
 ```
 
 ### Advanced: Transform Functions
