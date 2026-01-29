@@ -99,8 +99,9 @@ export const config: UserConfig = {
 			layouts: {
 				dir: path.resolve(import.meta.dirname, '__assets', '_libs', 'layouts'),
 			},
-			async afterSerialize(elements, window, isServe) {
+			async afterSerialize(elements, window, isServe, context) {
 				// DOM manipulation or custom processing here
+				// context provides: path, inputPath, outputPath, isServe, context
 			},
 		}),
 		styleCompiler({
@@ -170,7 +171,7 @@ The order of entries in the array determines the processing order.
 - `layouts.dir`: Layout file directory
 - `compileHooks`: Compilation hooks for customizing compile process (required for Pug templates)
 - `host`: Host URL for JSDOM's url option. If not specified, in build mode uses `production.baseURL` or `production.host` from package.json, in serve mode uses dev server URL (`http://${devServer.host}:${devServer.port}`)
-- `afterSerialize`: Hook after DOM serialization
+- `afterSerialize`: Hook after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext) => Promise<void> | void`
 
 **Note**: `page-compiler` is a generic container compiler and does not compile Pug templates by default. To use Pug templates, install `@kamado-io/pug-compiler` and configure `compileHooks`. See [@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md) for details.
 

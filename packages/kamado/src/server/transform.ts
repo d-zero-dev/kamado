@@ -18,12 +18,12 @@ export async function applyTransforms(
 	context: TransformContext,
 	transforms: readonly ResponseTransform[] | undefined,
 ): Promise<string | ArrayBuffer> {
-	// Guard: Only apply in serve mode
-	if (context.context.mode !== 'serve') {
+	if (!transforms || transforms.length === 0) {
 		return content;
 	}
 
-	if (!transforms || transforms.length === 0) {
+	// Guard: Only apply in serve mode
+	if (context.context.mode !== 'serve') {
 		return content;
 	}
 

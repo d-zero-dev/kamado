@@ -52,8 +52,8 @@ export const config: UserConfig = {
 - `transformBreadcrumbItem`: Function to transform each breadcrumb item. Can add custom properties to breadcrumb items. `(item: BreadcrumbItem) => BreadcrumbItem`
 - `transformNavNode`: Function to transform each navigation node. Can add custom properties or filter nodes by returning `null`/`undefined`. `(node: NavNode) => NavNode | null | undefined`
 - `host`: Host URL for JSDOM's url option. If not specified, in build mode uses `production.baseURL` or `production.host` from package.json, in serve mode uses dev server URL (`http://${devServer.host}:${devServer.port}`)
-- `beforeSerialize`: Hook function called before DOM serialization `(content: string, isServe: boolean) => Promise<string> | string`
-- `afterSerialize`: Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean) => Promise<void> | void`
+- `beforeSerialize`: Hook function called before DOM serialization `(content: string, isServe: boolean, context: TransformContext) => Promise<string> | string`
+- `afterSerialize`: Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext) => Promise<void> | void`
 - `replace`: Final HTML content replacement processing `(content: string, paths: Paths, isServe: boolean) => Promise<string> | string`
 - `compileHooks`: Compilation hooks for customizing compile process
   - Can be an object or a function `(options: PageCompilerOptions) => CompileHooksObject | Promise<CompileHooksObject>` that returns an object (sync or async)
@@ -103,7 +103,7 @@ export const config: UserConfig = {
 
 ## Development Transform Utilities
 
-The page-compiler package provides utilities for Kamado's Transform API, which allows you to modify response content during development server mode.
+The page-compiler package provides utilities for Kamado's Transform API, which allows you to modify response content during both development server mode and build time.
 
 ### Available Utilities
 
@@ -112,7 +112,7 @@ The page-compiler package provides utilities for Kamado's Transform API, which a
 Inject content into the HTML `<head>` element. Useful for adding development scripts, meta tags, or stylesheets during local development.
 
 ```ts
-import { injectToHead } from '@kamado-io/page-compiler/dev-transform/inject-to-head';
+import { injectToHead } from '@kamado-io/page-compiler/transform/inject-to-head';
 import type { UserConfig } from 'kamado/config';
 
 export const config: UserConfig = {
@@ -126,6 +126,8 @@ export const config: UserConfig = {
 	},
 };
 ```
+
+**Important:** The `devServer.transforms` array only applies during development server mode (`kamado server`). Transforms in this array are automatically applied to responses in serve mode only. To use transform utilities in both serve and build modes, use them within the `beforeSerialize` hook instead (see [Using Transform Utilities in Build Time](#using-transform-utilities-in-build-time)).
 
 **Options:**
 
@@ -153,7 +155,7 @@ transforms: [
 Implement pseudo Server Side Includes (SSI) for development. Processes `<!--#include virtual="/path/to/file.html" -->` directives and replaces them with file content.
 
 ```ts
-import { createSSIShim } from '@kamado-io/page-compiler/dev-transform/ssi-shim';
+import { createSSIShim } from '@kamado-io/page-compiler/transform/ssi-shim';
 import type { UserConfig } from 'kamado/config';
 
 export const config: UserConfig = {
@@ -209,13 +211,173 @@ createSSIShim({
 // Will read from: {output}/includes/header.html
 ```
 
+### TransformContext
+
+The `TransformContext` object is passed as the third parameter to `beforeSerialize` and the fourth parameter to `afterSerialize`. It provides access to file path information and the full Kamado execution context.
+
+**Properties:**
+
+- `path`: Request path relative to output directory (e.g., `"page.html"` or `"foo/bar/index.html"`)
+- `inputPath`: Original input file path (e.g., `"/project/src/page.html"`)
+- `outputPath`: Output file path (e.g., `"/project/dist/page.html"`)
+- `isServe`: Boolean indicating whether running in development server mode (`true`) or build mode (`false`)
+- `context`: Full Kamado execution context with the following properties:
+  - `context.dir.input`: Input directory path
+  - `context.dir.output`: Output directory path
+  - `context.dir.public`: Public directory path
+  - `context.mode`: Execution mode (`'build'` or `'serve'`)
+  - `context.pkg`: Package.json data
+  - `context.devServer`: Dev server configuration (host, port, etc.)
+
+**Example:**
+
+```ts
+beforeSerialize: async (content, isServe, context) => {
+	console.log('Processing:', context.path);
+	console.log('Input:', context.inputPath);
+	console.log('Output:', context.outputPath);
+	console.log('Mode:', context.context.mode);
+	console.log('Output dir:', context.context.dir.output);
+
+	// Use context information for conditional processing
+	if (context.path.startsWith('admin/')) {
+		// Special processing for admin pages
+	}
+
+	return content;
+};
+```
+
+### Using Transform Utilities in Build Time
+
+Transform utilities can also be used during build time via the `beforeSerialize` hook. The hook receives a `TransformContext` as its third parameter, allowing you to use transform utilities in both development and build contexts.
+
+**Example: Using injectToHead in beforeSerialize**
+
+```ts
+import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
+import type { PageCompilerOptions } from '@kamado-io/page-compiler';
+
+const pageCompilerOptions: PageCompilerOptions = {
+	beforeSerialize: async (content, isServe, context) => {
+		// Apply injectToHead transform
+		const injectTransform = createInjectToHeadTransform({
+			content: isServe
+				? '<script src="/__dev-tools.js"></script>'
+				: '<meta name="build-time" content="' + Date.now() + '">',
+		});
+
+		return await injectTransform(content, context);
+	},
+};
+```
+
+**Example: Using createSSIShim in beforeSerialize**
+
+```ts
+import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
+import type { PageCompilerOptions } from '@kamado-io/page-compiler';
+
+const pageCompilerOptions: PageCompilerOptions = {
+	beforeSerialize: async (content, isServe, context) => {
+		// Apply SSI shim transform
+		const ssiTransform = createSSIShimTransform({
+			onError: (path) => `<!-- Failed to include: ${path} -->`,
+		});
+
+		return await ssiTransform(content, context);
+	},
+};
+```
+
+**Example: Combining multiple transforms**
+
+```ts
+import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
+import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
+import type { PageCompilerOptions } from '@kamado-io/page-compiler';
+
+const pageCompilerOptions: PageCompilerOptions = {
+	beforeSerialize: async (content, isServe, context) => {
+		// Apply SSI first
+		const ssiTransform = createSSIShimTransform();
+		let result = await ssiTransform(content, context);
+
+		// Then inject to head
+		const injectTransform = createInjectToHeadTransform({
+			content: '<meta name="generator" content="Kamado">',
+		});
+		result = await injectTransform(result, context);
+
+		return result;
+	},
+};
+```
+
+**Example: Conditional processing based on path**
+
+```ts
+import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
+import type { PageCompilerOptions } from '@kamado-io/page-compiler';
+
+const pageCompilerOptions: PageCompilerOptions = {
+	beforeSerialize: async (content, isServe, context) => {
+		// Inject admin tools only for admin pages
+		if (context.path.startsWith('admin/')) {
+			const adminTransform = createInjectToHeadTransform({
+				content: '<script src="/__admin-tools.js"></script>',
+			});
+			content = await adminTransform(content, context);
+		}
+
+		// Add analytics only in production builds
+		if (!isServe) {
+			const analyticsTransform = createInjectToHeadTransform({
+				content: '<script src="/analytics.js"></script>',
+			});
+			content = await analyticsTransform(content, context);
+		}
+
+		return content;
+	},
+};
+```
+
+**Example: Using context for file operations**
+
+```ts
+import { existsSync, readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import type { PageCompilerOptions } from '@kamado-io/page-compiler';
+
+const pageCompilerOptions: PageCompilerOptions = {
+	beforeSerialize: async (content, isServe, context) => {
+		// Read a sibling file based on current file location
+		const inputDir = dirname(context.inputPath);
+		const metaFile = join(inputDir, 'meta.json');
+
+		if (existsSync(metaFile)) {
+			const meta = JSON.parse(readFileSync(metaFile, 'utf-8'));
+			console.log(`Processing ${context.path} with meta:`, meta);
+
+			// Use meta information for custom processing
+			if (meta.inject) {
+				content = content.replace('</head>', `${meta.inject}</head>`);
+			}
+		}
+
+		return content;
+	},
+};
+```
+
 ### Advanced: Transform Functions
 
 For advanced use cases, you can use the lower-level transform functions to create custom `ResponseTransform` objects:
 
 ```ts
-import { createInjectToHeadTransform } from '@kamado-io/page-compiler/dev-transform/inject-to-head';
-import { createSSIShimTransform } from '@kamado-io/page-compiler/dev-transform/ssi-shim';
+import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
+import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
 
 export const config: UserConfig = {
 	devServer: {
@@ -268,8 +430,8 @@ const formattedHtml = await formatHtml({
 - `outputPath` (required): Output file path. Full path to the output file (e.g., `/dist/pages/about.html`)
 - `outputDir` (required): Output directory root. Base directory for the build output (e.g., `/dist`). Used as the root for relative path calculations and image size detection. Note: This is NOT `path.dirname(outputPath)` - it's the root output directory that may be several levels up from the output file
 - `url` (optional): JSDOM URL configuration for DOM operations
-- `beforeSerialize` (optional): Hook function called before DOM serialization `(content: string, isServe: boolean) => Promise<string> | string`
-- `afterSerialize` (optional): Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean) => Promise<void> | void`
+- `beforeSerialize` (optional): Hook function called before DOM serialization `(content: string, isServe: boolean, context: TransformContext) => Promise<string> | string`
+- `afterSerialize` (optional): Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext) => Promise<void> | void`
 - `imageSizes` (optional): Configuration for automatically adding width/height attributes to images (default: `true`)
 - `characterEntities` (optional): Whether to enable character entity conversion
 - `prettier` (optional): Prettier options (default: `true`)
@@ -277,6 +439,7 @@ const formattedHtml = await formatHtml({
 - `lineBreak` (optional): Line break configuration (`'\n'` or `'\r\n'`)
 - `replace` (optional): Final HTML content replacement processing `(content: string, paths: Paths, isServe: boolean) => Promise<string> | string`
 - `isServe` (optional): Whether running on development server (default: `false`)
+- `context` (required): Kamado execution context containing configuration and directory paths
 
 ## License
 

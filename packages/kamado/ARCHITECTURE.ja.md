@@ -196,23 +196,22 @@ export interface ResponseTransform {
 
 // 変換コンテキストはリクエスト/レスポンス情報を提供
 export interface TransformContext {
-	readonly path: string; // リクエストパス
-	readonly contentType: string | undefined; // レスポンスContent-Type
-	readonly inputPath?: string; // ソースファイルパス（利用可能な場合）
+	readonly path: string; // リクエストパス（出力ディレクトリからの相対パス）
+	readonly inputPath?: string; // ソースファイルパス（コンパイラから利用可能な場合）
 	readonly outputPath: string; // 出力ファイルパス
-	readonly isServe: boolean; // 開発サーバーでは常にtrue
-	readonly context: Context; // 完全な実行コンテキスト
+	readonly isServe: boolean; // 開発サーバーモードで実行中かどうか
+	readonly context: Context; // 完全な実行コンテキスト（config + mode）
 }
 ```
 
 #### 実行フロー
 
-1. **モードチェック**: `serve`モードでのみ実行（`applyTransforms()`でチェック）
-2. **フィルタマッチング**: 各変換に対して以下をチェック：
-   - picomatchを使用したパスパターン（Globパターンマッチング）
-   - Content-Typeパターン（`text/*`のようなワイルドカード対応）
+1. **モードチェック**: `devServer.transforms`の場合は`serve`モードでのみ実行（`applyTransforms()`でチェック）
+2. **フィルタマッチング**: 各変換に対してpicomatchを使用したパスパターン（Globパターンマッチング）をチェック
 3. **順次実行**: 変換は配列の順序で適用
 4. **エラーハンドリング**: エラーはログに記録されますがサーバーを停止させません。エラー時は元のコンテンツが返されます
+
+**注記**: Transform utilities（`injectToHead`、`createSSIShim`）は、`beforeSerialize`や`afterSerialize`などのコンパイラフック内で手動で呼び出すことで、serveモードとbuildモードの両方で使用できます。
 
 #### 実装の詳細
 

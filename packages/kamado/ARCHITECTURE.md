@@ -196,23 +196,22 @@ export interface ResponseTransform {
 
 // Transform context provides request/response information
 export interface TransformContext {
-	readonly path: string; // Request path
-	readonly contentType: string | undefined; // Response Content-Type
-	readonly inputPath?: string; // Source file path (if available)
+	readonly path: string; // Request path (relative to output directory)
+	readonly inputPath?: string; // Source file path (if available from compiler)
 	readonly outputPath: string; // Output file path
-	readonly isServe: boolean; // Always true in dev server
-	readonly context: Context; // Full execution context
+	readonly isServe: boolean; // Whether running in development server mode
+	readonly context: Context; // Full execution context (config + mode)
 }
 ```
 
 #### Execution Flow
 
-1. **Mode Check**: Only executes in `serve` mode (checked in `applyTransforms()`)
-2. **Filter Matching**: For each transform, checks:
-   - Path patterns using picomatch (glob pattern matching)
-   - Content-Type patterns (supports wildcards like `text/*`)
+1. **Mode Check**: Only executes in `serve` mode for `devServer.transforms` (checked in `applyTransforms()`)
+2. **Filter Matching**: For each transform, checks path patterns using picomatch (glob pattern matching)
 3. **Sequential Execution**: Transforms are applied in array order
 4. **Error Handling**: Errors are logged but don't break the server; original content is returned on error
+
+**Note**: Transform utilities (`injectToHead`, `createSSIShim`) can be used in both serve and build modes when called manually within compiler hooks like `beforeSerialize` or `afterSerialize`.
 
 #### Implementation Details
 

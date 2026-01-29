@@ -1,4 +1,5 @@
 import type { PageCompilerOptions } from './index.js';
+import type { Context, TransformContext } from 'kamado/config';
 
 import path from 'node:path';
 
@@ -73,6 +74,10 @@ export interface FormatHtmlOptions {
 	 * @default false
 	 */
 	readonly isServe?: boolean;
+	/**
+	 * Kamado context (needed for TransformContext)
+	 */
+	readonly context: Context;
 }
 
 /**
@@ -105,10 +110,22 @@ export async function formatHtml(
 		lineBreak: lineBreakOption,
 		replace: replaceOption,
 		isServe = false,
+		context,
 	} = options;
+
+	// Build TransformContext for beforeSerialize
+	const transformContext: TransformContext = {
+		path: outputPath.replace(outputDir, '').replace(/^\//, '') || '/',
+		inputPath,
+		outputPath,
+		isServe,
+		context,
+	};
+
 	let content = initialContent;
+
 	if (beforeSerialize) {
-		content = await beforeSerialize(content, isServe);
+		content = await beforeSerialize(content, isServe, transformContext);
 	}
 
 	const imageSizesValue = imageSizesOption ?? true;
@@ -127,7 +144,7 @@ export async function formatHtml(
 					});
 				}
 
-				await afterSerialize?.(elements, window, isServe);
+				await afterSerialize?.(elements, window, isServe, transformContext);
 			},
 			url,
 		);

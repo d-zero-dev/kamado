@@ -54,11 +54,12 @@ export interface InjectToHeadOptions extends InjectToHeadTransformOptions {
  * Create a transform function that injects content into the HTML head element
  * This is the core transform function without filter configuration.
  * Use this when you want to create custom ResponseTransform objects.
+ * Can be used in both development and build contexts.
  * @param options - Transform options
  * @returns Transform function (content, context) => Promise<string | ArrayBuffer>
  * @example Creating a custom ResponseTransform
  * ```typescript
- * import { createInjectToHeadTransform } from '@kamado-io/page-compiler/dev-transform/inject-to-head';
+ * import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
  *
  * export const config: UserConfig = {
  *   devServer: {
@@ -115,11 +116,12 @@ export function createInjectToHeadTransform(options: InjectToHeadTransformOption
  * This is a convenience wrapper around createInjectToHeadTransform with filter configuration.
  * Returns a ResponseTransform object with name and filter included, which can be used directly
  * or customized via spread syntax.
+ * Can be used in both development (devServer.transforms) and build contexts (beforeSerialize hook).
  * @param options - Configuration options including filters
- * @returns ResponseTransform object for use in devServer.transforms
- * @example Basic usage
+ * @returns ResponseTransform object for use in devServer.transforms or with beforeSerialize
+ * @example Usage in devServer.transforms
  * ```typescript
- * import { injectToHead } from '@kamado-io/page-compiler/dev-transform/inject-to-head';
+ * import { injectToHead } from '@kamado-io/page-compiler/transform/inject-to-head';
  *
  * export const config: UserConfig = {
  *   devServer: {
