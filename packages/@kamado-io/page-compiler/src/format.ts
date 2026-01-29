@@ -106,7 +106,9 @@ export async function formatHtml(
 		replace: replaceOption,
 		isServe = false,
 	} = options;
+
 	let content = initialContent;
+
 	if (beforeSerialize) {
 		content = await beforeSerialize(content, isServe);
 	}
