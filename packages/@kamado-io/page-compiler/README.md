@@ -346,7 +346,7 @@ const pageCompilerOptions: PageCompilerOptions = {
 **Example: Using context for file operations**
 
 ```ts
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
@@ -356,7 +356,7 @@ const pageCompilerOptions: PageCompilerOptions = {
 		const inputDir = dirname(context.inputPath);
 		const metaFile = join(inputDir, 'meta.json');
 
-		try {
+		if (existsSync(metaFile)) {
 			const meta = JSON.parse(readFileSync(metaFile, 'utf-8'));
 			console.log(`Processing ${context.path} with meta:`, meta);
 
@@ -364,8 +364,6 @@ const pageCompilerOptions: PageCompilerOptions = {
 			if (meta.inject) {
 				content = content.replace('</head>', `${meta.inject}</head>`);
 			}
-		} catch {
-			// Meta file doesn't exist, skip
 		}
 
 		return content;
