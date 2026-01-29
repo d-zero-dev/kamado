@@ -101,6 +101,140 @@ export const config: UserConfig = {
 };
 ```
 
+## Development Transform Utilities
+
+The page-compiler package provides utilities for Kamado's Transform API, which allows you to modify response content during development server mode.
+
+### Available Utilities
+
+#### injectToHead
+
+Inject content into the HTML `<head>` element. Useful for adding development scripts, meta tags, or stylesheets during local development.
+
+```ts
+import { injectToHead } from '@kamado-io/page-compiler/dev-transform/inject-to-head';
+import type { UserConfig } from 'kamado/config';
+
+export const config: UserConfig = {
+	devServer: {
+		transforms: [
+			injectToHead({
+				content: '<script src="/__dev-tools.js"></script>',
+				position: 'head-end', // or 'head-start'
+			}),
+		],
+	},
+};
+```
+
+**Options:**
+
+- `content`: String or function that returns the content to inject
+- `position`: `'head-start'` (after `<head>`) or `'head-end'` (before `</head>`, default)
+- `name`: Optional name for debugging (default: `'inject-to-head'`)
+- `filter`: Optional filter options
+  - `include`: Glob pattern(s) to include (default: `'**/*.html'`)
+  - `exclude`: Glob pattern(s) to exclude
+
+**Customizing with spread syntax:**
+
+```ts
+transforms: [
+	{
+		...injectToHead({ content: '<script src="/dev.js"></script>' }),
+		name: 'my-custom-inject',
+		filter: { include: '**/*.htm' },
+	},
+];
+```
+
+#### createSSIShim
+
+Implement pseudo Server Side Includes (SSI) for development. Processes `<!--#include virtual="/path/to/file.html" -->` directives and replaces them with file content.
+
+```ts
+import { createSSIShim } from '@kamado-io/page-compiler/dev-transform/ssi-shim';
+import type { UserConfig } from 'kamado/config';
+
+export const config: UserConfig = {
+	devServer: {
+		transforms: [createSSIShim()],
+	},
+};
+```
+
+**Usage in HTML:**
+
+```html
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>My Page</title>
+	</head>
+	<body>
+		<!--#include virtual="/header.html" -->
+		<main>Content here</main>
+		<!--#include virtual="/footer.html" -->
+	</body>
+</html>
+```
+
+**Options:**
+
+- `name`: Optional name for debugging (default: `'ssi-shim'`)
+- `filter`: Optional filter options
+  - `include`: Glob pattern(s) to include (default: `'**/*.html'`)
+  - `exclude`: Glob pattern(s) to exclude
+- `dir`: Server document root path to simulate. When specified, virtual paths are treated as absolute paths from this document root, and the relative portion is resolved against the output directory. Useful for simulating production server paths.
+- `onError`: Custom error handler `(includePath: string, error: unknown) => string | Promise<string>`
+
+**With custom error handling:**
+
+```ts
+createSSIShim({
+	onError: (path, error) => {
+		console.error(`Failed to include ${path}:`, error);
+		return `<!-- Failed to include: ${path} -->`;
+	},
+});
+```
+
+**Simulating server document root:**
+
+```ts
+createSSIShim({
+	dir: '/home/www/document_root/',
+});
+// In HTML: <!--#include virtual="/home/www/document_root/includes/header.html" -->
+// Will read from: {output}/includes/header.html
+```
+
+### Advanced: Transform Functions
+
+For advanced use cases, you can use the lower-level transform functions to create custom `ResponseTransform` objects:
+
+```ts
+import { createInjectToHeadTransform } from '@kamado-io/page-compiler/dev-transform/inject-to-head';
+import { createSSIShimTransform } from '@kamado-io/page-compiler/dev-transform/ssi-shim';
+
+export const config: UserConfig = {
+	devServer: {
+		transforms: [
+			{
+				name: 'my-custom-transform',
+				filter: { include: '**/*.html', contentType: 'text/html' },
+				transform: createInjectToHeadTransform({
+					content: '<script src="/__dev.js"></script>',
+					position: 'head-end',
+				}),
+			},
+		],
+	},
+};
+```
+
+These functions return the raw transform function `(content, context) => Promise<string | ArrayBuffer>` without the name and filter configuration, allowing you to create fully custom `ResponseTransform` objects.
+
 ## Standalone API: formatHtml
 
 The `formatHtml` function is available as a standalone API for formatting HTML content outside of the Kamado build system.

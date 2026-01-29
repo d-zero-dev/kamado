@@ -18,6 +18,14 @@
 		"./format": {
 			"types": "./dist/format.d.ts",
 			"default": "./dist/format.js"
+		},
+		"./dev-transform/inject-to-head": {
+			"types": "./dist/dev-transform/inject-to-head.d.ts",
+			"default": "./dist/dev-transform/inject-to-head.js"
+		},
+		"./dev-transform/ssi-shim": {
+			"types": "./dist/dev-transform/ssi-shim.d.ts",
+			"default": "./dist/dev-transform/ssi-shim.js"
 		}
 	},
 	"scripts": {
