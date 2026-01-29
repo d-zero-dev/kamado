@@ -112,7 +112,7 @@ The page-compiler package provides utilities for Kamado's Transform API, which a
 Inject content into the HTML `<head>` element. Useful for adding development scripts, meta tags, or stylesheets during local development.
 
 ```ts
-import { injectToHead } from '@kamado-io/page-compiler/dev-transform/inject-to-head';
+import { injectToHead } from '@kamado-io/page-compiler/transform/inject-to-head';
 import type { UserConfig } from 'kamado/config';
 
 export const config: UserConfig = {
@@ -153,7 +153,7 @@ transforms: [
 Implement pseudo Server Side Includes (SSI) for development. Processes `<!--#include virtual="/path/to/file.html" -->` directives and replaces them with file content.
 
 ```ts
-import { createSSIShim } from '@kamado-io/page-compiler/dev-transform/ssi-shim';
+import { createSSIShim } from '@kamado-io/page-compiler/transform/ssi-shim';
 import type { UserConfig } from 'kamado/config';
 
 export const config: UserConfig = {
@@ -214,8 +214,8 @@ createSSIShim({
 For advanced use cases, you can use the lower-level transform functions to create custom `ResponseTransform` objects:
 
 ```ts
-import { createInjectToHeadTransform } from '@kamado-io/page-compiler/dev-transform/inject-to-head';
-import { createSSIShimTransform } from '@kamado-io/page-compiler/dev-transform/ssi-shim';
+import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
+import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
 
 export const config: UserConfig = {
 	devServer: {
