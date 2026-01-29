@@ -98,10 +98,6 @@ export interface TransformContext {
 	 */
 	readonly path: string;
 	/**
-	 * Response Content-Type header
-	 */
-	readonly contentType: string | undefined;
-	/**
 	 * Original input file path (if available from compiler)
 	 */
 	readonly inputPath?: string;
@@ -142,12 +138,6 @@ export interface ResponseTransform {
 		 * @example '**\/_*.html'
 		 */
 		readonly exclude?: string | readonly string[];
-		/**
-		 * Content-Type filter
-		 * Supports wildcard patterns like 'text/*'
-		 * @example ['text/html', 'text/css']
-		 */
-		readonly contentType?: string | readonly string[];
 	};
 	/**
 	 * Transform function to modify response content

@@ -38,7 +38,6 @@ function createTransformContext(
 ): TransformContext {
 	return {
 		path: '/index.html',
-		contentType: 'text/html',
 		outputPath: '/test/dist/index.html',
 		isServe: true,
 		context: createMockContext('serve'),
@@ -188,101 +187,6 @@ describe('applyTransforms', () => {
 		});
 	});
 
-	describe('content-type filtering', () => {
-		test('applies transform with matching content-type', async () => {
-			const content = 'test';
-			const context = createTransformContext({ contentType: 'text/html' });
-			const transform: ResponseTransform = {
-				filter: { contentType: 'text/html' },
-				transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
-			};
-			const result = await applyTransforms(content, context, [transform]);
-			expect(result).toBe('test-modified');
-		});
-
-		test('does not apply transform with non-matching content-type', async () => {
-			const content = 'test';
-			const context = createTransformContext({ contentType: 'text/html' });
-			const transform: ResponseTransform = {
-				filter: { contentType: 'text/css' },
-				transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
-			};
-			const result = await applyTransforms(content, context, [transform]);
-			expect(result).toBe('test');
-		});
-
-		test('applies transform with wildcard content-type', async () => {
-			const content = 'test';
-			const context = createTransformContext({ contentType: 'text/html' });
-			const transform: ResponseTransform = {
-				filter: { contentType: 'text/*' },
-				transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
-			};
-			const result = await applyTransforms(content, context, [transform]);
-			expect(result).toBe('test-modified');
-		});
-
-		test('applies transform with multiple content-types', async () => {
-			const content = 'test';
-			const context = createTransformContext({ contentType: 'text/css' });
-			const transform: ResponseTransform = {
-				filter: { contentType: ['text/html', 'text/css'] },
-				transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
-			};
-			const result = await applyTransforms(content, context, [transform]);
-			expect(result).toBe('test-modified');
-		});
-
-		test('handles substring match in content-type', async () => {
-			const content = 'test';
-			const context = createTransformContext({
-				contentType: 'text/html; charset=utf-8',
-			});
-			const transform: ResponseTransform = {
-				filter: { contentType: 'text/html' },
-				transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
-			};
-			const result = await applyTransforms(content, context, [transform]);
-			expect(result).toBe('test-modified');
-		});
-	});
-
-	describe('combined filtering', () => {
-		test('applies transform when both path and content-type match', async () => {
-			const content = 'test';
-			const context = createTransformContext({
-				path: '/index.html',
-				contentType: 'text/html',
-			});
-			const transform: ResponseTransform = {
-				filter: {
-					include: '**/*.html',
-					contentType: 'text/html',
-				},
-				transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
-			};
-			const result = await applyTransforms(content, context, [transform]);
-			expect(result).toBe('test-modified');
-		});
-
-		test('does not apply transform when path matches but content-type does not', async () => {
-			const content = 'test';
-			const context = createTransformContext({
-				path: '/index.html',
-				contentType: 'text/html',
-			});
-			const transform: ResponseTransform = {
-				filter: {
-					include: '**/*.html',
-					contentType: 'text/css',
-				},
-				transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
-			};
-			const result = await applyTransforms(content, context, [transform]);
-			expect(result).toBe('test');
-		});
-	});
-
 	describe('error handling', () => {
 		test('continues with original content on error', async () => {
 			const content = 'test';
@@ -343,10 +247,10 @@ describe('applyTransforms', () => {
 	describe('real-world scenarios', () => {
 		test('injects script tag into HTML', async () => {
 			const content = '<html><body></body></html>';
-			const context = createTransformContext({ contentType: 'text/html' });
+			const context = createTransformContext({ path: '/index.html' });
 			const transform: ResponseTransform = {
 				name: 'inject-script',
-				filter: { contentType: 'text/html' },
+				filter: { include: '**/*.html' },
 				transform: (c) => {
 					if (typeof c !== 'string') return c;
 					return c.replace('</body>', '<script src="/dev.js"></script></body>');
@@ -360,11 +264,10 @@ describe('applyTransforms', () => {
 			const content = '.test { color: red; }';
 			const context = createTransformContext({
 				path: '/style.css',
-				contentType: 'text/css',
 			});
 			const transform: ResponseTransform = {
 				name: 'add-header',
-				filter: { contentType: 'text/css' },
+				filter: { include: '**/*.css' },
 				transform: (c) => {
 					if (typeof c !== 'string') return c;
 					return `/* Generated */\n${c}`;
@@ -376,7 +279,7 @@ describe('applyTransforms', () => {
 
 		test('chains multiple HTML transforms', async () => {
 			const content = '<html><head></head><body></body></html>';
-			const context = createTransformContext({ contentType: 'text/html' });
+			const context = createTransformContext({ path: '/index.html' });
 			const transforms: ResponseTransform[] = [
 				{
 					name: 'inject-meta',
@@ -397,6 +300,64 @@ describe('applyTransforms', () => {
 			expect(result).toBe(
 				'<html><head><meta name="test" /></head><body><script></script></body></html>',
 			);
+		});
+	});
+
+	describe('path-based filtering', () => {
+		test('should apply transform based on path filter alone', async () => {
+			const content = 'test content';
+			const context = createTransformContext({
+				path: '/test.html',
+			});
+
+			const transform: ResponseTransform = {
+				name: 'html-only',
+				filter: {
+					include: '**/*.html',
+				},
+				transform: () => 'transformed',
+			};
+
+			const result = await applyTransforms(content, context, [transform]);
+			// Should be transformed based on path alone
+			expect(result).toBe('transformed');
+		});
+
+		test('should apply transform for .shtml files with path filter', async () => {
+			const content = 'test content';
+			const context = createTransformContext({
+				path: '/test.shtml',
+			});
+
+			const transform: ResponseTransform = {
+				name: 'shtml-transform',
+				filter: {
+					include: '**/*.shtml',
+				},
+				transform: () => 'transformed',
+			};
+
+			const result = await applyTransforms(content, context, [transform]);
+			// Should be transformed based on path
+			expect(result).toBe('transformed');
+		});
+
+		test('should handle multiple file extensions in filter', async () => {
+			const content = 'test content';
+			const context = createTransformContext({
+				path: '/test.htm',
+			});
+
+			const transform: ResponseTransform = {
+				name: 'html-like-transform',
+				filter: {
+					include: ['**/*.html', '**/*.htm', '**/*.shtml'],
+				},
+				transform: () => 'transformed',
+			};
+
+			const result = await applyTransforms(content, context, [transform]);
+			expect(result).toBe('transformed');
 		});
 	});
 });

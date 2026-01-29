@@ -96,28 +96,5 @@ function shouldApplyTransform(
 		}
 	}
 
-	// Content-Type filtering (with wildcard support)
-	if (filter.contentType && context.contentType) {
-		const contentTypes = Array.isArray(filter.contentType)
-			? filter.contentType
-			: [filter.contentType];
-
-		const matches = contentTypes.some((ct) => {
-			// Support wildcard patterns like "text/*"
-			if (ct.includes('*')) {
-				const regex = new RegExp(
-					'^' + ct.replaceAll('*', '.*').replaceAll('/', '\\/') + '$',
-				);
-				return regex.test(context.contentType!);
-			}
-			// Exact match or substring match
-			return context.contentType!.includes(ct);
-		});
-
-		if (!matches) {
-			return false;
-		}
-	}
-
 	return true;
 }
