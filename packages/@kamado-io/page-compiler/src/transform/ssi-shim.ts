@@ -71,12 +71,13 @@ export interface SSIShimOptions extends SSIShimTransformOptions {
  *
  * Processes `<!--#include virtual="/path/to/file.html" -->` directives in HTML files
  * and replaces them with the content of the referenced files.
+ * Can be used in both development and build contexts.
  * @param options - Transform options
  * @param name
  * @returns Transform function (content, context) => Promise<string | ArrayBuffer>
  * @example Creating a custom ResponseTransform
  * ```typescript
- * import { createSSIShimTransform } from '@kamado-io/page-compiler/dev-transform/ssi-shim';
+ * import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
  *
  * export const config: UserConfig = {
  *   devServer: {
@@ -171,11 +172,12 @@ export function createSSIShimTransform(
  *
  * Processes `<!--#include virtual="/path/to/file.html" -->` directives in HTML files
  * and replaces them with the content of the referenced files.
+ * Can be used in both development (devServer.transforms) and build contexts (beforeSerialize hook).
  * @param options - Configuration options including filters
- * @returns ResponseTransform object for use in devServer.transforms
- * @example Basic usage
+ * @returns ResponseTransform object for use in devServer.transforms or with beforeSerialize
+ * @example Usage in devServer.transforms
  * ```typescript
- * import { createSSIShim } from '@kamado-io/page-compiler/dev-transform/ssi-shim';
+ * import { createSSIShim } from '@kamado-io/page-compiler/transform/ssi-shim';
  *
  * export const config: UserConfig = {
  *   devServer: {
