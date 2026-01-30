@@ -1,4 +1,4 @@
-import type { CompileData, CompileHook } from './index.js';
+import type { CompileData, CompileHook } from './types.js';
 import type { CompilableFile } from 'kamado/files';
 
 import c from 'ansi-colors';
