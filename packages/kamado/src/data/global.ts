@@ -7,7 +7,7 @@ import dayjs from 'dayjs';
 import fg from 'fast-glob';
 import yaml from 'yaml';
 
-import { getTitle } from '../features/title.js';
+import { getTitle } from '../deprecated/title.js';
 import { getFileContent } from '../files/file-content.js';
 
 import { getAssetGroup } from './assets.js';

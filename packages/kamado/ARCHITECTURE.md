@@ -70,6 +70,7 @@ Key directories under `packages/kamado/src` and their roles:
 - **`compiler/`**: Management of compiler plugin interfaces and the function map.
 - **`config/`**: Loading and merging configuration files, defining default values.
 - **`data/`**: Listing files for compilation and managing asset groups.
+- **`deprecated/`**: Deprecated internal utilities (not exported). Contains legacy code for backward compatibility.
 - **`files/`**: File abstraction layer for reading files, processing Frontmatter, and managing cache.
 - **`path/`**: Path resolution utilities.
 - **`stdout/`**: Coloring and formatting for console output.
