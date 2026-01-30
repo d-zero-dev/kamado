@@ -7,10 +7,10 @@ import path from 'node:path';
 import { deal } from '@d-zero/dealer';
 import c from 'ansi-colors';
 
-import { createCompiler } from '../compiler/compiler.js';
+import { createCompiler } from '../compiler/create-compiler.js';
 import { createCompileFunctionMap } from '../compiler/function-map.js';
-import { mergeConfig } from '../config/merge.js';
-import { getAssetGroup } from '../data/assets.js';
+import { mergeConfig } from '../config/merge-config.js';
+import { getAssetGroup } from '../data/get-asset-group.js';
 import { filePathColorizer } from '../stdout/color.js';
 
 /**

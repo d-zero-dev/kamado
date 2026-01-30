@@ -8,12 +8,12 @@
 		"access": "public"
 	},
 	"type": "module",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
+	"main": "./dist/pug-compiler.js",
+	"types": "./dist/pug-compiler.d.ts",
 	"exports": {
 		".": {
-			"types": "./dist/index.d.ts",
-			"default": "./dist/index.js"
+			"types": "./dist/pug-compiler.d.ts",
+			"default": "./dist/pug-compiler.js"
 		}
 	},
 	"scripts": {

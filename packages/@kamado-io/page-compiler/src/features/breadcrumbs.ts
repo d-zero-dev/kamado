@@ -2,7 +2,7 @@ import type { CompilableFile } from 'kamado/files';
 
 import path from 'node:path';
 
-import { getTitle } from './title.js';
+import { getTitle } from './get-title.js';
 
 /**
  * Breadcrumb item

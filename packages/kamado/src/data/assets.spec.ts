@@ -1,7 +1,7 @@
 import { vol, fs as memfs } from 'memfs';
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 
-import { getAssetGroup } from './assets.js';
+import { getAssetGroup } from './get-asset-group.js';
 
 vi.mock('fast-glob', async () => {
 	const actual = await vi.importActual('fast-glob');

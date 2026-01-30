@@ -8904,7 +8904,7 @@ __metadata:
     picomatch: "npm:4.0.3"
     yaml: "npm:2.8.2"
   bin:
-    kamado: ./dist/index.js
+    kamado: ./dist/cli.js
   languageName: unknown
   linkType: soft
 

@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 
-import { mergeConfig } from '../config/merge.js';
+import { mergeConfig } from '../config/merge-config.js';
 
 import { createCompileFunctionMap } from './function-map.js';
 

@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { cosmiconfig } from 'cosmiconfig';
 
-import { mergeConfig } from './merge.js';
+import { mergeConfig } from './merge-config.js';
 
 const explorer = cosmiconfig('kamado');
 

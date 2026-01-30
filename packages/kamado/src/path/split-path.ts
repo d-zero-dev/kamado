@@ -1,26 +1,6 @@
-import path from 'node:path';
+import type { SplitPathInfo } from './types.js';
 
-/**
- * Path information from splitPath
- */
-export interface SplitPathInfo {
-	/**
-	 * Relative path from current working directory to base directory
-	 */
-	readonly fromCwd: string;
-	/**
-	 * Relative path from base directory to file directory
-	 */
-	readonly fromBase: string;
-	/**
-	 * File name without extension
-	 */
-	readonly name: string;
-	/**
-	 * File extension (includes dot)
-	 */
-	readonly ext: `.${string}`;
-}
+import path from 'node:path';
 
 /**
  * Splits file path and gets relative path information

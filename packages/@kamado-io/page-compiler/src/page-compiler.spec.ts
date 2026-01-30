@@ -1,4 +1,4 @@
-import type { PageCompilerOptions } from './index.js';
+import type { PageCompilerOptions } from './types.js';
 import type { CompilableFile } from 'kamado/files';
 
 import { mergeConfig } from 'kamado/config';
@@ -6,8 +6,7 @@ import { describe, test, expect, expectTypeOf } from 'vitest';
 
 import { type BreadcrumbItem } from './features/breadcrumbs.js';
 import { type NavNode } from './features/nav.js';
-
-import { pageCompiler } from './index.js';
+import { pageCompiler } from './page-compiler.js';
 
 describe('page compiler', async () => {
 	const config = await mergeConfig({});

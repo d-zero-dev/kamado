@@ -10,9 +10,9 @@ import {
 	afterAll,
 } from 'vitest';
 
-import { mergeConfig } from '../config/merge.js';
+import { mergeConfig } from '../config/merge-config.js';
 
-import { build } from './index.js';
+import { build } from './build.js';
 
 vi.mock('fast-glob', async () => {
 	const actual = await vi.importActual('fast-glob');

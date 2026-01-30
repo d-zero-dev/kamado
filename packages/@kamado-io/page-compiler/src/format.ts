@@ -1,4 +1,4 @@
-import type { PageCompilerOptions } from './index.js';
+import type { PageCompilerOptions } from './types.js';
 import type { CompileFunction } from 'kamado/compiler';
 import type { Context, TransformContext } from 'kamado/config';
 

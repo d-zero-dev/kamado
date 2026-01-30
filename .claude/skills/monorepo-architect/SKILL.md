@@ -19,7 +19,7 @@ AIエージェントは、以下のコマンド制約を例外なく守らなけ
 ## **2. Directory & Structure Rules**
 
 - **One Function per File**: 原則として、1つのファイルには1つのエクスポート関数のみを記述します。
-- **No index.ts**: ディレクトリのトップレベルに index.ts を作成したり、再エクスポートに使用したりすることは禁止です。
+- **No index.ts**: `index.ts`ファイルの使用は禁止です。各モジュールには、モジュール名に基づいた具体的なエントリファイル（例: `compiler/compiler.ts`、`config/config.ts`）を使用し、再エクスポートを行います。外部パッケージはパッケージ固有の名前のエントリファイル（例: `page-compiler.ts`、`script-compiler.ts`）を使用します。
 - **Type Segregation**: 処理やモデルのカテゴリごとにフォルダを分けて管理することを推奨します。その際、各フォルダ内に必ず types.ts を作成し、関連する型定義をそこに集約してください。
 
 ## **3. TypeScript Coding Standards**
@@ -48,19 +48,20 @@ export function functionName(
 ### **❌ Bad Workflow**
 
 - npm install を叩く。
-- packages/pkg/src/index.ts を作成して複数の関数をエクスポートする。
+- `packages/pkg/src/index.ts` を作成して複数の関数をエクスポートする。
 - 関数に3つ以上の独立した引数を定義する。
 
 ### **✅ Good Workflow**
 
 1. ルートからパッケージ構造を把握（`ls -R`）。
-2. `packages/core/src/billing/calculateTax.ts` を作成。
+2. `packages/core/src/billing/calculate-tax.ts` を作成。
 3. 同ディレクトリの `types.ts` に interface で型を定義。
-4. `packages/core/package.json` の exports に対象ファイルへのパスを追記。
-5. `yarn workspace @repo/core build` でビルド確認。
+4. モジュール用のエントリファイル `packages/core/src/billing/billing.ts` を作成し、再エクスポートを記述。
+5. `packages/core/package.json` の exports に `"./billing": "./dist/billing/billing.js"` を追記。
+6. `yarn workspace @repo/core build` でビルド確認。
 
 ## **5. Operational Protocol for AI**
 
 1. **Scan Before Action**: 修正を開始する前に、必ず `ls -R` や `cat package.json` を行い、リポジトリの依存関係と `exports` の現状を完全に把握してください。
 2. **Preserve Exports**: `package.json` の `exports` を更新する際は、既存の定義を削除したり壊したりしないよう、差分のみを正確に追記してください。
-3. **Architecture Guard**: あなたの提案が「1関数1ファイル」や「`index.ts` 禁止」に違反していないか、常にセルフチェックを行ってください。
+3. **Architecture Guard**: あなたの提案が「1関数1ファイル」や「`index.ts`使用禁止（代わりにモジュール名ベースのエントリファイルを使用）」に違反していないか、常にセルフチェックを行ってください。

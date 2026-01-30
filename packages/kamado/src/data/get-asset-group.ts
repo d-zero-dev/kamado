@@ -1,4 +1,4 @@
-import type { CustomCompilerWithMetadata } from '../compiler/index.js';
+import type { CustomCompilerWithMetadata } from '../compiler/types.js';
 import type { CompilableFile } from '../files/types.js';
 
 import path from 'node:path';
@@ -6,7 +6,7 @@ import path from 'node:path';
 import fg from 'fast-glob';
 import picomatch from 'picomatch';
 
-import { getFile } from '../files/file.js';
+import { getFile } from '../files/get-file.js';
 
 interface GetAssetsOptions {
 	readonly inputDir: string;

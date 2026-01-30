@@ -1,7 +1,7 @@
 import type { Config } from '../config/types.js';
 import type { CompilableFile } from '../files/types.js';
 
-import { getAssetGroup } from './assets.js';
+import { getAssetGroup } from './get-asset-group.js';
 
 /**
  *

@@ -9,17 +9,17 @@
 		"access": "public"
 	},
 	"type": "module",
-	"bin": "./dist/index.js",
+	"bin": "./dist/cli.js",
 	"exports": {
-		"./build": "./dist/builder/index.js",
+		"./build": "./dist/builder/build.js",
 		"./server": "./dist/server/app.js",
-		"./config": "./dist/config/index.js",
-		"./compiler": "./dist/compiler/index.js",
+		"./config": "./dist/config/config.js",
+		"./compiler": "./dist/compiler/compiler.js",
 		"./compiler/banner": "./dist/compiler/banner.js",
 		"./compiler/function-map": "./dist/compiler/function-map.js",
-		"./data": "./dist/data/index.js",
-		"./files": "./dist/files/index.js",
-		"./path": "./dist/path/index.js",
+		"./data": "./dist/data/data.js",
+		"./files": "./dist/files/files.js",
+		"./path": "./dist/path/path.js",
 		"./utils/dom": "./dist/utils/dom.js"
 	},
 	"scripts": {
