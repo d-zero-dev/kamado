@@ -17,7 +17,7 @@
 		"./compiler": "./dist/compiler/compiler.js",
 		"./compiler/banner": "./dist/compiler/banner.js",
 		"./compiler/function-map": "./dist/compiler/function-map.js",
-		"./data": "./dist/data/index.js",
+		"./data": "./dist/data/data.js",
 		"./files": "./dist/files/index.js",
 		"./path": "./dist/path/index.js",
 		"./utils/dom": "./dist/utils/dom.js"
