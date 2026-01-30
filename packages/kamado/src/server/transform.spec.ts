@@ -50,14 +50,17 @@ describe('applyTransforms', () => {
 		test('returns original content when no transforms provided', async () => {
 			const content = '<html>test</html>';
 			const context = createTransformContext();
-			const result = await applyTransforms(content, context);
+			const result = await applyTransforms({ content, transformContext: context });
 			expect(result).toBe(content);
 		});
 
 		test('returns original content when transforms array is empty', async () => {
 			const content = '<html>test</html>';
 			const context = createTransformContext();
-			const result = await applyTransforms(content, context, []);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [] },
+			);
 			expect(result).toBe(content);
 		});
 
@@ -70,7 +73,10 @@ describe('applyTransforms', () => {
 			const transform: ResponseTransform = {
 				transform: () => 'modified',
 			};
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe(content);
 		});
 
@@ -85,7 +91,10 @@ describe('applyTransforms', () => {
 					return c;
 				},
 			};
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe('<html>modified</html>');
 		});
 
@@ -97,7 +106,10 @@ describe('applyTransforms', () => {
 				{ transform: (c) => (typeof c === 'string' ? c + '-2' : c) },
 				{ transform: (c) => (typeof c === 'string' ? c + '-3' : c) },
 			];
-			const result = await applyTransforms(content, context, transforms);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms },
+			);
 			expect(result).toBe('original-1-2-3');
 		});
 
@@ -110,7 +122,10 @@ describe('applyTransforms', () => {
 					return typeof c === 'string' ? c + '-async' : c;
 				},
 			};
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe('test-async');
 		});
 
@@ -120,7 +135,10 @@ describe('applyTransforms', () => {
 			const transform: ResponseTransform = {
 				transform: (c) => c, // passthrough
 			};
-			const result = await applyTransforms(buffer, context, [transform]);
+			const result = await applyTransforms(
+				{ content: buffer, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe(buffer);
 		});
 	});
@@ -133,7 +151,10 @@ describe('applyTransforms', () => {
 				filter: { include: '**/*.html' },
 				transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
 			};
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe('test-modified');
 		});
 
@@ -144,7 +165,10 @@ describe('applyTransforms', () => {
 				filter: { include: '**/*.css' },
 				transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
 			};
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe('test');
 		});
 
@@ -155,7 +179,10 @@ describe('applyTransforms', () => {
 				filter: { include: ['**/*.html', '**/*.css'] },
 				transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
 			};
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe('test-modified');
 		});
 
@@ -169,7 +196,10 @@ describe('applyTransforms', () => {
 				},
 				transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
 			};
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe('test');
 		});
 
@@ -183,7 +213,10 @@ describe('applyTransforms', () => {
 				},
 				transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
 			};
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe('test-modified');
 		});
 	});
@@ -199,7 +232,10 @@ describe('applyTransforms', () => {
 					throw new Error('Transform error');
 				},
 			};
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe('test');
 			expect(consoleSpy).toHaveBeenCalledWith(
 				expect.stringContaining('error-transform'),
@@ -222,7 +258,10 @@ describe('applyTransforms', () => {
 					transform: (c) => (typeof c === 'string' ? c + '-modified' : c),
 				},
 			];
-			const result = await applyTransforms(content, context, transforms);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms },
+			);
 			expect(result).toBe('test-modified');
 			consoleSpy.mockRestore();
 		});
@@ -236,7 +275,10 @@ describe('applyTransforms', () => {
 					throw new Error('Transform error');
 				},
 			};
-			await applyTransforms(content, context, [transform]);
+			await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(consoleSpy).toHaveBeenCalledWith(
 				expect.stringContaining('anonymous'),
 				expect.any(Error),
@@ -257,7 +299,10 @@ describe('applyTransforms', () => {
 					return c.replace('</body>', '<script src="/dev.js"></script></body>');
 				},
 			};
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe('<html><body><script src="/dev.js"></script></body></html>');
 		});
 
@@ -274,7 +319,10 @@ describe('applyTransforms', () => {
 					return `/* Generated */\n${c}`;
 				},
 			};
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe('/* Generated */\n.test { color: red; }');
 		});
 
@@ -297,7 +345,10 @@ describe('applyTransforms', () => {
 					},
 				},
 			];
-			const result = await applyTransforms(content, context, transforms);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms },
+			);
 			expect(result).toBe(
 				'<html><head><meta name="test" /></head><body><script></script></body></html>',
 			);
@@ -319,7 +370,10 @@ describe('applyTransforms', () => {
 				transform: () => 'transformed',
 			};
 
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			// Should be transformed based on path alone
 			expect(result).toBe('transformed');
 		});
@@ -338,7 +392,10 @@ describe('applyTransforms', () => {
 				transform: () => 'transformed',
 			};
 
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			// Should be transformed based on path
 			expect(result).toBe('transformed');
 		});
@@ -357,7 +414,10 @@ describe('applyTransforms', () => {
 				transform: () => 'transformed',
 			};
 
-			const result = await applyTransforms(content, context, [transform]);
+			const result = await applyTransforms(
+				{ content, transformContext: context },
+				{ transforms: [transform] },
+			);
 			expect(result).toBe('transformed');
 		});
 	});

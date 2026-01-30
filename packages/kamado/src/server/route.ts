@@ -15,8 +15,19 @@ import { filePathColorizer } from '../stdout/color.js';
 
 import { applyTransforms } from './transform.js';
 
-interface RouteOptions {
-	verbose?: boolean;
+/**
+ * Required context for setting routes
+ */
+export interface SetRouteContext {
+	readonly app: Hono;
+	readonly context: Context;
+}
+
+/**
+ * Optional options for setting routes
+ */
+export interface SetRouteOptions {
+	readonly verbose?: boolean;
 }
 
 const CHECK_MARK = c.green('✔');
@@ -24,19 +35,19 @@ const ERROR_MARK = c.red('✘');
 
 /**
  * Sets routes for the application
- * @param app - Hono application instance
- * @param context - Execution context
- * @param options - Options for route configuration
- * @param options.verbose - Whether to enable verbose logging
+ * @param context - Required context (app, context)
+ * @param options - Optional options (verbose)
  * @returns Application after route configuration
  */
-export async function setRoute(app: Hono, context: Context, options: RouteOptions = {}) {
+export async function setRoute(context: SetRouteContext, options?: SetRouteOptions) {
+	const { app, context: kamadoContext } = context;
 	const hostname =
-		context.devServer.host + (context.devServer.port ? `:${context.devServer.port}` : '');
+		kamadoContext.devServer.host +
+		(kamadoContext.devServer.port ? `:${kamadoContext.devServer.port}` : '');
 
-	const compilableFileMap = await getCompilableFileMap(context);
-	const compileFunctionMap = await createCompileFunctionMap(context);
-	const compile = createCompiler({ ...context, compileFunctionMap });
+	const compilableFileMap = await getCompilableFileMap(kamadoContext);
+	const compileFunctionMap = await createCompileFunctionMap(kamadoContext);
+	const compile = createCompiler({ ...kamadoContext, compileFunctionMap });
 
 	const INDENT = '  ';
 
@@ -48,14 +59,14 @@ export async function setRoute(app: Hono, context: Context, options: RouteOption
 	let fileIdIterator = 0;
 
 	const f = filePathColorizer({
-		rootDir: context.dir.input,
+		rootDir: kamadoContext.dir.input,
 	});
 
 	const routes = app.get('*', async (ctx) => {
 		const url = new URL(ctx.req.url, `http://${hostname}`);
 		const requestFilePath = urlToLocalPath(url.toString(), '.html');
 
-		const refLocalFilePath = path.resolve(context.dir.output, requestFilePath);
+		const refLocalFilePath = path.resolve(kamadoContext.dir.output, requestFilePath);
 		let fileId = fileIds.get(refLocalFilePath) ?? fileIdIterator++;
 
 		// Helper to apply transforms and return response
@@ -65,15 +76,17 @@ export async function setRoute(app: Hono, context: Context, options: RouteOption
 			inputPath?: string,
 		) => {
 			const transformed = await applyTransforms(
-				content,
 				{
-					path: requestFilePath,
-					inputPath,
-					outputPath,
-					isServe: true,
-					context,
+					content,
+					transformContext: {
+						path: requestFilePath,
+						inputPath,
+						outputPath,
+						isServe: true,
+						context: kamadoContext,
+					},
 				},
-				context.devServer.transforms,
+				{ transforms: kamadoContext.devServer.transforms },
 			);
 			return ctx.body(transformed);
 		};
@@ -132,7 +145,7 @@ export async function setRoute(app: Hono, context: Context, options: RouteOption
 						inputPath: originalFile.inputPath,
 						outputExtension: ext,
 					},
-					options.verbose
+					options?.verbose
 						? (message) => lanes.update(fileId, `%braille% ${fileName} ${message}`)
 						: undefined,
 					// Refresh the file content on each request
