@@ -8,6 +8,7 @@ import { Lanes } from '@d-zero/dealer';
 import { urlToLocalPath } from '@d-zero/shared/url-to-local-path';
 import c from 'ansi-colors';
 
+import { createCompiler } from '../compiler/compiler.js';
 import { createCompileFunctionMap } from '../compiler/function-map.js';
 import { getCompilableFileMap } from '../data/map.js';
 import { filePathColorizer } from '../stdout/color.js';
@@ -35,6 +36,7 @@ export async function setRoute(app: Hono, context: Context, options: RouteOption
 
 	const compilableFileMap = await getCompilableFileMap(context);
 	const compileFunctionMap = await createCompileFunctionMap(context);
+	const compile = createCompiler({ ...context, compileFunctionMap });
 
 	const INDENT = '  ';
 
@@ -118,45 +120,44 @@ export async function setRoute(app: Hono, context: Context, options: RouteOption
 		fileIds.set(refLocalFilePath, fileId);
 
 		const originalFile = compilableFileMap.get(refLocalFilePath);
+
 		if (originalFile) {
-			const outputExtension = path.extname(originalFile.outputPath);
-			const compile = compileFunctionMap.get(outputExtension);
+			const fileName = f(originalFile.inputPath);
 
-			if (compile) {
-				const fileName = f(originalFile.inputPath);
+			lanes.update(fileId, `%braille% ${fileName}`);
 
-				lanes.update(fileId, `%braille% ${fileName}`);
-
-				const content = await Promise.resolve(
-					compile(
-						originalFile,
-						options.verbose
-							? (message) => lanes.update(fileId, `%braille% ${fileName} ${message}`)
-							: undefined,
-						// Refresh the file content on each request
-						false,
-					),
-				).catch((error: unknown) => {
-					if (error instanceof Error) {
-						return error;
-					}
-					throw error;
-				});
-
-				if (content instanceof Error) {
-					lanes.update(fileId, `${ERROR_MARK} ${fileName} ${c.red(content.name)}`);
-					return ctx.text(content.message, 500);
+			const content = await Promise.resolve(
+				compile(
+					{
+						inputPath: originalFile.inputPath,
+						outputExtension: ext,
+					},
+					options.verbose
+						? (message) => lanes.update(fileId, `%braille% ${fileName} ${message}`)
+						: undefined,
+					// Refresh the file content on each request
+					false,
+				),
+			).catch((error: unknown) => {
+				if (error instanceof Error) {
+					return error;
 				}
+				throw error;
+			});
 
-				lanes.update(fileId, `${CHECK_MARK} ${fileName}`);
+			if (content instanceof Error) {
+				lanes.update(fileId, `${ERROR_MARK} ${fileName} ${c.red(content.name)}`);
+				return ctx.text(content.message, 500);
+			}
 
-				if (content) {
-					return respondWithTransform(
-						content,
-						originalFile.outputPath,
-						originalFile.inputPath,
-					);
-				}
+			lanes.update(fileId, `${CHECK_MARK} ${fileName}`);
+
+			if (content) {
+				return respondWithTransform(
+					content,
+					originalFile.outputPath,
+					originalFile.inputPath,
+				);
 			}
 		}
 
