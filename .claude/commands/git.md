@@ -35,32 +35,44 @@ description: Git manipulation rules
 
 # Commit message safety guidelines
 
-- Always use single quotes (') instead of double quotes (") for commit messages to avoid shell interpretation issues
-- For breaking changes or complex commit messages:
-  - Option 1 (Recommended for complex messages): Use the git commit without -m flag to open an editor:
+- For breaking changes or complex commit messages, ALWAYS use heredoc format (see below)
+- For simple, single-line commits, use single quotes (')
+- NEVER use multiple -m flags for breaking changes (causes commitlint parse errors)
 
-    ```
-    git commit
-    ```
+## Heredoc Format (REQUIRED for Breaking Changes)
 
-    Then write your commit message in the editor with the proper format:
+Use heredoc with command substitution to pass multi-line commit messages. This ensures:
+- Special characters like `!` are preserved correctly
+- Multi-line messages are properly formatted
+- commitlint can parse the message correctly
 
-    ```
-    type(scope)!: subject line
+**Format:**
+```bash
+git commit -m "$(cat <<'EOF'
+type(scope)!: subject line
 
-    BREAKING CHANGE: detailed explanation
-    - Additional details
-    - More information
-    ```
+BREAKING CHANGE: Rename all compiler-related types and functions
 
-  - Option 2: For command line commits with breaking changes, use a simple format:
-    ```
-    git commit -m 'type(scope)!: subject line' -m 'BREAKING CHANGE: explanation'
-    ```
+Type renames:
+- OldName -> NewName
+- Another -> Change
 
-- Avoid using special characters like \n in command line commit messages
-- For multi-line messages in command line, use multiple -m parameters instead of line breaks
-- When lines exceed 100 characters, split them using multiple -m flags:
-  ```
-  git commit -m 'type(scope): subject line' -m 'First line of body' -m 'Second line of body'
-  ```
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+**Important notes:**
+- Use `<<'EOF'` (with quotes) to prevent variable expansion
+- Close with `)` after `EOF` to complete command substitution
+- Do NOT use multiple `-m` flags for breaking changes
+- The entire message must be wrapped in `"$(cat <<'EOF' ... EOF)"`
+
+## Simple Commits (Non-Breaking)
+
+For simple, single-line commits without breaking changes:
+```bash
+git commit -m 'type(scope): subject line'
+```
+
+For multi-line non-breaking commits, use heredoc format as well to ensure proper formatting
