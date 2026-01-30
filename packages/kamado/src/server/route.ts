@@ -58,9 +58,7 @@ export async function setRoute(context: SetRouteContext, options?: SetRouteOptio
 
 	let fileIdIterator = 0;
 
-	const f = filePathColorizer({
-		rootDir: kamadoContext.dir.input,
-	});
+	const f = filePathColorizer({ rootDir: kamadoContext.dir.input });
 
 	const routes = app.get('*', async (ctx) => {
 		const url = new URL(ctx.req.url, `http://${hostname}`);

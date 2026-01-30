@@ -75,9 +75,7 @@ export async function build(buildConfig: UserConfig & BuildConfig) {
 	);
 	const allFiles = fileArrays.flat();
 
-	const f = filePathColorizer({
-		rootDir: context.dir.input,
-	});
+	const f = filePathColorizer({ rootDir: context.dir.input });
 
 	const CHECK_MARK = c.green('✔');
 

@@ -12,31 +12,16 @@ type ColorsNames = {
 };
 
 /**
- * Generates a function to colorize file paths
- * @param options - Options for colorization
- * @param options.rootDir - Root directory
- * @param options.cwd - Current working directory
- * @param options.enable - Whether to enable colorization
- * @param options.colors - Color settings
- * @param options.colors.underDir - Color for paths above root directory
- * @param options.colors.dir - Color for directory names
- * @param options.colors.name - Color for file names (configurable per extension)
- * @returns Function that takes a file path and returns colorized string
- * @throws {Error} if the returned function is called with a non-absolute file path
- * @example
- * ```typescript
- * const colorize = filePathColorizer({
- *   rootDir: './src',
- *   colors: {
- *     dir: c.cyan,
- *     name: { '.ts': c.yellow, '.js': c.green },
- *   },
- * });
- * const colored = colorize('/path/to/file.ts');
- * ```
+ * Required context for file path colorizer
  */
-export function filePathColorizer(options?: {
+export interface FilePathColorizerContext {
 	readonly rootDir: string;
+}
+
+/**
+ * Optional options for file path colorizer
+ */
+export interface FilePathColorizerOptions {
 	readonly cwd?: string;
 	readonly enable?: boolean;
 	readonly colors?: {
@@ -44,7 +29,33 @@ export function filePathColorizer(options?: {
 		readonly dir?: StyleFunction;
 		readonly name?: ColorsNames;
 	};
-}) {
+}
+
+/**
+ * Generates a function to colorize file paths
+ * @param context - Required context (rootDir)
+ * @param options - Optional options (cwd, enable, colors)
+ * @returns Function that takes a file path and returns colorized string
+ * @throws {Error} if the returned function is called with a non-absolute file path
+ * @example
+ * ```typescript
+ * const colorize = filePathColorizer(
+ *   { rootDir: './src' },
+ *   {
+ *     colors: {
+ *       dir: c.cyan,
+ *       name: { '.ts': c.yellow, '.js': c.green },
+ *     },
+ *   }
+ * );
+ * const colored = colorize('/path/to/file.ts');
+ * ```
+ */
+export function filePathColorizer(
+	context: FilePathColorizerContext,
+	options?: FilePathColorizerOptions,
+) {
+	const { rootDir } = context;
 	const colorsUnderDir = options?.colors?.underDir ?? c.dim;
 	const colorsDir = options?.colors?.dir ?? c.white;
 	const colorsNames: Required<ColorsNames> = {
@@ -70,11 +81,7 @@ export function filePathColorizer(options?: {
 			throw new Error(`File path is not absolute: ${filePath}`);
 		}
 
-		const { fromCwd, fromBase, name, ext } = splitPath(
-			filePath,
-			options?.rootDir,
-			options?.cwd,
-		);
+		const { fromCwd, fromBase, name, ext } = splitPath(filePath, rootDir, options?.cwd);
 
 		const colorsName =
 			colorsNames[ext.toLowerCase() as `.${string}`] ?? colorsNames.default;

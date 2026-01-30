@@ -20,7 +20,7 @@ describe('filePathColorizer', () => {
 	});
 
 	test('should throw error for non-absolute path', () => {
-		const colorize = filePathColorizer();
+		const colorize = filePathColorizer({ rootDir: process.cwd() });
 		expect(() => colorize('relative/path/file.js')).toThrow(
 			'File path is not absolute: relative/path/file.js',
 		);
@@ -185,17 +185,19 @@ describe('filePathColorizer', () => {
 		) as unknown as StyleFunction;
 		const mockDir = vi.fn((text: string) => `[dir]${text}`) as unknown as StyleFunction;
 		const mockName = vi.fn((text: string) => `[name]${text}`) as unknown as StyleFunction;
-		const colorize = filePathColorizer({
-			rootDir: '/project',
-			colors: {
-				underDir: mockUnderDir,
-				dir: mockDir,
-				name: {
-					default: mockName,
-					'.js': mockName, // Use custom color for .js extension too
+		const colorize = filePathColorizer(
+			{ rootDir: '/project' },
+			{
+				colors: {
+					underDir: mockUnderDir,
+					dir: mockDir,
+					name: {
+						default: mockName,
+						'.js': mockName, // Use custom color for .js extension too
+					},
 				},
 			},
-		});
+		);
 		const filePath = '/project/src/file.js';
 		const result = colorize(filePath);
 
@@ -210,15 +212,17 @@ describe('filePathColorizer', () => {
 			(text: string) => `[default]${text}`,
 		) as unknown as StyleFunction;
 		const mockJs = vi.fn((text: string) => `[js]${text}`) as unknown as StyleFunction;
-		const colorize = filePathColorizer({
-			rootDir: '/project',
-			colors: {
-				name: {
-					default: mockDefault,
-					'.js': mockJs,
+		const colorize = filePathColorizer(
+			{ rootDir: '/project' },
+			{
+				colors: {
+					name: {
+						default: mockDefault,
+						'.js': mockJs,
+					},
 				},
 			},
-		});
+		);
 		const jsFilePath = '/project/src/file.js';
 		const unknownFilePath = '/project/src/file.unknown';
 
@@ -274,8 +278,8 @@ describe('filePathColorizer', () => {
 	});
 
 	test('should handle file in current working directory', () => {
-		const colorize = filePathColorizer();
 		const cwd = process.cwd();
+		const colorize = filePathColorizer({ rootDir: cwd });
 		const filePath = path.join(cwd, 'file.js');
 		const result = colorize(filePath);
 
