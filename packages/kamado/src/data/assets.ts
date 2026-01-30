@@ -1,4 +1,4 @@
-import type { CompilerWithMetadata } from '../compiler/index.js';
+import type { CustomCompilerWithMetadata } from '../compiler/index.js';
 import type { CompilableFile } from '../files/types.js';
 
 import path from 'node:path';
@@ -11,7 +11,7 @@ import { getFile } from '../files/file.js';
 interface GetAssetsOptions {
 	readonly inputDir: string;
 	readonly outputDir: string;
-	readonly compilerEntry: CompilerWithMetadata;
+	readonly compilerEntry: CustomCompilerWithMetadata;
 	readonly glob?: string;
 }
 

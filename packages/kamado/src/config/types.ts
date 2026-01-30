@@ -1,4 +1,4 @@
-import type { CompilerWithMetadata } from '../compiler/index.js';
+import type { CustomCompilerWithMetadata } from '../compiler/index.js';
 import type { CompilableFile } from '../files/types.js';
 
 /**
@@ -32,7 +32,7 @@ export interface Config {
 	/**
 	 * Compiler configuration (array to guarantee processing order)
 	 */
-	readonly compilers: readonly CompilerWithMetadata[];
+	readonly compilers: readonly CustomCompilerWithMetadata[];
 	/**
 	 * Hook function called before build
 	 * @param config - Configuration object
@@ -66,7 +66,7 @@ export type UserConfig = Partial<
 	Omit<Config, 'pkg' | 'dir' | 'devServer'> & {
 		readonly dir: Partial<DirectoryConfig>;
 		readonly devServer: Partial<DevServerConfig>;
-		readonly compilers?: readonly CompilerWithMetadata[];
+		readonly compilers?: readonly CustomCompilerWithMetadata[];
 	}
 >;
 
