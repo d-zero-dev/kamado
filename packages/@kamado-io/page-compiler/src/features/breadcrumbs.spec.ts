@@ -49,7 +49,7 @@ describe('getBreadcrumbs', () => {
 			const aboutPage = createMockPage('/about/', 'About');
 			const pageList = [indexPage, aboutPage];
 
-			const breadcrumbs = getBreadcrumbs(aboutPage, pageList);
+			const breadcrumbs = getBreadcrumbs({ page: aboutPage, pageList });
 
 			expect(breadcrumbs).toHaveLength(2);
 			expect(breadcrumbs[0]?.title).toBe('Home');
@@ -67,7 +67,7 @@ describe('getBreadcrumbs', () => {
 			const memberPage = createMockPage('/about/team/member/', 'Member');
 			const pageList = [indexPage, aboutPage, teamPage, memberPage];
 
-			const breadcrumbs = getBreadcrumbs(memberPage, pageList);
+			const breadcrumbs = getBreadcrumbs({ page: memberPage, pageList });
 
 			expect(breadcrumbs).toHaveLength(4);
 			expect(breadcrumbs.map((b) => b.href)).toEqual([
@@ -86,7 +86,7 @@ describe('getBreadcrumbs', () => {
 			// Pass in shuffled order
 			const pageList = [teamPage, indexPage, aboutPage];
 
-			const breadcrumbs = getBreadcrumbs(teamPage, pageList);
+			const breadcrumbs = getBreadcrumbs({ page: teamPage, pageList });
 
 			expect(breadcrumbs.map((b) => b.href)).toEqual(['/', '/about/', '/about/team/']);
 		});
@@ -99,9 +99,12 @@ describe('getBreadcrumbs', () => {
 			const teamPage = createMockPage('/about/team/', 'Team');
 			const pageList = [indexPage, aboutPage, teamPage];
 
-			const breadcrumbs = getBreadcrumbs(teamPage, pageList, {
-				baseURL: '/about/',
-			});
+			const breadcrumbs = getBreadcrumbs(
+				{ page: teamPage, pageList },
+				{
+					baseURL: '/about/',
+				},
+			);
 
 			// Should exclude items with depth < 1 (baseURL depth)
 			expect(breadcrumbs).toHaveLength(2);
@@ -113,9 +116,12 @@ describe('getBreadcrumbs', () => {
 			const aboutPage = createMockPage('/about/', 'About');
 			const pageList = [indexPage, aboutPage];
 
-			const breadcrumbs = getBreadcrumbs(aboutPage, pageList, {
-				baseURL: '/',
-			});
+			const breadcrumbs = getBreadcrumbs(
+				{ page: aboutPage, pageList },
+				{
+					baseURL: '/',
+				},
+			);
 
 			expect(breadcrumbs).toHaveLength(2);
 		});
@@ -132,12 +138,15 @@ describe('getBreadcrumbs', () => {
 				'/about/': 'about-icon',
 			};
 
-			const breadcrumbs = getBreadcrumbs(aboutPage, pageList, {
-				transformItem: (item) => ({
-					...item,
-					icon: iconMap[item.href] ?? 'default',
-				}),
-			});
+			const breadcrumbs = getBreadcrumbs(
+				{ page: aboutPage, pageList },
+				{
+					transformItem: (item) => ({
+						...item,
+						icon: iconMap[item.href] ?? 'default',
+					}),
+				},
+			);
 
 			expect(breadcrumbs).toHaveLength(2);
 			expect(breadcrumbs[0]).toMatchObject({
@@ -158,11 +167,14 @@ describe('getBreadcrumbs', () => {
 			const pageList = [indexPage, aboutPage];
 
 			expect(() =>
-				getBreadcrumbs(aboutPage, pageList, {
-					transformItem: () => {
-						throw new Error('Transform error');
+				getBreadcrumbs(
+					{ page: aboutPage, pageList },
+					{
+						transformItem: () => {
+							throw new Error('Transform error');
+						},
 					},
-				}),
+				),
 			).toThrow('Transform error');
 		});
 	});
@@ -172,7 +184,7 @@ describe('getBreadcrumbs', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const pageList = [indexPage];
 
-			const breadcrumbs = getBreadcrumbs(indexPage, pageList);
+			const breadcrumbs = getBreadcrumbs({ page: indexPage, pageList });
 
 			expect(breadcrumbs).toHaveLength(1);
 			expect(breadcrumbs[0]?.href).toBe('/');
@@ -182,7 +194,7 @@ describe('getBreadcrumbs', () => {
 			const aboutPage = createMockPage('/about/', 'About');
 			const pageList: (CompilableFile & { title: string })[] = [];
 
-			const breadcrumbs = getBreadcrumbs(aboutPage, pageList);
+			const breadcrumbs = getBreadcrumbs({ page: aboutPage, pageList });
 
 			expect(breadcrumbs).toHaveLength(0);
 		});
@@ -194,7 +206,7 @@ describe('getBreadcrumbs', () => {
 			const teamPage = createMockPage('/about/team/', 'Team');
 			const pageList = [indexPage, aboutPage, contactPage, teamPage];
 
-			const breadcrumbs = getBreadcrumbs(teamPage, pageList);
+			const breadcrumbs = getBreadcrumbs({ page: teamPage, pageList });
 
 			// /contact/ should not be included
 			expect(breadcrumbs.map((b) => b.href)).toEqual(['/', '/about/', '/about/team/']);

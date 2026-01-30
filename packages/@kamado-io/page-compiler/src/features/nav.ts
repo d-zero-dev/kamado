@@ -72,11 +72,24 @@ export type GetNavTreeOptions<
  * });
  * ```
  */
+/**
+ * Required context for navigation tree generation
+ */
+export interface GetNavTreeContext {
+	readonly currentPage: CompilableFile;
+	readonly pages: readonly (CompilableFile & { title: string })[];
+}
+
+/**
+ *
+ * @param context
+ * @param options
+ */
 export function getNavTree<TOut extends Record<string, unknown> = Record<never, never>>(
-	currentPage: CompilableFile,
-	pages: readonly (CompilableFile & { title: string })[],
+	context: GetNavTreeContext,
 	options?: GetNavTreeOptions<TOut>,
 ): (NavNode & TOut) | null | undefined {
+	const { currentPage, pages } = context;
 	const tree = pathListToTree(
 		pages.map((item) => item.url),
 		{

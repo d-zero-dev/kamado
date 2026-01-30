@@ -15,9 +15,9 @@ import {
 import { imageSizes } from './image.js';
 
 /**
- * Options for formatHtml function
+ * Required context for HTML formatting
  */
-export interface FormatHtmlOptions {
+export interface FormatHtmlContext {
 	/**
 	 * HTML content to format
 	 */
@@ -34,6 +34,21 @@ export interface FormatHtmlOptions {
 	 * Output directory path
 	 */
 	readonly outputDir: string;
+	/**
+	 * Kamado context (needed for TransformContext)
+	 */
+	readonly context: Context;
+	/**
+	 * Compile function for compiling other files during HTML formatting.
+	 * Used when the formatter needs to compile dependencies (e.g., layouts, includes).
+	 */
+	readonly compile: CompileFunction;
+}
+
+/**
+ * Optional options for HTML formatting
+ */
+export interface FormatHtmlOptions {
 	/**
 	 * Hook function called before DOM serialization
 	 */
@@ -75,15 +90,6 @@ export interface FormatHtmlOptions {
 	 * @default false
 	 */
 	readonly isServe?: boolean;
-	/**
-	 * Kamado context (needed for TransformContext)
-	 */
-	readonly context: Context;
-	/**
-	 * Compile function for compiling other files during HTML formatting.
-	 * Used when the formatter needs to compile dependencies (e.g., layouts, includes).
-	 */
-	readonly compile: CompileFunction;
 }
 
 /**
@@ -95,17 +101,23 @@ export interface FormatHtmlOptions {
  * - HTML minification
  * - Line break normalization
  * - Custom content replacement
- * @param options - Format options
+ * @param context - Required context (content, inputPath, outputPath, outputDir, context, compile)
+ * @param options - Optional options (beforeSerialize, afterSerialize, url, imageSizes, etc.)
  * @returns Formatted HTML content or ArrayBuffer
  */
 export async function formatHtml(
-	options: FormatHtmlOptions,
+	context: FormatHtmlContext,
+	options?: FormatHtmlOptions,
 ): Promise<string | ArrayBuffer> {
 	const {
 		content: initialContent,
 		inputPath,
 		outputPath,
 		outputDir,
+		context: kamadoContext,
+		compile,
+	} = context;
+	const {
 		beforeSerialize,
 		afterSerialize,
 		url,
@@ -116,9 +128,7 @@ export async function formatHtml(
 		lineBreak: lineBreakOption,
 		replace: replaceOption,
 		isServe = false,
-		context,
-		compile,
-	} = options;
+	} = options ?? {};
 
 	// Build TransformContext for beforeSerialize
 	const transformContext: TransformContext = {
@@ -126,7 +136,7 @@ export async function formatHtml(
 		inputPath,
 		outputPath,
 		isServe,
-		context,
+		context: kamadoContext,
 	};
 
 	let content = initialContent;
@@ -145,10 +155,13 @@ export async function formatHtml(
 					const imageSizeOpts =
 						typeof imageSizesValue === 'object' ? imageSizesValue : {};
 					const rootDir = path.resolve(outputDir);
-					await imageSizes(elements, {
-						rootDir,
-						...imageSizeOpts,
-					});
+					await imageSizes(
+						{ elements },
+						{
+							rootDir,
+							...imageSizeOpts,
+						},
+					);
 				}
 
 				await afterSerialize?.(elements, window, isServe, transformContext, compile);

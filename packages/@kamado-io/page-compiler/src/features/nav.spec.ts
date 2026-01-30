@@ -87,7 +87,7 @@ describe('getNavTree', () => {
 
 			// Current page is /about/history/2025/ (depth 3, level 4)
 			// getNavTree returns the depth 2 (level 3) ancestor: /about/history/
-			const navTree = getNavTree(aboutHistory2025Page, pageList);
+			const navTree = getNavTree({ currentPage: aboutHistory2025Page, pages: pageList });
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.url).toBe('/about/history/');
@@ -108,7 +108,7 @@ describe('getNavTree', () => {
 				aboutHistory2024Page,
 			];
 
-			const navTree = getNavTree(aboutHistory2025Page, pageList);
+			const navTree = getNavTree({ currentPage: aboutHistory2025Page, pages: pageList });
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.children).toHaveLength(2);
@@ -125,9 +125,12 @@ describe('getNavTree', () => {
 			const pageList = [indexPage, aboutPage, aboutHistoryPage];
 
 			// Current page is /about/history/ (level 3, depth 1)
-			const navTree = getNavTree(aboutHistoryPage, pageList, {
-				baseDepth: 1,
-			});
+			const navTree = getNavTree(
+				{ currentPage: aboutHistoryPage, pages: pageList },
+				{
+					baseDepth: 1,
+				},
+			);
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.url).toBe('/about/');
@@ -147,12 +150,15 @@ describe('getNavTree', () => {
 				'/about/history/2025/': 'new',
 			};
 
-			const navTree = getNavTree(aboutHistory2025Page, pageList, {
-				transformNode: (node) => ({
-					...node,
-					badge: badgeMap[node.url] ?? 'default',
-				}),
-			});
+			const navTree = getNavTree(
+				{ currentPage: aboutHistory2025Page, pages: pageList },
+				{
+					transformNode: (node) => ({
+						...node,
+						badge: badgeMap[node.url] ?? 'default',
+					}),
+				},
+			);
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.url).toBe('/about/history/');
@@ -176,8 +182,7 @@ describe('getNavTree', () => {
 			const pageList = [indexPage, aboutPage, aboutHistoryPage, aboutHistory2025Page];
 
 			const navTree = getNavTree<{ badge: string | undefined }>(
-				aboutHistory2025Page,
-				pageList,
+				{ currentPage: aboutHistory2025Page, pages: pageList },
 				{
 					transformNode: (node) => {
 						return {
@@ -204,12 +209,15 @@ describe('getNavTree', () => {
 			const pageList = [indexPage, aboutPage, historyPage, y2025Page, janPage];
 
 			let transformCount = 0;
-			const navTree = getNavTree(janPage, pageList, {
-				transformNode: (node) => {
-					transformCount++;
-					return { ...node, transformed: true };
+			const navTree = getNavTree(
+				{ currentPage: janPage, pages: pageList },
+				{
+					transformNode: (node) => {
+						transformCount++;
+						return { ...node, transformed: true };
+					},
 				},
-			});
+			);
 
 			expect(navTree).not.toBeNull();
 			// All nodes in the subtree should be transformed
@@ -229,11 +237,14 @@ describe('getNavTree', () => {
 			const pageList = [indexPage, aboutPage, historyPage];
 
 			expect(() =>
-				getNavTree(historyPage, pageList, {
-					transformNode: () => {
-						throw new Error('Transform error');
+				getNavTree(
+					{ currentPage: historyPage, pages: pageList },
+					{
+						transformNode: () => {
+							throw new Error('Transform error');
+						},
 					},
-				}),
+				),
 			).toThrow('Transform error');
 		});
 	});
@@ -245,9 +256,12 @@ describe('getNavTree', () => {
 			const aboutHistoryPage = createMockPage('/about/history/', 'History');
 			const pageList = [indexPage, aboutPage, aboutHistoryPage];
 
-			const navTree = getNavTree(aboutHistoryPage, pageList, {
-				baseDepth: 1,
-			});
+			const navTree = getNavTree(
+				{ currentPage: aboutHistoryPage, pages: pageList },
+				{
+					baseDepth: 1,
+				},
+			);
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.title).toBe('About');
@@ -260,7 +274,7 @@ describe('getNavTree', () => {
 			const historyPage = createMockPage('/about/history/', 'History');
 			const pageList = [indexPage, aboutPage, historyPage];
 
-			const navTree = getNavTree(historyPage, pageList);
+			const navTree = getNavTree({ currentPage: historyPage, pages: pageList });
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.url).toBe('/about/');
@@ -275,21 +289,30 @@ describe('getNavTree', () => {
 			const pageList = [indexPage, aboutPage, historyPage];
 
 			expect(
-				getNavTree(historyPage, pageList, {
-					baseDepth: 2,
-				})?.url,
+				getNavTree(
+					{ currentPage: historyPage, pages: pageList },
+					{
+						baseDepth: 2,
+					},
+				)?.url,
 			).toBeUndefined();
 
 			expect(
-				getNavTree(historyPage, pageList, {
-					baseDepth: 1,
-				})?.url,
+				getNavTree(
+					{ currentPage: historyPage, pages: pageList },
+					{
+						baseDepth: 1,
+					},
+				)?.url,
 			).toBe('/about/');
 
 			expect(
-				getNavTree(historyPage, pageList, {
-					baseDepth: 0,
-				})?.url,
+				getNavTree(
+					{ currentPage: historyPage, pages: pageList },
+					{
+						baseDepth: 0,
+					},
+				)?.url,
 			).toBe('/');
 		});
 	});
@@ -301,14 +324,17 @@ describe('getNavTree', () => {
 			const historyPage = createMockPage('/about/history/', 'History');
 			const pageList = [indexPage, aboutPage, historyPage];
 
-			const navTree = getNavTree(indexPage, pageList, {
-				transformNode: (node) => {
-					if (node.url === '/about/') {
-						return null;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					transformNode: (node) => {
+						if (node.url === '/about/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).toStrictEqual({
 				children: [],
@@ -327,14 +353,17 @@ describe('getNavTree', () => {
 			const historyPage = createMockPage('/about/history/', 'History');
 			const pageList = [indexPage, aboutPage, historyPage];
 
-			const navTree = getNavTree(indexPage, pageList, {
-				transformNode: (node) => {
-					if (node.url === '/about/') {
-						return;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					transformNode: (node) => {
+						if (node.url === '/about/') {
+							return;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).toStrictEqual({
 				children: [],
@@ -363,15 +392,18 @@ describe('getNavTree', () => {
 				contactPage,
 			];
 
-			const navTree = getNavTree(indexPage, pageList, {
-				transformNode: (node) => {
-					// Remove /about/ and all its descendants should disappear
-					if (node.url === '/about/') {
-						return null;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					transformNode: (node) => {
+						// Remove /about/ and all its descendants should disappear
+						if (node.url === '/about/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.url).toBe('/');
@@ -394,15 +426,18 @@ describe('getNavTree', () => {
 
 			const calledUrls: string[] = [];
 
-			getNavTree(indexPage, pageList, {
-				transformNode: (node) => {
-					calledUrls.push(node.url);
-					if (node.url === '/about/') {
-						return null;
-					}
-					return node;
+			getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					transformNode: (node) => {
+						calledUrls.push(node.url);
+						if (node.url === '/about/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			// transformNode is called bottom-up (children first, then parent)
 			// When /about/ returns null, its children have already been processed
@@ -428,14 +463,17 @@ describe('getNavTree', () => {
 				aboutHistory2024Page,
 			];
 
-			const navTree = getNavTree(aboutHistory2025Page, pageList, {
-				transformNode: (node) => {
-					if (node.url === '/about/history/2024/') {
-						return null;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: aboutHistory2025Page, pages: pageList },
+				{
+					transformNode: (node) => {
+						if (node.url === '/about/history/2024/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.url).toBe('/about/history/');
@@ -461,17 +499,20 @@ describe('getNavTree', () => {
 				aboutHistory2023Page,
 			];
 
-			const navTree = getNavTree(aboutHistory2025Page, pageList, {
-				transformNode: (node) => {
-					if (node.url === '/about/history/2024/') {
-						return null;
-					}
-					if (node.url === '/about/history/2023/') {
-						return;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: aboutHistory2025Page, pages: pageList },
+				{
+					transformNode: (node) => {
+						if (node.url === '/about/history/2024/') {
+							return null;
+						}
+						if (node.url === '/about/history/2023/') {
+							return;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.url).toBe('/about/history/');
@@ -489,15 +530,18 @@ describe('getNavTree', () => {
 			const teamPage = createMockPage('/about/team/', 'Team');
 			const pageList = [indexPage, aboutPage, historyPage, teamPage];
 
-			const navTree = getNavTree(indexPage, pageList, {
-				transformNode: (node) => {
-					// Remove all children of /about/
-					if (node.url === '/about/history/' || node.url === '/about/team/') {
-						return null;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					transformNode: (node) => {
+						// Remove all children of /about/
+						if (node.url === '/about/history/' || node.url === '/about/team/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).not.toBeNull();
 			const aboutNode = findNodeByUrl(navTree!, '/about/');
@@ -513,14 +557,17 @@ describe('getNavTree', () => {
 			const servicesPage = createMockPage('/services/', 'Services');
 			const pageList = [indexPage, aboutPage, contactPage, servicesPage];
 
-			const navTree = getNavTree(indexPage, pageList, {
-				transformNode: (node) => {
-					if (node.url === '/contact/') {
-						return null;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					transformNode: (node) => {
+						if (node.url === '/contact/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.children).toHaveLength(2);
@@ -547,15 +594,18 @@ describe('getNavTree', () => {
 				history2024Page,
 			];
 
-			const navTree = getNavTree(history2025Page, pageList, {
-				transformNode: (node) => {
-					// Remove only a grandchild (2024)
-					if (node.url === '/about/history/2024/') {
-						return null;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: history2025Page, pages: pageList },
+				{
+					transformNode: (node) => {
+						// Remove only a grandchild (2024)
+						if (node.url === '/about/history/2024/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).not.toBeNull();
 			// Parent (/about/history/) should exist
@@ -574,9 +624,12 @@ describe('getNavTree', () => {
 			const historyPage = createMockPage('/about/history/', 'History');
 			const pageList = [indexPage, aboutPage, historyPage];
 
-			const navTree = getNavTree(indexPage, pageList, {
-				transformNode: () => null,
-			});
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					transformNode: () => null,
+				},
+			);
 
 			expect(navTree).toBeNull();
 		});
@@ -587,10 +640,13 @@ describe('getNavTree', () => {
 			const historyPage = createMockPage('/about/history/', 'History');
 			const pageList = [indexPage, aboutPage, historyPage];
 
-			const navTree = getNavTree(indexPage, pageList, {
-				// @ts-ignore
-				transformNode: () => {},
-			});
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					// @ts-ignore
+					transformNode: () => {},
+				},
+			);
 
 			expect(navTree).toBeUndefined();
 		});
@@ -603,15 +659,18 @@ describe('getNavTree', () => {
 			const dPage = createMockPage('/d/', 'D');
 			const pageList = [indexPage, aPage, bPage, cPage, dPage];
 
-			const navTree = getNavTree(indexPage, pageList, {
-				transformNode: (node) => {
-					// Remove B and D
-					if (node.url === '/b/' || node.url === '/d/') {
-						return null;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					transformNode: (node) => {
+						// Remove B and D
+						if (node.url === '/b/' || node.url === '/d/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.children).toHaveLength(2);
@@ -628,15 +687,18 @@ describe('getNavTree', () => {
 			const contactPage = createMockPage('/contact/', 'Contact');
 			const pageList = [indexPage, aboutPage, historyPage, history2025Page, contactPage];
 
-			const navTree = getNavTree(indexPage, pageList, {
-				baseDepth: 0,
-				transformNode: (node) => {
-					if (node.url === '/about/') {
-						return null;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					baseDepth: 0,
+					transformNode: (node) => {
+						if (node.url === '/about/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			// Verify exact tree structure after removal
 			expect(navTree).toStrictEqual({
@@ -667,15 +729,18 @@ describe('getNavTree', () => {
 			const servicesPage = createMockPage('/services/', 'Services');
 			const pageList = [indexPage, aboutPage, contactPage, servicesPage];
 
-			const navTree = getNavTree(indexPage, pageList, {
-				baseDepth: 0,
-				transformNode: (node) => {
-					if (node.url === '/contact/') {
-						return null;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					baseDepth: 0,
+					transformNode: (node) => {
+						if (node.url === '/contact/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).toStrictEqual({
 				url: '/',
@@ -721,15 +786,18 @@ describe('getNavTree', () => {
 				history2024Page,
 			];
 
-			const navTree = getNavTree(history2025Page, pageList, {
-				baseDepth: 2,
-				transformNode: (node) => {
-					if (node.url === '/about/history/2024/') {
-						return null;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: history2025Page, pages: pageList },
+				{
+					baseDepth: 2,
+					transformNode: (node) => {
+						if (node.url === '/about/history/2024/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).toStrictEqual({
 				url: '/about/history/',
@@ -761,14 +829,17 @@ describe('getNavTree', () => {
 			const ePage = createMockPage('/e/', 'E');
 			const pageList = [indexPage, aPage, bPage, cPage, dPage, ePage];
 
-			const navTree = getNavTree(indexPage, pageList, {
-				baseDepth: 0,
-				transformNode: (node) => {
-					if (node.url === '/b/') return null;
-					if (node.url === '/d/') return;
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					baseDepth: 0,
+					transformNode: (node) => {
+						if (node.url === '/b/') return null;
+						if (node.url === '/d/') return;
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).toStrictEqual({
 				url: '/',
@@ -825,15 +896,18 @@ describe('getNavTree', () => {
 				febPage,
 			];
 
-			const navTree = getNavTree(janPage, pageList, {
-				baseDepth: 2,
-				transformNode: (node) => {
-					if (node.url === '/about/history/2025/feb/') {
-						return null;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: janPage, pages: pageList },
+				{
+					baseDepth: 2,
+					transformNode: (node) => {
+						if (node.url === '/about/history/2025/feb/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).toStrictEqual({
 				url: '/about/history/',
@@ -873,15 +947,18 @@ describe('getNavTree', () => {
 			const teamPage = createMockPage('/about/team/', 'Team');
 			const pageList = [indexPage, aboutPage, historyPage, teamPage];
 
-			const navTree = getNavTree(indexPage, pageList, {
-				baseDepth: 0,
-				transformNode: (node) => {
-					if (node.url === '/about/history/' || node.url === '/about/team/') {
-						return null;
-					}
-					return node;
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					baseDepth: 0,
+					transformNode: (node) => {
+						if (node.url === '/about/history/' || node.url === '/about/team/') {
+							return null;
+						}
+						return node;
+					},
 				},
-			});
+			);
 
 			expect(navTree).toStrictEqual({
 				url: '/',

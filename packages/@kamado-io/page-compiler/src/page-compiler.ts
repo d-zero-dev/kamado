@@ -58,27 +58,36 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 			const pageContent = await file.get(cache);
 			const { metaData, content: pageMainContent } = pageContent;
 
-			const breadcrumbs = getBreadcrumbs(file, globalData?.pageList ?? [], {
-				baseURL: context.pkg.production?.baseURL,
-				optimizeTitle: options?.optimizeTitle,
-				transformItem: options?.transformBreadcrumbItem,
-			});
+			const breadcrumbs = getBreadcrumbs(
+				{ page: file, pageList: globalData?.pageList ?? [] },
+				{
+					baseURL: context.pkg.production?.baseURL,
+					optimizeTitle: options?.optimizeTitle,
+					transformItem: options?.transformBreadcrumbItem,
+				},
+			);
 
 			const compileData: CompileData = {
 				...globalData,
 				...metaData,
 				page: file,
 				nav: (navOptions: GetNavTreeOptions) =>
-					getNavTree(file, globalData?.pageList ?? [], {
-						optimizeTitle: options?.optimizeTitle,
-						...navOptions,
-						transformNode: options?.transformNavNode,
-					}),
+					getNavTree(
+						{ currentPage: file, pages: globalData?.pageList ?? [] },
+						{
+							optimizeTitle: options?.optimizeTitle,
+							...navOptions,
+							transformNode: options?.transformNavNode,
+						},
+					),
 				titleList: (options: TitleListOptions) =>
-					titleList(breadcrumbs, {
-						siteName: context.pkg.production?.siteName,
-						...options,
-					}),
+					titleList(
+						{ breadcrumbs },
+						{
+							siteName: context.pkg.production?.siteName,
+							...options,
+						},
+					),
 				breadcrumbs,
 			};
 
@@ -90,11 +99,8 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 
 			// Transpile main content
 			const mainContentHtml = await transpileMainContent(
-				pageMainContent,
-				compileData,
-				file,
-				compileHooks?.main,
-				log,
+				{ content: pageMainContent, compileData, file },
+				{ compileHook: compileHooks?.main, log },
 			);
 
 			let html = mainContentHtml;
@@ -116,13 +122,14 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 
 				// Transpile layout
 				html = await transpileLayout(
-					layoutContent,
-					layoutCompileData,
-					layoutExtension,
-					layout,
-					file,
-					compileHooks?.layout,
-					log,
+					{
+						layoutContent,
+						layoutCompileData,
+						layoutExtension,
+						layout,
+						file,
+					},
+					{ compileHook: compileHooks?.layout, log },
 				);
 			}
 
@@ -139,24 +146,28 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 							? `http://${context.pkg.production.host}`
 							: undefined)));
 
-			const formattedHtml = await formatHtml({
-				content: html,
-				inputPath: file.inputPath,
-				outputPath: file.outputPath,
-				outputDir: context.dir.output,
-				url,
-				beforeSerialize: options?.beforeSerialize,
-				afterSerialize: options?.afterSerialize,
-				imageSizes: options?.imageSizes,
-				characterEntities: options?.characterEntities,
-				prettier: options?.prettier,
-				minifier: options?.minifier,
-				lineBreak: options?.lineBreak,
-				replace: options?.replace,
-				isServe,
-				context,
-				compile,
-			});
+			const formattedHtml = await formatHtml(
+				{
+					content: html,
+					inputPath: file.inputPath,
+					outputPath: file.outputPath,
+					outputDir: context.dir.output,
+					context,
+					compile,
+				},
+				{
+					url,
+					beforeSerialize: options?.beforeSerialize,
+					afterSerialize: options?.afterSerialize,
+					imageSizes: options?.imageSizes,
+					characterEntities: options?.characterEntities,
+					prettier: options?.prettier,
+					minifier: options?.minifier,
+					lineBreak: options?.lineBreak,
+					replace: options?.replace,
+					isServe,
+				},
+			);
 
 			return formattedHtml;
 		};
