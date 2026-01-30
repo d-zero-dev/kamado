@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 
-import { compilePug, createCompileHooks } from './index.js';
+import { compilePug, createCompileHooks } from './pug-compiler.js';
 
 describe('pug-compiler', () => {
 	test('should create a compiler function', async () => {
