@@ -7,6 +7,7 @@ import path from 'node:path';
 import { deal } from '@d-zero/dealer';
 import c from 'ansi-colors';
 
+import { createCompiler } from '../compiler/compiler.js';
 import { createCompileFunctionMap } from '../compiler/function-map.js';
 import { mergeConfig } from '../config/merge.js';
 import { getAssetGroup } from '../data/assets.js';
@@ -60,6 +61,7 @@ export async function build(buildConfig: UserConfig & BuildConfig) {
 	}
 
 	const compileFunctionMap = await createCompileFunctionMap(context);
+	const compile = createCompiler({ ...context, compileFunctionMap });
 
 	const fileArrays = await Promise.all(
 		context.compilers.map((compilerEntry) =>
@@ -86,17 +88,7 @@ export async function build(buildConfig: UserConfig & BuildConfig) {
 			setLineHeader(`${c.cyan('%braille%')} ${cPath} `);
 
 			return async () => {
-				let content: string | ArrayBuffer;
-
-				// Find compiler by output extension
-				const outputExtension = path.extname(file.outputPath);
-				const compile = compileFunctionMap.get(outputExtension);
-				if (compile) {
-					content = await compile(file, log);
-				} else {
-					const { raw } = await file.get();
-					content = raw;
-				}
+				const content = await compile(file, log);
 
 				log(c.yellow('Writing...'));
 				await fs.mkdir(path.dirname(file.outputPath), { recursive: true });

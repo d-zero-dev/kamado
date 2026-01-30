@@ -52,8 +52,8 @@ export const config: UserConfig = {
 - `transformBreadcrumbItem`: Function to transform each breadcrumb item. Can add custom properties to breadcrumb items. `(item: BreadcrumbItem) => BreadcrumbItem`
 - `transformNavNode`: Function to transform each navigation node. Can add custom properties or filter nodes by returning `null`/`undefined`. `(node: NavNode) => NavNode | null | undefined`
 - `host`: Host URL for JSDOM's url option. If not specified, in build mode uses `production.baseURL` or `production.host` from package.json, in serve mode uses dev server URL (`http://${devServer.host}:${devServer.port}`)
-- `beforeSerialize`: Hook function called before DOM serialization `(content: string, isServe: boolean, context: TransformContext) => Promise<string> | string`
-- `afterSerialize`: Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext) => Promise<void> | void`
+- `beforeSerialize`: Hook function called before DOM serialization `(content: string, isServe: boolean, context: TransformContext, compile: CompileFunction) => Promise<string> | string`
+- `afterSerialize`: Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext, compile: CompileFunction) => Promise<void> | void`
 - `replace`: Final HTML content replacement processing `(content: string, paths: Paths, isServe: boolean) => Promise<string> | string`
 - `compileHooks`: Compilation hooks for customizing compile process
   - Can be an object or a function `(options: PageCompilerOptions) => CompileHooksObject | Promise<CompileHooksObject>` that returns an object (sync or async)
@@ -232,7 +232,7 @@ The `TransformContext` object is passed as the third parameter to `beforeSeriali
 **Example:**
 
 ```ts
-beforeSerialize: async (content, isServe, context) => {
+beforeSerialize: async (content, isServe, context, compile) => {
 	console.log('Processing:', context.path);
 	console.log('Input:', context.inputPath);
 	console.log('Output:', context.outputPath);
@@ -243,6 +243,9 @@ beforeSerialize: async (content, isServe, context) => {
 	if (context.path.startsWith('admin/')) {
 		// Special processing for admin pages
 	}
+
+	// Use compile to compile other files if needed
+	// const layoutContent = await compile({ inputPath: '/layouts/main.html', outputExtension: '.html' });
 
 	return content;
 };
@@ -259,7 +262,7 @@ import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/
 import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
 const pageCompilerOptions: PageCompilerOptions = {
-	beforeSerialize: async (content, isServe, context) => {
+	beforeSerialize: async (content, isServe, context, compile) => {
 		// Apply injectToHead transform
 		const injectTransform = createInjectToHeadTransform({
 			content: isServe
@@ -279,7 +282,7 @@ import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-s
 import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
 const pageCompilerOptions: PageCompilerOptions = {
-	beforeSerialize: async (content, isServe, context) => {
+	beforeSerialize: async (content, isServe, context, compile) => {
 		// Apply SSI shim transform
 		const ssiTransform = createSSIShimTransform({
 			onError: (path) => `<!-- Failed to include: ${path} -->`,
@@ -298,7 +301,7 @@ import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-s
 import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
 const pageCompilerOptions: PageCompilerOptions = {
-	beforeSerialize: async (content, isServe, context) => {
+	beforeSerialize: async (content, isServe, context, compile) => {
 		// Apply SSI first
 		const ssiTransform = createSSIShimTransform();
 		let result = await ssiTransform(content, context);
@@ -321,7 +324,7 @@ import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/
 import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
 const pageCompilerOptions: PageCompilerOptions = {
-	beforeSerialize: async (content, isServe, context) => {
+	beforeSerialize: async (content, isServe, context, compile) => {
 		// Inject admin tools only for admin pages
 		if (context.path.startsWith('admin/')) {
 			const adminTransform = createInjectToHeadTransform({
@@ -351,7 +354,7 @@ import { join, dirname } from 'node:path';
 import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
 const pageCompilerOptions: PageCompilerOptions = {
-	beforeSerialize: async (content, isServe, context) => {
+	beforeSerialize: async (content, isServe, context, compile) => {
 		// Read a sibling file based on current file location
 		const inputDir = dirname(context.inputPath);
 		const metaFile = join(inputDir, 'meta.json');

@@ -1,3 +1,4 @@
+import type { CompileFunction } from './compiler.js';
 import type { Context } from '../config/types.js';
 import type { CompilableFile } from '../files/types.js';
 
@@ -32,12 +33,14 @@ export interface CustomCompiler {
 export interface CustomCompileFunction {
 	/**
 	 * @param compilableFile - File to compile
+	 * @param compile - Recursive compiler function to compile other files during compilation
 	 * @param log - Log output function (optional)
 	 * @param cache - Whether to cache the file content (default: true)
 	 * @returns Compilation result (string or ArrayBuffer)
 	 */
 	(
 		compilableFile: CompilableFile,
+		compile: CompileFunction,
 		log?: (message: string) => void,
 		cache?: boolean,
 	): Promise<string | ArrayBuffer> | string | ArrayBuffer;
