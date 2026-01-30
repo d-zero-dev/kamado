@@ -75,6 +75,25 @@ Key directories under `packages/kamado/src` and their roles:
 - **`path/`**: Path resolution utilities.
 - **`stdout/`**: Coloring and formatting for console output.
 
+### Code Organization Principles
+
+The codebase follows strict architectural rules for maintainability:
+
+1. **One Function Per File**: Each TypeScript file (except `index.ts` and test files) exports exactly one public function. This ensures clear responsibilities and easy navigation.
+
+2. **Type Segregation**: Type definitions are consolidated in `types.ts` files within each directory category:
+   - `compiler/types.ts`: All compiler-related interfaces
+   - `config/types.ts`: Configuration-related types
+   - `data/types.ts`: Data-related types
+   - `files/types.ts`: File-related types
+   - `path/types.ts`: Path-related types
+
+3. **Index Files as Re-export Only**: `index.ts` files serve only as re-export modules and do not contain implementation logic. They provide clean public APIs for each module.
+
+4. **Naming Convention**: Function files are named after their exported function in kebab-case (e.g., `get-config.ts` exports `getConfig`, `create-compiler.ts` exports `createCompiler`).
+
+This structure ensures code discoverability, prevents circular dependencies, and maintains a clean separation of concerns.
+
 ---
 
 ## Execution Flows
