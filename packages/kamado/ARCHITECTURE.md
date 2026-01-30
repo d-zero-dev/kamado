@@ -79,7 +79,7 @@ Key directories under `packages/kamado/src` and their roles:
 
 The codebase follows strict architectural rules for maintainability:
 
-1. **One Function Per File**: Each TypeScript file (except `index.ts` and test files) exports exactly one public function. This ensures clear responsibilities and easy navigation.
+1. **One Function Per File**: Each TypeScript file (except test files) exports exactly one public function. This ensures clear responsibilities and easy navigation.
 
 2. **Type Segregation**: Type definitions are consolidated in `types.ts` files within each directory category:
    - `compiler/types.ts`: All compiler-related interfaces
@@ -88,9 +88,9 @@ The codebase follows strict architectural rules for maintainability:
    - `files/types.ts`: File-related types
    - `path/types.ts`: Path-related types
 
-3. **Index Files as Re-export Only**: `index.ts` files serve only as re-export modules and do not contain implementation logic. They provide clean public APIs for each module.
+3. **No Index Files**: `index.ts` files are not used. Instead, each module has a specifically named entry file (e.g., `compiler/compiler.ts`, `data/data.ts`, `config/config.ts`) that re-exports the module's public API. External packages use package-specific entry files (e.g., `page-compiler.ts`, `script-compiler.ts`).
 
-4. **Naming Convention**: Function files are named after their exported function in kebab-case (e.g., `get-config.ts` exports `getConfig`, `create-compiler.ts` exports `createCompiler`).
+4. **Naming Convention**: Function files are named after their exported function in kebab-case (e.g., `get-config.ts` exports `getConfig`, `create-compiler.ts` exports `createCompiler`). Module entry files are named after the module itself (e.g., `compiler.ts` for the compiler module, `page-compiler.ts` for the page compiler package).
 
 This structure ensures code discoverability, prevents circular dependencies, and maintains a clean separation of concerns.
 

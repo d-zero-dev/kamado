@@ -79,7 +79,7 @@ export interface Context extends Config {
 
 コードベースは保守性のために厳格なアーキテクチャルールに従っています：
 
-1. **1関数1ファイル**: 各TypeScriptファイル（`index.ts`とテストファイルを除く）は、正確に1つのパブリック関数のみをエクスポートします。これにより、明確な責任範囲と容易なナビゲーションが保証されます。
+1. **1関数1ファイル**: 各TypeScriptファイル（テストファイルを除く）は、正確に1つのパブリック関数のみをエクスポートします。これにより、明確な責任範囲と容易なナビゲーションが保証されます。
 
 2. **型定義の分離**: 型定義は各ディレクトリカテゴリ内の`types.ts`ファイルに集約されます：
    - `compiler/types.ts`: すべてのコンパイラ関連インターフェース
@@ -88,9 +88,9 @@ export interface Context extends Config {
    - `files/types.ts`: ファイル関連の型
    - `path/types.ts`: パス関連の型
 
-3. **Indexファイルは再エクスポート専用**: `index.ts`ファイルは再エクスポートモジュールとしてのみ機能し、実装ロジックを含みません。各モジュールのクリーンなパブリックAPIを提供します
+3. **Indexファイルの廃止**: `index.ts`ファイルは使用されません。代わりに、各モジュールには具体的な名前のエントリファイル（例: `compiler/compiler.ts`、`data/data.ts`、`config/config.ts`）があり、モジュールのパブリックAPIを再エクスポートします。外部パッケージはパッケージ固有のエントリファイル（例: `page-compiler.ts`、`script-compiler.ts`）を使用します
 
-4. **命名規則**: 関数ファイルは、エクスポートする関数名をケバブケースで命名します（例: `get-config.ts`は`getConfig`をエクスポート、`create-compiler.ts`は`createCompiler`をエクスポート）
+4. **命名規則**: 関数ファイルは、エクスポートする関数名をケバブケースで命名します（例: `get-config.ts`は`getConfig`をエクスポート、`create-compiler.ts`は`createCompiler`をエクスポート）。モジュールのエントリファイルは、モジュール名自体で命名されます（例: コンパイラモジュールの`compiler.ts`、ページコンパイラパッケージの`page-compiler.ts`）
 
 この構造により、コードの発見可能性が確保され、循環依存が防止され、関心の明確な分離が維持されます。
 
