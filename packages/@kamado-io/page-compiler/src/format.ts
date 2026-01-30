@@ -1,4 +1,5 @@
 import type { PageCompilerOptions } from './index.js';
+import type { CompileFunction } from 'kamado/compiler';
 import type { Context, TransformContext } from 'kamado/config';
 
 import path from 'node:path';
@@ -78,6 +79,11 @@ export interface FormatHtmlOptions {
 	 * Kamado context (needed for TransformContext)
 	 */
 	readonly context: Context;
+	/**
+	 * Compile function for compiling other files during HTML formatting.
+	 * Used when the formatter needs to compile dependencies (e.g., layouts, includes).
+	 */
+	readonly compile: CompileFunction;
 }
 
 /**
@@ -111,6 +117,7 @@ export async function formatHtml(
 		replace: replaceOption,
 		isServe = false,
 		context,
+		compile,
 	} = options;
 
 	// Build TransformContext for beforeSerialize
@@ -125,7 +132,7 @@ export async function formatHtml(
 	let content = initialContent;
 
 	if (beforeSerialize) {
-		content = await beforeSerialize(content, isServe, transformContext);
+		content = await beforeSerialize(content, isServe, transformContext, compile);
 	}
 
 	const imageSizesValue = imageSizesOption ?? true;
@@ -144,7 +151,7 @@ export async function formatHtml(
 					});
 				}
 
-				await afterSerialize?.(elements, window, isServe, transformContext);
+				await afterSerialize?.(elements, window, isServe, transformContext, compile);
 			},
 			url,
 		);

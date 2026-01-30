@@ -2,6 +2,7 @@ import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { GetNavTreeOptions, NavNode } from './features/nav.js';
 import type { TitleListOptions } from './features/title-list.js';
 import type { Options as HMTOptions } from 'html-minifier-terser';
+import type { CompileFunction } from 'kamado/compiler';
 import type { Context, TransformContext } from 'kamado/config';
 import type { CompilableFile, FileObject } from 'kamado/files';
 import type { Options as PrettierOptions } from 'prettier';
@@ -107,6 +108,7 @@ export interface PageCompilerOptions {
 		content: string,
 		isServe: boolean,
 		context: TransformContext,
+		compile: CompileFunction,
 	) => Promise<string> | string;
 	/**
 	 * Hook function called after DOM serialization
@@ -120,6 +122,7 @@ export interface PageCompilerOptions {
 		window: Window,
 		isServe: boolean,
 		context: TransformContext,
+		compile: CompileFunction,
 	) => Promise<void> | void;
 	/**
 	 * Final HTML content replacement processing
@@ -313,11 +316,7 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 			...options?.globalData?.data,
 		};
 
-		return async (
-			file: CompilableFile,
-			log?: (message: string) => void,
-			cache?: boolean,
-		) => {
+		return async (file, compile, log, cache) => {
 			log?.(c.blue('Building...'));
 			const pageContent = await file.get(cache);
 			const { metaData, content: pageMainContent } = pageContent;
@@ -419,6 +418,7 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 				replace: options?.replace,
 				isServe,
 				context,
+				compile,
 			});
 
 			return formattedHtml;
