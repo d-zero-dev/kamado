@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createCompiler } from 'kamado/compiler';
+import { createCustomCompiler } from 'kamado/compiler';
 import { createBanner } from 'kamado/compiler/banner';
 
 /**
@@ -43,7 +43,7 @@ export interface ScriptCompilerOptions {
  * };
  * ```
  */
-export const scriptCompiler = createCompiler<ScriptCompilerOptions>(() => ({
+export const scriptCompiler = createCustomCompiler<ScriptCompilerOptions>(() => ({
 	defaultFiles: '**/*.{js,ts,jsx,tsx,mjs,cjs}',
 	defaultOutputExtension: '.js',
 	compile: (options) => async () => {

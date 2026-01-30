@@ -142,16 +142,16 @@ graph TD
 
 ### コンパイラ・プラグイン
 
-Kamado の機能拡張は、`CompilerPlugin` を追加することで行います。
+Kamado の機能拡張は、`CustomCompilerPlugin` を追加することで行います。
 
 ```typescript
-// CompilerインターフェースはContextを受け取る
-export interface Compiler {
-	(context: Context): Promise<CompileFunction> | CompileFunction;
+// CustomCompilerインターフェースはContextを受け取る
+export interface CustomCompiler {
+	(context: Context): Promise<CustomCompileFunction> | CustomCompileFunction;
 }
 
-// CompileFunctionは個別のファイルコンパイルを処理
-export interface CompileFunction {
+// CustomCompileFunctionは個別のファイルコンパイルを処理
+export interface CustomCompileFunction {
 	(
 		compilableFile: CompilableFile,
 		log?: (message: string) => void,
@@ -160,7 +160,7 @@ export interface CompileFunction {
 }
 ```
 
-`Compiler`は`Context`オブジェクト（`mode: 'serve' | 'build'`を含む）を受け取り、`CompileFunction`を返します。`CompileFunction`は`CompilableFile`オブジェクトを受け取り、変換後の内容を返します。この際、ソースコードの読み込みやキャッシュの管理は`CompilableFile`クラス（`src/files/`）が隠蔽します。
+`CustomCompiler`は`Context`オブジェクト（`mode: 'serve' | 'build'`を含む）を受け取り、`CustomCompileFunction`を返します。`CustomCompileFunction`は`CompilableFile`オブジェクトを受け取り、変換後の内容を返します。この際、ソースコードの読み込みやキャッシュの管理は`CompilableFile`クラス（`src/files/`）が隠蔽します。
 
 **注意**: `Context`は`Config`を拡張しているため、パラメータ名として`Config`を使用している既存のカスタムコンパイラは変更なしで動作し続けます。ただし、`context.mode`にアクセスして実行モードを検出できます。
 

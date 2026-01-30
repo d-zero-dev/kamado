@@ -1,4 +1,4 @@
-import type { CompileFunction } from './index.js';
+import type { CustomCompileFunction } from './custom-compiler.js';
 import type { Context } from '../config/types.js';
 
 /**
@@ -7,7 +7,7 @@ import type { Context } from '../config/types.js';
  * @returns Map of output extension to compile function
  */
 export async function createCompileFunctionMap(context: Context) {
-	const compilers = new Map<string, CompileFunction>();
+	const compilers = new Map<string, CustomCompileFunction>();
 	for (const compilerWithMetadata of context.compilers) {
 		const compileFunction = await compilerWithMetadata.compiler(context);
 		compilers.set(compilerWithMetadata.outputExtension, compileFunction);

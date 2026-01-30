@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import cssnano from 'cssnano';
-import { createCompiler } from 'kamado/compiler';
+import { createCustomCompiler } from 'kamado/compiler';
 import { createBanner, type CreateBanner } from 'kamado/compiler/banner';
 import postcss from 'postcss';
 import postcssImport from 'postcss-import';
@@ -39,7 +39,7 @@ export interface StyleCompilerOptions {
  * };
  * ```
  */
-export const styleCompiler = createCompiler<StyleCompilerOptions>(() => ({
+export const styleCompiler = createCustomCompiler<StyleCompilerOptions>(() => ({
 	defaultFiles: '**/*.css',
 	defaultOutputExtension: '.css',
 	compile: (options) => () => {
