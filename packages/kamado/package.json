@@ -14,7 +14,7 @@
 		"./build": "./dist/builder/index.js",
 		"./server": "./dist/server/app.js",
 		"./config": "./dist/config/index.js",
-		"./compiler": "./dist/compiler/index.js",
+		"./compiler": "./dist/compiler/compiler.js",
 		"./compiler/banner": "./dist/compiler/banner.js",
 		"./compiler/function-map": "./dist/compiler/function-map.js",
 		"./data": "./dist/data/index.js",

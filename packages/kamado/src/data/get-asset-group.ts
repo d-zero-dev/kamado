@@ -1,4 +1,4 @@
-import type { CustomCompilerWithMetadata } from '../compiler/index.js';
+import type { CustomCompilerWithMetadata } from '../compiler/types.js';
 import type { CompilableFile } from '../files/types.js';
 
 import path from 'node:path';
