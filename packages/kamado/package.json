@@ -13,7 +13,7 @@
 	"exports": {
 		"./build": "./dist/builder/index.js",
 		"./server": "./dist/server/app.js",
-		"./config": "./dist/config/index.js",
+		"./config": "./dist/config/config.js",
 		"./compiler": "./dist/compiler/compiler.js",
 		"./compiler/banner": "./dist/compiler/banner.js",
 		"./compiler/function-map": "./dist/compiler/function-map.js",
