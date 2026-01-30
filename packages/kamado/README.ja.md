@@ -99,8 +99,9 @@ export const config: UserConfig = {
 			layouts: {
 				dir: path.resolve(import.meta.dirname, '__assets', '_libs', 'layouts'),
 			},
-			async afterSerialize(elements, window, isServe) {
+			async afterSerialize(elements, window, isServe, context) {
 				// DOM操作やカスタム処理をここに記述
+				// context には path, inputPath, outputPath, isServe, context が含まれます
 			},
 		}),
 		styleCompiler({
@@ -299,7 +300,6 @@ export const config: UserConfig = {
 				name: 'inject-dev-script',
 				filter: {
 					include: '**/*.html',
-					contentType: 'text/html',
 				},
 				transform: (content) => {
 					if (typeof content !== 'string') {
@@ -352,7 +352,7 @@ export const config: UserConfig = {
 			{
 				name: 'css-source-comment',
 				filter: {
-					contentType: 'text/css',
+					include: '**/*.css',
 				},
 				transform: (content, ctx) => {
 					if (typeof content !== 'string') {
@@ -376,7 +376,6 @@ interface ResponseTransform {
 	filter?: {
 		include?: string | string[]; // インクルードするGlobパターン
 		exclude?: string | string[]; // エクスクルードするGlobパターン
-		contentType?: string | string[]; // Content-Typeフィルタ（ワイルドカード対応）
 	};
 	transform: (
 		content: string | ArrayBuffer,
@@ -386,7 +385,6 @@ interface ResponseTransform {
 
 interface TransformContext {
 	path: string; // リクエストパス
-	contentType: string | undefined; // レスポンスContent-Type
 	inputPath?: string; // 元の入力ファイルパス（利用可能な場合）
 	outputPath: string; // 出力ファイルパス
 	isServe: boolean; // 開発サーバーでは常にtrue
@@ -398,7 +396,6 @@ interface TransformContext {
 
 - `include`: リクエストパスにマッチするGlobパターン（例: `'**/*.html'`、`['**/*.css', '**/*.js']`）
 - `exclude`: 除外するGlobパターン（例: `'**/_*.html'`で`_`で始まるファイルをスキップ）
-- `contentType`: ワイルドカード対応のContent-Typeフィルタ（例: `'text/html'`、`'text/*'`、`['text/html', 'application/json']`）
 
 **重要な注意事項:**
 
