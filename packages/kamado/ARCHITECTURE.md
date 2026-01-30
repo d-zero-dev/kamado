@@ -142,16 +142,16 @@ The map is built once at server startup and used for all subsequent requests.
 
 ### Compiler Plugins
 
-Kamado's features are extended by adding `CompilerPlugin`s.
+Kamado's features are extended by adding `CustomCompilerPlugin`s.
 
 ```typescript
-// Compiler interface receives Context
-export interface Compiler {
-	(context: Context): Promise<CompileFunction> | CompileFunction;
+// CustomCompiler interface receives Context
+export interface CustomCompiler {
+	(context: Context): Promise<CustomCompileFunction> | CustomCompileFunction;
 }
 
-// CompileFunction handles individual file compilation
-export interface CompileFunction {
+// CustomCompileFunction handles individual file compilation
+export interface CustomCompileFunction {
 	(
 		compilableFile: CompilableFile,
 		log?: (message: string) => void,
@@ -160,7 +160,7 @@ export interface CompileFunction {
 }
 ```
 
-The `Compiler` receives a `Context` object (which includes `mode: 'serve' | 'build'`) and returns a `CompileFunction`. The `CompileFunction` then receives a `CompilableFile` object and returns the transformed content. The `CompilableFile` class (`src/files/`) handles file reading and cache management behind the scenes.
+The `CustomCompiler` receives a `Context` object (which includes `mode: 'serve' | 'build'`) and returns a `CustomCompileFunction`. The `CustomCompileFunction` then receives a `CompilableFile` object and returns the transformed content. The `CompilableFile` class (`src/files/`) handles file reading and cache management behind the scenes.
 
 **Note**: Because `Context extends Config`, existing custom compilers that use `Config` as a parameter name will continue to work without changes. However, they can access `context.mode` to detect the execution mode.
 
