@@ -1,0 +1,66 @@
+---
+name: monorepo-architect-skill
+description: 'Node.jsモノレポ環境でのメンテナンス、機能追加、コード設計を統括します。プロジェクト固有の厳格なアーキテクチャ・ルールを遵守させたい時に使用します。'
+---
+
+# **Monorepo Architect Skill**
+
+このスキルは、プロフェッショナルなNode.jsモノレポ開発において、プロジェクトの整合性と保守性を極限まで高めるための思考プロトコルです。
+
+## **1. Command Constraints (Strictly Yarn)**
+
+AIエージェントは、以下のコマンド制約を例外なく守らなければなりません。
+
+- **Use yarn ONLY**: パッケージのインストール、ビルド、スクリプト実行には必ず yarn を使用してください。npm の使用はあらゆる状況で**厳禁**です。
+- **No cd**: 作業ディレクトリを移動（cd）しないでください。常にルートディレクトリを起点とし、`yarn workspace <package-name> <command>` または `--cwd` フラグを使用して操作を完結させてください。
+- **Targeted Operations**: ビルドや検証は、常に影響を受けるパッケージに限定して行います（例: `yarn build --scope <package-name>`）。
+- **Testing**: ユニットテストの実行には `npx vitest run` を使用してください。
+
+## **2. Directory & Structure Rules**
+
+- **One Function per File**: 原則として、1つのファイルには1つのエクスポート関数のみを記述します。
+- **No index.ts**: ディレクトリのトップレベルに index.ts を作成したり、再エクスポートに使用したりすることは禁止です。
+- **Type Segregation**: 処理やモデルのカテゴリごとにフォルダを分けて管理することを推奨します。その際、各フォルダ内に必ず types.ts を作成し、関連する型定義をそこに集約してください。
+
+## **3. TypeScript Coding Standards**
+
+### **Function Signature**
+
+すべての関数は、以下の標準的な引数パターンに従って定義されなければなりません：
+
+```ts
+/**
+ * @param context - 必須の依存関係やコンテキスト（Required）* @param options - 任意の設定やパラメータ（Partial）
+ */
+export function functionName(
+	context: Required<ContextType>,
+	options?: Partial<OptionsType>,
+): Promise<ReturnType>;
+```
+
+### **Type Definitions**
+
+- **Interface Over Type**: 型定義には、拡張性と一貫性の観点から type ステートメントではなく、可能な限り interface 宣言を使用してください。
+- **Strict Exports**: package.json の exports フィールドを直接編集し、外部に公開するAPI（各 /src/dir/sub.ts など）を厳選して定義してください。一括公開は避けてください。
+
+## **4. Workflow Examples**
+
+### **❌ Bad Workflow**
+
+- npm install を叩く。
+- packages/pkg/src/index.ts を作成して複数の関数をエクスポートする。
+- 関数に3つ以上の独立した引数を定義する。
+
+### **✅ Good Workflow**
+
+1. ルートからパッケージ構造を把握（`ls -R`）。
+2. `packages/core/src/billing/calculateTax.ts` を作成。
+3. 同ディレクトリの `types.ts` に interface で型を定義。
+4. `packages/core/package.json` の exports に対象ファイルへのパスを追記。
+5. `yarn workspace @repo/core build` でビルド確認。
+
+## **5. Operational Protocol for AI**
+
+1. **Scan Before Action**: 修正を開始する前に、必ず `ls -R` や `cat package.json` を行い、リポジトリの依存関係と `exports` の現状を完全に把握してください。
+2. **Preserve Exports**: `package.json` の `exports` を更新する際は、既存の定義を削除したり壊したりしないよう、差分のみを正確に追記してください。
+3. **Architecture Guard**: あなたの提案が「1関数1ファイル」や「`index.ts` 禁止」に違反していないか、常にセルフチェックを行ってください。
