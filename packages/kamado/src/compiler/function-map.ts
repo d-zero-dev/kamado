@@ -1,4 +1,4 @@
-import type { CustomCompileFunction } from './custom-compiler.js';
+import type { CustomCompileFunction } from './types.js';
 import type { Context } from '../config/types.js';
 
 /**

@@ -1,9 +1,9 @@
 import { vol, fs as memfs } from 'memfs';
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 
-import { mergeConfig } from '../config/merge.js';
+import { mergeConfig } from '../config/merge-config.js';
 
-import { getGlobalData } from './global.js';
+import { getGlobalData } from './get-global-data.js';
 
 vi.mock('fast-glob', async () => {
 	const actual = await vi.importActual('fast-glob');

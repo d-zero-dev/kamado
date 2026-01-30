@@ -8,7 +8,7 @@ import { Lanes } from '@d-zero/dealer';
 import { urlToLocalPath } from '@d-zero/shared/url-to-local-path';
 import c from 'ansi-colors';
 
-import { createCompiler } from '../compiler/compiler.js';
+import { createCompiler } from '../compiler/create-compiler.js';
 import { createCompileFunctionMap } from '../compiler/function-map.js';
 import { getCompilableFileMap } from '../data/map.js';
 import { filePathColorizer } from '../stdout/color.js';

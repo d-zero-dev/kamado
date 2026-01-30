@@ -1,4 +1,13 @@
 /**
+ * Options for getting a file
+ */
+export interface GetFileOptions {
+	readonly inputDir: string;
+	readonly outputDir: string;
+	readonly outputExtension: string;
+}
+
+/**
  * File object interface
  */
 export interface FileObject {

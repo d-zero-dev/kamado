@@ -1,4 +1,5 @@
 export { toAbsolutePath } from './absolute-path.js';
-export { computeOutputPath, type OutputPathInfo } from './output-path.js';
+export { computeOutputPath } from './output-path.js';
 export { pathResolver } from './resolver.js';
-export { splitPath, type SplitPathInfo } from './split-path.js';
+export { splitPath } from './split-path.js';
+export type { OutputPathInfo, SplitPathInfo } from './types.js';

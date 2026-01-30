@@ -1,29 +1,38 @@
-import type { CompileFunction } from './compiler.js';
 import type { Context } from '../config/types.js';
 import type { CompilableFile } from '../files/types.js';
 
 /**
- * Compiler plugin interface
- * Function that takes options and returns a compiler
+ * Compile function interface
+ * Compiles a file based on its output extension using the appropriate compiler from the function map
  */
-export interface CustomCompilerPlugin<CustomCompileOptions = void> {
+export interface CompileFunction {
 	/**
-	 * @param options - Compile options
-	 * @returns Compiler function
+	 * @param file - File to compile (CompilableFile or file seed with inputPath and outputExtension)
+	 * @param log - Log output function (optional)
+	 * @param cache - Whether to cache the file content (default: true)
+	 * @returns Compilation result (string or ArrayBuffer)
 	 */
-	(options?: CustomCompileOptions): CustomCompiler;
+	(
+		file:
+			| {
+					readonly inputPath: string;
+					readonly outputExtension: string;
+			  }
+			| CompilableFile,
+		log?: (message: string) => void,
+		cache?: boolean,
+	): Promise<string | ArrayBuffer>;
 }
 
 /**
- * Compiler interface
- * Function that takes execution context and returns a compile function
+ * Compiler context with compile function map
+ * Extends Context to include a map of compiler functions by output extension
  */
-export interface CustomCompiler {
+export interface CompilerContext extends Context {
 	/**
-	 * @param context - Execution context (config + mode)
-	 * @returns Compile function
+	 * Map of compiler functions keyed by output file extension (e.g., '.html', '.css', '.js')
 	 */
-	(context: Context): Promise<CustomCompileFunction> | CustomCompileFunction;
+	readonly compileFunctionMap: Map<string, CustomCompileFunction>;
 }
 
 /**
@@ -44,6 +53,30 @@ export interface CustomCompileFunction {
 		log?: (message: string) => void,
 		cache?: boolean,
 	): Promise<string | ArrayBuffer> | string | ArrayBuffer;
+}
+
+/**
+ * Compiler interface
+ * Function that takes execution context and returns a compile function
+ */
+export interface CustomCompiler {
+	/**
+	 * @param context - Execution context (config + mode)
+	 * @returns Compile function
+	 */
+	(context: Context): Promise<CustomCompileFunction> | CustomCompileFunction;
+}
+
+/**
+ * Compiler plugin interface
+ * Function that takes options and returns a compiler
+ */
+export interface CustomCompilerPlugin<CustomCompileOptions = void> {
+	/**
+	 * @param options - Compile options
+	 * @returns Compiler function
+	 */
+	(options?: CustomCompileOptions): CustomCompiler;
 }
 
 /**
@@ -108,31 +141,4 @@ export interface CustomCompilerFactoryResult<CustomCompileOptions> {
 	readonly compile: (
 		options?: CustomCompileOptions & CustomCompilerMetadataOptions,
 	) => CustomCompiler;
-}
-
-/**
- * Creates a compiler with metadata
- * @param factory - Factory function that returns compiler factory result
- * @returns Function that takes options and returns CompilerWithMetadata
- */
-export function createCustomCompiler<CustomCompileOptions>(
-	factory: () => CustomCompilerFactoryResult<CustomCompileOptions>,
-): (
-	options?: CustomCompileOptions & CustomCompilerMetadataOptions,
-) => CustomCompilerWithMetadata {
-	return (
-		userOptions?: CustomCompileOptions & CustomCompilerMetadataOptions,
-	): CustomCompilerWithMetadata => {
-		const result = factory();
-		const files = userOptions?.files ?? result.defaultFiles;
-		const outputExtension = userOptions?.outputExtension ?? result.defaultOutputExtension;
-		const ignore = userOptions?.ignore;
-
-		return {
-			files,
-			ignore,
-			outputExtension,
-			compiler: result.compile(userOptions),
-		};
-	};
 }
