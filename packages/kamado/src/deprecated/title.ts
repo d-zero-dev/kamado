@@ -1,7 +1,5 @@
 import type { CompilableFile } from '../files/types.js';
 
-import fs from 'node:fs';
-
 const titleCache = new Map<string, string>();
 
 /**
@@ -37,31 +35,6 @@ export async function getTitle(
 		getTitleFromDOM(content, optimizeTitle) ||
 		page.fileSlug;
 	titleCache.set(filePathStem, title);
-	return title;
-}
-
-/**
- * Gets title from static HTML file
- * @deprecated This function will be removed in the next major version (v2.0.0).
- * Import from '@kamado-io/page-compiler' instead.
- * @param filePath - HTML file path
- * @param optimizeTitle - Function to optimize title (optional)
- * @returns Title (null if not found)
- */
-export function getTitleFromStaticFile(
-	filePath: string,
-	optimizeTitle?: (title: string) => string,
-) {
-	if (titleCache.has(filePath)) {
-		return titleCache.get(filePath);
-	}
-	if (!fs.existsSync(filePath)) {
-		return null;
-	}
-	const content = fs.readFileSync(filePath, 'utf8');
-	let title = getTitleFromDOM(content, optimizeTitle);
-	title = optimizeTitle?.(title) ?? title;
-	titleCache.set(filePath, title);
 	return title;
 }
 
