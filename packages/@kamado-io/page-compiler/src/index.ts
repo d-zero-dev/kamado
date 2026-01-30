@@ -9,7 +9,7 @@ import type { Options as PrettierOptions } from 'prettier';
 import path from 'node:path';
 
 import c from 'ansi-colors';
-import { createCompiler } from 'kamado/compiler';
+import { createCustomCompiler } from 'kamado/compiler';
 import { getGlobalData } from 'kamado/data';
 
 import { getBreadcrumbs } from './features/breadcrumbs.js';
@@ -293,7 +293,7 @@ export interface Paths {
  * ```
  * @throws {Error} if page compilation fails or layout is not found
  */
-export const pageCompiler = createCompiler<PageCompilerOptions>(() => ({
+export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 	defaultFiles: '**/*.html',
 	defaultOutputExtension: '.html',
 	compile: (options) => async (context: Context) => {
