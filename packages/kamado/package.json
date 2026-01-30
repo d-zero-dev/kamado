@@ -9,7 +9,7 @@
 		"access": "public"
 	},
 	"type": "module",
-	"bin": "./dist/index.js",
+	"bin": "./dist/cli.js",
 	"exports": {
 		"./build": "./dist/builder/build.js",
 		"./server": "./dist/server/app.js",
