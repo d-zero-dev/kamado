@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { pathListToTree } from '@d-zero/shared/path-list-to-tree';
 
-import { getTitleFromStaticFile } from './title.js';
+import { getTitleFromStaticFile } from './get-title-from-static-file.js';
 
 /**
  * Navigation node with title
