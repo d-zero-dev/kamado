@@ -19,7 +19,7 @@
 		"./compiler/function-map": "./dist/compiler/function-map.js",
 		"./data": "./dist/data/data.js",
 		"./files": "./dist/files/files.js",
-		"./path": "./dist/path/index.js",
+		"./path": "./dist/path/path.js",
 		"./utils/dom": "./dist/utils/dom.js"
 	},
 	"scripts": {
