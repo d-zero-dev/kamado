@@ -99,9 +99,10 @@ export const config: UserConfig = {
 			layouts: {
 				dir: path.resolve(import.meta.dirname, '__assets', '_libs', 'layouts'),
 			},
-			async afterSerialize(elements, window, isServe, context) {
+			async afterSerialize(elements, window, isServe, context, compile) {
 				// DOM操作やカスタム処理をここに記述
-				// context には path, inputPath, outputPath, isServe, context が含まれます
+				// context には path, inputPath, outputPath, isServe, およびネストされたcontextが含まれます
+				// compile: 処理中に他のファイルをコンパイルする関数
 			},
 		}),
 		styleCompiler({
@@ -171,7 +172,8 @@ export default config;
 - `layouts.dir`: レイアウトファイルのディレクトリ
 - `compileHooks`: コンパイルプロセスをカスタマイズするコンパイルフック（Pugテンプレートを使用する場合は必須）
 - `host`: JSDOMのurlオプションに使用するホストURL。未指定の場合、ビルドモードではpackage.jsonの`production.baseURL`または`production.host`を使用、開発サーバーモードでは開発サーバーURL（`http://${devServer.host}:${devServer.port}`）を使用
-- `afterSerialize`: DOMシリアライズ後のフック
+- `beforeSerialize`: DOMシリアライズ前のフック `(content: string, isServe: boolean, context: TransformContext, compile: CompileFunction) => Promise<string> | string`
+- `afterSerialize`: DOMシリアライズ後のフック `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext, compile: CompileFunction) => Promise<void> | void`
 
 **注意**: `page-compiler`は汎用コンテナコンパイラであり、デフォルトではPugテンプレートをコンパイルしません。Pugテンプレートを使用するには、`@kamado-io/pug-compiler`をインストールし、`compileHooks`を設定してください。詳細は[@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md)を参照してください。
 

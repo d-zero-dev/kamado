@@ -155,13 +155,21 @@ export interface CustomCompiler {
 export interface CustomCompileFunction {
 	(
 		compilableFile: CompilableFile,
+		compile: CompileFunction,
 		log?: (message: string) => void,
 		cache?: boolean,
 	): Promise<string | ArrayBuffer> | string | ArrayBuffer;
 }
 ```
 
-`CustomCompiler`は`Context`オブジェクト（`mode: 'serve' | 'build'`を含む）を受け取り、`CustomCompileFunction`を返します。`CustomCompileFunction`は`CompilableFile`オブジェクトを受け取り、変換後の内容を返します。この際、ソースコードの読み込みやキャッシュの管理は`CompilableFile`クラス（`src/files/`）が隠蔽します。
+`CustomCompiler`は`Context`オブジェクト（`mode: 'serve' | 'build'`を含む）を受け取り、`CustomCompileFunction`を返します。`CustomCompileFunction`は以下のパラメータを受け取ります：
+
+- `compilableFile`: コンパイル対象のファイル
+- `compile`: コンパイル中に他のファイルを再帰的にコンパイルできる関数（レイアウトやインクルードなど）
+- `log`: オプションのログ出力関数
+- `cache`: ファイルコンテンツをキャッシュするかどうか
+
+ソースコードの読み込みやキャッシュの管理は`CompilableFile`クラス（`src/files/`）が隠蔽します。`compile`パラメータにより、コンパイラは依存ファイルを再帰的にコンパイルできます。
 
 **注意**: `Context`は`Config`を拡張しているため、パラメータ名として`Config`を使用している既存のカスタムコンパイラは変更なしで動作し続けます。ただし、`context.mode`にアクセスして実行モードを検出できます。
 
