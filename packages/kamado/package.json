@@ -11,7 +11,7 @@
 	"type": "module",
 	"bin": "./dist/index.js",
 	"exports": {
-		"./build": "./dist/builder/index.js",
+		"./build": "./dist/builder/build.js",
 		"./server": "./dist/server/app.js",
 		"./config": "./dist/config/config.js",
 		"./compiler": "./dist/compiler/compiler.js",

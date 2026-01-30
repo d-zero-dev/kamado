@@ -5,7 +5,7 @@ import path from 'node:path';
 import { roar } from '@d-zero/roar';
 import c from 'ansi-colors';
 
-import { build } from './builder/index.js';
+import { build } from './builder/build.js';
 import { getConfig } from './config/get-config.js';
 import { pathResolver } from './path/resolver.js';
 import { start } from './server/app.js';
