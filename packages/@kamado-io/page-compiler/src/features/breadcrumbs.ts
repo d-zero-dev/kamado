@@ -100,7 +100,7 @@ export function getBreadcrumbs<
 	const breadcrumbs = pages.map((sourcePage) => ({
 		title:
 			sourcePage.title?.trim() ||
-			getTitle(sourcePage, optimizeTitle, true) ||
+			getTitle(sourcePage, { optimizeTitle, safe: true }) ||
 			'__NO_TITLE__',
 		href: sourcePage.url,
 		depth: sourcePage.url.split('/').filter(Boolean).length,

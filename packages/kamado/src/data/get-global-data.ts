@@ -53,7 +53,7 @@ export async function getGlobalData(dir: string, config: Config): Promise<Global
 		userDefinedPageList.map(async (page) => ({
 			...page,
 			title:
-				page.title?.trim() || (await getTitle(page, undefined, true)) || '__NO_TITLE__',
+				page.title?.trim() || (await getTitle(page, { safe: true })) || '__NO_TITLE__',
 		})),
 	);
 
