@@ -1,4 +1,26 @@
 /**
+ * Required context for computing output path
+ */
+export interface ComputeOutputPathContext {
+	/**
+	 * Input file path
+	 */
+	readonly inputPath: string;
+	/**
+	 * Input directory path
+	 */
+	readonly inputDir: string;
+	/**
+	 * Output directory path
+	 */
+	readonly outputDir: string;
+	/**
+	 * Output file extension (e.g., '.html', '.css', '.js')
+	 */
+	readonly outputExtension: string;
+}
+
+/**
  * File path information for output
  */
 export interface OutputPathInfo {

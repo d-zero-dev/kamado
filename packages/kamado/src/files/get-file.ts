@@ -26,12 +26,12 @@ import { getFileContent } from './file-content.js';
  * ```
  */
 export function getFile(filePath: string, options: GetFileOptions): CompilableFile {
-	const pathInfo = computeOutputPath(
-		filePath,
-		options.inputDir,
-		options.outputDir,
-		options.outputExtension,
-	);
+	const pathInfo = computeOutputPath({
+		inputPath: filePath,
+		inputDir: options.inputDir,
+		outputDir: options.outputDir,
+		outputExtension: options.outputExtension,
+	});
 
 	const filePathStem = '/' + pathInfo.rootRelPath.replaceAll(path.sep, '/');
 	const url =
