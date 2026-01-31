@@ -50,14 +50,14 @@ export type TitleListOptions = {
  * // Returns: "📄 Page Title | Section | My Site"
  * ```
  */
-export function titleList(breadcrumbs: BreadcrumbItem[], options: TitleListOptions = {}) {
+export function titleList(breadcrumbs: BreadcrumbItem[], options?: TitleListOptions) {
 	const {
 		separator = ' | ',
 		baseURL = '/',
 		prefix = '',
-		suffix = options.siteName,
-		fallback = options.siteName,
-	} = options;
+		suffix = options?.siteName,
+		fallback = options?.siteName,
+	} = options ?? {};
 
 	const titleList = breadcrumbs
 		.filter((item) => item.href !== baseURL && item.href !== '/')

@@ -71,13 +71,26 @@ export type GetBreadcrumbsOptions<
  * });
  * ```
  */
+/**
+ * Required context for breadcrumbs generation
+ */
+export interface GetBreadcrumbsContext {
+	readonly page: CompilableFile & { title?: string };
+	readonly pageList: readonly (CompilableFile & { title?: string })[];
+}
+
+/**
+ *
+ * @param context
+ * @param options
+ */
 export function getBreadcrumbs<
 	TOut extends Record<string, unknown> = Record<never, never>,
 >(
-	page: CompilableFile & { title?: string },
-	pageList: readonly (CompilableFile & { title?: string })[],
+	context: GetBreadcrumbsContext,
 	options?: GetBreadcrumbsOptions<TOut>,
 ): (BreadcrumbItem & TOut)[] {
+	const { page, pageList } = context;
 	const baseURL = options?.baseURL ?? '/';
 	const optimizeTitle = options?.optimizeTitle;
 	const baseDepth = baseURL.split('/').filter(Boolean).length;
@@ -87,7 +100,7 @@ export function getBreadcrumbs<
 	const breadcrumbs = pages.map((sourcePage) => ({
 		title:
 			sourcePage.title?.trim() ||
-			getTitle(sourcePage, optimizeTitle, true) ||
+			getTitle(sourcePage, { optimizeTitle, safe: true }) ||
 			'__NO_TITLE__',
 		href: sourcePage.url,
 		depth: sourcePage.url.split('/').filter(Boolean).length,

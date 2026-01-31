@@ -1,16 +1,36 @@
 import { JSDOM } from 'jsdom';
 
 /**
- *
- * @param html
- * @param hook
- * @param url
+ * Options for DOM serialization
  */
-export async function domSerialize(
-	html: string,
-	hook: (elements: Element[], window: Window) => Promise<void> | void,
-	url?: string,
-) {
+export interface DomSerializeOptions {
+	/**
+	 * Hook function to manipulate DOM elements before serialization
+	 */
+	readonly hook: (elements: Element[], window: Window) => Promise<void> | void;
+	/**
+	 * URL for JSDOM (optional)
+	 */
+	readonly url?: string;
+}
+
+/**
+ * Serializes HTML with DOM manipulation hook
+ * @param html - HTML content to serialize
+ * @param options - Serialization options (hook, url)
+ * @returns Serialized HTML string
+ * @example
+ * ```typescript
+ * const result = await domSerialize(html, {
+ *   hook: async (elements, window) => {
+ *     // Manipulate DOM elements
+ *   },
+ *   url: 'https://example.com',
+ * });
+ * ```
+ */
+export async function domSerialize(html: string, options: DomSerializeOptions) {
+	const { hook, url } = options;
 	const dom = getDOM(html, url);
 	await hook(dom.elements, dom.window);
 	const serialized = dom.elements.map((node) => node.outerHTML).join('');

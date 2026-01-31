@@ -20,7 +20,7 @@ describe('filePathColorizer', () => {
 	});
 
 	test('should throw error for non-absolute path', () => {
-		const colorize = filePathColorizer();
+		const colorize = filePathColorizer(process.cwd());
 		expect(() => colorize('relative/path/file.js')).toThrow(
 			'File path is not absolute: relative/path/file.js',
 		);
@@ -28,7 +28,7 @@ describe('filePathColorizer', () => {
 
 	test('should return exact output for file in root directory', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/index.html';
 		const result = colorize(filePath);
 
@@ -39,7 +39,7 @@ describe('filePathColorizer', () => {
 
 	test('should return exact output with directory path', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/components/Button.jsx';
 		const result = colorize(filePath);
 
@@ -52,7 +52,7 @@ describe('filePathColorizer', () => {
 
 	test('should use default color for unknown extension', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/file.unknown';
 		const result = colorize(filePath);
 
@@ -63,7 +63,7 @@ describe('filePathColorizer', () => {
 
 	test('should apply correct colors for .html extension', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/file.html';
 		const result = colorize(filePath);
 
@@ -74,7 +74,7 @@ describe('filePathColorizer', () => {
 
 	test('should apply correct colors for .css extension', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/file.css';
 		const result = colorize(filePath);
 
@@ -87,7 +87,7 @@ describe('filePathColorizer', () => {
 
 	test('should apply correct colors for .scss extension', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/file.scss';
 		const result = colorize(filePath);
 
@@ -100,7 +100,7 @@ describe('filePathColorizer', () => {
 
 	test('should apply correct colors for .sass extension', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/file.sass';
 		const result = colorize(filePath);
 
@@ -113,7 +113,7 @@ describe('filePathColorizer', () => {
 
 	test('should apply correct colors for .js extension', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/file.js';
 		const result = colorize(filePath);
 
@@ -124,7 +124,7 @@ describe('filePathColorizer', () => {
 
 	test('should apply correct colors for .mjs extension', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/file.mjs';
 		const result = colorize(filePath);
 
@@ -135,7 +135,7 @@ describe('filePathColorizer', () => {
 
 	test('should apply correct colors for .cjs extension', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/file.cjs';
 		const result = colorize(filePath);
 
@@ -146,7 +146,7 @@ describe('filePathColorizer', () => {
 
 	test('should apply correct colors for .jsx extension', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/file.jsx';
 		const result = colorize(filePath);
 
@@ -157,7 +157,7 @@ describe('filePathColorizer', () => {
 
 	test('should apply correct colors for .json extension', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/file.json';
 		const result = colorize(filePath);
 
@@ -170,7 +170,7 @@ describe('filePathColorizer', () => {
 
 	test('should apply correct colors for .svg extension', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/file.svg';
 		const result = colorize(filePath);
 
@@ -185,8 +185,7 @@ describe('filePathColorizer', () => {
 		) as unknown as StyleFunction;
 		const mockDir = vi.fn((text: string) => `[dir]${text}`) as unknown as StyleFunction;
 		const mockName = vi.fn((text: string) => `[name]${text}`) as unknown as StyleFunction;
-		const colorize = filePathColorizer({
-			rootDir: '/project',
+		const colorize = filePathColorizer('/project', {
 			colors: {
 				underDir: mockUnderDir,
 				dir: mockDir,
@@ -210,8 +209,7 @@ describe('filePathColorizer', () => {
 			(text: string) => `[default]${text}`,
 		) as unknown as StyleFunction;
 		const mockJs = vi.fn((text: string) => `[js]${text}`) as unknown as StyleFunction;
-		const colorize = filePathColorizer({
-			rootDir: '/project',
+		const colorize = filePathColorizer('/project', {
 			colors: {
 				name: {
 					default: mockDefault,
@@ -235,7 +233,7 @@ describe('filePathColorizer', () => {
 
 	test('should handle nested directories', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/components/ui/Button.jsx';
 		const result = colorize(filePath);
 
@@ -248,7 +246,7 @@ describe('filePathColorizer', () => {
 
 	test('should handle file without extension', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/project/src/file';
 		const result = colorize(filePath);
 
@@ -259,7 +257,7 @@ describe('filePathColorizer', () => {
 
 	test('should handle case-insensitive extension matching', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const upperCasePath = '/project/src/FILE.JS';
 		const lowerCasePath = '/project/src/file.js';
 		const resultUpper = colorize(upperCasePath);
@@ -274,8 +272,8 @@ describe('filePathColorizer', () => {
 	});
 
 	test('should handle file in current working directory', () => {
-		const colorize = filePathColorizer();
 		const cwd = process.cwd();
+		const colorize = filePathColorizer(cwd);
 		const filePath = path.join(cwd, 'file.js');
 		const result = colorize(filePath);
 
@@ -286,7 +284,7 @@ describe('filePathColorizer', () => {
 
 	test('should handle file outside rootDir', () => {
 		const rootDir = '/project';
-		const colorize = filePathColorizer({ rootDir });
+		const colorize = filePathColorizer(rootDir);
 		const filePath = '/other/file.js';
 		const result = colorize(filePath);
 

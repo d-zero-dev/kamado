@@ -65,19 +65,19 @@ export async function build(buildConfig: UserConfig & BuildConfig) {
 
 	const fileArrays = await Promise.all(
 		context.compilers.map((compilerEntry) =>
-			getAssetGroup({
-				inputDir: context.dir.input,
-				outputDir: context.dir.output,
-				compilerEntry,
-				glob: buildConfig.targetGlob,
-			}),
+			getAssetGroup(
+				{
+					inputDir: context.dir.input,
+					outputDir: context.dir.output,
+					compilerEntry,
+				},
+				{ glob: buildConfig.targetGlob },
+			),
 		),
 	);
 	const allFiles = fileArrays.flat();
 
-	const f = filePathColorizer({
-		rootDir: context.dir.input,
-	});
+	const f = filePathColorizer(context.dir.input);
 
 	const CHECK_MARK = c.green('✔');
 

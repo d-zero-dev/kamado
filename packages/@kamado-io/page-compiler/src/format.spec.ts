@@ -4,6 +4,9 @@ import { describe, expect, test } from 'vitest';
 
 import { formatHtml } from './format.js';
 
+// Mock compile function for tests
+const mockCompile = () => Promise.resolve('');
+
 describe('formatHtml', () => {
 	describe('beforeSerialize hook', () => {
 		test('receives TransformContext as third parameter', async () => {
@@ -23,18 +26,23 @@ describe('formatHtml', () => {
 				pkg: {},
 			} as Context;
 
-			await formatHtml({
-				content: '<html><body>test</body></html>',
-				inputPath: '/test/input/page.html',
-				outputPath: '/test/output/page.html',
-				outputDir: '/test/output',
-				isServe: false,
-				context: mockContext,
-				beforeSerialize: (content, isServe, context) => {
-					receivedContext = context;
-					return content;
+			await formatHtml(
+				{
+					content: '<html><body>test</body></html>',
+					inputPath: '/test/input/page.html',
+					outputPath: '/test/output/page.html',
+					outputDir: '/test/output',
+					context: mockContext,
+					compile: mockCompile,
 				},
-			});
+				{
+					isServe: false,
+					beforeSerialize: (content, isServe, context) => {
+						receivedContext = context;
+						return content;
+					},
+				},
+			);
 
 			expect(receivedContext).toBeDefined();
 			expect(receivedContext?.path).toBe('page.html');
@@ -61,18 +69,23 @@ describe('formatHtml', () => {
 				pkg: {},
 			} as Context;
 
-			await formatHtml({
-				content: '<html><body>test</body></html>',
-				inputPath: '/test/input/foo/bar/index.html',
-				outputPath: '/test/output/foo/bar/index.html',
-				outputDir: '/test/output',
-				isServe: true,
-				context: mockContext,
-				beforeSerialize: (content, isServe, context) => {
-					receivedContext = context;
-					return content;
+			await formatHtml(
+				{
+					content: '<html><body>test</body></html>',
+					inputPath: '/test/input/foo/bar/index.html',
+					outputPath: '/test/output/foo/bar/index.html',
+					outputDir: '/test/output',
+					context: mockContext,
+					compile: mockCompile,
 				},
-			});
+				{
+					isServe: true,
+					beforeSerialize: (content, isServe, context) => {
+						receivedContext = context;
+						return content;
+					},
+				},
+			);
 
 			expect(receivedContext?.path).toBe('foo/bar/index.html');
 			expect(receivedContext?.isServe).toBe(true);
@@ -95,18 +108,23 @@ describe('formatHtml', () => {
 				pkg: {},
 			} as Context;
 
-			await formatHtml({
-				content: '<html><body>test</body></html>',
-				inputPath: '/test/input/index.html',
-				outputPath: '/test/output/index.html',
-				outputDir: '/test/output',
-				isServe: false,
-				context: mockContext,
-				beforeSerialize: (content, isServe, context) => {
-					receivedContext = context;
-					return content;
+			await formatHtml(
+				{
+					content: '<html><body>test</body></html>',
+					inputPath: '/test/input/index.html',
+					outputPath: '/test/output/index.html',
+					outputDir: '/test/output',
+					context: mockContext,
+					compile: mockCompile,
 				},
-			});
+				{
+					isServe: false,
+					beforeSerialize: (content, isServe, context) => {
+						receivedContext = context;
+						return content;
+					},
+				},
+			);
 
 			expect(receivedContext?.path).toBe('index.html');
 		});
@@ -126,20 +144,25 @@ describe('formatHtml', () => {
 				pkg: {},
 			} as Context;
 
-			const result = await formatHtml({
-				content: '<html><head></head><body>test</body></html>',
-				inputPath: '/test/input/page.html',
-				outputPath: '/test/output/page.html',
-				outputDir: '/test/output',
-				isServe: false,
-				context: mockContext,
-				beforeSerialize: (content, _isServe, context) => {
-					// Simulate using a transform utility
-					expect(context.path).toBe('page.html');
-					expect(context.context.mode).toBe('build');
-					return content.replace('</head>', '<script>injected</script></head>');
+			const result = await formatHtml(
+				{
+					content: '<html><head></head><body>test</body></html>',
+					inputPath: '/test/input/page.html',
+					outputPath: '/test/output/page.html',
+					outputDir: '/test/output',
+					context: mockContext,
+					compile: mockCompile,
 				},
-			});
+				{
+					isServe: false,
+					beforeSerialize: (content, _isServe, context) => {
+						// Simulate using a transform utility
+						expect(context.path).toBe('page.html');
+						expect(context.context.mode).toBe('build');
+						return content.replace('</head>', '<script>injected</script></head>');
+					},
+				},
+			);
 
 			expect(result).toContain('<script>injected</script>');
 		});
@@ -163,17 +186,22 @@ describe('formatHtml', () => {
 				pkg: {},
 			} as Context;
 
-			await formatHtml({
-				content: '<html><head></head><body>test</body></html>',
-				inputPath: '/test/input/page.html',
-				outputPath: '/test/output/page.html',
-				outputDir: '/test/output',
-				isServe: false,
-				context: mockContext,
-				afterSerialize: (elements, window, isServe, context) => {
-					receivedContext = context;
+			await formatHtml(
+				{
+					content: '<html><head></head><body>test</body></html>',
+					inputPath: '/test/input/page.html',
+					outputPath: '/test/output/page.html',
+					outputDir: '/test/output',
+					context: mockContext,
+					compile: mockCompile,
 				},
-			});
+				{
+					isServe: false,
+					afterSerialize: (elements, window, isServe, context) => {
+						receivedContext = context;
+					},
+				},
+			);
 
 			expect(receivedContext).toBeDefined();
 			expect(receivedContext?.path).toBe('page.html');
@@ -200,17 +228,22 @@ describe('formatHtml', () => {
 				pkg: {},
 			} as Context;
 
-			await formatHtml({
-				content: '<html><head></head><body>test</body></html>',
-				inputPath: '/test/input/foo/bar/index.html',
-				outputPath: '/test/output/foo/bar/index.html',
-				outputDir: '/test/output',
-				isServe: true,
-				context: mockContext,
-				afterSerialize: (elements, window, isServe, context) => {
-					receivedContext = context;
+			await formatHtml(
+				{
+					content: '<html><head></head><body>test</body></html>',
+					inputPath: '/test/input/foo/bar/index.html',
+					outputPath: '/test/output/foo/bar/index.html',
+					outputDir: '/test/output',
+					context: mockContext,
+					compile: mockCompile,
 				},
-			});
+				{
+					isServe: true,
+					afterSerialize: (elements, window, isServe, context) => {
+						receivedContext = context;
+					},
+				},
+			);
 
 			expect(receivedContext?.path).toBe('foo/bar/index.html');
 			expect(receivedContext?.isServe).toBe(true);

@@ -159,6 +159,20 @@ export interface PageCompilerOptions {
 }
 
 /**
+ * Options for getting page title
+ */
+export interface GetTitleOptions {
+	/**
+	 * Function to optimize title (optional)
+	 */
+	readonly optimizeTitle?: (title: string) => string;
+	/**
+	 * Whether to return an empty string if the page content is not found (optional)
+	 */
+	readonly safe?: boolean;
+}
+
+/**
  * Compile data object passed to templates and hooks
  */
 export interface CompileData extends Record<string, unknown> {

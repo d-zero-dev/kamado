@@ -22,7 +22,7 @@ export async function start(config: Config) {
 
 	const app = new Hono();
 
-	await setRoute(app, context);
+	await setRoute({ app, context });
 
 	serve({
 		fetch: app.fetch,

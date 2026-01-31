@@ -42,21 +42,16 @@ async function sizeOf(filePath: string): Promise<ImageSize> {
 
 /**
  * Automatically adds width/height attributes to image elements
- * @param elements - Array of DOM elements
- * @param options - Options for adding image sizes
- * @param options.rootDir - Root directory for image files
- * @param options.selector - Selector for target image elements
- * @param options.ext - List of image extensions to target (default: ['png', 'jpg', 'jpeg', 'webp', 'avif', 'svg'])
+ * @param elements - Array of elements to process
+ * @param options - Optional options (rootDir, selector, ext)
  */
-export async function imageSizes(
-	elements: Element[],
-	{
+export async function imageSizes(elements: Element[], options?: ImageSizesOptions) {
+	const {
 		rootDir,
 		selector,
 		// https://github.com/image-size/image-size?tab=readme-ov-file#supported-formats
 		ext = ['png', 'jpg', 'jpeg', 'webp', 'avif', 'svg'],
-	}: ImageSizesOptions,
-) {
+	} = options ?? {};
 	const cache = new Cache<ImageSize>('@d-zero/builder/image-sizes');
 
 	const images = elements.flatMap((el) => [

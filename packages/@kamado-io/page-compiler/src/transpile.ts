@@ -3,9 +3,9 @@ import type { CompileData, CompileHook } from './types.js';
 import c from 'ansi-colors';
 
 /**
- * Options for the transpile function
+ * Required context for the transpile function
  */
-export interface TranspileOptions {
+export interface TranspileContext {
 	/**
 	 * Content to transpile
 	 */
@@ -18,10 +18,16 @@ export interface TranspileOptions {
 	 * File extension for the compiler
 	 */
 	readonly extension: string;
+}
+
+/**
+ * Optional options for the transpile function
+ */
+export interface TranspileOptions {
 	/**
 	 * Compile hook configuration
 	 */
-	readonly compileHook: CompileHook | undefined;
+	readonly compileHook?: CompileHook;
 	/**
 	 * Optional logging function
 	 */
@@ -29,20 +35,20 @@ export interface TranspileOptions {
 	/**
 	 * Log message to display during compilation
 	 */
-	readonly compileLogMessage: string;
+	readonly compileLogMessage?: string;
 	/**
 	 * ANSI color function for the compile log message
 	 * @example c.yellowBright, c.greenBright
 	 */
-	readonly compileLogColor: (str: string) => string;
+	readonly compileLogColor?: (str: string) => string;
 	/**
 	 * Error log message to display when compilation fails
 	 */
-	readonly errorLogMessage: string;
+	readonly errorLogMessage?: string;
 	/**
 	 * Error message for the thrown Error
 	 */
-	readonly errorMessage: string;
+	readonly errorMessage?: string;
 	/**
 	 * Whether to use the before hook result when no compiler is specified
 	 * - true: Use processedContent (layout behavior)
@@ -55,15 +61,17 @@ export interface TranspileOptions {
 /**
  * Generic transpile function that executes compile hooks in sequence.
  * Handles before hook, compiler, and after hook execution with customizable behavior.
- * @param options - Transpile options
+ * @param context - Required transpile context (content, compileData, extension)
+ * @param options - Optional transpile options (hooks, logging, etc.)
  * @returns Transpiled HTML content
  * @throws {Error} if compilation fails
  */
-export async function transpile(options: TranspileOptions): Promise<string> {
+export async function transpile(
+	context: TranspileContext,
+	options?: TranspileOptions,
+): Promise<string> {
+	const { content, compileData, extension } = context;
 	const {
-		content,
-		compileData,
-		extension,
 		compileHook,
 		log,
 		compileLogMessage,
@@ -71,7 +79,7 @@ export async function transpile(options: TranspileOptions): Promise<string> {
 		errorLogMessage,
 		errorMessage,
 		useBeforeResultWhenNoCompiler = false,
-	} = options;
+	} = options ?? {};
 
 	if (!compileHook) {
 		return content;
@@ -88,7 +96,9 @@ export async function transpile(options: TranspileOptions): Promise<string> {
 		// Compile
 		let result: string;
 		if (compileHook.compiler) {
-			log?.(compileLogColor(compileLogMessage));
+			if (log && compileLogMessage && compileLogColor) {
+				log(compileLogColor(compileLogMessage));
+			}
 			result = await compileHook.compiler(processedContent, compileData, extension);
 		} else {
 			// Behavior depends on useBeforeResultWhenNoCompiler flag
@@ -102,8 +112,10 @@ export async function transpile(options: TranspileOptions): Promise<string> {
 
 		return result;
 	} catch (error) {
-		log?.(c.red(`❌ ${errorLogMessage}`));
-		throw new Error(errorMessage, {
+		if (log && errorLogMessage) {
+			log(c.red(`❌ ${errorLogMessage}`));
+		}
+		throw new Error(errorMessage ?? 'Compilation failed', {
 			cause: error,
 		});
 	}

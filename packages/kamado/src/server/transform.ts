@@ -4,26 +4,40 @@ import c from 'ansi-colors';
 import picomatch from 'picomatch';
 
 /**
+ * Required context for applying transforms
+ */
+export interface ApplyTransformsContext {
+	readonly content: string | ArrayBuffer;
+	readonly transformContext: TransformContext;
+}
+
+/**
+ * Optional options for applying transforms
+ */
+export interface ApplyTransformsOptions {
+	readonly transforms?: readonly ResponseTransform[];
+}
+
+/**
  * Apply response transforms
  * Executes transform functions in array order on the response content.
  * Only applies in serve mode.
- * @param content - Original response content (string or ArrayBuffer).
- *                  Static files are typically ArrayBuffer.
- * @param context - Transform context with request/response information
- * @param transforms - Array of transform functions to apply
+ * @param context - Required context (content, transformContext)
+ * @param options - Optional options (transforms)
  * @returns Transformed content
  */
 export async function applyTransforms(
-	content: string | ArrayBuffer,
-	context: TransformContext,
-	transforms: readonly ResponseTransform[] | undefined,
+	context: ApplyTransformsContext,
+	options?: ApplyTransformsOptions,
 ): Promise<string | ArrayBuffer> {
+	const { content, transformContext } = context;
+	const { transforms } = options ?? {};
 	if (!transforms || transforms.length === 0) {
 		return content;
 	}
 
 	// Guard: Only apply in serve mode
-	if (context.context.mode !== 'serve') {
+	if (transformContext.context.mode !== 'serve') {
 		return content;
 	}
 
@@ -31,16 +45,19 @@ export async function applyTransforms(
 
 	for (const transform of transforms) {
 		// Check if transform should be applied based on filters
-		if (!shouldApplyTransform(transform, context)) {
+		if (!shouldApplyTransform(transform, transformContext)) {
 			continue;
 		}
 
 		try {
-			result = await Promise.resolve(transform.transform(result, context));
+			result = await Promise.resolve(transform.transform(result, transformContext));
 		} catch (error) {
 			const name = transform.name || 'anonymous';
 			// eslint-disable-next-line no-console
-			console.error(c.red(`Transform error [${name}] at ${context.path}:`), error);
+			console.error(
+				c.red(`Transform error [${name}] at ${transformContext.path}:`),
+				error,
+			);
 			// Continue with current result on error (graceful degradation)
 			continue;
 		}
