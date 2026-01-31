@@ -94,6 +94,74 @@ The codebase follows strict architectural rules for maintainability:
 
 This structure ensures code discoverability, prevents circular dependencies, and maintains a clean separation of concerns.
 
+### 5. Function Signature Pattern
+
+Functions with 2 or more required parameters should follow the context+options pattern:
+
+```typescript
+/**
+ * @param context - Required dependencies and context (Required)
+ * @param options - Optional settings and parameters (Partial, optional)
+ */
+export function functionName(
+	context: Required<ContextType>,
+	options?: Partial<OptionsType>,
+): Promise<ReturnType>;
+```
+
+**Exception Cases** - Do NOT apply this pattern when:
+
+1. **Only 1 required parameter**: Use the parameter directly
+
+   ```typescript
+   // ✅ Good
+   export function filePathColorizer(rootDir: string, options?: Options);
+
+   // ❌ Bad
+   export function filePathColorizer(context: { rootDir: string }, options?: Options);
+   ```
+
+2. **All parameters are optional**: Keep as single parameter
+
+   ```typescript
+   // ✅ Good
+   export function build(config?: BuildConfig);
+
+   // ❌ Bad
+   export function build(context: {}, options?: BuildConfig);
+   ```
+
+3. **Public API/builder functions**: Prioritize usability over consistency
+   - Example: `pageCompiler(options)`, `scriptCompiler(options)`
+
+4. **Functions receiving primitives**: Don't objectify
+   - If already receives object → split into context+options
+   - If receives primitives → keep as-is
+
+**Judgment Criteria**:
+
+- 2+ required parameters → Apply pattern
+- All optional → Don't apply
+- Public API → Don't apply (internal only)
+- Already receives object → Split
+- Receives primitives → Keep as-is
+
+**Examples**:
+
+```typescript
+// ✅ Good: 3 required parameters
+export function getAssetGroup(
+	context: { inputDir: string; outputDir: string; compilerEntry: Compiler },
+	options?: { glob?: string },
+);
+
+// ✅ Good: 1 required parameter
+export function imageSizes(elements: Element[], options?: ImageSizesOptions);
+
+// ❌ Bad: Wrapping single parameter
+export function imageSizes(context: { elements: Element[] }, options?: ImageSizesOptions);
+```
+
 ---
 
 ## Execution Flows

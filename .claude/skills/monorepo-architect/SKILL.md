@@ -44,17 +44,16 @@ export function functionName(
 以下の場合は、context+optionsパターンを**適用しない**でください：
 
 1. **すべてのパラメータがoptionalな場合**
+
    ```ts
    // ❌ 悪い例: 空のcontextを強制
    export function pageCompiler(
-     context: {},  // 中身がない！
-     options?: PageCompilerOptions,
-   )
+   	context: {}, // 中身がない！
+   	options?: PageCompilerOptions,
+   );
 
    // ✅ 良い例: 単一のoptionalパラメータ
-   export function pageCompiler(
-     options?: PageCompilerOptions,
-   )
+   export function pageCompiler(options?: PageCompilerOptions);
    ```
 
 2. **公開API関数（特にbuilder/factory functions）**
@@ -63,18 +62,20 @@ export function functionName(
    - 例: `pageCompiler()`, `scriptCompiler()` などのビルダー関数
 
 3. **シンプルな関数（1-2個の必須パラメータのみ）**
+
    ```ts
    // ✅ 良い例: そのまま維持
-   export function compile(template: string, data?: object): string
+   export function compile(template: string, data?: object): string;
 
    // ❌ 悪い例: 過度に冗長化
    export function compile(
-     context: { template: string },
-     options?: { data?: object },
-   ): string
+   	context: { template: string },
+   	options?: { data?: object },
+   ): string;
    ```
 
 **適用の判断基準**:
+
 - 必須パラメータが2個以上ある → context+optionsパターンを適用
 - すべてoptional → 適用しない
 - 公開API → 適用しない（内部APIのみ）

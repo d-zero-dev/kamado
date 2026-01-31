@@ -94,6 +94,74 @@ export interface Context extends Config {
 
 この構造により、コードの発見可能性が確保され、循環依存が防止され、関心の明確な分離が維持されます。
 
+### 5. 関数シグネチャパターン
+
+2個以上の必須パラメータを持つ関数は、context+optionsパターンに従う必要があります：
+
+```typescript
+/**
+ * @param context - 必須の依存関係やコンテキスト（Required）
+ * @param options - 任意の設定やパラメータ（Partial、オプション）
+ */
+export function functionName(
+	context: Required<ContextType>,
+	options?: Partial<OptionsType>,
+): Promise<ReturnType>;
+```
+
+**例外ケース** - 以下の場合はこのパターンを適用**しない**：
+
+1. **必須パラメータが1個のみの場合**: パラメータを直接使用
+
+   ```typescript
+   // ✅ 良い例
+   export function filePathColorizer(rootDir: string, options?: Options);
+
+   // ❌ 悪い例
+   export function filePathColorizer(context: { rootDir: string }, options?: Options);
+   ```
+
+2. **すべてのパラメータがoptionalの場合**: 単一パラメータのまま維持
+
+   ```typescript
+   // ✅ 良い例
+   export function build(config?: BuildConfig);
+
+   // ❌ 悪い例
+   export function build(context: {}, options?: BuildConfig);
+   ```
+
+3. **公開API/builder関数**: 一貫性よりも使いやすさを優先
+   - 例: `pageCompiler(options)`、`scriptCompiler(options)`
+
+4. **プリミティブを受け取る関数**: オブジェクト化しない
+   - すでにオブジェクトを受け取る → context+optionsに分割
+   - プリミティブを受け取る → そのまま維持
+
+**判断基準**:
+
+- 必須パラメータが2個以上 → パターンを適用
+- すべてoptional → 適用しない
+- 公開API → 適用しない（内部APIのみ）
+- すでにオブジェクトを受け取る → 分割
+- プリミティブを受け取る → そのまま維持
+
+**例**:
+
+```typescript
+// ✅ 良い例: 3個の必須パラメータ
+export function getAssetGroup(
+	context: { inputDir: string; outputDir: string; compilerEntry: Compiler },
+	options?: { glob?: string },
+);
+
+// ✅ 良い例: 1個の必須パラメータ
+export function imageSizes(elements: Element[], options?: ImageSizesOptions);
+
+// ❌ 悪い例: 単一パラメータをラップ
+export function imageSizes(context: { elements: Element[] }, options?: ImageSizesOptions);
+```
+
 ---
 
 ## 実行フロー
