@@ -10,7 +10,7 @@ import { getGlobalData } from 'kamado/data';
 import { getBreadcrumbs } from './features/breadcrumbs.js';
 import { type GetNavTreeOptions, getNavTree } from './features/nav.js';
 import { type TitleListOptions, titleList } from './features/title-list.js';
-import { formatHtml } from './format.js';
+import { pageTransform } from './format.js';
 import { getLayouts } from './layouts.js';
 import { transpileLayout } from './transpile-layout.js';
 import { transpileMainContent } from './transpile-main.js';
@@ -143,7 +143,7 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 							? `http://${context.pkg.production.host}`
 							: undefined)));
 
-			const formattedHtml = await formatHtml(
+			const formattedHtml = await pageTransform(
 				{
 					content: html,
 					inputPath: file.inputPath,

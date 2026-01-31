@@ -2,12 +2,12 @@ import type { Context, TransformContext } from 'kamado/config';
 
 import { describe, expect, test } from 'vitest';
 
-import { formatHtml } from './format.js';
+import { pageTransform } from './format.js';
 
 // Mock compile function for tests
 const mockCompile = () => Promise.resolve('');
 
-describe('formatHtml', () => {
+describe('pageTransform', () => {
 	describe('beforeSerialize hook', () => {
 		test('receives TransformContext as third parameter', async () => {
 			let receivedContext: TransformContext | undefined;
@@ -26,7 +26,7 @@ describe('formatHtml', () => {
 				pkg: {},
 			} as Context;
 
-			await formatHtml(
+			await pageTransform(
 				{
 					content: '<html><body>test</body></html>',
 					inputPath: '/test/input/page.html',
@@ -69,7 +69,7 @@ describe('formatHtml', () => {
 				pkg: {},
 			} as Context;
 
-			await formatHtml(
+			await pageTransform(
 				{
 					content: '<html><body>test</body></html>',
 					inputPath: '/test/input/foo/bar/index.html',
@@ -108,7 +108,7 @@ describe('formatHtml', () => {
 				pkg: {},
 			} as Context;
 
-			await formatHtml(
+			await pageTransform(
 				{
 					content: '<html><body>test</body></html>',
 					inputPath: '/test/input/index.html',
@@ -144,7 +144,7 @@ describe('formatHtml', () => {
 				pkg: {},
 			} as Context;
 
-			const result = await formatHtml(
+			const result = await pageTransform(
 				{
 					content: '<html><head></head><body>test</body></html>',
 					inputPath: '/test/input/page.html',
@@ -186,7 +186,7 @@ describe('formatHtml', () => {
 				pkg: {},
 			} as Context;
 
-			await formatHtml(
+			await pageTransform(
 				{
 					content: '<html><head></head><body>test</body></html>',
 					inputPath: '/test/input/page.html',
@@ -228,7 +228,7 @@ describe('formatHtml', () => {
 				pkg: {},
 			} as Context;
 
-			await formatHtml(
+			await pageTransform(
 				{
 					content: '<html><head></head><body>test</body></html>',
 					inputPath: '/test/input/foo/bar/index.html',

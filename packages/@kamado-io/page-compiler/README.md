@@ -400,49 +400,93 @@ export const config: UserConfig = {
 
 These functions return the raw transform function `(content, context) => Promise<string | ArrayBuffer>` without the name and filter configuration, allowing you to create fully custom `ResponseTransform` objects.
 
-## Standalone API: formatHtml
+## Standalone API: pageTransform
 
-The `formatHtml` function is available as a standalone API for formatting HTML content outside of the Kamado build system.
+The `pageTransform` function is available as a standalone API for transforming page content outside of the Kamado build system. It applies a three-phase transformation pipeline to HTML content.
+
+### Transformation Phases
+
+The transformation pipeline is divided into three phases:
+
+1. **Phase 1: beforeFormat** (DOM操作前) - String transformations before DOM parsing
+   - `beforeSerialize`: User-defined pre-DOM hook for template expansion, macro replacement, etc.
+
+2. **Phase 2: domManipulation** (DOM操作) - DOM-based transformations
+   - `domSerialize`: DOM parsing, image size injection, and afterSerialize hook
+
+3. **Phase 3: afterFormat** (DOM操作後) - String transformations after DOM serialization
+   - `characterEntities`: Convert characters to HTML entities
+   - `doctype`: Insert DOCTYPE declaration
+   - `prettier`: Format with Prettier
+   - `minifier`: Minify HTML
+   - `lineBreak`: Normalize line breaks
+   - `replace`: Final content replacement
 
 ### Import
 
 ```ts
-import { formatHtml, type FormatHtmlOptions } from '@kamado-io/page-compiler/format';
+import {
+	pageTransform,
+	type PageTransformOptions,
+} from '@kamado-io/page-compiler/format';
 ```
 
 ### Usage
 
 ```ts
-const formattedHtml = await formatHtml({
-	content: '<html><body><h1>Hello</h1></body></html>',
-	inputPath: '/project/src/pages/about.html',
-	outputPath: '/project/dist/pages/about.html',
-	outputDir: '/project/dist', // Root output directory, not /project/dist/pages
-	url: 'https://example.com',
-	imageSizes: true,
-	prettier: true,
-	minifier: true,
-	isServe: false,
-});
+const transformedHtml = await pageTransform(
+	{
+		content: '<html><body><h1>Hello</h1></body></html>',
+		inputPath: '/project/src/pages/about.html',
+		outputPath: '/project/dist/pages/about.html',
+		outputDir: '/project/dist', // Root output directory, not /project/dist/pages
+		context: kamadoContext, // Kamado execution context
+		compile: compileFunction, // Compile function for compiling dependencies
+	},
+	{
+		url: 'https://example.com',
+		imageSizes: true,
+		prettier: true,
+		minifier: true,
+		isServe: false,
+	},
+);
 ```
 
-### FormatHtmlOptions
+### PageTransformContext (first parameter)
 
-- `content` (required): HTML content to format
+- `content` (required): HTML content to transform
 - `inputPath` (required): Input file path (used for Prettier config resolution)
 - `outputPath` (required): Output file path. Full path to the output file (e.g., `/dist/pages/about.html`)
 - `outputDir` (required): Output directory root. Base directory for the build output (e.g., `/dist`). Used as the root for relative path calculations and image size detection. Note: This is NOT `path.dirname(outputPath)` - it's the root output directory that may be several levels up from the output file
-- `url` (optional): JSDOM URL configuration for DOM operations
+- `context` (required): Kamado execution context containing configuration and directory paths
+- `compile` (required): Compile function for compiling other files during transformation
+
+### PageTransformOptions (second parameter)
+
+Options are organized by transformation phase:
+
+**Phase 1: beforeFormat**
+
 - `beforeSerialize` (optional): Hook function called before DOM serialization `(content: string, isServe: boolean, context: TransformContext) => Promise<string> | string`
-- `afterSerialize` (optional): Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext) => Promise<void> | void`
+
+**Phase 2: domManipulation**
+
 - `imageSizes` (optional): Configuration for automatically adding width/height attributes to images (default: `true`)
+- `afterSerialize` (optional): Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext) => Promise<void> | void`
+- `url` (optional): JSDOM URL configuration for DOM operations
+
+**Phase 3: afterFormat**
+
 - `characterEntities` (optional): Whether to enable character entity conversion
 - `prettier` (optional): Prettier options (default: `true`)
 - `minifier` (optional): HTML minifier options (default: `true`)
 - `lineBreak` (optional): Line break configuration (`'\n'` or `'\r\n'`)
 - `replace` (optional): Final HTML content replacement processing `(content: string, paths: Paths, isServe: boolean) => Promise<string> | string`
+
+**Common**
+
 - `isServe` (optional): Whether running on development server (default: `false`)
-- `context` (required): Kamado execution context containing configuration and directory paths
 
 ## License
 

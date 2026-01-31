@@ -13,11 +13,11 @@ import { prettier } from './format/prettier.js';
 import { replace } from './format/replace.js';
 
 /**
- * Required context for HTML formatting
+ * Required context for page transformation
  */
-export interface FormatHtmlContext {
+export interface PageTransformContext {
 	/**
-	 * HTML content to format
+	 * HTML content to transform
 	 */
 	readonly content: string;
 	/**
@@ -37,20 +37,27 @@ export interface FormatHtmlContext {
 	 */
 	readonly context: Context;
 	/**
-	 * Compile function for compiling other files during HTML formatting.
-	 * Used when the formatter needs to compile dependencies (e.g., layouts, includes).
+	 * Compile function for compiling other files during page transformation.
+	 * Used when the transformer needs to compile dependencies (e.g., layouts, includes).
 	 */
 	readonly compile: CompileFunction;
 }
 
 /**
- * Optional options for HTML formatting
+ * Optional options for page transformation
  */
-export interface FormatHtmlOptions {
+export interface PageTransformOptions {
+	// Phase 1: beforeFormat (DOM操作前)
 	/**
 	 * Hook function called before DOM serialization
 	 */
 	readonly beforeSerialize?: PageCompilerOptions['beforeSerialize'];
+
+	// Phase 2: domManipulation (DOM操作)
+	/**
+	 * Configuration for automatically adding width/height attributes to images
+	 */
+	readonly imageSizes?: PageCompilerOptions['imageSizes'];
 	/**
 	 * Hook function called after DOM serialization
 	 */
@@ -59,10 +66,8 @@ export interface FormatHtmlOptions {
 	 * JSDOM URL configuration (optional)
 	 */
 	readonly url?: string;
-	/**
-	 * Configuration for automatically adding width/height attributes to images
-	 */
-	readonly imageSizes?: PageCompilerOptions['imageSizes'];
+
+	// Phase 3: afterFormat (DOM操作後)
 	/**
 	 * Whether to enable character entity conversion
 	 */
@@ -83,6 +88,8 @@ export interface FormatHtmlOptions {
 	 * Final HTML content replacement processing
 	 */
 	readonly replace?: PageCompilerOptions['replace'];
+
+	// Common
 	/**
 	 * Whether running on development server
 	 * @default false
@@ -91,21 +98,28 @@ export interface FormatHtmlOptions {
 }
 
 /**
- * Formats HTML content by applying various transformations:
- * - DOM serialization (JSDOM) for image size insertion and custom manipulations
- * - Character entity conversion
- * - DOCTYPE addition
- * - Prettier formatting
- * - HTML minification
- * - Line break normalization
- * - Custom content replacement
+ * Transforms page content by applying a three-phase transformation pipeline:
+ *
+ * Phase 1 (beforeFormat): String transformations before DOM parsing
+ * - beforeSerialize: User-defined pre-DOM hook
+ *
+ * Phase 2 (domManipulation): DOM-based transformations
+ * - domSerialize: DOM parsing, image size injection, afterSerialize hook
+ *
+ * Phase 3 (afterFormat): String transformations after DOM serialization
+ * - characterEntities: Convert characters to HTML entities
+ * - doctype: Insert DOCTYPE declaration
+ * - prettier: Format with Prettier
+ * - minifier: Minify HTML
+ * - lineBreak: Normalize line breaks
+ * - replace: Final content replacement
  * @param context - Required context (content, inputPath, outputPath, outputDir, context, compile)
- * @param options - Optional options (beforeSerialize, afterSerialize, url, imageSizes, etc.)
- * @returns Formatted HTML content or ArrayBuffer
+ * @param options - Optional options organized by transformation phase
+ * @returns Transformed HTML content or ArrayBuffer
  */
-export async function formatHtml(
-	context: FormatHtmlContext,
-	options?: FormatHtmlOptions,
+export async function pageTransform(
+	context: PageTransformContext,
+	options?: PageTransformOptions,
 ): Promise<string | ArrayBuffer> {
 	const {
 		content: initialContent,
@@ -123,14 +137,20 @@ export async function formatHtml(
 		{ isServe },
 	);
 
-	// Apply transformations sequentially using a pipeline
 	let content: string | ArrayBuffer = initialContent;
 
+	// Phase 1: beforeFormat (DOM操作前)
 	for (const processor of [
 		beforeSerialize(
 			{ transformContext, compile },
 			{ beforeSerialize: options?.beforeSerialize, isServe },
 		),
+	]) {
+		content = await processor(content);
+	}
+
+	// Phase 2: domManipulation (DOM操作)
+	for (const processor of [
 		domSerialize(
 			{ outputDir, transformContext, compile },
 			{
@@ -140,6 +160,12 @@ export async function formatHtml(
 				isServe,
 			},
 		),
+	]) {
+		content = await processor(content);
+	}
+
+	// Phase 3: afterFormat (DOM操作後)
+	for (const processor of [
 		characterEntities({ enabled: options?.characterEntities }),
 		doctype(),
 		prettier({ inputPath }, { prettier: options?.prettier }),
