@@ -68,31 +68,35 @@ describe('getAssetGroup with virtual file system', () => {
 	});
 
 	test('should filter files with glob option (AND condition)', async () => {
-		const result = await getAssetGroup({
-			inputDir: '/mock/input/dir',
-			outputDir: '/mock/output/dir',
-			compilerEntry: {
-				files: '**/*.{html,pug}',
-				outputExtension: '.html',
-				compiler: () => () => '',
+		const result = await getAssetGroup(
+			{
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.{html,pug}',
+					outputExtension: '.html',
+					compiler: () => () => '',
+				},
 			},
-			glob: '**/index.*',
-		});
+			{ glob: '**/index.*' },
+		);
 
 		expect(result.map((f) => f.inputPath)).toStrictEqual(['/mock/input/dir/index.html']);
 	});
 
 	test('should filter files with glob option matching specific directory', async () => {
-		const result = await getAssetGroup({
-			inputDir: '/mock/input/dir',
-			outputDir: '/mock/output/dir',
-			compilerEntry: {
-				files: '**/*.{html,pug}',
-				outputExtension: '.html',
-				compiler: () => () => '',
+		const result = await getAssetGroup(
+			{
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.{html,pug}',
+					outputExtension: '.html',
+					compiler: () => () => '',
+				},
 			},
-			glob: '**/subdir/**',
-		});
+			{ glob: '**/subdir/**' },
+		);
 
 		expect(result.map((f) => f.inputPath)).toStrictEqual([
 			'/mock/input/dir/subdir/page.html',
@@ -100,16 +104,18 @@ describe('getAssetGroup with virtual file system', () => {
 	});
 
 	test('should return empty array when glob matches no files', async () => {
-		const result = await getAssetGroup({
-			inputDir: '/mock/input/dir',
-			outputDir: '/mock/output/dir',
-			compilerEntry: {
-				files: '**/*.{html,pug}',
-				outputExtension: '.html',
-				compiler: () => () => '',
+		const result = await getAssetGroup(
+			{
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.{html,pug}',
+					outputExtension: '.html',
+					compiler: () => () => '',
+				},
 			},
-			glob: '**/nonexistent.*',
-		});
+			{ glob: '**/nonexistent.*' },
+		);
 
 		expect(result).toStrictEqual([]);
 	});

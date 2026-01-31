@@ -8,40 +8,48 @@ import picomatch from 'picomatch';
 
 import { getFile } from '../files/get-file.js';
 
-interface GetAssetsOptions {
+/**
+ * Required context for getting asset files
+ */
+export interface GetAssetGroupContext {
 	readonly inputDir: string;
 	readonly outputDir: string;
 	readonly compilerEntry: CustomCompilerWithMetadata;
+}
+
+/**
+ * Optional options for getting asset files
+ */
+export interface GetAssetGroupOptions {
 	readonly glob?: string;
 }
 
 /**
  * Gets asset files for the specified compiler entry
- * @param options - Options for getting assets
- * @param options.inputDir - Input directory path
- * @param options.outputDir - Output directory path
- * @param options.compilerEntry - Compiler with metadata configuration
- * @param options.glob - Additional glob pattern to filter results (AND condition with compilerEntry.files)
+ * @param context - Required context (inputDir, outputDir, compilerEntry)
+ * @param options - Optional options (glob)
  * @returns List of asset files
  */
 export async function getAssetGroup(
-	options: GetAssetsOptions,
+	context: GetAssetGroupContext,
+	options?: GetAssetGroupOptions,
 ): Promise<CompilableFile[]> {
-	const baseGlob = path.resolve(options.inputDir, options.compilerEntry.files);
+	const { inputDir, outputDir, compilerEntry } = context;
+	const baseGlob = path.resolve(inputDir, compilerEntry.files);
 
 	const fgOptions: {
 		cwd: string;
 		ignore?: string[];
 	} = {
-		cwd: options.inputDir,
+		cwd: inputDir,
 	};
-	if (options.compilerEntry.ignore) {
-		fgOptions.ignore = [options.compilerEntry.ignore];
+	if (compilerEntry.ignore) {
+		fgOptions.ignore = [compilerEntry.ignore];
 	}
 
 	let filePaths = await fg(baseGlob, fgOptions);
 
-	if (options.glob) {
+	if (options?.glob) {
 		const isMatch = picomatch(options.glob);
 		filePaths = filePaths.filter((filePath) => isMatch(filePath));
 	}
@@ -50,9 +58,9 @@ export async function getAssetGroup(
 
 	for (const filePath of filePaths) {
 		const file = getFile(filePath, {
-			inputDir: options.inputDir,
-			outputDir: options.outputDir,
-			outputExtension: options.compilerEntry.outputExtension,
+			inputDir,
+			outputDir,
+			outputExtension: compilerEntry.outputExtension,
 		});
 
 		results.push(file);
