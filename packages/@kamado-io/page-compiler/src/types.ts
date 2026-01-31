@@ -56,9 +56,10 @@ export interface PageCompilerOptions {
 	readonly imageSizes?: ImageSizesOptions | boolean;
 	/**
 	 * HTML minifier options
+	 * Set to false to disable minification
 	 * @default true
 	 */
-	readonly minifier?: HMTOptions;
+	readonly minifier?: HMTOptions | boolean;
 	/**
 	 * Prettier options
 	 * @default true

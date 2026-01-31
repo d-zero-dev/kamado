@@ -1,18 +1,16 @@
 import type { PageCompilerOptions } from './types.js';
 import type { CompileFunction } from 'kamado/compiler';
-import type { Context, TransformContext } from 'kamado/config';
+import type { Context } from 'kamado/config';
 
-import path from 'node:path';
-
-import { characterEntities } from 'character-entities';
-import { minify } from 'html-minifier-terser';
-import { domSerialize } from 'kamado/utils/dom';
-import {
-	format as prettierFormat,
-	resolveConfig as prettierResolveConfig,
-} from 'prettier';
-
-import { imageSizes } from './image.js';
+import { beforeSerialize } from './format/before-serialize.js';
+import { buildTransformContext } from './format/build-transform-context.js';
+import { characterEntities } from './format/character-entities.js';
+import { doctype } from './format/doctype.js';
+import { domSerialize } from './format/dom-serialize.js';
+import { lineBreak } from './format/line-break.js';
+import { minifier } from './format/minifier.js';
+import { prettier } from './format/prettier.js';
+import { replace } from './format/replace.js';
 
 /**
  * Required context for HTML formatting
@@ -117,125 +115,39 @@ export async function formatHtml(
 		context: kamadoContext,
 		compile,
 	} = context;
-	const {
-		beforeSerialize,
-		afterSerialize,
-		url,
-		imageSizes: imageSizesOption,
-		characterEntities: characterEntitiesOption,
-		prettier: prettierOption,
-		minifier: minifierOption,
-		lineBreak: lineBreakOption,
-		replace: replaceOption,
-		isServe = false,
-	} = options ?? {};
+	const { isServe = false } = options ?? {};
 
-	// Build TransformContext for beforeSerialize
-	const transformContext: TransformContext = {
-		path: outputPath.replace(outputDir, '').replace(/^\//, '') || '/',
-		inputPath,
-		outputPath,
-		isServe,
-		context: kamadoContext,
-	};
+	// Build TransformContext for hooks
+	const transformContext = buildTransformContext(
+		{ outputPath, outputDir, inputPath, kamadoContext },
+		{ isServe },
+	);
 
-	let content = initialContent;
+	// Apply transformations sequentially using a pipeline
+	let content: string | ArrayBuffer = initialContent;
 
-	if (beforeSerialize) {
-		content = await beforeSerialize(content, isServe, transformContext, compile);
-	}
-
-	const imageSizesValue = imageSizesOption ?? true;
-	if (imageSizesValue || afterSerialize) {
-		content = await domSerialize(content, {
-			hook: async (elements, window) => {
-				// Hooks
-				if (imageSizesValue) {
-					const imageSizeOpts =
-						typeof imageSizesValue === 'object' ? imageSizesValue : {};
-					const rootDir = path.resolve(outputDir);
-					await imageSizes(elements, {
-						rootDir,
-						...imageSizeOpts,
-					});
-				}
-
-				await afterSerialize?.(elements, window, isServe, transformContext, compile);
-			},
-			url,
-		});
-	}
-
-	if (characterEntitiesOption) {
-		for (const [entity, char] of Object.entries(characterEntities)) {
-			let _entity = entity;
-			const codePoint = char.codePointAt(0);
-			if (codePoint != null && codePoint < 127) {
-				continue;
-			}
-			if (/^[A-Z]+$/i.test(entity) && characterEntities[entity.toLowerCase()] === char) {
-				_entity = entity.toLowerCase();
-			}
-			content = content.replaceAll(char, `&${_entity};`);
-		}
-	}
-
-	if (
-		// Start with `<html` (For partial HTML)
-		/^<html(?:\s|>)/i.test(content.trim()) &&
-		// Not start with `<!doctype html`
-		!/^<!doctype html/i.test(content.trim())
-	) {
-		// eleventy-pug-plugin does not support `doctype` option
-		content = '<!DOCTYPE html>\n' + content;
-	}
-
-	if (prettierOption ?? true) {
-		const userPrettierConfig = typeof prettierOption === 'object' ? prettierOption : {};
-		const prettierConfig = await prettierResolveConfig(inputPath);
-		content = await prettierFormat(content, {
-			parser: 'html',
-			printWidth: 100_000,
-			tabWidth: 2,
-			useTabs: false,
-			...prettierConfig,
-			...userPrettierConfig,
-		});
-	}
-
-	if (minifierOption ?? true) {
-		content = await minify(content, {
-			collapseWhitespace: false,
-			collapseBooleanAttributes: true,
-			removeComments: false,
-			removeRedundantAttributes: true,
-			removeScriptTypeAttributes: true,
-			removeStyleLinkTypeAttributes: true,
-			useShortDoctype: false,
-			minifyCSS: true,
-			minifyJS: true,
-			...minifierOption,
-		});
-	}
-
-	if (lineBreakOption) {
-		content = content.replaceAll(/\r?\n/g, lineBreakOption);
-	}
-
-	if (replaceOption) {
-		const filePath = outputPath;
-		const dirPath = path.dirname(filePath);
-		const relativePathFromBase = path.relative(dirPath, outputDir) || '.';
-
-		content = await replaceOption(
-			content,
+	for (const processor of [
+		beforeSerialize(
+			{ transformContext, compile },
+			{ beforeSerialize: options?.beforeSerialize, isServe },
+		),
+		domSerialize(
+			{ outputDir, transformContext, compile },
 			{
-				filePath,
-				dirPath,
-				relativePathFromBase,
+				imageSizes: options?.imageSizes,
+				afterSerialize: options?.afterSerialize,
+				url: options?.url,
+				isServe,
 			},
-			isServe,
-		);
+		),
+		characterEntities({ enabled: options?.characterEntities }),
+		doctype(),
+		prettier({ inputPath }, { prettier: options?.prettier }),
+		minifier({ minifier: options?.minifier }),
+		lineBreak({ lineBreak: options?.lineBreak }),
+		replace({ outputPath, outputDir }, { replace: options?.replace, isServe }),
+	]) {
+		content = await processor(content);
 	}
 
 	return content;
