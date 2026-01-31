@@ -41,22 +41,11 @@ async function sizeOf(filePath: string): Promise<ImageSize> {
 }
 
 /**
- * Required context for image sizes function
- */
-export interface ImageSizesContext {
-	readonly elements: Element[];
-}
-
-/**
  * Automatically adds width/height attributes to image elements
- * @param context - Required context (elements)
+ * @param elements - Array of elements to process
  * @param options - Optional options (rootDir, selector, ext)
  */
-export async function imageSizes(
-	context: ImageSizesContext,
-	options?: ImageSizesOptions,
-) {
-	const { elements } = context;
+export async function imageSizes(elements: Element[], options?: ImageSizesOptions) {
 	const {
 		rootDir,
 		selector,

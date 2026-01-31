@@ -155,13 +155,10 @@ export async function formatHtml(
 					const imageSizeOpts =
 						typeof imageSizesValue === 'object' ? imageSizesValue : {};
 					const rootDir = path.resolve(outputDir);
-					await imageSizes(
-						{ elements },
-						{
-							rootDir,
-							...imageSizeOpts,
-						},
-					);
+					await imageSizes(elements, {
+						rootDir,
+						...imageSizeOpts,
+					});
 				}
 
 				await afterSerialize?.(elements, window, isServe, transformContext, compile);
