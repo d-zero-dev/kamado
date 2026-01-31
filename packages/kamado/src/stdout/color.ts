@@ -12,13 +12,6 @@ type ColorsNames = {
 };
 
 /**
- * Required context for file path colorizer
- */
-export interface FilePathColorizerContext {
-	readonly rootDir: string;
-}
-
-/**
  * Optional options for file path colorizer
  */
 export interface FilePathColorizerOptions {
@@ -33,29 +26,22 @@ export interface FilePathColorizerOptions {
 
 /**
  * Generates a function to colorize file paths
- * @param context - Required context (rootDir)
+ * @param rootDir - Root directory for relative path calculation
  * @param options - Optional options (cwd, enable, colors)
  * @returns Function that takes a file path and returns colorized string
  * @throws {Error} if the returned function is called with a non-absolute file path
  * @example
  * ```typescript
- * const colorize = filePathColorizer(
- *   { rootDir: './src' },
- *   {
- *     colors: {
- *       dir: c.cyan,
- *       name: { '.ts': c.yellow, '.js': c.green },
- *     },
- *   }
- * );
+ * const colorize = filePathColorizer('./src', {
+ *   colors: {
+ *     dir: c.cyan,
+ *     name: { '.ts': c.yellow, '.js': c.green },
+ *   },
+ * });
  * const colored = colorize('/path/to/file.ts');
  * ```
  */
-export function filePathColorizer(
-	context: FilePathColorizerContext,
-	options?: FilePathColorizerOptions,
-) {
-	const { rootDir } = context;
+export function filePathColorizer(rootDir: string, options?: FilePathColorizerOptions) {
 	const colorsUnderDir = options?.colors?.underDir ?? c.dim;
 	const colorsDir = options?.colors?.dir ?? c.white;
 	const colorsNames: Required<ColorsNames> = {
