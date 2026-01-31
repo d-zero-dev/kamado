@@ -81,13 +81,10 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 						},
 					),
 				titleList: (options: TitleListOptions) =>
-					titleList(
-						{ breadcrumbs },
-						{
-							siteName: context.pkg.production?.siteName,
-							...options,
-						},
-					),
+					titleList(breadcrumbs, {
+						siteName: context.pkg.production?.siteName,
+						...options,
+					}),
 				breadcrumbs,
 			};
 

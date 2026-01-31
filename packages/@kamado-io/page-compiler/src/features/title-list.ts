@@ -50,20 +50,7 @@ export type TitleListOptions = {
  * // Returns: "📄 Page Title | Section | My Site"
  * ```
  */
-/**
- * Required context for title list generation
- */
-export interface TitleListContext {
-	readonly breadcrumbs: BreadcrumbItem[];
-}
-
-/**
- *
- * @param context
- * @param options
- */
-export function titleList(context: TitleListContext, options?: TitleListOptions) {
-	const { breadcrumbs } = context;
+export function titleList(breadcrumbs: BreadcrumbItem[], options?: TitleListOptions) {
 	const {
 		separator = ' | ',
 		baseURL = '/',
