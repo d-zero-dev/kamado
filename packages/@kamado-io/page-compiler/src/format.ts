@@ -147,9 +147,8 @@ export async function formatHtml(
 
 	const imageSizesValue = imageSizesOption ?? true;
 	if (imageSizesValue || afterSerialize) {
-		content = await domSerialize(
-			content,
-			async (elements, window) => {
+		content = await domSerialize(content, {
+			hook: async (elements, window) => {
 				// Hooks
 				if (imageSizesValue) {
 					const imageSizeOpts =
@@ -164,7 +163,7 @@ export async function formatHtml(
 				await afterSerialize?.(elements, window, isServe, transformContext, compile);
 			},
 			url,
-		);
+		});
 	}
 
 	if (characterEntitiesOption) {
