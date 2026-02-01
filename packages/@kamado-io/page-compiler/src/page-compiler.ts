@@ -154,14 +154,14 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 				},
 				{
 					url,
-					beforeSerialize: options?.beforeSerialize,
-					afterSerialize: options?.afterSerialize,
+					preprocessContent: options?.preprocessContent,
+					manipulateDOM: options?.manipulateDOM,
 					imageSizes: options?.imageSizes,
 					characterEntities: options?.characterEntities,
 					prettier: options?.prettier,
 					minifier: options?.minifier,
 					lineBreak: options?.lineBreak,
-					replace: options?.replace,
+					postprocessContent: options?.postprocessContent,
 					isServe,
 				},
 			);
