@@ -3,9 +3,9 @@ import type { PageCompilerOptions } from '../types.js';
 import path from 'node:path';
 
 /**
- * Required context for content replacement
+ * Required context for content postprocessing
  */
-export interface ReplaceContext {
+export interface PostprocessContentContext {
 	/**
 	 * Output file path
 	 */
@@ -17,13 +17,13 @@ export interface ReplaceContext {
 }
 
 /**
- * Options for content replacement
+ * Options for content postprocessing
  */
-export interface ReplaceOptions {
+export interface PostprocessContentOptions {
 	/**
-	 * Final HTML content replacement processing
+	 * Hook function called for postprocessing content after DOM serialization
 	 */
-	readonly replace?: PageCompilerOptions['replace'];
+	readonly postprocessContent?: PageCompilerOptions['postprocessContent'];
 	/**
 	 * Whether running on development server
 	 * @default false
@@ -32,18 +32,18 @@ export interface ReplaceOptions {
 }
 
 /**
- * Applies final content replacement processing.
+ * Applies final content postprocessing.
  *
- * Calculates path information and passes it to the replace callback function.
+ * Calculates path information and passes it to the postprocessContent callback function.
  * This is the last processing step in the pipeline.
  * @param context - Required context (outputPath, outputDir)
  * @param options - Configuration options
- * @returns A function that takes content and returns a Promise of replaced content
+ * @returns A function that takes content and returns a Promise of processed content
  * @internal
  */
-export function replace(
-	context: ReplaceContext,
-	options?: ReplaceOptions,
+export function postprocessContent(
+	context: PostprocessContentContext,
+	options?: PostprocessContentOptions,
 ): (content: string | ArrayBuffer) => Promise<string | ArrayBuffer> {
 	return async (content: string | ArrayBuffer): Promise<string | ArrayBuffer> => {
 		if (typeof content !== 'string') {
@@ -51,9 +51,9 @@ export function replace(
 		}
 
 		const { outputPath, outputDir } = context;
-		const { replace: replaceOption, isServe = false } = options ?? {};
+		const { postprocessContent: postprocessOption, isServe = false } = options ?? {};
 
-		if (!replaceOption) {
+		if (!postprocessOption) {
 			return content;
 		}
 
@@ -61,7 +61,7 @@ export function replace(
 		const dirPath = path.dirname(filePath);
 		const relativePathFromBase = path.relative(dirPath, outputDir) || '.';
 
-		return await replaceOption(
+		return await postprocessOption(
 			content,
 			{
 				filePath,

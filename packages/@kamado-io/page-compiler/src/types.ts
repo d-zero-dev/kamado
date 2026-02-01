@@ -85,26 +85,26 @@ export interface PageCompilerOptions {
 	 */
 	readonly host?: string;
 	/**
-	 * Hook function called before DOM serialization
+	 * Hook function called for preprocessing content before DOM parsing
 	 * @param content - HTML content
 	 * @param isServe - Whether running on development server
 	 * @param context - Transform context (provides path and config info)
 	 * @returns Processed HTML content
 	 */
-	readonly beforeSerialize?: (
+	readonly preprocessContent?: (
 		content: string,
 		isServe: boolean,
 		context: TransformContext,
 		compile: CompileFunction,
 	) => Promise<string> | string;
 	/**
-	 * Hook function called after DOM serialization
+	 * Hook function called for DOM manipulation after parsing
 	 * @param elements - Array of DOM elements
 	 * @param window - Window object
 	 * @param isServe - Whether running on development server
 	 * @param context - Transform context (provides path and config info)
 	 */
-	readonly afterSerialize?: (
+	readonly manipulateDOM?: (
 		elements: readonly Element[],
 		window: Window,
 		isServe: boolean,
@@ -112,13 +112,13 @@ export interface PageCompilerOptions {
 		compile: CompileFunction,
 	) => Promise<void> | void;
 	/**
-	 * Final HTML content replacement processing
+	 * Hook function called for postprocessing content after DOM serialization
 	 * @param content - HTML content
 	 * @param paths - Path information
 	 * @param isServe - Whether running on development server
-	 * @returns Replaced HTML content
+	 * @returns Processed HTML content
 	 */
-	readonly replace?: (
+	readonly postprocessContent?: (
 		content: string,
 		paths: Paths,
 		isServe: boolean,

@@ -9,9 +9,9 @@ import { domSerialize as serializeDom } from 'kamado/utils/dom';
 import { imageSizes } from '../image.js';
 
 /**
- * Required context for DOM serialization
+ * Required context for DOM manipulation
  */
-export interface DomSerializeContext {
+export interface ManipulateDOMContext {
 	/**
 	 * Output directory path (used for image size calculation)
 	 */
@@ -27,9 +27,9 @@ export interface DomSerializeContext {
 }
 
 /**
- * Options for DOM serialization
+ * Options for DOM manipulation
  */
-export interface DomSerializeOptions {
+export interface ManipulateDOMOptions {
 	/**
 	 * Configuration for automatically adding width/height attributes to images
 	 * Set to false to disable image size injection
@@ -37,9 +37,9 @@ export interface DomSerializeOptions {
 	 */
 	readonly imageSizes?: PageCompilerOptions['imageSizes'];
 	/**
-	 * Hook function called after DOM serialization
+	 * Hook function called for DOM manipulation after parsing
 	 */
-	readonly afterSerialize?: PageCompilerOptions['afterSerialize'];
+	readonly manipulateDOM?: PageCompilerOptions['manipulateDOM'];
 	/**
 	 * JSDOM URL configuration (optional)
 	 */
@@ -52,22 +52,22 @@ export interface DomSerializeOptions {
 }
 
 /**
- * Applies DOM serialization with image size injection and afterSerialize hook.
+ * Applies DOM manipulation with image size injection and manipulateDOM hook.
  *
- * Only performs DOM serialization if imageSizes or afterSerialize is enabled.
+ * Only performs DOM operations if imageSizes or manipulateDOM is enabled.
  * This is the most complex processing step, involving:
  * - Parsing HTML into a DOM
  * - Injecting width/height attributes to images (if enabled)
- * - Executing the afterSerialize hook (if provided)
+ * - Executing the manipulateDOM hook (if provided)
  * - Serializing the DOM back to HTML
  * @param context - Required context (outputDir, transformContext, compile)
  * @param options - Configuration options
  * @returns A function that takes content and returns a Promise of processed content
  * @internal
  */
-export function domSerialize(
-	context: DomSerializeContext,
-	options?: DomSerializeOptions,
+export function manipulateDOM(
+	context: ManipulateDOMContext,
+	options?: ManipulateDOMOptions,
 ): (content: string | ArrayBuffer) => Promise<string | ArrayBuffer> {
 	return async (content: string | ArrayBuffer): Promise<string | ArrayBuffer> => {
 		if (typeof content !== 'string') {
@@ -77,15 +77,15 @@ export function domSerialize(
 		const { outputDir, transformContext, compile } = context;
 		const {
 			imageSizes: imageSizesOption,
-			afterSerialize,
+			manipulateDOM,
 			url,
 			isServe = false,
 		} = options ?? {};
 
 		const imageSizesValue = imageSizesOption ?? true;
 
-		// Skip DOM serialization if both imageSizes and afterSerialize are disabled
-		if (!imageSizesValue && !afterSerialize) {
+		// Skip DOM operations if both imageSizes and manipulateDOM are disabled
+		if (!imageSizesValue && !manipulateDOM) {
 			return content;
 		}
 
@@ -102,8 +102,8 @@ export function domSerialize(
 					});
 				}
 
-				// afterSerialize hook
-				await afterSerialize?.(elements, window, isServe, transformContext, compile);
+				// manipulateDOM hook
+				await manipulateDOM?.(elements, window, isServe, transformContext, compile);
 			},
 			url,
 		});

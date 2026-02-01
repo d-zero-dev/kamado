@@ -3,9 +3,9 @@ import type { CompileFunction } from 'kamado/compiler';
 import type { TransformContext } from 'kamado/config';
 
 /**
- * Required context for beforeSerialize hook
+ * Required context for preprocessContent hook
  */
-export interface BeforeSerializeContext {
+export interface PreprocessContentContext {
 	/**
 	 * Transform context to pass to the hook
 	 */
@@ -17,13 +17,13 @@ export interface BeforeSerializeContext {
 }
 
 /**
- * Options for beforeSerialize hook
+ * Options for preprocessContent hook
  */
-export interface BeforeSerializeOptions {
+export interface PreprocessContentOptions {
 	/**
-	 * Hook function called before DOM serialization
+	 * Hook function called for preprocessing content before DOM parsing
 	 */
-	readonly beforeSerialize?: PageCompilerOptions['beforeSerialize'];
+	readonly preprocessContent?: PageCompilerOptions['preprocessContent'];
 	/**
 	 * Whether running on development server
 	 * @default false
@@ -32,18 +32,18 @@ export interface BeforeSerializeOptions {
 }
 
 /**
- * Applies the beforeSerialize hook to HTML content.
+ * Applies the preprocessContent hook to HTML content.
  *
- * Executes the user-provided hook function before DOM serialization occurs.
+ * Executes the user-provided hook function before DOM parsing occurs.
  * The hook receives the content, isServe flag, transform context, and compile function.
  * @param context - Required context (transformContext, compile)
  * @param options - Configuration options
  * @returns A function that takes content and returns a Promise of processed content
  * @internal
  */
-export function beforeSerialize(
-	context: BeforeSerializeContext,
-	options?: BeforeSerializeOptions,
+export function preprocessContent(
+	context: PreprocessContentContext,
+	options?: PreprocessContentOptions,
 ): (content: string | ArrayBuffer) => Promise<string | ArrayBuffer> {
 	return async (content: string | ArrayBuffer): Promise<string | ArrayBuffer> => {
 		if (typeof content !== 'string') {
@@ -51,12 +51,12 @@ export function beforeSerialize(
 		}
 
 		const { transformContext, compile } = context;
-		const { beforeSerialize, isServe = false } = options ?? {};
+		const { preprocessContent, isServe = false } = options ?? {};
 
-		if (!beforeSerialize) {
+		if (!preprocessContent) {
 			return content;
 		}
 
-		return await beforeSerialize(content, isServe, transformContext, compile);
+		return await preprocessContent(content, isServe, transformContext, compile);
 	};
 }
