@@ -10,8 +10,8 @@ import { getGlobalData } from 'kamado/data';
 import { getBreadcrumbs } from './features/breadcrumbs.js';
 import { type GetNavTreeOptions, getNavTree } from './features/nav.js';
 import { type TitleListOptions, titleList } from './features/title-list.js';
-import { pageTransform } from './format.js';
 import { getLayouts } from './layouts.js';
+import { pageTransform } from './page-transform.js';
 import { transpileLayout } from './transpile-layout.js';
 import { transpileMainContent } from './transpile-main.js';
 

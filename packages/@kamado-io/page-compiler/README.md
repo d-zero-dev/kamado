@@ -428,7 +428,7 @@ The transformation pipeline is divided into three phases:
 import {
 	pageTransform,
 	type PageTransformOptions,
-} from '@kamado-io/page-compiler/format';
+} from '@kamado-io/page-compiler/page-transform';
 ```
 
 ### Usage

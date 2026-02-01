@@ -2,7 +2,7 @@ import type { Context, TransformContext } from 'kamado/config';
 
 import { describe, expect, test } from 'vitest';
 
-import { pageTransform } from './format.js';
+import { pageTransform } from './page-transform.js';
 
 // Mock compile function for tests
 const mockCompile = () => Promise.resolve('');

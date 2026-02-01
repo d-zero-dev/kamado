@@ -15,9 +15,9 @@
 			"types": "./dist/page-compiler.d.ts",
 			"default": "./dist/page-compiler.js"
 		},
-		"./format": {
-			"types": "./dist/format.d.ts",
-			"default": "./dist/format.js"
+		"./page-transform": {
+			"types": "./dist/page-transform.d.ts",
+			"default": "./dist/page-transform.js"
 		},
 		"./transform/inject-to-head": {
 			"types": "./dist/transform/inject-to-head.d.ts",
