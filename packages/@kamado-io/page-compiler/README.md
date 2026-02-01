@@ -52,9 +52,9 @@ export const config: UserConfig = {
 - `transformBreadcrumbItem`: Function to transform each breadcrumb item. Can add custom properties to breadcrumb items. `(item: BreadcrumbItem) => BreadcrumbItem`
 - `transformNavNode`: Function to transform each navigation node. Can add custom properties or filter nodes by returning `null`/`undefined`. `(node: NavNode) => NavNode | null | undefined`
 - `host`: Host URL for JSDOM's url option. If not specified, in build mode uses `production.baseURL` or `production.host` from package.json, in serve mode uses dev server URL (`http://${devServer.host}:${devServer.port}`)
-- `beforeSerialize`: Hook function called before DOM serialization `(content: string, isServe: boolean, context: TransformContext, compile: CompileFunction) => Promise<string> | string`
-- `afterSerialize`: Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext, compile: CompileFunction) => Promise<void> | void`
-- `replace`: Final HTML content replacement processing `(content: string, paths: Paths, isServe: boolean) => Promise<string> | string`
+- `preprocessContent`: Hook function called for preprocessing content before DOM parsing `(content: string, isServe: boolean, context: TransformContext, compile: CompileFunction) => Promise<string> | string`
+- `manipulateDOM`: Hook function called for DOM manipulation after parsing `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext, compile: CompileFunction) => Promise<void> | void`
+- `postprocessContent`: Hook function called for postprocessing content after DOM serialization `(content: string, paths: Paths, isServe: boolean) => Promise<string> | string`
 - `compileHooks`: Compilation hooks for customizing compile process
   - Can be an object or a function `(options: PageCompilerOptions) => CompileHooksObject | Promise<CompileHooksObject>` that returns an object (sync or async)
   - `main`: Hooks for main content compilation
@@ -127,7 +127,7 @@ export const config: UserConfig = {
 };
 ```
 
-**Important:** The `devServer.transforms` array only applies during development server mode (`kamado server`). Transforms in this array are automatically applied to responses in serve mode only. To use transform utilities in both serve and build modes, use them within the `beforeSerialize` hook instead (see [Using Transform Utilities in Build Time](#using-transform-utilities-in-build-time)).
+**Important:** The `devServer.transforms` array only applies during development server mode (`kamado server`). Transforms in this array are automatically applied to responses in serve mode only. To use transform utilities in both serve and build modes, use them within the `preprocessContent` hook instead (see [Using Transform Utilities in Build Time](#using-transform-utilities-in-build-time)).
 
 **Options:**
 
@@ -213,7 +213,7 @@ createSSIShim({
 
 ### TransformContext
 
-The `TransformContext` object is passed as the third parameter to `beforeSerialize` and the fourth parameter to `afterSerialize`. It provides access to file path information and the full Kamado execution context.
+The `TransformContext` object is passed as the third parameter to `preprocessContent` and the fourth parameter to `manipulateDOM`. It provides access to file path information and the full Kamado execution context.
 
 **Properties:**
 
@@ -232,7 +232,7 @@ The `TransformContext` object is passed as the third parameter to `beforeSeriali
 **Example:**
 
 ```ts
-beforeSerialize: async (content, isServe, context, compile) => {
+preprocessContent: async (content, isServe, context, compile) => {
 	console.log('Processing:', context.path);
 	console.log('Input:', context.inputPath);
 	console.log('Output:', context.outputPath);
@@ -253,16 +253,16 @@ beforeSerialize: async (content, isServe, context, compile) => {
 
 ### Using Transform Utilities in Build Time
 
-Transform utilities can also be used during build time via the `beforeSerialize` hook. The hook receives a `TransformContext` as its third parameter, allowing you to use transform utilities in both development and build contexts.
+Transform utilities can also be used during build time via the `preprocessContent` hook. The hook receives a `TransformContext` as its third parameter, allowing you to use transform utilities in both development and build contexts.
 
-**Example: Using injectToHead in beforeSerialize**
+**Example: Using injectToHead in preprocessContent**
 
 ```ts
 import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
 import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
 const pageCompilerOptions: PageCompilerOptions = {
-	beforeSerialize: async (content, isServe, context, compile) => {
+	preprocessContent: async (content, isServe, context, compile) => {
 		// Apply injectToHead transform
 		const injectTransform = createInjectToHeadTransform({
 			content: isServe
@@ -275,14 +275,14 @@ const pageCompilerOptions: PageCompilerOptions = {
 };
 ```
 
-**Example: Using createSSIShim in beforeSerialize**
+**Example: Using createSSIShim in preprocessContent**
 
 ```ts
 import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
 import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
 const pageCompilerOptions: PageCompilerOptions = {
-	beforeSerialize: async (content, isServe, context, compile) => {
+	preprocessContent: async (content, isServe, context, compile) => {
 		// Apply SSI shim transform
 		const ssiTransform = createSSIShimTransform({
 			onError: (path) => `<!-- Failed to include: ${path} -->`,
@@ -301,7 +301,7 @@ import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-s
 import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
 const pageCompilerOptions: PageCompilerOptions = {
-	beforeSerialize: async (content, isServe, context, compile) => {
+	preprocessContent: async (content, isServe, context, compile) => {
 		// Apply SSI first
 		const ssiTransform = createSSIShimTransform();
 		let result = await ssiTransform(content, context);
@@ -324,7 +324,7 @@ import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/
 import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
 const pageCompilerOptions: PageCompilerOptions = {
-	beforeSerialize: async (content, isServe, context, compile) => {
+	preprocessContent: async (content, isServe, context, compile) => {
 		// Inject admin tools only for admin pages
 		if (context.path.startsWith('admin/')) {
 			const adminTransform = createInjectToHeadTransform({
@@ -354,7 +354,7 @@ import { join, dirname } from 'node:path';
 import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
 const pageCompilerOptions: PageCompilerOptions = {
-	beforeSerialize: async (content, isServe, context, compile) => {
+	preprocessContent: async (content, isServe, context, compile) => {
 		// Read a sibling file based on current file location
 		const inputDir = dirname(context.inputPath);
 		const metaFile = join(inputDir, 'meta.json');
@@ -408,19 +408,19 @@ The `pageTransform` function is available as a standalone API for transforming p
 
 The transformation pipeline is divided into three phases:
 
-1. **Phase 1: beforeFormat** (DOM操作前) - String transformations before DOM parsing
-   - `beforeSerialize`: User-defined pre-DOM hook for template expansion, macro replacement, etc.
+1. **Phase 1: preprocessContent** (DOM parsing前のコンテンツ前処理) - String transformations before DOM parsing
+   - `preprocessContent`: User-defined pre-DOM hook for template expansion, macro replacement, etc.
 
-2. **Phase 2: domManipulation** (DOM操作) - DOM-based transformations
-   - `domSerialize`: DOM parsing, image size injection, and afterSerialize hook
+2. **Phase 2: manipulateDOM** (DOM操作) - DOM-based transformations
+   - `manipulateDOM`: DOM parsing, image size injection, and manipulateDOM hook
 
-3. **Phase 3: afterFormat** (DOM操作後) - String transformations after DOM serialization
+3. **Phase 3: postprocessContent** (DOM serialization後のコンテンツ後処理) - String transformations after DOM serialization
    - `characterEntities`: Convert characters to HTML entities
    - `doctype`: Insert DOCTYPE declaration
    - `prettier`: Format with Prettier
    - `minifier`: Minify HTML
    - `lineBreak`: Normalize line breaks
-   - `replace`: Final content replacement
+   - `postprocessContent`: Final content postprocessing
 
 ### Import
 
@@ -466,23 +466,23 @@ const transformedHtml = await pageTransform(
 
 Options are organized by transformation phase:
 
-**Phase 1: beforeFormat**
+**Phase 1: preprocessContent**
 
-- `beforeSerialize` (optional): Hook function called before DOM serialization `(content: string, isServe: boolean, context: TransformContext) => Promise<string> | string`
+- `preprocessContent` (optional): Hook function called for preprocessing content before DOM parsing `(content: string, isServe: boolean, context: TransformContext) => Promise<string> | string`
 
-**Phase 2: domManipulation**
+**Phase 2: manipulateDOM**
 
 - `imageSizes` (optional): Configuration for automatically adding width/height attributes to images (default: `true`)
-- `afterSerialize` (optional): Hook function called after DOM serialization `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext) => Promise<void> | void`
+- `manipulateDOM` (optional): Hook function called for DOM manipulation after parsing `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext) => Promise<void> | void`
 - `url` (optional): JSDOM URL configuration for DOM operations
 
-**Phase 3: afterFormat**
+**Phase 3: postprocessContent**
 
 - `characterEntities` (optional): Whether to enable character entity conversion
 - `prettier` (optional): Prettier options (default: `true`)
 - `minifier` (optional): HTML minifier options (default: `true`)
 - `lineBreak` (optional): Line break configuration (`'\n'` or `'\r\n'`)
-- `replace` (optional): Final HTML content replacement processing `(content: string, paths: Paths, isServe: boolean) => Promise<string> | string`
+- `postprocessContent` (optional): Hook function called for postprocessing content after DOM serialization `(content: string, paths: Paths, isServe: boolean) => Promise<string> | string`
 
 **Common**
 
