@@ -8,7 +8,7 @@ import { pageTransform } from './page-transform.js';
 const mockCompile = () => Promise.resolve('');
 
 describe('pageTransform', () => {
-	describe('beforeSerialize hook', () => {
+	describe('preprocessContent hook', () => {
 		test('receives TransformContext as third parameter', async () => {
 			let receivedContext: TransformContext | undefined;
 
@@ -37,7 +37,7 @@ describe('pageTransform', () => {
 				},
 				{
 					isServe: false,
-					beforeSerialize: (content, isServe, context) => {
+					preprocessContent: (content, isServe, context) => {
 						receivedContext = context;
 						return content;
 					},
@@ -80,7 +80,7 @@ describe('pageTransform', () => {
 				},
 				{
 					isServe: true,
-					beforeSerialize: (content, isServe, context) => {
+					preprocessContent: (content, isServe, context) => {
 						receivedContext = context;
 						return content;
 					},
@@ -119,7 +119,7 @@ describe('pageTransform', () => {
 				},
 				{
 					isServe: false,
-					beforeSerialize: (content, isServe, context) => {
+					preprocessContent: (content, isServe, context) => {
 						receivedContext = context;
 						return content;
 					},
@@ -129,7 +129,7 @@ describe('pageTransform', () => {
 			expect(receivedContext?.path).toBe('index.html');
 		});
 
-		test('allows transform utilities to be used in beforeSerialize', async () => {
+		test('allows transform utilities to be used in preprocessContent', async () => {
 			const mockContext: Context = {
 				mode: 'build',
 				dir: {
@@ -155,7 +155,7 @@ describe('pageTransform', () => {
 				},
 				{
 					isServe: false,
-					beforeSerialize: (content, _isServe, context) => {
+					preprocessContent: (content, _isServe, context) => {
 						// Simulate using a transform utility
 						expect(context.path).toBe('page.html');
 						expect(context.context.mode).toBe('build');
@@ -168,7 +168,7 @@ describe('pageTransform', () => {
 		});
 	});
 
-	describe('afterSerialize hook', () => {
+	describe('manipulateDOM hook', () => {
 		test('receives TransformContext as fourth parameter', async () => {
 			let receivedContext: TransformContext | undefined;
 
@@ -197,7 +197,7 @@ describe('pageTransform', () => {
 				},
 				{
 					isServe: false,
-					afterSerialize: (elements, window, isServe, context) => {
+					manipulateDOM: (elements, window, isServe, context) => {
 						receivedContext = context;
 					},
 				},
@@ -239,7 +239,7 @@ describe('pageTransform', () => {
 				},
 				{
 					isServe: true,
-					afterSerialize: (elements, window, isServe, context) => {
+					manipulateDOM: (elements, window, isServe, context) => {
 						receivedContext = context;
 					},
 				},
