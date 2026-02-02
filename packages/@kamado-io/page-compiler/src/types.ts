@@ -1,12 +1,8 @@
 import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { GetNavTreeOptions, NavNode } from './features/nav.js';
 import type { TitleListOptions } from './features/title-list.js';
-import type { ImageSizesOptions } from './image.js';
-import type { Options as HMTOptions } from 'html-minifier-terser';
-import type { CompileFunction } from 'kamado/compiler';
-import type { TransformContext } from 'kamado/config';
+import type { Transform } from 'kamado/config';
 import type { CompilableFile, FileObject } from 'kamado/files';
-import type { Options as PrettierOptions } from 'prettier';
 
 /**
  * Options for the page compiler
@@ -50,79 +46,62 @@ export interface PageCompilerOptions {
 		readonly contentVariableName?: string;
 	};
 	/**
-	 * Configuration for automatically adding width/height attributes to images
-	 * @default true
+	 * Array of transform functions to apply to compiled HTML, or a function that receives and returns transforms
+	 * If omitted, uses defaultPageTransforms
+	 * @example
+	 * ```typescript
+	 * import { defaultPageTransforms } from '@kamado-io/page-compiler/page-transform';
+	 * import { manipulateDOM } from '@kamado-io/page-compiler/transform/manipulate-dom';
+	 * import { prettier } from '@kamado-io/page-compiler/transform/prettier';
+	 *
+	 * // Use defaults
+	 * pageCompiler({ transforms: defaultPageTransforms });
+	 *
+	 * // Custom selection
+	 * pageCompiler({
+	 *   transforms: [
+	 *     manipulateDOM({ imageSizes: true }),
+	 *     prettier({ options: { printWidth: 120 } }),
+	 *   ],
+	 * });
+	 *
+	 * // Extend defaults with custom transform (requires import)
+	 * pageCompiler({
+	 *   transforms: [
+	 *     {
+	 *       name: 'custom',
+	 *       transform: (content, ctx) => {
+	 *         // Custom processing
+	 *         return content;
+	 *       },
+	 *     },
+	 *     ...defaultPageTransforms,
+	 *   ],
+	 * });
+	 *
+	 * // Use function to extend defaults (no import needed)
+	 * pageCompiler({
+	 *   transforms: (defaults) => [
+	 *     {
+	 *       name: 'prepend-transform',
+	 *       transform: (content) => content,
+	 *     },
+	 *     ...defaults,
+	 *     {
+	 *       name: 'append-transform',
+	 *       transform: (content) => content,
+	 *     },
+	 *   ],
+	 * });
+	 * ```
 	 */
-	readonly imageSizes?: ImageSizesOptions | boolean;
-	/**
-	 * HTML minifier options
-	 * Set to false to disable minification
-	 * @default true
-	 */
-	readonly minifier?: HMTOptions | boolean;
-	/**
-	 * Prettier options
-	 * @default true
-	 */
-	readonly prettier?: PrettierOptions | boolean;
-	/**
-	 * Line break configuration
-	 */
-	readonly lineBreak?: '\n' | '\r\n';
-	/**
-	 * Whether to enable character entity conversion
-	 */
-	readonly characterEntities?: boolean;
+	readonly transforms?:
+		| Transform[]
+		| ((defaultTransforms: readonly Transform[]) => Transform[]);
 	/**
 	 * Function to optimize titles
 	 */
 	readonly optimizeTitle?: (title: string) => string;
-	/**
-	 * JSDOM URL configuration
-	 * Host URL to use for JSDOM's url option
-	 * If not specified, will use production domain from package.json in build mode,
-	 * or dev server URL in serve mode
-	 */
-	readonly host?: string;
-	/**
-	 * Hook function called for preprocessing content before DOM parsing
-	 * @param content - HTML content
-	 * @param isServe - Whether running on development server
-	 * @param context - Transform context (provides path and config info)
-	 * @returns Processed HTML content
-	 */
-	readonly preprocessContent?: (
-		content: string,
-		isServe: boolean,
-		context: TransformContext,
-		compile: CompileFunction,
-	) => Promise<string> | string;
-	/**
-	 * Hook function called for DOM manipulation after parsing
-	 * @param elements - Array of DOM elements
-	 * @param window - Window object
-	 * @param isServe - Whether running on development server
-	 * @param context - Transform context (provides path and config info)
-	 */
-	readonly manipulateDOM?: (
-		elements: readonly Element[],
-		window: Window,
-		isServe: boolean,
-		context: TransformContext,
-		compile: CompileFunction,
-	) => Promise<void> | void;
-	/**
-	 * Hook function called for postprocessing content after DOM serialization
-	 * @param content - HTML content
-	 * @param paths - Path information
-	 * @param isServe - Whether running on development server
-	 * @returns Processed HTML content
-	 */
-	readonly postprocessContent?: (
-		content: string,
-		paths: Paths,
-		isServe: boolean,
-	) => Promise<string> | string;
 	/**
 	 * Compilation hooks for customizing compile process
 	 * Can be an object or a function that returns an object
