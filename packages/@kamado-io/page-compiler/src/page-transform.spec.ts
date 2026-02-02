@@ -2,252 +2,109 @@ import type { Context, TransformContext } from 'kamado/config';
 
 import { describe, expect, test } from 'vitest';
 
-import { pageTransform } from './page-transform.js';
+import { defaultPageTransforms } from './page-transform.js';
+import { prettier } from './transform/prettier.js';
 
-// Mock compile function for tests
-const mockCompile = () => Promise.resolve('');
+/**
+ * Creates a mock transform info object for testing
+ * @param overrides - Optional overrides for specific fields
+ * @returns Mock transform info
+ */
+function createMockTransformInfo(
+	overrides?: Partial<TransformContext>,
+): TransformContext {
+	const defaultContext: TransformContext = {
+		path: 'page.html',
+		filePath: 'page.html',
+		inputPath: '/test/input/page.html',
+		outputPath: '/test/output/page.html',
+		outputDir: '/test/output',
+		isServe: false,
+		context: {
+			mode: 'build',
+			dir: {
+				root: '/test',
+				input: '/test/input',
+				output: '/test/output',
+				public: '/test/public',
+			},
+			pkg: {
+				production: {
+					baseURL: 'https://example.com',
+				},
+			},
+			compilers: [],
+			devServer: {
+				host: 'localhost',
+				port: 3000,
+			},
+		} as Context,
+		compile: () => Promise.resolve('<div>mock</div>'),
+	};
 
-describe('pageTransform', () => {
-	describe('preprocessContent hook', () => {
-		test('receives TransformContext as third parameter', async () => {
-			let receivedContext: TransformContext | undefined;
+	const merged = {
+		...defaultContext,
+		...overrides,
+	};
 
-			const mockContext: Context = {
-				mode: 'build',
-				dir: {
-					root: '/test/root',
-					output: '/test/output',
-					public: '/test/public',
-				},
-				devServer: {
-					host: 'localhost',
-					port: 3000,
-				},
-				pkg: {},
-			} as Context;
+	// Auto-set isServe based on context.mode if not explicitly overridden
+	if (overrides?.context && !('isServe' in (overrides || {}))) {
+		merged.isServe = merged.context.mode === 'serve';
+	}
 
-			await pageTransform(
-				{
-					content: '<html><body>test</body></html>',
-					inputPath: '/test/input/page.html',
-					outputPath: '/test/output/page.html',
-					outputDir: '/test/output',
-					context: mockContext,
-					compile: mockCompile,
-				},
-				{
-					isServe: false,
-					preprocessContent: (content, isServe, context) => {
-						receivedContext = context;
-						return content;
-					},
-				},
-			);
+	return merged;
+}
 
-			expect(receivedContext).toBeDefined();
-			expect(receivedContext?.path).toBe('page.html');
-			expect(receivedContext?.inputPath).toBe('/test/input/page.html');
-			expect(receivedContext?.outputPath).toBe('/test/output/page.html');
-			expect(receivedContext?.isServe).toBe(false);
-			expect(receivedContext?.context).toBe(mockContext);
-		});
-
-		test('calculates correct path from outputPath', async () => {
-			let receivedContext: TransformContext | undefined;
-
-			const mockContext: Context = {
-				mode: 'build',
-				dir: {
-					root: '/test/root',
-					output: '/test/output',
-					public: '/test/public',
-				},
-				devServer: {
-					host: 'localhost',
-					port: 3000,
-				},
-				pkg: {},
-			} as Context;
-
-			await pageTransform(
-				{
-					content: '<html><body>test</body></html>',
-					inputPath: '/test/input/foo/bar/index.html',
-					outputPath: '/test/output/foo/bar/index.html',
-					outputDir: '/test/output',
-					context: mockContext,
-					compile: mockCompile,
-				},
-				{
-					isServe: true,
-					preprocessContent: (content, isServe, context) => {
-						receivedContext = context;
-						return content;
-					},
-				},
-			);
-
-			expect(receivedContext?.path).toBe('foo/bar/index.html');
-			expect(receivedContext?.isServe).toBe(true);
-		});
-
-		test('handles root path correctly', async () => {
-			let receivedContext: TransformContext | undefined;
-
-			const mockContext: Context = {
-				mode: 'build',
-				dir: {
-					root: '/test/root',
-					output: '/test/output',
-					public: '/test/public',
-				},
-				devServer: {
-					host: 'localhost',
-					port: 3000,
-				},
-				pkg: {},
-			} as Context;
-
-			await pageTransform(
-				{
-					content: '<html><body>test</body></html>',
-					inputPath: '/test/input/index.html',
-					outputPath: '/test/output/index.html',
-					outputDir: '/test/output',
-					context: mockContext,
-					compile: mockCompile,
-				},
-				{
-					isServe: false,
-					preprocessContent: (content, isServe, context) => {
-						receivedContext = context;
-						return content;
-					},
-				},
-			);
-
-			expect(receivedContext?.path).toBe('index.html');
-		});
-
-		test('allows transform utilities to be used in preprocessContent', async () => {
-			const mockContext: Context = {
-				mode: 'build',
-				dir: {
-					root: '/test/root',
-					output: '/test/output',
-					public: '/test/public',
-				},
-				devServer: {
-					host: 'localhost',
-					port: 3000,
-				},
-				pkg: {},
-			} as Context;
-
-			const result = await pageTransform(
-				{
-					content: '<html><head></head><body>test</body></html>',
-					inputPath: '/test/input/page.html',
-					outputPath: '/test/output/page.html',
-					outputDir: '/test/output',
-					context: mockContext,
-					compile: mockCompile,
-				},
-				{
-					isServe: false,
-					preprocessContent: (content, _isServe, context) => {
-						// Simulate using a transform utility
-						expect(context.path).toBe('page.html');
-						expect(context.context.mode).toBe('build');
-						return content.replace('</head>', '<script>injected</script></head>');
-					},
-				},
-			);
-
-			expect(result).toContain('<script>injected</script>');
-		});
+describe('defaultPageTransforms', () => {
+	test('should be an array', () => {
+		expect(Array.isArray(defaultPageTransforms)).toBe(true);
 	});
 
-	describe('manipulateDOM hook', () => {
-		test('receives TransformContext as fourth parameter', async () => {
-			let receivedContext: TransformContext | undefined;
+	test('should contain 6 transforms', () => {
+		expect(defaultPageTransforms.length).toBe(6);
+	});
 
-			const mockContext: Context = {
-				mode: 'build',
-				dir: {
-					root: '/test/root',
-					output: '/test/output',
-					public: '/test/public',
-				},
-				devServer: {
-					host: 'localhost',
-					port: 3000,
-				},
-				pkg: {},
-			} as Context;
+	test('should have correct transform names in order', () => {
+		const names = defaultPageTransforms.map((t) => t.name);
+		expect(names).toEqual([
+			'manipulateDOM',
+			'characterEntities',
+			'doctype',
+			'prettier',
+			'minifier',
+			'lineBreak',
+		]);
+	});
 
-			await pageTransform(
-				{
-					content: '<html><head></head><body>test</body></html>',
-					inputPath: '/test/input/page.html',
-					outputPath: '/test/output/page.html',
-					outputDir: '/test/output',
-					context: mockContext,
-					compile: mockCompile,
-				},
-				{
-					isServe: false,
-					manipulateDOM: (elements, window, isServe, context) => {
-						receivedContext = context;
-					},
-				},
-			);
+	test('should allow finding transforms by name', () => {
+		const prettier = defaultPageTransforms.find((t) => t.name === 'prettier');
+		expect(prettier).toBeDefined();
+		expect(prettier?.name).toBe('prettier');
+	});
 
-			expect(receivedContext).toBeDefined();
-			expect(receivedContext?.path).toBe('page.html');
-			expect(receivedContext?.inputPath).toBe('/test/input/page.html');
-			expect(receivedContext?.outputPath).toBe('/test/output/page.html');
-			expect(receivedContext?.isServe).toBe(false);
-			expect(receivedContext?.context).toBe(mockContext);
-		});
+	test('should allow filtering transforms', () => {
+		const withoutMinifier = defaultPageTransforms.filter((t) => t.name !== 'minifier');
+		expect(withoutMinifier.length).toBe(5);
+		expect(withoutMinifier.find((t) => t.name === 'minifier')).toBeUndefined();
+	});
 
-		test('receives context with correct path in nested directory', async () => {
-			let receivedContext: TransformContext | undefined;
+	test('should allow mapping transforms', () => {
+		const customized = defaultPageTransforms.map((t) =>
+			t.name === 'prettier' ? prettier({ options: { printWidth: 120 } }) : t,
+		);
+		expect(customized.length).toBe(6);
+		expect(customized.find((t) => t.name === 'prettier')).toBeDefined();
+	});
 
-			const mockContext: Context = {
-				mode: 'serve',
-				dir: {
-					root: '/test/root',
-					output: '/test/output',
-					public: '/test/public',
-				},
-				devServer: {
-					host: 'localhost',
-					port: 3000,
-				},
-				pkg: {},
-			} as Context;
+	test('should execute transforms sequentially', async () => {
+		const info = createMockTransformInfo();
+		let result: string | ArrayBuffer = '<html><body>test</body></html>';
 
-			await pageTransform(
-				{
-					content: '<html><head></head><body>test</body></html>',
-					inputPath: '/test/input/foo/bar/index.html',
-					outputPath: '/test/output/foo/bar/index.html',
-					outputDir: '/test/output',
-					context: mockContext,
-					compile: mockCompile,
-				},
-				{
-					isServe: true,
-					manipulateDOM: (elements, window, isServe, context) => {
-						receivedContext = context;
-					},
-				},
-			);
+		// Apply only first 3 transforms
+		for (const transform of defaultPageTransforms.slice(0, 3)) {
+			result = await transform.transform(result, info);
+		}
 
-			expect(receivedContext?.path).toBe('foo/bar/index.html');
-			expect(receivedContext?.isServe).toBe(true);
-			expect(receivedContext?.context.mode).toBe('serve');
-		});
+		expect(typeof result).toBe('string');
 	});
 });

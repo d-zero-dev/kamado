@@ -167,7 +167,7 @@ describe('createSSIShim', () => {
 
 			expect(result).toBe('');
 			expect(consoleWarnSpy).toHaveBeenCalledWith(
-				'[ssi-shim] Failed to include /nonexistent.html:',
+				'[ssiShim] Failed to include /nonexistent.html:',
 				expect.any(String),
 			);
 
@@ -244,12 +244,6 @@ describe('createSSIShim', () => {
 
 			expect(transform.filter?.include).toEqual(['**/*.html', '**/*.htm']);
 			expect(transform.filter?.exclude).toBe('**/admin/**');
-		});
-
-		test('should allow custom name', () => {
-			const transform = createSSIShim({ name: 'custom-ssi' });
-
-			expect(transform.name).toBe('custom-ssi');
 		});
 	});
 
