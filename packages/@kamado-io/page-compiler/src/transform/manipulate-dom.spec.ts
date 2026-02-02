@@ -93,7 +93,7 @@ describe('manipulateDOM', () => {
 		let receivedContext: TransformContext | undefined;
 
 		const transform = manipulateDOM({
-			hook: (elements, window, isServe, context) => {
+			hook: (elements, window, context) => {
 				receivedContext = context;
 			},
 			imageSizes: false,

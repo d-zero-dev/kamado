@@ -101,9 +101,7 @@ The package provides **6 transform factory functions**:
      (
        elements: readonly Element[],
        window: Window,
-       isServe: boolean,
-       context: TransformContext,
-       compile: CompileFunction
+       context: TransformContext
      ) => Promise<void> | void
      ```
    - `options.imageSizes`: Enable/configure automatic image size detection
@@ -246,7 +244,7 @@ pageCompiler({
 	transforms: [
 		manipulateDOM({
 			imageSizes: true,
-			hook: async (elements, window, isServe, context, compile) => {
+			hook: async (elements, window, context) => {
 				// Custom DOM manipulation
 				const links = window.document.querySelectorAll('a[href^="http"]');
 				links.forEach((link) => link.setAttribute('target', '_blank'));
@@ -506,13 +504,13 @@ import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/
 
 manipulateDOM({
 	imageSizes: true,
-	hook: async (elements, window, isServe, context, compile) => {
+	hook: async (elements, window, context) => {
 		// Get the document HTML
 		const html = window.document.documentElement.outerHTML;
 
 		// Apply injectToHead transform
 		const injectTransform = createInjectToHeadTransform({
-			content: isServe
+			content: context.isServe
 				? '<script src="/__dev-tools.js"></script>'
 				: '<meta name="build-time" content="' + Date.now() + '">',
 		});

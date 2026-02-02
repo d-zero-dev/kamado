@@ -1,5 +1,4 @@
 import type { ImageSizesOptions } from '../image.js';
-import type { CompileFunction } from 'kamado/compiler';
 import type { Transform, TransformContext } from 'kamado/config';
 
 import path from 'node:path';
@@ -15,9 +14,7 @@ export interface ManipulateDOMOptions {
 	readonly hook?: (
 		elements: readonly Element[],
 		window: JSDOM['window'],
-		isServe: boolean,
 		context: TransformContext,
-		compile: CompileFunction,
 	) => Promise<void> | void;
 	readonly host?: string;
 	readonly imageSizes?: ImageSizesOptions | boolean;
@@ -58,7 +55,7 @@ export function manipulateDOM(options?: ManipulateDOMOptions): Transform {
 
 			// Apply custom hook if provided
 			if (options?.hook) {
-				await options.hook(elements, window, isServe, ctx, ctx.compile);
+				await options.hook(elements, window, ctx);
 			}
 
 			// Apply imageSizes if enabled (default: false unless explicitly true)
