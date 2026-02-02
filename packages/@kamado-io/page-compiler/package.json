@@ -19,6 +19,30 @@
 			"types": "./dist/page-transform.d.ts",
 			"default": "./dist/page-transform.js"
 		},
+		"./transform/manipulate-dom": {
+			"types": "./dist/transform/manipulate-dom.d.ts",
+			"default": "./dist/transform/manipulate-dom.js"
+		},
+		"./transform/character-entities": {
+			"types": "./dist/transform/character-entities.d.ts",
+			"default": "./dist/transform/character-entities.js"
+		},
+		"./transform/doctype": {
+			"types": "./dist/transform/doctype.d.ts",
+			"default": "./dist/transform/doctype.js"
+		},
+		"./transform/prettier": {
+			"types": "./dist/transform/prettier.d.ts",
+			"default": "./dist/transform/prettier.js"
+		},
+		"./transform/minifier": {
+			"types": "./dist/transform/minifier.d.ts",
+			"default": "./dist/transform/minifier.js"
+		},
+		"./transform/line-break": {
+			"types": "./dist/transform/line-break.d.ts",
+			"default": "./dist/transform/line-break.js"
+		},
 		"./transform/inject-to-head": {
 			"types": "./dist/transform/inject-to-head.d.ts",
 			"default": "./dist/transform/inject-to-head.js"
