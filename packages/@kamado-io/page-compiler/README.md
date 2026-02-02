@@ -25,7 +25,8 @@ export const config: UserConfig = {
 			layouts: {
 				dir: './layouts',
 			},
-			imageSizes: true,
+			// Transform pipeline is configured via transforms option
+			// If omitted, uses defaultPageTransforms
 		}),
 	],
 };
@@ -43,18 +44,13 @@ export const config: UserConfig = {
   - `dir`: Directory path where layout files are stored
   - `files`: Map of layout files
   - `contentVariableName`: Variable name for content in layout (default: `'content'`)
-- `imageSizes`: Configuration for automatically adding width/height attributes to images (default: `true`)
-- `minifier`: HTML minifier options (default: `true`)
-- `prettier`: Prettier options (default: `true`)
-- `lineBreak`: Line break configuration (`'\n'` or `'\r\n'`)
-- `characterEntities`: Whether to enable character entity conversion
+- `transforms`: Transform functions to apply to compiled HTML. Can be:
+  - `Transform[]` - Array of transform functions
+  - `(defaultTransforms: readonly Transform[]) => Transform[]` - Function that receives default transforms and returns modified array
+  - If omitted, uses `defaultPageTransforms`. See [Transform Pipeline](#transform-pipeline) for details.
 - `optimizeTitle`: Function to optimize titles
 - `transformBreadcrumbItem`: Function to transform each breadcrumb item. Can add custom properties to breadcrumb items. `(item: BreadcrumbItem) => BreadcrumbItem`
 - `transformNavNode`: Function to transform each navigation node. Can add custom properties or filter nodes by returning `null`/`undefined`. `(node: NavNode) => NavNode | null | undefined`
-- `host`: Host URL for JSDOM's url option. If not specified, in build mode uses `production.baseURL` or `production.host` from package.json, in serve mode uses dev server URL (`http://${devServer.host}:${devServer.port}`)
-- `preprocessContent`: Hook function called for preprocessing content before DOM parsing `(content: string, isServe: boolean, context: TransformContext, compile: CompileFunction) => Promise<string> | string`
-- `manipulateDOM`: Hook function called for DOM manipulation after parsing `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext, compile: CompileFunction) => Promise<void> | void`
-- `postprocessContent`: Hook function called for postprocessing content after DOM serialization `(content: string, paths: Paths, isServe: boolean) => Promise<string> | string`
 - `compileHooks`: Compilation hooks for customizing compile process
   - Can be an object or a function `(options: PageCompilerOptions) => CompileHooksObject | Promise<CompileHooksObject>` that returns an object (sync or async)
   - `main`: Hooks for main content compilation
@@ -67,6 +63,293 @@ export const config: UserConfig = {
     - `compiler`: Custom compiler function `(content: string, data: CompileData, extension: string) => Promise<string> | string`
 
 **Note**: To use Pug templates, install `@kamado-io/pug-compiler` and use `createCompileHooks` helper. See the [@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md) for integration examples.
+
+## Transform Pipeline
+
+The page compiler uses a Transform Pipeline to process HTML content after compilation. Each transform is an object with a `name` and `transform` function that receives content and contextual information.
+
+### Transform Interface
+
+```typescript
+interface Transform {
+	readonly name: string;
+	readonly transform: (
+		content: string | ArrayBuffer,
+		context: TransformContext,
+	) => Promise<string | ArrayBuffer> | string | ArrayBuffer;
+}
+
+interface TransformContext {
+	path: string; // Request path relative to output directory
+	filePath: string; // Same as path (for compatibility)
+	inputPath?: string; // Original input file path (always provided by pageCompiler)
+	outputPath: string; // Output file path
+	outputDir: string; // Output directory path
+	isServe: boolean; // true in serve mode, false in build mode
+	context: Context; // Kamado Context (Config + mode)
+	compile: CompileFunction; // Function to compile other files
+}
+```
+
+### Transform Factory Functions
+
+The package provides **6 transform factory functions**:
+
+1. **`manipulateDOM(options?)`** - DOM manipulation (includes imageSizes integration)
+   - `options.hook`: Custom DOM manipulation function
+     ```typescript
+     (
+       elements: readonly Element[],
+       window: Window,
+       isServe: boolean,
+       context: TransformContext,
+       compile: CompileFunction
+     ) => Promise<void> | void
+     ```
+   - `options.imageSizes`: Enable/configure automatic image size detection
+     - `boolean` - `true` to enable with defaults (default: `false` when used standalone, `true` in `defaultPageTransforms`)
+     - `ImageSizesOptions` object with properties:
+       - `rootDir?: string` - Root directory for resolving image paths (defaults to output directory)
+       - `selector?: string` - CSS selector to filter target images (default: no filter, all `img` and `picture > source` elements are processed)
+       - `ext?: readonly string[]` - Image extensions to process (default: `['png', 'jpg', 'jpeg', 'webp', 'avif', 'svg']`)
+     - Note: Width and height attributes are always set/overwritten, even if they already exist
+   - `options.host`: JSDOM URL configuration (default: `'http://localhost'`)
+
+2. **`characterEntities(options?)`** - Convert characters to HTML entities
+   - No options currently available
+
+3. **`doctype(options?)`** - Add DOCTYPE declaration
+   - No options currently available
+
+4. **`prettier(options?)`** - Format HTML with Prettier
+   - `options.options`: Prettier configuration object
+     ```typescript
+     {
+       printWidth?: number;
+       tabWidth?: number;
+       useTabs?: boolean;
+       // ... other Prettier options
+     }
+     ```
+
+5. **`minifier(options?)`** - Minify HTML
+   - `options.options`: html-minifier-terser configuration object
+     ```typescript
+     {
+       collapseWhitespace?: boolean;
+       removeComments?: boolean;
+       minifyCSS?: boolean;
+       minifyJS?: boolean;
+       // ... other minifier options
+     }
+     ```
+
+6. **`lineBreak(options?)`** - Normalize line breaks
+   - `options.lineBreak`: Line break style
+     - `'\n'` (default) - Unix/Linux/macOS line breaks
+     - `'\r\n'` - Windows line breaks
+
+### Default Transform Pipeline
+
+```typescript
+import { defaultPageTransforms } from '@kamado-io/page-compiler';
+
+// The default pipeline includes:
+const defaultPageTransforms = [
+	manipulateDOM({ imageSizes: true }),
+	characterEntities(),
+	doctype(),
+	prettier(),
+	minifier(),
+	lineBreak(),
+];
+```
+
+### Usage Examples
+
+#### Using Default Transforms
+
+```typescript
+import { pageCompiler, defaultPageTransforms } from '@kamado-io/page-compiler';
+
+pageCompiler({
+	layouts: { dir: './layouts' },
+	transforms: defaultPageTransforms, // Explicitly use defaults
+});
+
+// Or simply omit transforms to use defaults
+pageCompiler({
+	layouts: { dir: './layouts' },
+	// transforms defaults to defaultPageTransforms
+});
+```
+
+#### Extending Defaults with Function (Recommended)
+
+Use a function to extend defaults without importing `defaultPageTransforms`:
+
+```typescript
+import { pageCompiler } from '@kamado-io/page-compiler';
+
+pageCompiler({
+	layouts: { dir: './layouts' },
+	transforms: (defaults) => [
+		// Add custom transform before defaults
+		{
+			name: 'custom-preprocessing',
+			transform: async (content) => {
+				if (typeof content !== 'string') return content;
+				return content.replace(/\{DATE\}/g, new Date().toISOString());
+			},
+		},
+		...defaults,
+		// Add custom transform after defaults
+		{
+			name: 'custom-analytics',
+			transform: async (content) => {
+				if (typeof content !== 'string') return content;
+				return content.replace('</head>', '<script src="/analytics.js"></script></head>');
+			},
+		},
+	],
+});
+```
+
+#### Extending Defaults with Array (Requires Import)
+
+```typescript
+import { pageCompiler, defaultPageTransforms } from '@kamado-io/page-compiler';
+
+// Add custom transform after defaults
+pageCompiler({
+	layouts: { dir: './layouts' },
+	transforms: [
+		...defaultPageTransforms,
+		{
+			name: 'custom-analytics',
+			transform: async (content) => {
+				if (typeof content !== 'string') return content;
+				return content.replace('</head>', '<script src="/analytics.js"></script></head>');
+			},
+		},
+	],
+});
+```
+
+#### Custom Transform Selection
+
+```typescript
+import { pageCompiler, manipulateDOM, prettier } from '@kamado-io/page-compiler';
+
+pageCompiler({
+	layouts: { dir: './layouts' },
+	transforms: [
+		manipulateDOM({
+			imageSizes: true,
+			hook: async (elements, window, isServe, context, compile) => {
+				// Custom DOM manipulation
+				const links = window.document.querySelectorAll('a[href^="http"]');
+				links.forEach((link) => link.setAttribute('target', '_blank'));
+			},
+		}),
+		prettier({ options: { printWidth: 120 } }),
+	],
+});
+```
+
+#### Customizing Specific Transforms
+
+```typescript
+import { pageCompiler, prettier, minifier } from '@kamado-io/page-compiler';
+
+// Replace specific transforms using function
+pageCompiler({
+	layouts: { dir: './layouts' },
+	transforms: (defaults) =>
+		defaults.map((t) => {
+			if (t.name === 'prettier') {
+				return prettier({ options: { printWidth: 120 } });
+			}
+			if (t.name === 'minifier') {
+				return minifier({ options: { collapseWhitespace: true, removeComments: true } });
+			}
+			return t;
+		}),
+});
+```
+
+#### Filtering Transforms
+
+```typescript
+import { pageCompiler } from '@kamado-io/page-compiler';
+
+// Remove specific transforms
+pageCompiler({
+	layouts: { dir: './layouts' },
+	transforms: (defaults) => defaults.filter((t) => t.name !== 'minifier'),
+});
+```
+
+#### Environment-Specific Transforms
+
+```typescript
+import { pageCompiler, prettier, minifier } from '@kamado-io/page-compiler';
+
+const isProduction = process.env.NODE_ENV === 'production';
+
+pageCompiler({
+	layouts: { dir: './layouts' },
+	transforms: (defaults) =>
+		defaults.map((t) => {
+			// Skip prettier in production
+			if (t.name === 'prettier' && isProduction) {
+				return prettier({ options: { printWidth: 200 } }); // Less formatting in prod
+			}
+			// Enhanced minification in production
+			if (t.name === 'minifier' && isProduction) {
+				return minifier({
+					options: {
+						collapseWhitespace: true,
+						removeComments: true,
+						minifyCSS: true,
+						minifyJS: true,
+					},
+				});
+			}
+			return t;
+		}),
+});
+```
+
+#### Advanced: Custom Transform with imageSizes Configuration
+
+```typescript
+import { pageCompiler, manipulateDOM } from '@kamado-io/page-compiler';
+
+pageCompiler({
+	layouts: { dir: './layouts' },
+	transforms: (defaults) => [
+		// Replace manipulateDOM with custom configuration
+		manipulateDOM({
+			imageSizes: {
+				rootDir: '/custom/root',
+				selector: 'img[data-auto-size]', // Only process images with data attribute
+				ext: ['png', 'jpg', 'webp'], // Process only specific formats
+			},
+			hook: async (elements, window) => {
+				// Additional DOM manipulation
+				const images = window.document.querySelectorAll('img');
+				images.forEach((img) => {
+					if (!img.getAttribute('loading')) {
+						img.setAttribute('loading', 'lazy');
+					}
+				});
+			},
+		}),
+		...defaults.slice(1), // Include remaining defaults
+	],
+});
+```
 
 ## Example: Using compileHooks
 
@@ -127,7 +410,7 @@ export const config: UserConfig = {
 };
 ```
 
-**Important:** The `devServer.transforms` array only applies during development server mode (`kamado server`). Transforms in this array are automatically applied to responses in serve mode only. To use transform utilities in both serve and build modes, use them within the `preprocessContent` hook instead (see [Using Transform Utilities in Build Time](#using-transform-utilities-in-build-time)).
+**Important:** The `devServer.transforms` array only applies during development server mode (`kamado server`). Transforms in this array are automatically applied to responses in serve mode only.
 
 **Options:**
 
@@ -211,58 +494,22 @@ createSSIShim({
 // Will read from: {output}/includes/header.html
 ```
 
-### TransformContext
+### Using Transform Utilities in Page Transforms
 
-The `TransformContext` object is passed as the third parameter to `preprocessContent` and the fourth parameter to `manipulateDOM`. It provides access to file path information and the full Kamado execution context.
+Transform utilities can be used within the `manipulateDOM` hook or custom transforms. The utilities provide lower-level transform functions for advanced integration.
 
-**Properties:**
-
-- `path`: Request path relative to output directory (e.g., `"page.html"` or `"foo/bar/index.html"`)
-- `inputPath`: Original input file path (e.g., `"/project/src/page.html"`)
-- `outputPath`: Output file path (e.g., `"/project/dist/page.html"`)
-- `isServe`: Boolean indicating whether running in development server mode (`true`) or build mode (`false`)
-- `context`: Full Kamado execution context with the following properties:
-  - `context.dir.input`: Input directory path
-  - `context.dir.output`: Output directory path
-  - `context.dir.public`: Public directory path
-  - `context.mode`: Execution mode (`'build'` or `'serve'`)
-  - `context.pkg`: Package.json data
-  - `context.devServer`: Dev server configuration (host, port, etc.)
-
-**Example:**
+#### Example: Using injectToHead in manipulateDOM
 
 ```ts
-preprocessContent: async (content, isServe, context, compile) => {
-	console.log('Processing:', context.path);
-	console.log('Input:', context.inputPath);
-	console.log('Output:', context.outputPath);
-	console.log('Mode:', context.context.mode);
-	console.log('Output dir:', context.context.dir.output);
-
-	// Use context information for conditional processing
-	if (context.path.startsWith('admin/')) {
-		// Special processing for admin pages
-	}
-
-	// Use compile to compile other files if needed
-	// const layoutContent = await compile({ inputPath: '/layouts/main.html', outputExtension: '.html' });
-
-	return content;
-};
-```
-
-### Using Transform Utilities in Build Time
-
-Transform utilities can also be used during build time via the `preprocessContent` hook. The hook receives a `TransformContext` as its third parameter, allowing you to use transform utilities in both development and build contexts.
-
-**Example: Using injectToHead in preprocessContent**
-
-```ts
+import { manipulateDOM } from '@kamado-io/page-compiler';
 import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
-import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
-const pageCompilerOptions: PageCompilerOptions = {
-	preprocessContent: async (content, isServe, context, compile) => {
+manipulateDOM({
+	imageSizes: true,
+	hook: async (elements, window, isServe, context, compile) => {
+		// Get the document HTML
+		const html = window.document.documentElement.outerHTML;
+
 		// Apply injectToHead transform
 		const injectTransform = createInjectToHeadTransform({
 			content: isServe
@@ -270,19 +517,24 @@ const pageCompilerOptions: PageCompilerOptions = {
 				: '<meta name="build-time" content="' + Date.now() + '">',
 		});
 
-		return await injectTransform(content, context);
+		const result = await injectTransform(html, context);
+
+		// Update document with result
+		window.document.documentElement.outerHTML = result;
 	},
-};
+});
 ```
 
-**Example: Using createSSIShim in preprocessContent**
+#### Example: Using createSSIShim in Custom Transform
 
 ```ts
 import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
-import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
-const pageCompilerOptions: PageCompilerOptions = {
-	preprocessContent: async (content, isServe, context, compile) => {
+const customTransform = {
+	name: 'custom-ssi',
+	transform: async (content, context) => {
+		if (typeof content !== 'string') return content;
+
 		// Apply SSI shim transform
 		const ssiTransform = createSSIShimTransform({
 			onError: (path) => `<!-- Failed to include: ${path} -->`,
@@ -293,15 +545,17 @@ const pageCompilerOptions: PageCompilerOptions = {
 };
 ```
 
-**Example: Combining multiple transforms**
+#### Example: Combining Multiple Utility Transforms
 
 ```ts
 import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
 import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
-import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
-const pageCompilerOptions: PageCompilerOptions = {
-	preprocessContent: async (content, isServe, context, compile) => {
+const combinedTransform = {
+	name: 'combined-utilities',
+	transform: async (content, context) => {
+		if (typeof content !== 'string') return content;
+
 		// Apply SSI first
 		const ssiTransform = createSSIShimTransform();
 		let result = await ssiTransform(content, context);
@@ -317,14 +571,16 @@ const pageCompilerOptions: PageCompilerOptions = {
 };
 ```
 
-**Example: Conditional processing based on path**
+#### Example: Conditional Processing Based on Context
 
 ```ts
 import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
-import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
-const pageCompilerOptions: PageCompilerOptions = {
-	preprocessContent: async (content, isServe, context, compile) => {
+const contextAwareTransform = {
+	name: 'context-aware',
+	transform: async (content, context) => {
+		if (typeof content !== 'string') return content;
+
 		// Inject admin tools only for admin pages
 		if (context.path.startsWith('admin/')) {
 			const adminTransform = createInjectToHeadTransform({
@@ -334,7 +590,7 @@ const pageCompilerOptions: PageCompilerOptions = {
 		}
 
 		// Add analytics only in production builds
-		if (!isServe) {
+		if (!context.isServe) {
 			const analyticsTransform = createInjectToHeadTransform({
 				content: '<script src="/analytics.js"></script>',
 			});
@@ -346,15 +602,17 @@ const pageCompilerOptions: PageCompilerOptions = {
 };
 ```
 
-**Example: Using context for file operations**
+#### Example: Using Context for File Operations
 
 ```ts
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import type { PageCompilerOptions } from '@kamado-io/page-compiler';
 
-const pageCompilerOptions: PageCompilerOptions = {
-	preprocessContent: async (content, isServe, context, compile) => {
+const fileBasedTransform = {
+	name: 'file-based',
+	transform: async (content, context) => {
+		if (typeof content !== 'string') return content;
+
 		// Read a sibling file based on current file location
 		const inputDir = dirname(context.inputPath);
 		const metaFile = join(inputDir, 'meta.json');
@@ -381,6 +639,7 @@ For advanced use cases, you can use the lower-level transform functions to creat
 ```ts
 import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
 import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
+import type { UserConfig } from 'kamado/config';
 
 export const config: UserConfig = {
 	devServer: {
@@ -400,93 +659,68 @@ export const config: UserConfig = {
 
 These functions return the raw transform function `(content, context) => Promise<string | ArrayBuffer>` without the name and filter configuration, allowing you to create fully custom `ResponseTransform` objects.
 
-## Standalone API: pageTransform
+## API Exports
 
-The `pageTransform` function is available as a standalone API for transforming page content outside of the Kamado build system. It applies a three-phase transformation pipeline to HTML content.
+### Main Package (`@kamado-io/page-compiler`)
 
-### Transformation Phases
-
-The transformation pipeline is divided into three phases:
-
-1. **Phase 1: preprocessContent** (DOM parsing前のコンテンツ前処理) - String transformations before DOM parsing
-   - `preprocessContent`: User-defined pre-DOM hook for template expansion, macro replacement, etc.
-
-2. **Phase 2: manipulateDOM** (DOM操作) - DOM-based transformations
-   - `manipulateDOM`: DOM parsing, image size injection, and manipulateDOM hook
-
-3. **Phase 3: postprocessContent** (DOM serialization後のコンテンツ後処理) - String transformations after DOM serialization
-   - `characterEntities`: Convert characters to HTML entities
-   - `doctype`: Insert DOCTYPE declaration
-   - `prettier`: Format with Prettier
-   - `minifier`: Minify HTML
-   - `lineBreak`: Normalize line breaks
-   - `postprocessContent`: Final content postprocessing
-
-### Import
-
-```ts
+```typescript
 import {
-	pageTransform,
-	type PageTransformOptions,
-} from '@kamado-io/page-compiler/page-transform';
+	// Compiler
+	pageCompiler,
+
+	// Default transforms
+	defaultPageTransforms,
+
+	// Transform factory functions
+	manipulateDOM,
+	characterEntities,
+	doctype,
+	prettier,
+	minifier,
+	lineBreak,
+
+	// Types
+	type PageCompilerOptions,
+	type Transform,
+	type TransformContext,
+	type CompileData,
+	type CompileHooks,
+	type CompileHooksObject,
+	type CompileHook,
+	// ... other types
+} from '@kamado-io/page-compiler';
 ```
 
-### Usage
+### Transform Utilities
 
-```ts
-const transformedHtml = await pageTransform(
-	{
-		content: '<html><body><h1>Hello</h1></body></html>',
-		inputPath: '/project/src/pages/about.html',
-		outputPath: '/project/dist/pages/about.html',
-		outputDir: '/project/dist', // Root output directory, not /project/dist/pages
-		context: kamadoContext, // Kamado execution context
-		compile: compileFunction, // Compile function for compiling dependencies
-	},
-	{
-		url: 'https://example.com',
-		imageSizes: true,
-		prettier: true,
-		minifier: true,
-		isServe: false,
-	},
-);
+```typescript
+// Inject to head
+import {
+	injectToHead,
+	createInjectToHeadTransform,
+	type InjectToHeadOptions,
+	type InjectToHeadTransformOptions,
+} from '@kamado-io/page-compiler/transform/inject-to-head';
+
+// SSI shim
+import {
+	createSSIShim,
+	createSSIShimTransform,
+	type SSIShimOptions,
+	type SSIShimTransformOptions,
+} from '@kamado-io/page-compiler/transform/ssi-shim';
 ```
 
-### PageTransformContext (first parameter)
+### Individual Transforms (Subpath Exports)
 
-- `content` (required): HTML content to transform
-- `inputPath` (required): Input file path (used for Prettier config resolution)
-- `outputPath` (required): Output file path. Full path to the output file (e.g., `/dist/pages/about.html`)
-- `outputDir` (required): Output directory root. Base directory for the build output (e.g., `/dist`). Used as the root for relative path calculations and image size detection. Note: This is NOT `path.dirname(outputPath)` - it's the root output directory that may be several levels up from the output file
-- `context` (required): Kamado execution context containing configuration and directory paths
-- `compile` (required): Compile function for compiling other files during transformation
-
-### PageTransformOptions (second parameter)
-
-Options are organized by transformation phase:
-
-**Phase 1: preprocessContent**
-
-- `preprocessContent` (optional): Hook function called for preprocessing content before DOM parsing `(content: string, isServe: boolean, context: TransformContext) => Promise<string> | string`
-
-**Phase 2: manipulateDOM**
-
-- `imageSizes` (optional): Configuration for automatically adding width/height attributes to images (default: `true`)
-- `manipulateDOM` (optional): Hook function called for DOM manipulation after parsing `(elements: readonly Element[], window: Window, isServe: boolean, context: TransformContext) => Promise<void> | void`
-- `url` (optional): JSDOM URL configuration for DOM operations
-
-**Phase 3: postprocessContent**
-
-- `characterEntities` (optional): Whether to enable character entity conversion
-- `prettier` (optional): Prettier options (default: `true`)
-- `minifier` (optional): HTML minifier options (default: `true`)
-- `lineBreak` (optional): Line break configuration (`'\n'` or `'\r\n'`)
-- `postprocessContent` (optional): Hook function called for postprocessing content after DOM serialization `(content: string, paths: Paths, isServe: boolean) => Promise<string> | string`
-
-**Common**
-
-- `isServe` (optional): Whether running on development server (default: `false`)
+```typescript
+import { manipulateDOM } from '@kamado-io/page-compiler/transform/manipulate-dom';
+import { characterEntities } from '@kamado-io/page-compiler/transform/character-entities';
+import { doctype } from '@kamado-io/page-compiler/transform/doctype';
+import { prettier } from '@kamado-io/page-compiler/transform/prettier';
+import { minifier } from '@kamado-io/page-compiler/transform/minifier';
+import { lineBreak } from '@kamado-io/page-compiler/transform/line-break';
+```
 
 ## License
 
