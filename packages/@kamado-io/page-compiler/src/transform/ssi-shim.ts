@@ -1,4 +1,4 @@
-import type { ResponseTransform, TransformContext } from 'kamado/config';
+import type { Transform, TransformContext } from 'kamado/config';
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -43,11 +43,6 @@ export interface SSIShimTransformOptions {
  * Options for SSI shim utility (includes filter options)
  */
 export interface SSIShimOptions extends SSIShimTransformOptions {
-	/**
-	 * Optional name for debugging (used in error messages)
-	 * @default 'ssi-shim'
-	 */
-	readonly name?: string;
 	/**
 	 * Filter options to limit which files this transform applies to
 	 */
@@ -96,7 +91,7 @@ export interface SSIShimOptions extends SSIShimTransformOptions {
  */
 export function createSSIShimTransform(
 	options: SSIShimTransformOptions = {},
-	name = 'ssi-shim',
+	name = 'ssiShim',
 ) {
 	return async (
 		content: string | ArrayBuffer,
@@ -229,15 +224,13 @@ export function createSSIShimTransform(
  * </html>
  * ```
  */
-export function createSSIShim(options: SSIShimOptions = {}): ResponseTransform {
-	const name = options.name ?? 'ssi-shim';
-
+export function createSSIShim(options: SSIShimOptions = {}): Transform {
 	return {
-		name,
+		name: 'ssiShim',
 		filter: {
 			include: options.filter?.include ?? '**/*.html',
 			exclude: options.filter?.exclude,
 		},
-		transform: createSSIShimTransform(options, name),
+		transform: createSSIShimTransform(options, 'ssiShim'),
 	};
 }
