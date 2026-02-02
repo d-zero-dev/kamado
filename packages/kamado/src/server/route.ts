@@ -78,10 +78,13 @@ export async function setRoute(context: SetRouteContext, options?: SetRouteOptio
 					content,
 					transformContext: {
 						path: requestFilePath,
+						filePath: requestFilePath,
 						inputPath,
 						outputPath,
+						outputDir: kamadoContext.dir.output,
 						isServe: true,
 						context: kamadoContext,
+						compile,
 					},
 				},
 				{ transforms: kamadoContext.devServer.transforms },
