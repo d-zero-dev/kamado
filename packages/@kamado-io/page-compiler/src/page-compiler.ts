@@ -1,5 +1,7 @@
+import type { GetNavTreeOptions } from './features/nav.js';
+import type { TitleListOptions } from './features/title-list.js';
 import type { CompileData, PageCompilerOptions } from './types.js';
-import type { Context } from 'kamado/config';
+import type { Context, Transform, TransformContext } from 'kamado/config';
 
 import path from 'node:path';
 
@@ -8,10 +10,10 @@ import { createCustomCompiler } from 'kamado/compiler';
 import { getGlobalData } from 'kamado/data';
 
 import { getBreadcrumbs } from './features/breadcrumbs.js';
-import { type GetNavTreeOptions, getNavTree } from './features/nav.js';
-import { type TitleListOptions, titleList } from './features/title-list.js';
+import { getNavTree } from './features/nav.js';
+import { titleList } from './features/title-list.js';
 import { getLayouts } from './layouts.js';
-import { pageTransform } from './page-transform.js';
+import { defaultPageTransforms } from './page-transform.js';
 import { transpileLayout } from './transpile-layout.js';
 import { transpileMainContent } from './transpile-main.js';
 
@@ -132,47 +134,53 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 
 			log?.(c.cyanBright('Formatting...'));
 
-			// Determine URL for JSDOM
-			const isServe = context.mode === 'serve';
-			const url =
-				options?.host ??
-				(isServe
-					? `http://${context.devServer.host}:${context.devServer.port}`
-					: (context.pkg.production?.baseURL ??
-						(context.pkg.production?.host
-							? `http://${context.pkg.production.host}`
-							: undefined)));
+			// Create TransformContext
+			const relativePath = path.relative(context.dir.output, file.outputPath);
+			const transformContext: TransformContext = {
+				path: relativePath,
+				filePath: relativePath,
+				inputPath: file.inputPath,
+				outputPath: file.outputPath,
+				outputDir: context.dir.output,
+				isServe: context.mode === 'serve',
+				context, // Kamado Context (Config + mode)
+				compile,
+			};
 
-			const formattedHtml = await pageTransform(
-				{
-					content: html,
-					inputPath: file.inputPath,
-					outputPath: file.outputPath,
-					outputDir: context.dir.output,
-					context,
-					compile,
-				},
-				{
-					url,
-					preprocessContent: options?.preprocessContent,
-					manipulateDOM: options?.manipulateDOM,
-					imageSizes: options?.imageSizes,
-					characterEntities: options?.characterEntities,
-					prettier: options?.prettier,
-					minifier: options?.minifier,
-					lineBreak: options?.lineBreak,
-					postprocessContent: options?.postprocessContent,
-					isServe,
-				},
-			);
+			// Use provided transforms or default
+			const transforms: Transform[] =
+				typeof options?.transforms === 'function'
+					? options.transforms(defaultPageTransforms)
+					: (options?.transforms ?? defaultPageTransforms);
 
-			return formattedHtml;
+			// Apply transforms sequentially
+			let result: string | ArrayBuffer = html;
+			for (const transform of transforms) {
+				result = await transform.transform(result, transformContext);
+			}
+
+			// Ensure result is string
+			if (typeof result !== 'string') {
+				const decoder = new TextDecoder('utf-8');
+				result = decoder.decode(result);
+			}
+
+			return result;
 		};
 	},
 }));
 
 // Re-export types
 export type * from './types.js';
+
+// Re-export page transforms
+export { defaultPageTransforms } from './page-transform.js';
+export { manipulateDOM } from './transform/manipulate-dom.js';
+export { characterEntities } from './transform/character-entities.js';
+export { doctype } from './transform/doctype.js';
+export { prettier } from './transform/prettier.js';
+export { minifier } from './transform/minifier.js';
+export { lineBreak } from './transform/line-break.js';
 
 // Re-export for backward compatibility
 export { getLayouts, type GetLayoutsOptions } from './layouts.js';
