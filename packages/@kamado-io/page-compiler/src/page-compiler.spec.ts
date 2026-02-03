@@ -43,9 +43,7 @@ describe('page compiler', async () => {
 				}),
 		};
 		const result = await compilePage(page, {});
-		// With default transforms, includes DOCTYPE, HTML structure, and formatting
-		expect(result).toContain('<p>Hello, world!</p>');
-		expect(result).toContain('<!DOCTYPE html>');
+		expect(result).toBe('<p>Hello, world!</p>\n');
 	});
 
 	test('should pass through pug file without compiler', async () => {
@@ -66,8 +64,8 @@ describe('page compiler', async () => {
 				}),
 		};
 		const result = await compilePage(page, {});
-		// Pug syntax is treated as text by JSDOM, so it gets wrapped in HTML structure
-		expect(result).toContain('p Hello, world!');
+		// Pug syntax is not valid HTML, so domSerialize returns empty string
+		expect(result).toBe('');
 	});
 
 	test('should compile a page made with pug using compileHooks', async () => {
@@ -99,9 +97,7 @@ describe('page compiler', async () => {
 				},
 			},
 		});
-		// With default transforms, includes DOCTYPE and HTML structure
-		expect(result).toContain('<p>Hello, world!</p>');
-		expect(result).toContain('<!DOCTYPE html>');
+		expect(result).toBe('<p>Hello, world!</p>\n');
 	});
 
 	test('should compile a page made with pug with layout using compileHooks', async () => {
@@ -186,9 +182,7 @@ describe('page compiler', async () => {
 				pretty: true,
 			}),
 		});
-		// With default transforms, includes DOCTYPE and HTML structure
-		expect(result).toContain('<p>Hello, world!</p>');
-		expect(result).toContain('<!DOCTYPE html>');
+		expect(result).toBe('<p>Hello, world!</p>\n');
 	});
 });
 
