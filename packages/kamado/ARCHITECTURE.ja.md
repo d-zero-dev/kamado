@@ -50,7 +50,7 @@ export interface Context extends Config {
 1. **CLI**（`src/index.ts`）：ユーザーが`kamado build`または`kamado server`を実行
 2. **Builder/Server**（`src/builder/index.ts`または`src/server/app.ts`）：`Config`をスプレッドして`mode`を追加し、`Context`を作成
 3. **コンパイラ**：`Config`ではなく`Context`を受け取り、実行モードを検出可能
-4. **フック**：ライフサイクルフック（`onBeforeBuild`、`onAfterBuild`）とコンパイラフック（`beforeSerialize`、`afterSerialize`、`replace`）が実行モードを受け取る
+4. **フック**：ライフサイクルフック（`onBeforeBuild`、`onAfterBuild`）とpage compilerのtransform関数が`TransformContext`経由で実行モードを受け取る
 
 このアーキテクチャにより、以下のようなモード固有の動作が可能になります：
 
@@ -307,7 +307,7 @@ export interface TransformContext {
 3. **順次実行**: 変換は配列の順序で適用
 4. **エラーハンドリング**: エラーはログに記録されますがサーバーを停止させません。エラー時は元のコンテンツが返されます
 
-**注記**: Transform utilities（`injectToHead`、`createSSIShim`）は、`beforeSerialize`や`afterSerialize`などのコンパイラフック内で手動で呼び出すことで、serveモードとbuildモードの両方で使用できます。
+**注記**: Transform utilities（`injectToHead`、`createSSIShim`）は、page compilerのカスタムtransformまたは`manipulateDOM()`のhookオプション内で手動で呼び出すことで、serveモードとbuildモードの両方で使用できます。
 
 #### 実装の詳細
 
@@ -342,7 +342,7 @@ export interface TransformContext {
 - **ソースマッピング**: コンパイル済み出力にソースファイルコメントを追加
 - **モックデータ**: APIレスポンスにテストデータを挿入
 
-**注意**: このAPIは意図的に開発専用です。本番用の変換には、コンパイラフック（`beforeSerialize`、`afterSerialize`、`replace`）またはビルド時処理を使用してください。
+**注意**: このAPIは意図的に開発専用です。本番用の変換には、page compilerのTransform Pipeline（`transforms`オプションに`manipulateDOM()`、`characterEntities()`、`prettier()`などのtransform factoryを設定）またはビルド時処理を使用してください。
 
 ---
 

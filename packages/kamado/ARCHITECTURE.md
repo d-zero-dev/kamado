@@ -50,7 +50,7 @@ The execution mode flows through the system as follows:
 1. **CLI** (`src/index.ts`): User runs `kamado build` or `kamado server`
 2. **Builder/Server** (`src/builder/index.ts` or `src/server/app.ts`): Creates `Context` by spreading `Config` and adding `mode`
 3. **Compilers**: Receive `Context` instead of `Config`, allowing them to detect the execution mode
-4. **Hooks**: Lifecycle hooks (`onBeforeBuild`, `onAfterBuild`) and compiler hooks (`beforeSerialize`, `afterSerialize`, `replace`) receive the execution mode
+4. **Hooks**: Lifecycle hooks (`onBeforeBuild`, `onAfterBuild`) and page compiler transform functions receive the execution mode via `TransformContext`
 
 This architecture enables mode-specific behavior, such as:
 
@@ -307,7 +307,7 @@ export interface TransformContext {
 3. **Sequential Execution**: Transforms are applied in array order
 4. **Error Handling**: Errors are logged but don't break the server; original content is returned on error
 
-**Note**: Transform utilities (`injectToHead`, `createSSIShim`) can be used in both serve and build modes when called manually within compiler hooks like `beforeSerialize` or `afterSerialize`.
+**Note**: Transform utilities (`injectToHead`, `createSSIShim`) can be used in both serve and build modes when called manually within page compiler custom transforms or `manipulateDOM()` hook option.
 
 #### Implementation Details
 
@@ -342,7 +342,7 @@ A helper function `respondWithTransform()` consolidates the transform applicatio
 - **Source Mapping**: Add source file comments to compiled outputs
 - **Mock Data**: Inject test data into API responses
 
-**Note**: This API is intentionally development-only. For production transformations, use compiler hooks (`beforeSerialize`, `afterSerialize`, `replace`) or build-time processing.
+**Note**: This API is intentionally development-only. For production transformations, use the page compiler's Transform Pipeline (configure `transforms` option with transform factories like `manipulateDOM()`, `characterEntities()`, `prettier()`, etc.) or build-time processing.
 
 ---
 

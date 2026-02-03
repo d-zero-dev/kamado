@@ -1,4 +1,4 @@
-import type { CustomCompilerWithMetadata } from '../compiler/types.js';
+import type { CompileFunction, CustomCompilerWithMetadata } from '../compiler/types.js';
 import type { CompilableFile } from '../files/types.js';
 
 /**
@@ -98,6 +98,10 @@ export interface TransformContext {
 	 */
 	readonly path: string;
 	/**
+	 * File path (alias for path, for clarity)
+	 */
+	readonly filePath: string;
+	/**
 	 * Original input file path (if available from compiler)
 	 */
 	readonly inputPath?: string;
@@ -106,6 +110,10 @@ export interface TransformContext {
 	 */
 	readonly outputPath: string;
 	/**
+	 * Output directory path
+	 */
+	readonly outputDir: string;
+	/**
 	 * Whether running in development server mode
 	 */
 	readonly isServe: boolean;
@@ -113,49 +121,38 @@ export interface TransformContext {
 	 * Execution context (config + mode)
 	 */
 	readonly context: Context;
+	/**
+	 * Compile function for compiling other files during transformation
+	 */
+	readonly compile: CompileFunction;
 }
 
 /**
- * Response transformation function
- * Allows modifying response content in development server
+ * Transform object that processes content
+ * Used by both page-compiler transforms and devServer.transforms
  */
-export interface ResponseTransform {
+export interface Transform {
 	/**
-	 * Transform name (for debugging and error messages)
+	 * Transform name (used for find/filter/map customization)
 	 */
-	readonly name?: string;
+	readonly name: string;
 	/**
-	 * Filter conditions to determine when to apply this transform
+	 * Optional filter configuration (only used in devServer.transforms)
 	 */
 	readonly filter?: {
-		/**
-		 * Include paths (glob pattern)
-		 * @example '**\/*.html'
-		 */
 		readonly include?: string | readonly string[];
-		/**
-		 * Exclude paths (glob pattern)
-		 * @example '**\/_*.html'
-		 */
 		readonly exclude?: string | readonly string[];
+		readonly contentType?: string | readonly string[];
 	};
 	/**
-	 * Transform function to modify response content
-	 * @param content - Response content (string or ArrayBuffer).
-	 *                  Static files (non-compiled) are typically ArrayBuffer.
-	 *                  Use TextDecoder to decode ArrayBuffer for text processing:
-	 *                  ```
-	 *                  if (typeof content !== 'string') {
-	 *                    const decoder = new TextDecoder('utf-8');
-	 *                    content = decoder.decode(content);
-	 *                  }
-	 *                  ```
-	 * @param context - Transform context with request/response information
-	 * @returns Transformed content (can be async)
+	 * Transform function
+	 * @param content - Content to transform
+	 * @param ctx - Transform context (includes Kamado context, paths, compile function, etc.)
+	 * @returns Transformed content
 	 */
 	readonly transform: (
 		content: string | ArrayBuffer,
-		context: TransformContext,
+		ctx: TransformContext,
 	) => Promise<string | ArrayBuffer> | string | ArrayBuffer;
 }
 
@@ -200,7 +197,7 @@ export interface DevServerConfig {
 	 * ]
 	 * ```
 	 */
-	readonly transforms?: readonly ResponseTransform[];
+	readonly transforms?: readonly Transform[];
 }
 
 /**

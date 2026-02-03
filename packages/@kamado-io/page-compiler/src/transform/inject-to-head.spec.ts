@@ -166,15 +166,6 @@ describe('injectToHead', () => {
 			expect(transform.filter?.include).toBe('**/*.htm');
 			expect(transform.filter?.exclude).toBe('**/admin/**');
 		});
-
-		test('should allow custom name', () => {
-			const transform = injectToHead({
-				content: '<script src="/dev.js"></script>',
-				name: 'custom-inject',
-			});
-
-			expect(transform.name).toBe('custom-inject');
-		});
 	});
 
 	describe('edge cases', () => {

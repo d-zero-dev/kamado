@@ -15,9 +15,33 @@
 			"types": "./dist/page-compiler.d.ts",
 			"default": "./dist/page-compiler.js"
 		},
-		"./format": {
-			"types": "./dist/format.d.ts",
-			"default": "./dist/format.js"
+		"./page-transform": {
+			"types": "./dist/page-transform.d.ts",
+			"default": "./dist/page-transform.js"
+		},
+		"./transform/manipulate-dom": {
+			"types": "./dist/transform/manipulate-dom.d.ts",
+			"default": "./dist/transform/manipulate-dom.js"
+		},
+		"./transform/character-entities": {
+			"types": "./dist/transform/character-entities.d.ts",
+			"default": "./dist/transform/character-entities.js"
+		},
+		"./transform/doctype": {
+			"types": "./dist/transform/doctype.d.ts",
+			"default": "./dist/transform/doctype.js"
+		},
+		"./transform/prettier": {
+			"types": "./dist/transform/prettier.d.ts",
+			"default": "./dist/transform/prettier.js"
+		},
+		"./transform/minifier": {
+			"types": "./dist/transform/minifier.d.ts",
+			"default": "./dist/transform/minifier.js"
+		},
+		"./transform/line-break": {
+			"types": "./dist/transform/line-break.d.ts",
+			"default": "./dist/transform/line-break.js"
 		},
 		"./transform/inject-to-head": {
 			"types": "./dist/transform/inject-to-head.d.ts",
@@ -50,13 +74,11 @@
 		"fast-glob": "3.3.3",
 		"html-minifier-terser": "7.2.0",
 		"image-size": "2.0.2",
-		"jsdom": "27.4.0",
 		"kamado": "1.3.0",
 		"prettier": "3.8.1"
 	},
 	"devDependencies": {
 		"@types/html-minifier-terser": "7.0.2",
-		"@types/jsdom": "27.0.0",
 		"typescript": "5.9.3"
 	}
 }

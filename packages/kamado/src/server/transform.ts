@@ -1,4 +1,4 @@
-import type { ResponseTransform, TransformContext } from '../config/types.js';
+import type { Transform, TransformContext } from '../config/types.js';
 
 import c from 'ansi-colors';
 import picomatch from 'picomatch';
@@ -15,7 +15,7 @@ export interface ApplyTransformsContext {
  * Optional options for applying transforms
  */
 export interface ApplyTransformsOptions {
-	readonly transforms?: readonly ResponseTransform[];
+	readonly transforms?: readonly Transform[];
 }
 
 /**
@@ -72,10 +72,7 @@ export async function applyTransforms(
  * @param context - Transform context with request/response information
  * @returns true if transform should be applied
  */
-function shouldApplyTransform(
-	transform: ResponseTransform,
-	context: TransformContext,
-): boolean {
+function shouldApplyTransform(transform: Transform, context: TransformContext): boolean {
 	const filter = transform.filter;
 
 	if (!filter) {
