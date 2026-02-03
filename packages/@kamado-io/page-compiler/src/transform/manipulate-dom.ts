@@ -3,7 +3,7 @@ import type { Transform, TransformContext } from 'kamado/config';
 
 import path from 'node:path';
 
-import { JSDOM } from 'jsdom';
+import { domSerialize } from 'kamado/utils/dom';
 
 import { imageSizes } from '../image.js';
 
@@ -13,7 +13,7 @@ import { imageSizes } from '../image.js';
 export interface ManipulateDOMOptions {
 	readonly hook?: (
 		elements: readonly Element[],
-		window: JSDOM['window'],
+		window: Window,
 		context: TransformContext,
 	) => Promise<void> | void;
 	readonly host?: string;
@@ -49,26 +49,24 @@ export function manipulateDOM(options?: ManipulateDOMOptions): Transform {
 							? `http://${ctx.context.pkg.production.host}`
 							: undefined)));
 
-			const dom = new JSDOM(content, { url: host });
-			const { window } = dom;
-			const elements = [...window.document.querySelectorAll('*')];
+			return await domSerialize(content, {
+				hook: async (elements, window) => {
+					// Apply custom hook if provided
+					if (options?.hook) {
+						await options.hook(elements, window, ctx);
+					}
 
-			// Apply custom hook if provided
-			if (options?.hook) {
-				await options.hook(elements, window, ctx);
-			}
-
-			// Apply imageSizes if enabled (default: false unless explicitly true)
-			if (options?.imageSizes !== false) {
-				const imgElements = [...window.document.querySelectorAll('img')];
-				const rootDir = path.resolve(ctx.outputDir);
-				await imageSizes(imgElements, {
-					rootDir,
-					...(typeof options?.imageSizes === 'object' ? options.imageSizes : {}),
-				});
-			}
-
-			return dom.serialize();
+					// Apply imageSizes if enabled (default: false unless explicitly true)
+					if (options?.imageSizes !== false) {
+						const rootDir = path.resolve(ctx.outputDir);
+						await imageSizes(elements, {
+							rootDir,
+							...(typeof options?.imageSizes === 'object' ? options.imageSizes : {}),
+						});
+					}
+				},
+				url: host,
+			});
 		},
 	};
 }
