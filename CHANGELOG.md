@@ -3,6 +3,380 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.0](https://github.com/d-zero-dev/kamado/compare/v1.3.0...v2.0.0-alpha.0) (2026-02-03)
+
+### Bug Fixes
+
+- **page-compiler:** remove characterEntities from defaultPageTransforms ([cda1331](https://github.com/d-zero-dev/kamado/commit/cda1331aa9173ebd0d41f30b9be01da4648d33cf))
+- **page-compiler:** use domSerialize and pass parent elements to imageSizes ([d8f71ad](https://github.com/d-zero-dev/kamado/commit/d8f71ad6a4907f447fa469c95c1b1fe4032ac007))
+
+- refactor(page-compiler)!: move format transforms to transform directory ([329d266](https://github.com/d-zero-dev/kamado/commit/329d2661c39d451dfe3afae78dbe6475c0a1cf1a))
+- refactor(page-compiler)!: replace individual format options with unified transforms option ([10b26ec](https://github.com/d-zero-dev/kamado/commit/10b26ec68c28c32285b80f28e9fd475543aba66d))
+- refactor(kamado)!: unify Transform interface for page-compiler and devServer ([513e654](https://github.com/d-zero-dev/kamado/commit/513e654b0c794cadda2ba3074b6b82947b600d98))
+- refactor(page-compiler)!: update pageTransform option names in pageCompiler ([59b8f88](https://github.com/d-zero-dev/kamado/commit/59b8f88563149aef301cd56dfd6afb52165de299))
+- refactor(page-compiler)!: rename pageTransform API hooks ([365a5a1](https://github.com/d-zero-dev/kamado/commit/365a5a1a39d69eb786ffff2bab91d9c5fabf1d44))
+- refactor(page-compiler)!: rename format files to page-transform ([4496365](https://github.com/d-zero-dev/kamado/commit/4496365bae291d941d383ae0237fa3d2f451a214))
+- refactor(page-compiler)!: rename format files to page-transform ([b4e324a](https://github.com/d-zero-dev/kamado/commit/b4e324a8913dbf0a71b96eacb797dc5363f02a16))
+- refactor(page-compiler)!: rename formatHtml to pageTransform ([bba3fd3](https://github.com/d-zero-dev/kamado/commit/bba3fd3f2369911c5637ce27b7a9922171c04614))
+- refactor(page-compiler)!: split formatHtml into modular pipeline processors ([2c5bb43](https://github.com/d-zero-dev/kamado/commit/2c5bb435ccc84748ed6e1cbecc83646d9c7ba6df))
+- refactor(kamado)!: change computeOutputPath signature to context pattern ([c5643b8](https://github.com/d-zero-dev/kamado/commit/c5643b831cf7552d2fc07bfa4b809c2a701f8f7d))
+- refactor(kamado)!: apply context+options pattern to getAssetGroup ([a602d92](https://github.com/d-zero-dev/kamado/commit/a602d92cd279fbd0c2fb25a7e056feaf98a05a56))
+- refactor(pug-compiler)!: remove index.ts and use pug-compiler.ts ([f8c798b](https://github.com/d-zero-dev/kamado/commit/f8c798b2402b3f48ebb80e9a37422e3a4f6ed255))
+- refactor(style-compiler)!: remove index.ts and use style-compiler.ts ([552bb73](https://github.com/d-zero-dev/kamado/commit/552bb73bc6db73a58f28807208fa69863d57e5f2))
+- refactor(script-compiler)!: remove index.ts and use script-compiler.ts ([657147d](https://github.com/d-zero-dev/kamado/commit/657147d3317f0c416599d4f8d9c8a98d83dfb90e))
+- feat(page-compiler)!: add compile parameter to hook signatures ([b6d714b](https://github.com/d-zero-dev/kamado/commit/b6d714bd1dacfdd0c0b4f73e9d9f36739a6ca3c8))
+- refactor(kamado)!: add compile parameter to CustomCompileFunction ([1dbd6d0](https://github.com/d-zero-dev/kamado/commit/1dbd6d01d053e2f4ee78bab06372ebe4c71d20d3))
+- feat(kamado)!: remove features export completely ([8237c75](https://github.com/d-zero-dev/kamado/commit/8237c75608961ff72abfab944b94ed6c6dda5057))
+- docs(kamado)!: update compiler API documentation to use CustomCompiler ([77213e7](https://github.com/d-zero-dev/kamado/commit/77213e7fbb922a33a0f1a9078c0886f773bd5384))
+- feat(style-compiler)!: use createCustomCompiler from kamado ([9568803](https://github.com/d-zero-dev/kamado/commit/9568803835e4d98ba3dce5e49287ff533fd72ed2))
+- feat(script-compiler)!: use createCustomCompiler from kamado ([ba49260](https://github.com/d-zero-dev/kamado/commit/ba492605e6c79376dcf34c8615f1497521631f5f))
+- feat(page-compiler)!: use createCustomCompiler from kamado ([5727e7e](https://github.com/d-zero-dev/kamado/commit/5727e7e6364a212f26a422b169ecfeab72de46f4))
+- feat(kamado)!: rename compiler API types to custom compiler ([4ad3229](https://github.com/d-zero-dev/kamado/commit/4ad322969ba727e0fe5c066366633ca1b75aea91))
+
+### Features
+
+- **page-compiler:** add function support to transforms option ([ced2d4c](https://github.com/d-zero-dev/kamado/commit/ced2d4cdeefab2a470360c8b5e00b97f093f0727))
+- **repo:** add monorepo-architect skill ([be31ef4](https://github.com/d-zero-dev/kamado/commit/be31ef4756a96acd905bca215ab4842b0248fd6b))
+
+### BREAKING CHANGES
+
+- Move and refactor format/ transforms to transform/ directory
+
+File movements and removals:
+
+- Delete format/build-transform-context.ts (no longer needed)
+- Delete format/preprocess-content.ts (functionality removed)
+- Delete format/postprocess-content.ts (functionality removed)
+- Move format/character-entities.ts -> transform/character-entities.ts
+- Move format/doctype.ts -> transform/doctype.ts
+- Move format/line-break.ts -> transform/line-break.ts
+- Move format/manipulate-dom.ts -> transform/manipulate-dom.ts
+- Move format/minifier.ts -> transform/minifier.ts
+- Move format/prettier.ts -> transform/prettier.ts
+
+All transform factory functions now:
+
+- Accept options parameter only (no context parameter)
+- Return Transform object directly
+- Have simpler, unified API surface
+- Remove unused preprocess/postprocess transform builders
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Replace granular formatting options with flexible Transform Pipeline
+
+Removed options:
+
+- imageSizes (boolean | ImageSizesOptions)
+- minifier (boolean | HMTOptions)
+- prettier (boolean | PrettierOptions)
+- lineBreak ('\n' | '\r\n')
+- characterEntities (boolean)
+
+Added option:
+
+- transforms: Transform[] | ((defaultTransforms: readonly Transform[]) => Transform[])
+
+Users must now configure transforms explicitly or use defaultPageTransforms.
+Function variant allows extending defaults without importing defaultPageTransforms.
+
+Migration guide:
+
+```typescript
+// Before
+pageCompiler({ imageSizes: true, minifier: { collapseWhitespace: true } });
+
+// After (using defaults)
+pageCompiler({ transforms: defaultPageTransforms });
+
+// After (customizing)
+import { manipulateDOM, minifier } from '@kamado-io/page-compiler';
+pageCompiler({
+	transforms: [
+		manipulateDOM({ imageSizes: true }),
+		minifier({ options: { collapseWhitespace: true } }),
+	],
+});
+
+// After (extending defaults without import)
+pageCompiler({
+	transforms: (defaults) => [customTransform, ...defaults],
+});
+```
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Rename ResponseTransform to Transform and extend TransformContext
+
+Type changes:
+
+- ResponseTransform -> Transform
+- Transform.name is now required (was optional)
+- TransformContext extended with filePath, outputDir, and compile properties
+
+This unifies the transform interfaces between page-compiler and devServer.transforms,
+enabling better code reuse and consistency across the compilation pipeline.
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Update pageTransform call to use new option names
+
+Updated option names when calling pageTransform:
+
+- beforeSerialize -> preprocessContent
+- afterSerialize -> manipulateDOM
+- replace -> postprocessContent
+
+This aligns the pageCompiler implementation with the renamed pageTransform API.
+
+- Rename pageTransform hook APIs for clarity
+
+API renames:
+
+- beforeSerialize -> preprocessContent (content preprocessing before DOM parsing)
+- afterSerialize -> manipulateDOM (DOM manipulation after parsing)
+- replace -> postprocessContent (content postprocessing after serialization)
+
+Updated type definitions and internal implementations:
+
+- PageCompilerOptions, PageTransformOptions interfaces
+- PreprocessContentContext, ManipulateDOMContext, PostprocessContentContext types
+- preprocessContent(), manipulateDOM(), postprocessContent() processor functions
+- Updated JSDoc comments to reflect new phase names
+
+* Rename format processor files to match pageTransform API
+
+File renames:
+
+- before-serialize.ts -> preprocess-content.ts
+- dom-serialize.ts -> manipulate-dom.ts
+- replace.ts -> postprocess-content.ts
+
+This is the first step of the breaking change.
+The next commit will update internal implementations and API names.
+
+- Rename format.ts to page-transform.ts
+
+* Rename src/format.ts to src/page-transform.ts
+* Rename src/format.spec.ts to src/page-transform.spec.ts
+* Update package.json exports: ./format -> ./page-transform
+* Update all import statements to use ./page-transform.js
+* Update README.md import examples
+
+This aligns file names with the function name pageTransform.
+
+Migration:
+
+- Import from '@kamado-io/page-compiler/page-transform' instead of '@kamado-io/page-compiler/format'
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Replace formatHtml with pageTransform
+
+* Rename formatHtml function to pageTransform
+* Rename FormatHtmlContext to PageTransformContext
+* Rename FormatHtmlOptions to PageTransformOptions
+* Reorganize options by transformation phase (beforeFormat, domManipulation, afterFormat)
+* Update all documentation and examples
+
+The transformation pipeline is now explicitly divided into three phases:
+
+1. Phase 1: beforeFormat - String transformations before DOM parsing
+2. Phase 2: domManipulation - DOM-based transformations
+3. Phase 3: afterFormat - String transformations after DOM serialization
+
+Migration:
+
+- Import { pageTransform } instead of { formatHtml }
+- Use PageTransformContext instead of FormatHtmlContext
+- Use PageTransformOptions instead of FormatHtmlOptions
+- Function signature and options remain the same
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Add boolean support to minifier option type
+
+Split the 130+ line formatHtml function into 9 separate processor functions:
+
+- buildTransformContext: Builds TransformContext for hooks
+- beforeSerialize: Executes beforeSerialize hook
+- domSerialize: DOM serialization with image size injection
+- characterEntities: Converts characters to HTML entities
+- doctype: Inserts DOCTYPE declaration
+- prettier: Formats HTML with Prettier
+- minifier: Minifies HTML with html-minifier-terser
+- lineBreak: Normalizes line breaks
+- replace: Final content replacement
+
+Each processor follows a curried pattern: initialized with context/options,
+returns a function that processes content. Processors are executed in a
+pipeline array for clear, sequential transformation flow.
+
+Type change:
+
+- PageCompilerOptions.minifier: HMTOptions → HMTOptions | boolean
+  (now supports false to disable minification)
+
+Benefits:
+
+- Single responsibility: Each function has one clear purpose
+- Testability: Individual processors can be tested independently
+- Maintainability: Easy to add, modify, or remove processing steps
+- Readability: Main function is now a clear pipeline
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- computeOutputPath now takes a single context object
+  instead of 4 separate parameters
+
+* Add ComputeOutputPathContext interface to types.ts
+* Update computeOutputPath signature (4 params → context object)
+* Update call site in get-file.ts
+* Update JSDoc example code
+* Update 9 test cases in output-path.spec.ts
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- getAssetGroup function signature changed from
+  getAssetGroup(options) to getAssetGroup(context, options?).
+
+Before:
+getAssetGroup({
+inputDir: '/path',
+outputDir: '/path',
+compilerEntry: {...},
+glob: '\*_/_.html'
+})
+
+After:
+getAssetGroup(
+{ inputDir: '/path', outputDir: '/path', compilerEntry: {...} },
+{ glob: '\*_/_.html' }
+)
+
+- Split GetAssetsOptions into GetAssetGroupContext + GetAssetGroupOptions
+- Update internal call sites in build.ts and assets.spec.ts
+- All 155 tests passing
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Internal file structure changed. Public API unchanged.
+
+* Create src/pug-compiler.ts (re-exports)
+* Rename src/index.spec.ts to src/pug-compiler.spec.ts
+* Update spec import path
+* Update package.json (main, types, exports)
+* Delete src/index.ts
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Internal file structure changed. Public API unchanged.
+
+* Create src/style-compiler.ts (move impl from index.ts)
+* Update package.json (main, types, exports)
+* Delete src/index.ts
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Internal file structure changed. Public API unchanged.
+
+* Create src/script-compiler.ts (move impl from index.ts)
+* Update package.json (main, types, exports)
+* Delete src/index.ts
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- beforeSerialize and afterSerialize hook signatures changed
+
+The PageCompilerOptions hook signatures now include a compile parameter
+enabling hooks to compile dependencies during page processing:
+
+beforeSerialize:
+Old: (content, isServe, context) => Promise<string> | string
+New: (content, isServe, context, compile) => Promise<string> | string
+
+afterSerialize:
+Old: (elements, window, isServe, context) => Promise<void> | void
+New: (elements, window, isServe, context, compile) => Promise<void> | void
+
+Also adapts the internal compiler function to the new CustomCompileFunction
+signature.
+
+Migration: Update all beforeSerialize and afterSerialize hook implementations
+to accept the compile parameter.
+
+- CustomCompileFunction signature changed to include compile parameter
+
+The CustomCompileFunction interface now requires a compile parameter as the
+second argument, enabling compilers to recursively compile other files during
+compilation (e.g., layouts, includes).
+
+Old signature:
+(compilableFile, log?, cache?) => Promise<string | ArrayBuffer>
+
+New signature:
+(compilableFile, compile, log?, cache?) => Promise<string | ArrayBuffer>
+
+Changes:
+
+- Add new compiler.ts with CompileFunction interface and createCompiler
+- Update CustomCompileFunction to accept compile parameter
+- Refactor builder and server to use centralized createCompiler
+- Add comprehensive JSDoc comments for all compiler interfaces
+- Export CompileFunction from compiler/index.ts
+
+Migration: All custom compilers must update their function signature to accept
+the compile parameter, even if not used.
+
+- Remove ./features export from kamado package
+
+Changes:
+
+- Move features/title.ts to deprecated/title.ts (remove getTitleFromStaticFile)
+- Delete features directory files (breadcrumbs, nav, title-list)
+- Remove "./features" from package.json exports
+- These features are already migrated to @kamado-io/page-compiler
+
+Migration: Import from @kamado-io/page-compiler instead of kamado/features
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Update documentation to reflect renamed compiler types
+
+Type renames in documentation:
+
+- CompilerPlugin -> CustomCompilerPlugin
+- Compiler -> CustomCompiler
+- CompileFunction -> CustomCompileFunction
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Update import to use renamed createCustomCompiler function
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Update import to use renamed createCustomCompiler function
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Update import to use renamed createCustomCompiler function
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Rename all compiler-related types and functions
+
+Type renames:
+
+- Compiler -> CustomCompiler
+- CompilerPlugin -> CustomCompilerPlugin
+- CompileFunction -> CustomCompileFunction
+- CompilerWithMetadata -> CustomCompilerWithMetadata
+- CompilerMetadataOptions -> CustomCompilerMetadataOptions
+- CompilerFactoryResult -> CustomCompilerFactoryResult
+- createCompiler -> createCustomCompiler
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
 # [1.3.0](https://github.com/d-zero-dev/kamado/compare/v1.2.0...v1.3.0) (2026-01-29)
 
 ### Bug Fixes

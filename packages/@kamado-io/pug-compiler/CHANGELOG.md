@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.0](https://github.com/d-zero-dev/kamado/compare/v1.3.0...v2.0.0-alpha.0) (2026-02-03)
+
+- refactor(pug-compiler)!: remove index.ts and use pug-compiler.ts ([f8c798b](https://github.com/d-zero-dev/kamado/commit/f8c798b2402b3f48ebb80e9a37422e3a4f6ed255))
+
+### BREAKING CHANGES
+
+- Internal file structure changed. Public API unchanged.
+
+* Create src/pug-compiler.ts (re-exports)
+* Rename src/index.spec.ts to src/pug-compiler.spec.ts
+* Update spec import path
+* Update package.json (main, types, exports)
+* Delete src/index.ts
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
 # [1.3.0](https://github.com/d-zero-dev/kamado/compare/v1.2.0...v1.3.0) (2026-01-29)
 
 **Note:** Version bump only for package @kamado-io/pug-compiler

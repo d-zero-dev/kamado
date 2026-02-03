@@ -3,6 +3,125 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.0](https://github.com/d-zero-dev/kamodo/compare/v1.3.0...v2.0.0-alpha.0) (2026-02-03)
+
+- refactor(kamado)!: unify Transform interface for page-compiler and devServer ([513e654](https://github.com/d-zero-dev/kamodo/commit/513e654b0c794cadda2ba3074b6b82947b600d98))
+- refactor(kamado)!: change computeOutputPath signature to context pattern ([c5643b8](https://github.com/d-zero-dev/kamodo/commit/c5643b831cf7552d2fc07bfa4b809c2a701f8f7d))
+- refactor(kamado)!: apply context+options pattern to getAssetGroup ([a602d92](https://github.com/d-zero-dev/kamodo/commit/a602d92cd279fbd0c2fb25a7e056feaf98a05a56))
+- refactor(kamado)!: add compile parameter to CustomCompileFunction ([1dbd6d0](https://github.com/d-zero-dev/kamodo/commit/1dbd6d01d053e2f4ee78bab06372ebe4c71d20d3))
+- feat(kamado)!: remove features export completely ([8237c75](https://github.com/d-zero-dev/kamodo/commit/8237c75608961ff72abfab944b94ed6c6dda5057))
+- docs(kamado)!: update compiler API documentation to use CustomCompiler ([77213e7](https://github.com/d-zero-dev/kamodo/commit/77213e7fbb922a33a0f1a9078c0886f773bd5384))
+- feat(kamado)!: rename compiler API types to custom compiler ([4ad3229](https://github.com/d-zero-dev/kamodo/commit/4ad322969ba727e0fe5c066366633ca1b75aea91))
+
+### BREAKING CHANGES
+
+- Rename ResponseTransform to Transform and extend TransformContext
+
+Type changes:
+
+- ResponseTransform -> Transform
+- Transform.name is now required (was optional)
+- TransformContext extended with filePath, outputDir, and compile properties
+
+This unifies the transform interfaces between page-compiler and devServer.transforms,
+enabling better code reuse and consistency across the compilation pipeline.
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- computeOutputPath now takes a single context object
+  instead of 4 separate parameters
+
+* Add ComputeOutputPathContext interface to types.ts
+* Update computeOutputPath signature (4 params → context object)
+* Update call site in get-file.ts
+* Update JSDoc example code
+* Update 9 test cases in output-path.spec.ts
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- getAssetGroup function signature changed from
+  getAssetGroup(options) to getAssetGroup(context, options?).
+
+Before:
+getAssetGroup({
+inputDir: '/path',
+outputDir: '/path',
+compilerEntry: {...},
+glob: '\*_/_.html'
+})
+
+After:
+getAssetGroup(
+{ inputDir: '/path', outputDir: '/path', compilerEntry: {...} },
+{ glob: '\*_/_.html' }
+)
+
+- Split GetAssetsOptions into GetAssetGroupContext + GetAssetGroupOptions
+- Update internal call sites in build.ts and assets.spec.ts
+- All 155 tests passing
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- CustomCompileFunction signature changed to include compile parameter
+
+The CustomCompileFunction interface now requires a compile parameter as the
+second argument, enabling compilers to recursively compile other files during
+compilation (e.g., layouts, includes).
+
+Old signature:
+(compilableFile, log?, cache?) => Promise<string | ArrayBuffer>
+
+New signature:
+(compilableFile, compile, log?, cache?) => Promise<string | ArrayBuffer>
+
+Changes:
+
+- Add new compiler.ts with CompileFunction interface and createCompiler
+- Update CustomCompileFunction to accept compile parameter
+- Refactor builder and server to use centralized createCompiler
+- Add comprehensive JSDoc comments for all compiler interfaces
+- Export CompileFunction from compiler/index.ts
+
+Migration: All custom compilers must update their function signature to accept
+the compile parameter, even if not used.
+
+- Remove ./features export from kamado package
+
+Changes:
+
+- Move features/title.ts to deprecated/title.ts (remove getTitleFromStaticFile)
+- Delete features directory files (breadcrumbs, nav, title-list)
+- Remove "./features" from package.json exports
+- These features are already migrated to @kamado-io/page-compiler
+
+Migration: Import from @kamado-io/page-compiler instead of kamado/features
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Update documentation to reflect renamed compiler types
+
+Type renames in documentation:
+
+- CompilerPlugin -> CustomCompilerPlugin
+- Compiler -> CustomCompiler
+- CompileFunction -> CustomCompileFunction
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Rename all compiler-related types and functions
+
+Type renames:
+
+- Compiler -> CustomCompiler
+- CompilerPlugin -> CustomCompilerPlugin
+- CompileFunction -> CustomCompileFunction
+- CompilerWithMetadata -> CustomCompilerWithMetadata
+- CompilerMetadataOptions -> CustomCompilerMetadataOptions
+- CompilerFactoryResult -> CustomCompilerFactoryResult
+- createCompiler -> createCustomCompiler
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
 # [1.3.0](https://github.com/d-zero-dev/kamodo/compare/v1.2.0...v1.3.0) (2026-01-29)
 
 ### Features

@@ -3,6 +3,25 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.0](https://github.com/d-zero-dev/kamado/compare/v1.3.0...v2.0.0-alpha.0) (2026-02-03)
+
+- refactor(style-compiler)!: remove index.ts and use style-compiler.ts ([552bb73](https://github.com/d-zero-dev/kamado/commit/552bb73bc6db73a58f28807208fa69863d57e5f2))
+- feat(style-compiler)!: use createCustomCompiler from kamado ([9568803](https://github.com/d-zero-dev/kamado/commit/9568803835e4d98ba3dce5e49287ff533fd72ed2))
+
+### BREAKING CHANGES
+
+- Internal file structure changed. Public API unchanged.
+
+* Create src/style-compiler.ts (move impl from index.ts)
+* Update package.json (main, types, exports)
+* Delete src/index.ts
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Update import to use renamed createCustomCompiler function
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
 # [1.3.0](https://github.com/d-zero-dev/kamado/compare/v1.2.0...v1.3.0) (2026-01-29)
 
 **Note:** Version bump only for package @kamado-io/style-compiler

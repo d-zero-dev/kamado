@@ -3,6 +3,25 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.0](https://github.com/d-zero-dev/kamado/compare/v1.3.0...v2.0.0-alpha.0) (2026-02-03)
+
+- refactor(script-compiler)!: remove index.ts and use script-compiler.ts ([657147d](https://github.com/d-zero-dev/kamado/commit/657147d3317f0c416599d4f8d9c8a98d83dfb90e))
+- feat(script-compiler)!: use createCustomCompiler from kamado ([ba49260](https://github.com/d-zero-dev/kamado/commit/ba492605e6c79376dcf34c8615f1497521631f5f))
+
+### BREAKING CHANGES
+
+- Internal file structure changed. Public API unchanged.
+
+* Create src/script-compiler.ts (move impl from index.ts)
+* Update package.json (main, types, exports)
+* Delete src/index.ts
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+- Update import to use renamed createCustomCompiler function
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
 # [1.3.0](https://github.com/d-zero-dev/kamado/compare/v1.2.0...v1.3.0) (2026-01-29)
 
 **Note:** Version bump only for package @kamado-io/script-compiler
