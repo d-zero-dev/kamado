@@ -105,13 +105,14 @@ The package provides **6 transform factory functions**:
      ) => Promise<void> | void
      ```
    - `options.imageSizes`: Enable/configure automatic image size detection
-     - `boolean` - `true` to enable with defaults (default: `false` when used standalone, `true` in `defaultPageTransforms`)
+     - `boolean` - `true` to enable with defaults, `false` to disable (default: `true`)
      - `ImageSizesOptions` object with properties:
-       - `rootDir?: string` - Root directory for resolving image paths (defaults to output directory)
+       - `rootDir?: string` - Root directory for resolving image paths (defaults to `outputDir` from context)
        - `selector?: string` - CSS selector to filter target images (default: no filter, all `img` and `picture > source` elements are processed)
        - `ext?: readonly string[]` - Image extensions to process (default: `['png', 'jpg', 'jpeg', 'webp', 'avif', 'svg']`)
      - Note: Width and height attributes are always set/overwritten, even if they already exist
-   - `options.host`: JSDOM URL configuration (default: `'http://localhost'`)
+     - Note: Uses kamado's `domSerialize` utility which preserves fragments as fragments and full documents as full documents
+   - `options.host`: URL for DOM resolution context (defaults to `http://{devServer.host}:{devServer.port}` in serve mode, or production `baseURL`/`host` in build mode)
 
 2. **`characterEntities(options?)`** - Convert characters to HTML entities
    - No options currently available

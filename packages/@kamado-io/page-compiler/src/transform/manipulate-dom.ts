@@ -56,7 +56,7 @@ export function manipulateDOM(options?: ManipulateDOMOptions): Transform {
 						await options.hook(elements, window, ctx);
 					}
 
-					// Apply imageSizes if enabled (default: false unless explicitly true)
+					// Apply imageSizes if enabled (default: true)
 					if (options?.imageSizes !== false) {
 						const rootDir = path.resolve(ctx.outputDir);
 						await imageSizes(elements, {
