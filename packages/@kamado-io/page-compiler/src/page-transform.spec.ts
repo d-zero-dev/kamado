@@ -60,15 +60,14 @@ describe('defaultPageTransforms', () => {
 		expect(Array.isArray(defaultPageTransforms)).toBe(true);
 	});
 
-	test('should contain 6 transforms', () => {
-		expect(defaultPageTransforms.length).toBe(6);
+	test('should contain 5 transforms', () => {
+		expect(defaultPageTransforms.length).toBe(5);
 	});
 
 	test('should have correct transform names in order', () => {
 		const names = defaultPageTransforms.map((t) => t.name);
 		expect(names).toEqual([
 			'manipulateDOM',
-			'characterEntities',
 			'doctype',
 			'prettier',
 			'minifier',
@@ -84,7 +83,7 @@ describe('defaultPageTransforms', () => {
 
 	test('should allow filtering transforms', () => {
 		const withoutMinifier = defaultPageTransforms.filter((t) => t.name !== 'minifier');
-		expect(withoutMinifier.length).toBe(5);
+		expect(withoutMinifier.length).toBe(4);
 		expect(withoutMinifier.find((t) => t.name === 'minifier')).toBeUndefined();
 	});
 
@@ -92,7 +91,7 @@ describe('defaultPageTransforms', () => {
 		const customized = defaultPageTransforms.map((t) =>
 			t.name === 'prettier' ? prettier({ options: { printWidth: 120 } }) : t,
 		);
-		expect(customized.length).toBe(6);
+		expect(customized.length).toBe(5);
 		expect(customized.find((t) => t.name === 'prettier')).toBeDefined();
 	});
 

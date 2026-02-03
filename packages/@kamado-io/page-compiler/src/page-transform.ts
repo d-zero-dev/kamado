@@ -1,7 +1,6 @@
 import type { Transform } from 'kamado/config';
 
 // Import transform factories for defaultPageTransforms
-import { characterEntities } from './transform/character-entities.js';
 import { doctype } from './transform/doctype.js';
 import { lineBreak } from './transform/line-break.js';
 import { manipulateDOM } from './transform/manipulate-dom.js';
@@ -16,7 +15,6 @@ export const defaultPageTransforms: Transform[] = [
 	manipulateDOM({ imageSizes: true }),
 
 	// Postprocess phase
-	characterEntities(),
 	doctype(),
 	prettier(),
 	minifier(),

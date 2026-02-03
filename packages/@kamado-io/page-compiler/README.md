@@ -115,6 +115,8 @@ The package provides **6 transform factory functions**:
    - `options.host`: URL for DOM resolution context (defaults to `http://{devServer.host}:{devServer.port}` in serve mode, or production `baseURL`/`host` in build mode)
 
 2. **`characterEntities(options?)`** - Convert characters to HTML entities
+   - Converts non-ASCII characters (code points ≥ 127) to their HTML entity equivalents (e.g., `©` → `&copy;`)
+   - **Note**: Not included in `defaultPageTransforms` - must be explicitly added if needed
    - No options currently available
 
 3. **`doctype(options?)`** - Add DOCTYPE declaration
@@ -156,7 +158,6 @@ import { defaultPageTransforms } from '@kamado-io/page-compiler';
 // The default pipeline includes:
 const defaultPageTransforms = [
 	manipulateDOM({ imageSizes: true }),
-	characterEntities(),
 	doctype(),
 	prettier(),
 	minifier(),
@@ -286,6 +287,24 @@ import { pageCompiler } from '@kamado-io/page-compiler';
 pageCompiler({
 	layouts: { dir: './layouts' },
 	transforms: (defaults) => defaults.filter((t) => t.name !== 'minifier'),
+});
+```
+
+#### Adding Character Entities Transform
+
+The `characterEntities` transform is not included in `defaultPageTransforms`. Add it explicitly if needed:
+
+```typescript
+import { pageCompiler, characterEntities } from '@kamado-io/page-compiler';
+
+// Add characterEntities to the pipeline
+pageCompiler({
+	layouts: { dir: './layouts' },
+	transforms: (defaults) => [
+		...defaults.slice(0, 1), // manipulateDOM
+		characterEntities(), // Insert after DOM manipulation
+		...defaults.slice(1), // doctype, prettier, minifier, lineBreak
+	],
 });
 ```
 
