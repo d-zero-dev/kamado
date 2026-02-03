@@ -210,7 +210,7 @@ graph TD
 
 ### CompilableFileMap
 
-`compilableFileMap` は、出力ファイルパスを対応するソースファイルにマッピングする `Map<string, CompilableFile>` です。以下の手順で作成されます：
+`compilableFileMap` は、キーが**出力ファイルパス**（出力ディレクトリ内の出力先パス）、値が対応するソースファイルオブジェクトの `Map<string, CompilableFile>` です。以下の手順で作成されます：
 
 1. 設定内のすべてのコンパイラエントリを反復処理
 2. 各コンパイラについて、`getAssetGroup()` を使用してコンパイラの `files` パターンに一致するファイルを収集（`ignore` に一致するものを除外）
@@ -272,6 +272,13 @@ export interface CustomCompileFunction {
 ### レスポンス変換API
 
 レスポンス変換APIは、開発サーバーモード（`serve`モードのみ）でレスポンスコンテンツを変更できます。`src/server/transform.ts`に実装され、`src/server/route.ts`のリクエスト処理フローに統合されています。
+
+**注記:** レスポンス変換API（`devServer.transforms`）とpage compilerのTransform Pipeline API（`pageCompiler({ transforms })`）は、どちらも`kamado/config`の同じ`Transform`インターフェースを使用します。ただし、適用範囲が異なります：
+
+- レスポンス変換は開発モードのみで全てのファイルタイプに適用され、`filter`オプションが有効です
+- ページ変換はビルドモードと開発モードの両方でHTMLページに適用され、`filter`オプションは無視されます
+
+ページ変換システムについては`@kamado-io/page-compiler`を参照してください。`defaultPageTransforms`は`packages/@kamado-io/page-compiler/src/page-transform.ts`からエクスポートされています。
 
 #### アーキテクチャ
 

@@ -210,7 +210,7 @@ graph TD
 
 ### CompilableFileMap
 
-The `compilableFileMap` is a `Map<string, CompilableFile>` that maps output file paths to their corresponding source files. It is created by:
+The `compilableFileMap` is a `Map<string, CompilableFile>` where keys are **output file paths** (destination paths in the output directory) and values are the corresponding source file objects. It is created by:
 
 1. Iterating through all compiler entries in the configuration
 2. For each compiler, using `getAssetGroup()` to collect files matching the compiler's `files` pattern (excluding those matching `ignore`)
@@ -272,6 +272,13 @@ Both hooks receive `Context` instead of `Config`, allowing them to detect whethe
 ### Response Transform API
 
 The Response Transform API allows modification of response content during development server mode (`serve` mode only). It is implemented in `src/server/transform.ts` and integrated into the request handling flow in `src/server/route.ts`.
+
+**Note:** Both Response Transform API (`devServer.transforms`) and page compiler's Transform Pipeline API (`pageCompiler({ transforms })`) use the same `Transform` interface from `kamado/config`. However, they differ in scope:
+
+- Response transforms apply to all file types in dev mode only, and respect the `filter` option
+- Page transforms apply to HTML pages in both build and serve modes, and ignore the `filter` option
+
+See `@kamado-io/page-compiler` for the page transform system, which includes `defaultPageTransforms` (exported from `packages/@kamado-io/page-compiler/src/page-transform.ts`).
 
 #### Architecture
 
