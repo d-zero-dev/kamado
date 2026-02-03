@@ -273,10 +273,19 @@ export const config: UserConfig = {
 
 レスポンス変換APIを使用すると、開発サーバーモード時にレスポンスコンテンツを変更できます。スクリプトの挿入、疑似SSIの実装、メタタグの追加など、あらゆるレスポンス変換のニーズに対応します。
 
+**重要な区別:**
+
+両方とも同じ `Transform` インターフェース（`kamado/config`）を使用しますが、適用範囲と動作が異なります：
+
+- **`devServer.transforms`**: 開発サーバーモード時のみ（`kamado server`）、全てのレスポンスに適用されます。HTML、CSS、JS、画像など、あらゆるファイルタイプを処理できるミドルウェア形式の変換です。`filter` オプション（include/exclude）がここで有効です。ビルド時には実行されません。
+- **`pageCompiler({ transforms })`**: ビルドモードと開発サーバーモードの両方で、コンパイル済みHTMLページに適用されます。HTML処理専用の変換パイプラインです。`filter` オプションは無視されます（全てのHTMLページが処理されます）。詳細は[@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md)を参照してください。
+
+同じTransform関数（`manipulateDOM()`、`prettier()`、カスタムTransformなど）を両方で再利用できます。
+
 **主な特徴:**
 
 - **開発時のみ**: 変換は`serve`モードでのみ適用され、ビルド時には適用されません
-- **柔軟なフィルタリング**: GlobパターンとContent-Typeでフィルタリング（`text/*`のようなワイルドカード対応）
+- **柔軟なフィルタリング**: Globパターン（include/exclude）でフィルタリング
 - **エラー耐性**: 変換関数のエラーがサーバーを停止させません
 - **非同期対応**: 同期・非同期両方の変換関数をサポート
 - **チェーン可能**: 複数の変換を配列順に適用

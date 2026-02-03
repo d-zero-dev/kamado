@@ -23,9 +23,13 @@ For detailed usage and configuration, please refer to the documentation below:
 
 This repository is a monorepo managed by Lerna.
 
-| Package           | Description                                  | Version                                                                                     |
-| ----------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `packages/kamado` | The core logic of the static site generator. | [![npm version](https://badge.fury.io/js/kamado.svg)](https://www.npmjs.com/package/kamado) |
+| Package                      | Description                                | Version                                                                                                                               |
+| ---------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `kamado`                     | Core static site generator engine          | [![npm version](https://badge.fury.io/js/kamado.svg)](https://www.npmjs.com/package/kamado)                                           |
+| `@kamado-io/page-compiler`   | Page/HTML compiler with transform pipeline | [![npm version](https://badge.fury.io/js/@kamado-io%2Fpage-compiler.svg)](https://www.npmjs.com/package/@kamado-io/page-compiler)     |
+| `@kamado-io/pug-compiler`    | Pug template compiler                      | [![npm version](https://badge.fury.io/js/@kamado-io%2Fpug-compiler.svg)](https://www.npmjs.com/package/@kamado-io/pug-compiler)       |
+| `@kamado-io/script-compiler` | JavaScript/TypeScript bundler (esbuild)    | [![npm version](https://badge.fury.io/js/@kamado-io%2Fscript-compiler.svg)](https://www.npmjs.com/package/@kamado-io/script-compiler) |
+| `@kamado-io/style-compiler`  | CSS/SCSS processor (PostCSS)               | [![npm version](https://badge.fury.io/js/@kamado-io%2Fstyle-compiler.svg)](https://www.npmjs.com/package/@kamado-io/style-compiler)   |
 
 ## Development
 

@@ -273,10 +273,19 @@ Returns an array of `CompilableFile` objects, optionally with a `title` property
 
 The Response Transform API allows you to modify response content during development server mode. This is useful for injecting scripts, implementing pseudo-SSI, adding meta tags, or any other response transformation needs.
 
+**Important Distinction:**
+
+Both use the same `Transform` interface (`kamado/config`), but differ in scope and application:
+
+- **`devServer.transforms`**: Applied to ALL responses during development server mode only (`kamado server`). Middleware-style transforms that can process any file type (HTML, CSS, JS, images, etc.). The `filter` option (include/exclude) is respected here. Does not run during builds.
+- **`pageCompiler({ transforms })`**: Applied to compiled HTML pages in both build and serve modes. Transform pipeline for HTML processing only. The `filter` option is ignored (all HTML pages are processed). See [@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md) for details.
+
+You can reuse the same transform functions (like `manipulateDOM()`, `prettier()`, or custom transforms) in both places.
+
 **Key Features:**
 
 - **Development-only**: Transforms only apply in `serve` mode, not during builds
-- **Flexible filtering**: Filter by glob patterns and Content-Type (supports wildcards like `text/*`)
+- **Flexible filtering**: Filter by glob patterns (include/exclude)
 - **Error resilient**: Errors in transform functions don't break the server
 - **Async support**: Supports both synchronous and asynchronous transform functions
 - **Chainable**: Multiple transforms are applied in array order

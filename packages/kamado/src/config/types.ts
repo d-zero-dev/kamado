@@ -142,7 +142,6 @@ export interface Transform {
 	readonly filter?: {
 		readonly include?: string | readonly string[];
 		readonly exclude?: string | readonly string[];
-		readonly contentType?: string | readonly string[];
 	};
 	/**
 	 * Transform function
@@ -185,7 +184,7 @@ export interface DevServerConfig {
 	 * transforms: [
 	 *   {
 	 *     name: 'inject-script',
-	 *     filter: { include: '**\/*.html', contentType: 'text/html' },
+	 *     filter: { include: '**\/*.html' },
 	 *     transform: (content) => {
 	 *       if (typeof content !== 'string') {
 	 *         const decoder = new TextDecoder('utf-8');

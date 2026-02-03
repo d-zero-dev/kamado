@@ -44,10 +44,11 @@ export const config: UserConfig = {
   - `dir`: Directory path where layout files are stored
   - `files`: Map of layout files
   - `contentVariableName`: Variable name for content in layout (default: `'content'`)
-- `transforms`: Transform functions to apply to compiled HTML. Can be:
-  - `Transform[]` - Array of transform functions
-  - `(defaultTransforms: readonly Transform[]) => Transform[]` - Function that receives default transforms and returns modified array
-  - If omitted, uses `defaultPageTransforms`. See [Transform Pipeline](#transform-pipeline) for details.
+- `transforms`: Transform functions to apply to compiled HTML in both build and serve modes. Can be:
+  - `Transform[]` - Array of transform functions (uses `kamado/config` Transform interface)
+  - `(defaultTransforms: readonly Transform[]) => Transform[]` - Function that receives default transforms (5 transforms) and returns modified array
+  - If omitted, uses `defaultPageTransforms` (5 transforms: manipulateDOM, doctype, prettier, minifier, lineBreak). See [Transform Pipeline](#transform-pipeline) for details.
+  - **Note**: Uses the same `Transform` interface as `devServer.transforms`, but applies only to HTML pages in both build and serve modes. The `filter` option is ignored here (use `devServer.transforms` for filtering).
 - `optimizeTitle`: Function to optimize titles
 - `transformBreadcrumbItem`: Function to transform each breadcrumb item. Can add custom properties to breadcrumb items. `(item: BreadcrumbItem) => BreadcrumbItem`
 - `transformNavNode`: Function to transform each navigation node. Can add custom properties or filter nodes by returning `null`/`undefined`. `(node: NavNode) => NavNode | null | undefined`
@@ -73,6 +74,11 @@ The page compiler uses a Transform Pipeline to process HTML content after compil
 ```typescript
 interface Transform {
 	readonly name: string;
+	readonly filter?: {
+		// Note: filter is ignored in pageCompiler transforms
+		readonly include?: string | readonly string[];
+		readonly exclude?: string | readonly string[];
+	};
 	readonly transform: (
 		content: string | ArrayBuffer,
 		context: TransformContext,
@@ -91,9 +97,11 @@ interface TransformContext {
 }
 ```
 
+**Note**: The `Transform` interface is shared with `devServer.transforms` (from `kamado/config`). However, the `filter` option is only effective in `devServer.transforms` and is ignored when used in `pageCompiler({ transforms })`. All HTML pages are processed regardless of filter settings.
+
 ### Transform Factory Functions
 
-The package provides **6 transform factory functions**:
+The package provides **6 transform factory functions** (5 included in default pipeline):
 
 1. **`manipulateDOM(options?)`** - DOM manipulation (includes imageSizes integration)
    - `options.hook`: Custom DOM manipulation function
@@ -104,8 +112,8 @@ The package provides **6 transform factory functions**:
        context: TransformContext
      ) => Promise<void> | void
      ```
-   - `options.imageSizes`: Enable/configure automatic image size detection
-     - `boolean` - `true` to enable with defaults, `false` to disable (default: `true`)
+   - `options.imageSizes`: Enable/configure automatic image size detection (default: `true`)
+     - `boolean` - `true` to enable with defaults, `false` to disable
      - `ImageSizesOptions` object with properties:
        - `rootDir?: string` - Root directory for resolving image paths (defaults to `outputDir` from context)
        - `selector?: string` - CSS selector to filter target images (default: no filter, all `img` and `picture > source` elements are processed)
@@ -155,14 +163,15 @@ The package provides **6 transform factory functions**:
 ```typescript
 import { defaultPageTransforms } from '@kamado-io/page-compiler';
 
-// The default pipeline includes:
+// The default pipeline includes 5 transforms:
 const defaultPageTransforms = [
-	manipulateDOM({ imageSizes: true }),
-	doctype(),
-	prettier(),
-	minifier(),
-	lineBreak(),
+	manipulateDOM({ imageSizes: true }), // 1. DOM manipulation
+	doctype(), // 2. DOCTYPE injection
+	prettier(), // 3. HTML formatting
+	minifier(), // 4. HTML minification
+	lineBreak(), // 5. Line break normalization
 ];
+// Note: characterEntities() is NOT included by default
 ```
 
 ### Usage Examples
@@ -664,7 +673,7 @@ export const config: UserConfig = {
 		transforms: [
 			{
 				name: 'my-custom-transform',
-				filter: { include: '**/*.html', contentType: 'text/html' },
+				filter: { include: '**/*.html' },
 				transform: createInjectToHeadTransform({
 					content: '<script src="/__dev.js"></script>',
 					position: 'head-end',
