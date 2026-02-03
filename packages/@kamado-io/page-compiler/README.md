@@ -673,7 +673,7 @@ export const config: UserConfig = {
 		transforms: [
 			{
 				name: 'my-custom-transform',
-				filter: { include: '**/*.html', contentType: 'text/html' },
+				filter: { include: '**/*.html' },
 				transform: createInjectToHeadTransform({
 					content: '<script src="/__dev.js"></script>',
 					position: 'head-end',

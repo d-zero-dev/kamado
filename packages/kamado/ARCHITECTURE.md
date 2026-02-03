@@ -289,7 +289,6 @@ export interface ResponseTransform {
 	readonly filter?: {
 		readonly include?: string | readonly string[];
 		readonly exclude?: string | readonly string[];
-		readonly contentType?: string | readonly string[];
 	};
 	readonly transform: (
 		content: string | ArrayBuffer,

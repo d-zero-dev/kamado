@@ -285,7 +285,7 @@ You can reuse the same transform functions (like `manipulateDOM()`, `prettier()`
 **Key Features:**
 
 - **Development-only**: Transforms only apply in `serve` mode, not during builds
-- **Flexible filtering**: Filter by glob patterns and Content-Type (supports wildcards like `text/*`)
+- **Flexible filtering**: Filter by glob patterns (include/exclude)
 - **Error resilient**: Errors in transform functions don't break the server
 - **Async support**: Supports both synchronous and asynchronous transform functions
 - **Chainable**: Multiple transforms are applied in array order
