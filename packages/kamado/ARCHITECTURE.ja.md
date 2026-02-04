@@ -173,13 +173,15 @@ export function imageSizes(context: { elements: Element[] }, options?: ImageSize
 ```mermaid
 graph TD
     A[CLI: build] --> B[config のロード & マージ]
-    B --> C[onBeforeBuild フックの実行]
-    C --> D[コンパイラ・マップの作成]
-    D --> E[対象ファイルのリストアップ]
+    B --> B2[Context の作成 mode='build']
+    B2 --> C[onBeforeBuild フックの実行]
+    C --> D[コンパイラ関数マップの作成]
+    D --> D2[コンパイラの作成]
+    D2 --> E[getAssetGroup で対象ファイルのリストアップ]
     E --> F[並列処理開始 @d-zero/dealer]
-    F --> G{出力拡張子に一致する<br>コンパイラがあるか?}
+    F --> G{出力拡張子に対応する<br>コンパイラが存在するか?}
     G -- Yes --> H[コンパイラで実行]
-    G -- No --> I[そのままコピー]
+    G -- No --> I[生のコンテンツを読み込み]
     H --> J[出力ファイルとして書き出し]
     I --> J
     J --> K[全ファイル完了]
@@ -194,15 +196,16 @@ graph TD
 ```mermaid
 graph TD
     A[CLI: server] --> B[config のロード]
-    B --> C[Hono サーバーの起動]
-    C --> D[ブラウザからのリクエスト受領]
+    B --> B2[Context の作成 mode='serve']
+    B2 --> C[compilableFileMap & コンパイラの作成]
+    C --> C2[Hono サーバーの起動]
+    C2 --> D[ブラウザからのリクエスト受領]
     D --> E[URL からローカルパスを計算]
     E --> F{compilableFileMap に<br>存在するか?}
-    F -- Yes --> G[対応するコンパイラを特定]
-    G --> H[オンメモリでコンパイル実行]
+    F -- Yes --> H[オンメモリでコンパイル実行]
     H --> I[レスポンス変換を適用]
     I --> J[レスポンスとして返却]
-    F -- No --> K[出力ディレクトリ内の<br>静的ファイルを検索]
+    F -- No --> K[出力ディレクトリから<br>ファイルを読み込み]
     K --> L{ファイルが存在するか?}
     L -- Yes --> I
     L -- No --> M[404 Not Found]
@@ -259,6 +262,43 @@ export interface CustomCompileFunction {
 ソースコードの読み込みやキャッシュの管理は`CompilableFile`クラス（`src/files/`）が隠蔽します。`compile`パラメータにより、コンパイラは依存ファイルを再帰的にコンパイルできます。
 
 **注意**: `Context`は`Config`を拡張しているため、パラメータ名として`Config`を使用している既存のカスタムコンパイラは変更なしで動作し続けます。ただし、`context.mode`にアクセスして実行モードを検出できます。
+
+### ページリストフック
+
+`pageList`フックは、テンプレートで利用可能なページリストをフィルターまたは変換できます。グローバルデータ収集時（`getGlobalData()`内）に呼び出され、ページテンプレートで利用可能な`pageList`変数に影響します。
+
+```typescript
+pageList?: (
+	pageAssetFiles: readonly CompilableFile[],
+	config: Config,
+) => (CompilableFile & { title?: string })[] | Promise<(CompilableFile & { title?: string })[]>;
+```
+
+**パラメータ:**
+
+- `pageAssetFiles`: 全てのページファイルの配列（ページコンパイラの`files`パターンにマッチするファイル）
+- `config`: 設定オブジェクト
+
+**戻り値:** フィルター/変換されたページファイルの配列。オプションで`title`プロパティを追加可能
+
+**ユースケース:**
+
+- 下書きや未公開ページをナビゲーションから除外
+- 日付やカスタム順序でページをソート
+- ページにカスタムメタデータ（`title`など）を追加
+- カテゴリやタグでページをフィルタリング
+
+**例:**
+
+```typescript
+// kamado.config.ts
+export default {
+	pageList: async (pages, config) => {
+		// アンダースコアで始まるページ（下書き）を除外
+		return pages.filter((page) => !page.inputPath.includes('/_'));
+	},
+};
+```
 
 ### ライフサイクルフック
 
