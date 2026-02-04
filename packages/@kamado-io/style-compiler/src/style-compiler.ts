@@ -3,6 +3,7 @@ import path from 'node:path';
 import cssnano from 'cssnano';
 import { createCustomCompiler } from 'kamado/compiler';
 import { createBanner, type CreateBanner } from 'kamado/compiler/banner';
+import { getContentFromFile } from 'kamado/files';
 import postcss from 'postcss';
 import postcssImport from 'postcss-import';
 // eslint-disable-next-line import-x/default
@@ -104,7 +105,7 @@ export const styleCompiler = createCustomCompiler<StyleCompilerOptions>(() => ({
 				}
 			}
 
-			const css = await file.get(cache);
+			const css = await getContentFromFile(file, cache);
 
 			// Process CSS with PostCSS
 			const result = await postcss(plugins).process(css.content, {
