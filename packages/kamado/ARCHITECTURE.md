@@ -173,13 +173,15 @@ The flow for compiling all files at once and exporting them as static files.
 ```mermaid
 graph TD
     A[CLI: build] --> B[Load & Merge config]
-    B --> C[Execute onBeforeBuild hook]
-    C --> D[Create compiler map]
-    D --> E[List target files]
+    B --> B2[Create Context with mode='build']
+    B2 --> C[Execute onBeforeBuild hook]
+    C --> D[Create compiler function map]
+    D --> D2[Create compiler]
+    D2 --> E[List target files via getAssetGroup]
     E --> F[Parallel processing via @d-zero/dealer]
-    F --> G{Is there a compiler<br>matching output extension?}
+    F --> G{Compiler exists for<br>output extension?}
     G -- Yes --> H[Execute compiler]
-    G -- No --> I[Copy as-is]
+    G -- No --> I[Read raw content]
     H --> J[Write to output file]
     I --> J
     J --> K[All files completed]
@@ -194,15 +196,16 @@ The flow for on-demand compilation during local development.
 ```mermaid
 graph TD
     A[CLI: server] --> B[Load config]
-    B --> C[Start Hono server]
-    C --> D[Receive browser request]
+    B --> B2[Create Context with mode='serve']
+    B2 --> C[Create compilableFileMap & compiler]
+    C --> C2[Start Hono server]
+    C2 --> D[Receive browser request]
     D --> E[Calculate local path from URL]
     E --> F{Exists in<br>compilableFileMap?}
-    F -- Yes --> G[Identify corresponding compiler]
-    G --> H[Perform in-memory compilation]
+    F -- Yes --> H[Perform in-memory compilation]
     H --> I[Apply Response Transforms]
     I --> J[Return as response]
-    F -- No --> K[Search for static files<br>in output directory]
+    F -- No --> K[Read file from<br>output directory]
     K --> L{File exists?}
     L -- Yes --> I
     L -- No --> M[404 Not Found]
@@ -259,6 +262,43 @@ The `CustomCompiler` receives a `Context` object (which includes `mode: 'serve' 
 The `CompilableFile` class (`src/files/`) handles file reading and cache management behind the scenes. The `compile` parameter enables compilers to recursively compile dependencies.
 
 **Note**: Because `Context extends Config`, existing custom compilers that use `Config` as a parameter name will continue to work without changes. However, they can access `context.mode` to detect the execution mode.
+
+### Page List Hook
+
+The `pageList` hook allows users to filter or transform the list of pages available to templates. It is called during global data collection (in `getGlobalData()`) and affects the `pageList` variable available in page templates.
+
+```typescript
+pageList?: (
+	pageAssetFiles: readonly CompilableFile[],
+	config: Config,
+) => (CompilableFile & { title?: string })[] | Promise<(CompilableFile & { title?: string })[]>;
+```
+
+**Parameters:**
+
+- `pageAssetFiles`: Array of all page files (files matching the page compiler's `files` pattern)
+- `config`: Configuration object
+
+**Returns:** Filtered/transformed array of page files, optionally with `title` property added
+
+**Use Cases:**
+
+- Excluding draft or unpublished pages from navigation
+- Sorting pages by date or custom order
+- Adding custom metadata (like `title`) to pages
+- Filtering pages by category or tag
+
+**Example:**
+
+```typescript
+// kamado.config.ts
+export default {
+	pageList: async (pages, config) => {
+		// Exclude pages starting with underscore (drafts)
+		return pages.filter((page) => !page.inputPath.includes('/_'));
+	},
+};
+```
 
 ### Lifecycle Hooks
 
