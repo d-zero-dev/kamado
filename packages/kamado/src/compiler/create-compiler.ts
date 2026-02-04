@@ -2,6 +2,7 @@ import type { CompileFunction, CompilerContext } from './types.js';
 
 import path from 'node:path';
 
+import { getContentFromFile } from '../files/get-content-from-file.js';
 import { getFile } from '../files/get-file.js';
 
 /**
@@ -12,7 +13,7 @@ import { getFile } from '../files/get-file.js';
 export function createCompiler(context: CompilerContext): CompileFunction {
 	const self: CompileFunction = async (fileSeed, log, cache) => {
 		const file =
-			'get' in fileSeed
+			'outputPath' in fileSeed
 				? fileSeed
 				: getFile(fileSeed.inputPath, {
 						inputDir: context.dir.input,
@@ -28,7 +29,7 @@ export function createCompiler(context: CompilerContext): CompileFunction {
 		if (compile) {
 			content = await compile(file, self, log, cache);
 		} else {
-			const { raw } = await file.get(cache);
+			const { raw } = await getContentFromFile(file, cache);
 			content = raw;
 		}
 
