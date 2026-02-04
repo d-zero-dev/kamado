@@ -11,13 +11,8 @@ import { getNavTree, type NavNode } from './nav.js';
  * - `/about/` → `/about/index`
  * @param url - URL path ending with `/`
  * @param title - Page title
- * @param metaData - Optional metadata (front matter)
  */
-function createMockPage(
-	url: string,
-	title: string,
-	metaData: Record<string, unknown> = {},
-): CompilableFile & { title: string } {
+function createMockPage(url: string, title: string): CompilableFile & { title: string } {
 	const filePathStem = url === '/' ? '/index' : url.replace(/\/$/, '/index');
 	const slug = url === '/' ? 'index' : url.split('/').findLast(Boolean) || 'index';
 
@@ -30,12 +25,6 @@ function createMockPage(
 		extension: '.html',
 		date: new Date(),
 		title,
-		get: () =>
-			Promise.resolve({
-				metaData,
-				content: '<p>content</p>',
-				raw: '<p>content</p>',
-			}),
 	};
 }
 

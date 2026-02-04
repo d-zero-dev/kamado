@@ -2,14 +2,54 @@ import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { NavNode } from './features/nav.js';
 import type { Transform } from './page-compiler.js';
 import type { PageCompilerOptions } from './types.js';
-import type { CompilableFile } from 'kamado/files';
+import type { CompilableFile, FileContent } from 'kamado/files';
 
 import { mergeConfig } from 'kamado/config';
-import { describe, test, expect, expectTypeOf } from 'vitest';
+import { describe, test, expect, expectTypeOf, vi } from 'vitest';
 
 import { pageCompiler } from './page-compiler.js';
 import { defaultPageTransforms } from './page-transform.js';
 import { manipulateDOM } from './transform/manipulate-dom.js';
+
+// Mock file content storage for tests
+const mockFileContents = new Map<string, FileContent>();
+
+vi.mock('kamado/files', async (importOriginal) => {
+	const original = await importOriginal();
+	return {
+		...original,
+		getContentFromFile: vi.fn((file: CompilableFile) => {
+			const content = mockFileContents.get(file.inputPath);
+			if (!content) {
+				throw new Error(`ENOENT: no such file or directory, open '${file.inputPath}'`);
+			}
+			return Promise.resolve(content);
+		}),
+		getContentFromFileObject: vi.fn((file: { inputPath: string }) => {
+			const content = mockFileContents.get(file.inputPath);
+			if (!content) {
+				throw new Error(`ENOENT: no such file or directory, open '${file.inputPath}'`);
+			}
+			return Promise.resolve(content);
+		}),
+	};
+});
+
+/**
+ * Helper to set mock file content for tests
+ * @param inputPath
+ * @param content
+ */
+function setMockFileContent(inputPath: string, content: FileContent) {
+	mockFileContents.set(inputPath, content);
+}
+
+/**
+ * Helper to clear mock file contents
+ */
+function clearMockFileContents() {
+	mockFileContents.clear();
+}
 
 describe('page compiler', async () => {
 	const config = await mergeConfig({});
@@ -26,6 +66,7 @@ describe('page compiler', async () => {
 	}
 
 	test('should compile a page', async () => {
+		clearMockFileContents();
 		const content = '<p>Hello, world!</p>';
 		const page: CompilableFile = {
 			inputPath: '/path/to/page.html',
@@ -35,18 +76,18 @@ describe('page compiler', async () => {
 			url: '/path/to/page',
 			extension: '.html',
 			date: new Date(),
-			get: () =>
-				Promise.resolve({
-					metaData: {},
-					content,
-					raw: content,
-				}),
 		};
+		setMockFileContent('/path/to/page.html', {
+			metaData: {},
+			content,
+			raw: content,
+		});
 		const result = await compilePage(page, {});
 		expect(result).toBe('<p>Hello, world!</p>\n');
 	});
 
 	test('should pass through pug file without compiler', async () => {
+		clearMockFileContents();
 		const content = 'p Hello, world!';
 		const page: CompilableFile = {
 			inputPath: '/path/to/page.pug',
@@ -56,19 +97,19 @@ describe('page compiler', async () => {
 			url: '/path/to/page',
 			extension: '.pug',
 			date: new Date(),
-			get: () =>
-				Promise.resolve({
-					metaData: {},
-					content,
-					raw: content,
-				}),
 		};
+		setMockFileContent('/path/to/page.pug', {
+			metaData: {},
+			content,
+			raw: content,
+		});
 		const result = await compilePage(page, {});
 		// Pug syntax is not valid HTML, so domSerialize returns empty string
 		expect(result).toBe('');
 	});
 
 	test('should compile a page made with pug using compileHooks', async () => {
+		clearMockFileContents();
 		const { compilePug } = await import('@kamado-io/pug-compiler');
 		const content = 'p Hello, world!';
 		const page: CompilableFile = {
@@ -79,13 +120,12 @@ describe('page compiler', async () => {
 			url: '/path/to/page',
 			extension: '.pug',
 			date: new Date(),
-			get: () =>
-				Promise.resolve({
-					metaData: {},
-					content,
-					raw: content,
-				}),
 		};
+		setMockFileContent('/path/to/page.pug', {
+			metaData: {},
+			content,
+			raw: content,
+		});
 		const compiler = compilePug({
 			doctype: 'html',
 			pretty: true,
@@ -101,6 +141,7 @@ describe('page compiler', async () => {
 	});
 
 	test('should compile a page made with pug with layout using compileHooks', async () => {
+		clearMockFileContents();
 		const { compilePug } = await import('@kamado-io/pug-compiler');
 		const compiler = compilePug({
 			doctype: 'html',
@@ -114,26 +155,24 @@ describe('page compiler', async () => {
 			url: '/path/to/page',
 			extension: '.pug',
 			date: new Date(),
-			get: () =>
-				Promise.resolve({
-					metaData: {
-						layout: 'layout.pug',
-					},
-					content: 'p Hello, world!',
-					raw: '__DUMMY__',
-				}),
 		};
+		setMockFileContent('/path/to/page.pug', {
+			metaData: {
+				layout: 'layout.pug',
+			},
+			content: 'p Hello, world!',
+			raw: '__DUMMY__',
+		});
+		setMockFileContent('/path/to/layout.pug', {
+			metaData: {},
+			content: 'html\n  body\n    main !{content}',
+			raw: '__DUMMY__',
+		});
 		const result = await compilePage(page, {
 			layouts: {
 				files: {
 					'layout.pug': {
 						inputPath: '/path/to/layout.pug',
-						get: () =>
-							Promise.resolve({
-								metaData: {},
-								content: 'html\n  body\n    main !{content}',
-								raw: '__DUMMY__',
-							}),
 					},
 				},
 			},
@@ -159,6 +198,7 @@ describe('page compiler', async () => {
 	});
 
 	test('should use createCompileHooks helper', async () => {
+		clearMockFileContents();
 		const { createCompileHooks } = await import('@kamado-io/pug-compiler');
 		const content = 'p Hello, world!';
 		const page: CompilableFile = {
@@ -169,13 +209,12 @@ describe('page compiler', async () => {
 			url: '/path/to/page',
 			extension: '.pug',
 			date: new Date(),
-			get: () =>
-				Promise.resolve({
-					metaData: {},
-					content,
-					raw: content,
-				}),
 		};
+		setMockFileContent('/path/to/page.pug', {
+			metaData: {},
+			content,
+			raw: content,
+		});
 		const result = await compilePage(page, {
 			compileHooks: createCompileHooks({
 				doctype: 'html',
@@ -255,6 +294,7 @@ describe('pageCompiler with custom transforms', async () => {
 	}
 
 	test('uses custom transforms instead of default', async () => {
+		clearMockFileContents();
 		const customTransform: Transform = {
 			name: 'custom',
 			transform: (content) => {
@@ -273,13 +313,12 @@ describe('pageCompiler with custom transforms', async () => {
 			url: '/path/to/page',
 			extension: '.html',
 			date: new Date(),
-			get: () =>
-				Promise.resolve({
-					metaData: {},
-					content,
-					raw: content,
-				}),
 		};
+		setMockFileContent('/path/to/page.html', {
+			metaData: {},
+			content,
+			raw: content,
+		});
 
 		const result = await compilePage(page, {
 			transforms: [customTransform],
@@ -290,6 +329,7 @@ describe('pageCompiler with custom transforms', async () => {
 	});
 
 	test('uses defaultPageTransforms when no transforms provided', async () => {
+		clearMockFileContents();
 		const content = '<p>Hello, world!</p>';
 		const page: CompilableFile = {
 			inputPath: '/path/to/page.html',
@@ -299,13 +339,12 @@ describe('pageCompiler with custom transforms', async () => {
 			url: '/path/to/page',
 			extension: '.html',
 			date: new Date(),
-			get: () =>
-				Promise.resolve({
-					metaData: {},
-					content,
-					raw: content,
-				}),
 		};
+		setMockFileContent('/path/to/page.html', {
+			metaData: {},
+			content,
+			raw: content,
+		});
 
 		const result = await compilePage(page, {});
 
@@ -313,6 +352,7 @@ describe('pageCompiler with custom transforms', async () => {
 	});
 
 	test('transform receives correct info', async () => {
+		clearMockFileContents();
 		let receivedInfo: unknown;
 		const customTransform: Transform = {
 			name: 'custom',
@@ -331,13 +371,12 @@ describe('pageCompiler with custom transforms', async () => {
 			url: '/path/to/page',
 			extension: '.html',
 			date: new Date(),
-			get: () =>
-				Promise.resolve({
-					metaData: {},
-					content,
-					raw: content,
-				}),
 		};
+		setMockFileContent('/input/path/page.html', {
+			metaData: {},
+			content,
+			raw: content,
+		});
 
 		await compilePage(page, {
 			transforms: [customTransform],
@@ -351,6 +390,7 @@ describe('pageCompiler with custom transforms', async () => {
 	});
 
 	test('can use transform factories with custom options', async () => {
+		clearMockFileContents();
 		const content = '<p>Hello, world!</p>';
 		const page: CompilableFile = {
 			inputPath: '/path/to/page.html',
@@ -360,13 +400,12 @@ describe('pageCompiler with custom transforms', async () => {
 			url: '/path/to/page',
 			extension: '.html',
 			date: new Date(),
-			get: () =>
-				Promise.resolve({
-					metaData: {},
-					content,
-					raw: content,
-				}),
 		};
+		setMockFileContent('/path/to/page.html', {
+			metaData: {},
+			content,
+			raw: content,
+		});
 
 		const result = await compilePage(page, {
 			transforms: [
@@ -389,6 +428,7 @@ describe('pageCompiler with custom transforms', async () => {
 	});
 
 	test('can extend defaultPageTransforms', async () => {
+		clearMockFileContents();
 		const customTransform: Transform = {
 			name: 'custom-postprocess',
 			transform: (content) => {
@@ -407,13 +447,12 @@ describe('pageCompiler with custom transforms', async () => {
 			url: '/path/to/page',
 			extension: '.html',
 			date: new Date(),
-			get: () =>
-				Promise.resolve({
-					metaData: {},
-					content,
-					raw: content,
-				}),
 		};
+		setMockFileContent('/path/to/page.html', {
+			metaData: {},
+			content,
+			raw: content,
+		});
 
 		const result = await compilePage(page, {
 			transforms: [...defaultPageTransforms, customTransform],
@@ -424,6 +463,7 @@ describe('pageCompiler with custom transforms', async () => {
 	});
 
 	test('can use function to extend defaultPageTransforms', async () => {
+		clearMockFileContents();
 		const customTransform: Transform = {
 			name: 'custom-postprocess',
 			transform: (content) => {
@@ -442,13 +482,12 @@ describe('pageCompiler with custom transforms', async () => {
 			url: '/path/to/page',
 			extension: '.html',
 			date: new Date(),
-			get: () =>
-				Promise.resolve({
-					metaData: {},
-					content,
-					raw: content,
-				}),
 		};
+		setMockFileContent('/path/to/page.html', {
+			metaData: {},
+			content,
+			raw: content,
+		});
 
 		const result = await compilePage(page, {
 			// Use function to extend defaults (no import needed)
@@ -460,6 +499,7 @@ describe('pageCompiler with custom transforms', async () => {
 	});
 
 	test('can filter transforms from defaults', async () => {
+		clearMockFileContents();
 		const content = '<p>Hello, world!</p>';
 		const page: CompilableFile = {
 			inputPath: '/path/to/page.html',
@@ -469,13 +509,12 @@ describe('pageCompiler with custom transforms', async () => {
 			url: '/path/to/page',
 			extension: '.html',
 			date: new Date(),
-			get: () =>
-				Promise.resolve({
-					metaData: {},
-					content,
-					raw: content,
-				}),
 		};
+		setMockFileContent('/path/to/page.html', {
+			metaData: {},
+			content,
+			raw: content,
+		});
 
 		// Remove prettier and minifier
 		const result = await compilePage(page, {

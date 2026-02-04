@@ -1,6 +1,8 @@
 import type { GetTitleOptions } from '../types.js';
 import type { CompilableFile } from 'kamado/files';
 
+import { getContentFromFile } from 'kamado/files';
+
 import { getTitleFromDOM, titleCache } from './title-utils.js';
 
 /**
@@ -20,7 +22,7 @@ export async function getTitle(page: CompilableFile, options?: GetTitleOptions) 
 	if (titleCache.has(filePathStem)) {
 		return titleCache.get(filePathStem);
 	}
-	const pageContent = await page.get().catch((error) => {
+	const pageContent = await getContentFromFile(page).catch((error) => {
 		if (safe) {
 			return null;
 		}

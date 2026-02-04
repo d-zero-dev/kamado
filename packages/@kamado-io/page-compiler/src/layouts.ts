@@ -3,7 +3,6 @@ import type { FileObject } from 'kamado/files';
 import path from 'node:path';
 
 import fg from 'fast-glob';
-import { getFileContent } from 'kamado/files';
 
 /**
  * Options for getting layouts
@@ -47,14 +46,6 @@ function getLayout(filePath: string): Record<string, FileObject> {
 	return {
 		[name]: {
 			inputPath: filePath,
-			async get(cache = true) {
-				const content = await getFileContent(filePath, cache);
-				return {
-					metaData: {},
-					content,
-					raw: content,
-				};
-			},
 		},
 	};
 }

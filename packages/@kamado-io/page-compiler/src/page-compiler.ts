@@ -8,6 +8,7 @@ import path from 'node:path';
 import c from 'ansi-colors';
 import { createCustomCompiler } from 'kamado/compiler';
 import { getGlobalData } from 'kamado/data';
+import { getContentFromFile, getContentFromFileObject } from 'kamado/files';
 
 import { getBreadcrumbs } from './features/breadcrumbs.js';
 import { getNavTree } from './features/nav.js';
@@ -57,7 +58,7 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 
 		return async (file, compile, log, cache) => {
 			log?.(c.blue('Building...'));
-			const pageContent = await file.get(cache);
+			const pageContent = await getContentFromFile(file, cache);
 			const { metaData, content: pageMainContent } = pageContent;
 
 			const breadcrumbs = getBreadcrumbs(
@@ -111,7 +112,7 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 					throw new Error(`Layout not found: ${metaData.layout}`);
 				}
 
-				const { content: layoutContent } = await layout.get(cache);
+				const { content: layoutContent } = await getContentFromFileObject(layout, cache);
 				const contentVariableName = options?.layouts?.contentVariableName ?? 'content';
 				const layoutCompileData: CompileData = {
 					...compileData,

@@ -12,13 +12,8 @@ import { getBreadcrumbs } from './breadcrumbs.js';
  * - `/about/team/` → `/about/team/index`
  * @param url - URL path ending with `/`
  * @param title - Page title
- * @param metaData - Optional metadata (front matter)
  */
-function createMockPage(
-	url: string,
-	title: string,
-	metaData: Record<string, unknown> = {},
-): CompilableFile & { title: string } {
+function createMockPage(url: string, title: string): CompilableFile & { title: string } {
 	// Convert URL to filePathStem matching isAncestor logic
 	// /about/ → /about/index, / → /index
 	const filePathStem = url === '/' ? '/index' : url.replace(/\/$/, '/index');
@@ -33,12 +28,6 @@ function createMockPage(
 		extension: '.html',
 		date: new Date(),
 		title,
-		get: () =>
-			Promise.resolve({
-				metaData,
-				content: '<p>content</p>',
-				raw: '<p>content</p>',
-			}),
 	};
 }
 
