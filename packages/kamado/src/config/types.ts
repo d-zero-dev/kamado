@@ -35,14 +35,14 @@ export interface Config {
 	readonly compilers: readonly CustomCompilerWithMetadata[];
 	/**
 	 * Hook function called before build
-	 * @param config - Configuration object
+	 * @param context - Execution context (Config + mode)
 	 */
-	readonly onBeforeBuild?: (config: Config) => Promise<void> | void;
+	readonly onBeforeBuild?: (context: Context) => Promise<void> | void;
 	/**
 	 * Hook function called after build
-	 * @param config - Configuration object
+	 * @param context - Execution context (Config + mode)
 	 */
-	readonly onAfterBuild?: (config: Config) => Promise<void> | void;
+	readonly onAfterBuild?: (context: Context) => Promise<void> | void;
 }
 
 /**
