@@ -107,10 +107,12 @@ describe('getAssetGroup with virtual file system', async () => {
 			},
 		]);
 
+		// title is now optional - kamado no longer auto-populates titles
+		// Users should set titles via config.pageList hook, or page-compiler will handle fallback
 		expect(globalData.pageList.map((page) => page.title)).toStrictEqual([
-			'contact',
-			'Content of Index page',
-			'Content of Page',
+			undefined,
+			undefined,
+			undefined,
 		]);
 	});
 });

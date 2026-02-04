@@ -8,7 +8,6 @@ import dayjs from 'dayjs';
 import fg from 'fast-glob';
 import yaml from 'yaml';
 
-import { getTitle } from '../deprecated/title.js';
 import { getFileContent } from '../files/file-content.js';
 
 import { getAssetGroup } from './get-asset-group.js';
@@ -45,17 +44,9 @@ export async function getGlobalData(dir: string, config: Config): Promise<Global
 			})
 		: [];
 
-	const userDefinedPageList: (CompilableFile & { title?: string })[] = config.pageList
+	const pageList: (CompilableFile & { title?: string })[] = config.pageList
 		? await config.pageList(pageAssetFiles, config)
 		: pageAssetFiles;
-
-	const pageList = await Promise.all(
-		userDefinedPageList.map(async (page) => ({
-			...page,
-			title:
-				page.title?.trim() || (await getTitle(page, { safe: true })) || '__NO_TITLE__',
-		})),
-	);
 
 	return {
 		pkg: config.pkg as unknown as GlobalData['pkg'],

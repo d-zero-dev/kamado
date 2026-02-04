@@ -47,9 +47,9 @@ export interface GlobalData {
 	 */
 	readonly pageAssetFiles: CompilableFile[];
 	/**
-	 * List of pages with titles (from user-defined page list)
+	 * List of pages with optional titles (from user-defined page list)
 	 */
-	readonly pageList: (CompilableFile & { title: string })[];
+	readonly pageList: (CompilableFile & { title?: string })[];
 	/**
 	 * Filter functions
 	 */
