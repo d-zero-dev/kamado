@@ -1,5 +1,7 @@
 import type { CompilableFile } from '../files/types.js';
 
+import { getContentFromFile } from '../files/get-content-from-file.js';
+
 const titleCache = new Map<string, string>();
 
 /**
@@ -30,7 +32,7 @@ export async function getTitle(page: CompilableFile, options?: GetTitleOptions) 
 	if (titleCache.has(filePathStem)) {
 		return titleCache.get(filePathStem);
 	}
-	const pageContent = await page.get().catch((error) => {
+	const pageContent = await getContentFromFile(page).catch((error) => {
 		if (safe) {
 			return null;
 		}

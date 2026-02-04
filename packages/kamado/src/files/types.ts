@@ -15,12 +15,6 @@ export interface FileObject {
 	 * Input file path
 	 */
 	readonly inputPath: string;
-	/**
-	 * Gets file content
-	 * @param cache - Whether to cache the file content (default: true)
-	 * @returns File content
-	 */
-	get(cache?: boolean): Promise<FileContent>;
 }
 
 /**
