@@ -13,17 +13,17 @@ yarn add @kamado-io/style-compiler
 ## Usage
 
 ```ts
+import { defineConfig } from 'kamado/config';
 import { styleCompiler } from '@kamado-io/style-compiler';
-import type { UserConfig } from 'kamado/config';
 
-export const config: UserConfig = {
+export default defineConfig({
 	compilers: [
 		styleCompiler({
 			alias: { '@': './src/styles' },
 			banner: 'Generated file',
 		}),
 	],
-};
+});
 ```
 
 ## Options
