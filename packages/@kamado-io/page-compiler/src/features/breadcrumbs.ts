@@ -1,4 +1,4 @@
-import type { PageData } from 'kamado/files';
+import type { MetaData, PageData } from 'kamado/files';
 
 import path from 'node:path';
 
@@ -68,9 +68,9 @@ export type GetBreadcrumbsOptions<
 /**
  * Required context for breadcrumbs generation
  */
-export interface GetBreadcrumbsContext {
-	readonly page: PageData;
-	readonly pageList: readonly PageData[];
+export interface GetBreadcrumbsContext<M extends MetaData> {
+	readonly page: PageData<M>;
+	readonly pageList: readonly PageData<M>[];
 }
 
 /**
@@ -79,9 +79,10 @@ export interface GetBreadcrumbsContext {
  * @param options
  */
 export function getBreadcrumbs<
+	M extends MetaData,
 	TOut extends Record<string, unknown> = Record<never, never>,
 >(
-	context: GetBreadcrumbsContext,
+	context: GetBreadcrumbsContext<M>,
 	options?: GetBreadcrumbsOptions<TOut>,
 ): (BreadcrumbItem & TOut)[] {
 	const { page, pageList } = context;
