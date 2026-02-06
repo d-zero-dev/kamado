@@ -71,15 +71,14 @@ yarn add kamado
 Create `kamado.config.ts` in the project root:
 
 ```ts
-import type { UserConfig } from 'kamado/config';
-
 import path from 'node:path';
 
+import { defineConfig } from 'kamado/config';
 import { pageCompiler } from '@kamado-io/page-compiler';
 import { scriptCompiler } from '@kamado-io/script-compiler';
 import { styleCompiler } from '@kamado-io/style-compiler';
 
-export const config: UserConfig = {
+export default defineConfig({
 	dir: {
 		root: import.meta.dirname,
 		input: path.resolve(import.meta.dirname, '__assets', 'htdocs'),
@@ -127,9 +126,7 @@ export const config: UserConfig = {
 		// Process after build
 		// context.mode is available: 'build' or 'serve'
 	},
-};
-
-export default config;
+});
 ```
 
 ### Configuration Description
@@ -234,9 +231,10 @@ scriptCompiler({
 The `pageList` option allows you to customize the page list used for navigation, breadcrumbs, and other features that require a list of pages.
 
 ```ts
+import { defineConfig } from 'kamado/config';
 import { urlToFile, getFile } from 'kamado/files';
 
-export const config: UserConfig = {
+export default defineConfig({
 	// ... other config
 	pageList: async (pageAssetFiles, config) => {
 		// Filter pages (e.g., exclude drafts)
@@ -254,7 +252,7 @@ export const config: UserConfig = {
 
 		return [...filtered, externalPage];
 	},
-};
+});
 ```
 
 The function receives:
@@ -300,11 +298,12 @@ You can reuse the same transform functions (like `manipulateDOM()`, `prettier()`
 **Configuration:**
 
 ```typescript
-import type { UserConfig } from 'kamado/config';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 
-export const config: UserConfig = {
+import { defineConfig } from 'kamado/config';
+
+export default defineConfig({
 	devServer: {
 		port: 3000,
 		transforms: [
@@ -378,7 +377,7 @@ export const config: UserConfig = {
 			},
 		],
 	},
-};
+});
 ```
 
 **ResponseTransform Interface:**
