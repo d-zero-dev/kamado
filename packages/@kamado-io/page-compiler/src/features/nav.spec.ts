@@ -32,7 +32,7 @@ function createMockPage(url: string, title: string): PageData {
  * Recursively counts all nodes in a tree
  * @param node
  */
-function countNodes(node: NavNode | null): number {
+function countNodes(node: NavNode | null | undefined): number {
 	if (!node) return 0;
 	return 1 + node.children.reduce((sum, child) => sum + countNodes(child as NavNode), 0);
 }
@@ -42,11 +42,11 @@ function countNodes(node: NavNode | null): number {
  * @param node
  * @param url
  */
-function findNodeByUrl(node: NavNode | null, url: string): NavNode | null {
+function findNodeByUrl(node: NavNode | null | undefined, url: string): NavNode | null {
 	if (!node) return null;
 	if (node.url === url) return node;
 	for (const child of node.children) {
-		const found = findNodeByUrl(child as NavNode, url);
+		const found = findNodeByUrl(child, url);
 		if (found) return found;
 	}
 	return null;
@@ -80,7 +80,7 @@ describe('getNavTree', () => {
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.url).toBe('/about/history/');
-			expect(navTree?.title).toBe('History');
+			expect(navTree?.meta?.title).toBe('History');
 		});
 
 		test('should include children in the returned tree', () => {
@@ -151,12 +151,12 @@ describe('getNavTree', () => {
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.url).toBe('/about/history/');
-			expect((navTree as NavNode & { badge: string }).badge).toBe('section');
+			expect(navTree?.badge).toBe('section');
 
 			// Check children nodes are also transformed
 			const child2025 = navTree?.children.find((c) => c.url === '/about/history/2025/');
 			expect(child2025).toBeDefined();
-			expect((child2025 as NavNode & { badge: string }).badge).toBe('new');
+			expect(child2025?.badge).toBe('new');
 		});
 
 		test('should apply transformNode asynchronously with page.get()', () => {
@@ -166,7 +166,7 @@ describe('getNavTree', () => {
 			const aboutHistory2025Page = createMockPage('/about/history/2025/', '2025');
 			const pageList = [indexPage, aboutPage, aboutHistoryPage, aboutHistory2025Page];
 
-			const navTree = getNavTree<{ badge: string | undefined }>(
+			const navTree = getNavTree(
 				{ currentPage: aboutHistory2025Page, pages: pageList },
 				{
 					transformNode: (node) => {
@@ -182,7 +182,7 @@ describe('getNavTree', () => {
 			expect(navTree?.badge).toBe('new');
 
 			const child2025 = navTree?.children.find((c) => c.url === '/about/history/2025/');
-			expect((child2025 as NavNode & { badge: string }).badge).toBe('new');
+			expect(child2025?.badge).toBe('new');
 		});
 
 		test('should transform all nodes recursively in deep hierarchy', () => {
@@ -206,13 +206,13 @@ describe('getNavTree', () => {
 
 			expect(navTree).not.toBeNull();
 			// All nodes in the subtree should be transformed
-			const totalNodes = countNodes(navTree!);
+			const totalNodes = countNodes(navTree);
 			expect(transformCount).toBe(totalNodes);
 
 			// Verify deep child is transformed
-			const janNode = findNodeByUrl(navTree!, '/about/history/2025/jan/');
+			const janNode = findNodeByUrl(navTree, '/about/history/2025/jan/');
 			expect(janNode).not.toBeNull();
-			expect((janNode as NavNode & { transformed: boolean }).transformed).toBe(true);
+			expect(janNode?.transformed).toBe(true);
 		});
 
 		test('should propagate error from transformNode', () => {
@@ -249,7 +249,7 @@ describe('getNavTree', () => {
 			);
 
 			expect(navTree).not.toBeNull();
-			expect(navTree?.title).toBe('About');
+			expect(navTree?.meta?.title).toBe('About');
 			expect(navTree?.url).toBe('/about/');
 		});
 
@@ -327,7 +327,9 @@ describe('getNavTree', () => {
 				depth: 0,
 				isAncestor: false,
 				stem: '/',
-				title: 'Home',
+				meta: {
+					title: 'Home',
+				},
 				url: '/',
 			});
 		});
@@ -356,7 +358,9 @@ describe('getNavTree', () => {
 				depth: 0,
 				isAncestor: false,
 				stem: '/',
-				title: 'Home',
+				meta: {
+					title: 'Home',
+				},
 				url: '/',
 			});
 		});
@@ -396,10 +400,10 @@ describe('getNavTree', () => {
 			expect(navTree?.children[0]?.url).toBe('/contact/');
 
 			// Verify that all /about/ descendants are gone from the entire tree
-			expect(findNodeByUrl(navTree!, '/about/')).toBeNull();
-			expect(findNodeByUrl(navTree!, '/about/history/')).toBeNull();
-			expect(findNodeByUrl(navTree!, '/about/history/2025/')).toBeNull();
-			expect(findNodeByUrl(navTree!, '/about/history/2025/jan/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/2025/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/2025/jan/')).toBeNull();
 		});
 
 		test('should not call transformNode for descendants when parent returns null', () => {
@@ -465,7 +469,7 @@ describe('getNavTree', () => {
 			expect(navTree?.children).toHaveLength(1);
 			expect(navTree?.children[0]?.url).toBe('/about/history/2025/');
 			// Verify removed node is not findable anywhere
-			expect(findNodeByUrl(navTree!, '/about/history/2024/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/2024/')).toBeNull();
 		});
 
 		test('should remove multiple child nodes when transformNode returns null or undefined', () => {
@@ -504,8 +508,8 @@ describe('getNavTree', () => {
 			expect(navTree?.children).toHaveLength(1);
 			expect(navTree?.children[0]?.url).toBe('/about/history/2025/');
 			// Both removed nodes should not exist anywhere
-			expect(findNodeByUrl(navTree!, '/about/history/2024/')).toBeNull();
-			expect(findNodeByUrl(navTree!, '/about/history/2023/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/2024/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/2023/')).toBeNull();
 		});
 
 		test('should result in empty children when all child nodes are removed', () => {
@@ -529,7 +533,7 @@ describe('getNavTree', () => {
 			);
 
 			expect(navTree).not.toBeNull();
-			const aboutNode = findNodeByUrl(navTree!, '/about/');
+			const aboutNode = findNodeByUrl(navTree, '/about/');
 			expect(aboutNode).not.toBeNull();
 			expect(aboutNode?.children).toHaveLength(0);
 			expect(aboutNode?.children).toStrictEqual([]);
@@ -559,10 +563,10 @@ describe('getNavTree', () => {
 			const urls = navTree?.children.map((c) => c.url).toSorted();
 			expect(urls).toEqual(['/about/', '/services/']);
 			// Verify each sibling still has correct properties
-			const aboutNode = findNodeByUrl(navTree!, '/about/');
-			const servicesNode = findNodeByUrl(navTree!, '/services/');
-			expect(aboutNode?.title).toBe('About');
-			expect(servicesNode?.title).toBe('Services');
+			const aboutNode = findNodeByUrl(navTree, '/about/');
+			const servicesNode = findNodeByUrl(navTree, '/services/');
+			expect(aboutNode?.meta?.title).toBe('About');
+			expect(servicesNode?.meta?.title).toBe('Services');
 		});
 
 		test('should remove grandchild while keeping parent and child intact', () => {
@@ -595,12 +599,12 @@ describe('getNavTree', () => {
 			expect(navTree).not.toBeNull();
 			// Parent (/about/history/) should exist
 			expect(navTree?.url).toBe('/about/history/');
-			expect(navTree?.title).toBe('History');
+			expect(navTree?.meta?.title).toBe('History');
 			// Only one child should remain
 			expect(navTree?.children).toHaveLength(1);
 			expect(navTree?.children[0]?.url).toBe('/about/history/2025/');
 			// Grandchild should be gone
-			expect(findNodeByUrl(navTree!, '/about/history/2024/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/2024/')).toBeNull();
 		});
 
 		test('should return null when root node is removed by transformNode', () => {
@@ -692,7 +696,9 @@ describe('getNavTree', () => {
 				depth: 0,
 				current: true,
 				isAncestor: false,
-				title: 'Home',
+				meta: {
+					title: 'Home',
+				},
 				children: [
 					{
 						url: '/contact/',
@@ -700,7 +706,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'Contact',
+						meta: {
+							title: 'Contact',
+						},
 						children: [],
 					},
 				],
@@ -733,7 +741,9 @@ describe('getNavTree', () => {
 				depth: 0,
 				current: true,
 				isAncestor: false,
-				title: 'Home',
+				meta: {
+					title: 'Home',
+				},
 				children: [
 					{
 						url: '/about/',
@@ -741,7 +751,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'About',
+						meta: {
+							title: 'About',
+						},
 						children: [],
 					},
 					{
@@ -750,7 +762,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'Services',
+						meta: {
+							title: 'Services',
+						},
 						children: [],
 					},
 				],
@@ -790,7 +804,9 @@ describe('getNavTree', () => {
 				depth: 2,
 				current: false,
 				isAncestor: true,
-				title: 'History',
+				meta: {
+					title: 'History',
+				},
 				children: [
 					{
 						url: '/about/history/2025/',
@@ -798,7 +814,9 @@ describe('getNavTree', () => {
 						depth: 3,
 						current: true,
 						isAncestor: false,
-						title: '2025',
+						meta: {
+							title: '2025',
+						},
 						children: [],
 					},
 				],
@@ -832,7 +850,9 @@ describe('getNavTree', () => {
 				depth: 0,
 				current: true,
 				isAncestor: false,
-				title: 'Home',
+				meta: {
+					title: 'Home',
+				},
 				children: [
 					{
 						url: '/a/',
@@ -840,7 +860,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'A',
+						meta: {
+							title: 'A',
+						},
 						children: [],
 					},
 					{
@@ -849,7 +871,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'C',
+						meta: {
+							title: 'C',
+						},
 						children: [],
 					},
 					{
@@ -858,7 +882,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'E',
+						meta: {
+							title: 'E',
+						},
 						children: [],
 					},
 				],
@@ -900,7 +926,9 @@ describe('getNavTree', () => {
 				depth: 2,
 				current: false,
 				isAncestor: true,
-				title: 'History',
+				meta: {
+					title: 'History',
+				},
 				children: [
 					{
 						url: '/about/history/2025/',
@@ -908,7 +936,9 @@ describe('getNavTree', () => {
 						depth: 3,
 						current: false,
 						isAncestor: true,
-						title: '2025',
+						meta: {
+							title: '2025',
+						},
 						children: [
 							{
 								url: '/about/history/2025/jan/',
@@ -916,7 +946,9 @@ describe('getNavTree', () => {
 								depth: 4,
 								current: true,
 								isAncestor: false,
-								title: 'January',
+								meta: {
+									title: 'January',
+								},
 								children: [],
 							},
 						],
@@ -951,7 +983,9 @@ describe('getNavTree', () => {
 				depth: 0,
 				current: true,
 				isAncestor: false,
-				title: 'Home',
+				meta: {
+					title: 'Home',
+				},
 				children: [
 					{
 						url: '/about/',
@@ -959,7 +993,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'About',
+						meta: {
+							title: 'About',
+						},
 						children: [],
 					},
 				],
