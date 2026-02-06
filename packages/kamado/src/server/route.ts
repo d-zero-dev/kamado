@@ -1,4 +1,5 @@
 import type { Context } from '../config/types.js';
+import type { MetaData } from '../files/types.js';
 import type { Hono } from 'hono';
 
 import fs from 'node:fs/promises';
@@ -18,9 +19,9 @@ import { applyTransforms } from './transform.js';
 /**
  * Required context for setting routes
  */
-export interface SetRouteContext {
+export interface SetRouteContext<M extends MetaData> {
 	readonly app: Hono;
-	readonly context: Context;
+	readonly context: Context<M>;
 }
 
 /**
@@ -39,7 +40,10 @@ const ERROR_MARK = c.red('✘');
  * @param options - Optional options (verbose)
  * @returns Application after route configuration
  */
-export async function setRoute(context: SetRouteContext, options?: SetRouteOptions) {
+export async function setRoute<M extends MetaData>(
+	context: SetRouteContext<M>,
+	options?: SetRouteOptions,
+) {
 	const { app, context: kamadoContext } = context;
 	const hostname =
 		kamadoContext.devServer.host +

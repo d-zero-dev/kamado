@@ -72,6 +72,9 @@ export interface CompilableFile extends FileObject {
 /**
  * Page data with optional metadata
  */
-export interface PageData extends CompilableFile {
-	metaData?: MetaData;
+export interface PageData<M extends MetaData> extends CompilableFile {
+	/**
+	 * Metadata (front matter, etc.)
+	 */
+	metaData?: M;
 }

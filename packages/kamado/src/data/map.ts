@@ -1,5 +1,5 @@
 import type { Config } from '../config/types.js';
-import type { CompilableFile } from '../files/types.js';
+import type { CompilableFile, MetaData } from '../files/types.js';
 
 import { getAssetGroup } from './get-asset-group.js';
 
@@ -7,7 +7,7 @@ import { getAssetGroup } from './get-asset-group.js';
  *
  * @param config
  */
-export async function getCompilableFileMap(config: Config) {
+export async function getCompilableFileMap<M extends MetaData>(config: Config<M>) {
 	const map = new Map<string, CompilableFile>();
 
 	for (const compilerEntry of config.compilers) {

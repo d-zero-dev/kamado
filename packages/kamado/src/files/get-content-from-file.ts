@@ -1,4 +1,4 @@
-import type { CompilableFile, FileContent } from './types.js';
+import type { CompilableFile, FileContent, MetaData } from './types.js';
 
 import path from 'node:path';
 
@@ -13,10 +13,10 @@ import { getFileContent } from './file-content.js';
  * @param cache - Whether to cache the file content (default: true)
  * @returns File content with metadata, content, and raw content
  */
-export async function getContentFromFile(
+export async function getContentFromFile<M extends MetaData>(
 	file: CompilableFile,
 	cache = true,
-): Promise<FileContent> {
+): Promise<FileContent & { metaData: M }> {
 	const filePath = file.inputPath;
 	const dir = path.dirname(filePath);
 	const ext = path.extname(filePath);

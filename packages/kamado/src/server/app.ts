@@ -1,4 +1,5 @@
 import type { Config, Context } from '../config/types.js';
+import type { MetaData } from '../files/types.js';
 
 import path from 'node:path';
 
@@ -13,9 +14,9 @@ import { setRoute } from './route.js';
  * Starts the development server
  * @param config - Configuration object
  */
-export async function start(config: Config) {
+export async function start<M extends MetaData>(config: Config<M>) {
 	// Create execution context
-	const context: Context = {
+	const context: Context<M> = {
 		...config,
 		mode: 'serve',
 	};

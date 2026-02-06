@@ -1,10 +1,10 @@
 import type { CompileFunction, CustomCompilerWithMetadata } from '../compiler/types.js';
-import type { CompilableFile, PageData } from '../files/types.js';
+import type { CompilableFile, MetaData, PageData } from '../files/types.js';
 
 /**
  * Application configuration
  */
-export interface Config {
+export interface Config<M extends MetaData> {
 	/**
 	 * Package information
 	 */
@@ -16,7 +16,7 @@ export interface Config {
 	/**
 	 * Development server configuration
 	 */
-	readonly devServer: DevServerConfig;
+	readonly devServer: DevServerConfig<M>;
 	/**
 	 * Function to filter or transform the page list
 	 * @param pageAssetFiles - Page asset files
@@ -25,22 +25,22 @@ export interface Config {
 	 */
 	readonly pageList?: (
 		pageAssetFiles: readonly CompilableFile[],
-		config: Config,
-	) => PageData[] | Promise<PageData[]>;
+		config: Config<M>,
+	) => PageData<M>[] | Promise<PageData<M>[]>;
 	/**
 	 * Compiler configuration (array to guarantee processing order)
 	 */
-	readonly compilers: readonly CustomCompilerWithMetadata[];
+	readonly compilers: readonly CustomCompilerWithMetadata<M>[];
 	/**
 	 * Hook function called before build
 	 * @param context - Execution context (Config + mode)
 	 */
-	readonly onBeforeBuild?: (context: Context) => Promise<void> | void;
+	readonly onBeforeBuild?: (context: Context<M>) => Promise<void> | void;
 	/**
 	 * Hook function called after build
 	 * @param context - Execution context (Config + mode)
 	 */
-	readonly onAfterBuild?: (context: Context) => Promise<void> | void;
+	readonly onAfterBuild?: (context: Context<M>) => Promise<void> | void;
 }
 
 /**
@@ -48,7 +48,7 @@ export interface Config {
  * Config + execution mode information
  * Created by CLI commands (build/serve)
  */
-export interface Context extends Config {
+export interface Context<M extends MetaData> extends Config<M> {
 	/**
 	 * Execution mode (set by CLI)
 	 * Users cannot configure this - it's automatically set by the command
@@ -60,11 +60,11 @@ export interface Context extends Config {
  * Type for user-configurable settings
  * Partial version of Config
  */
-export type UserConfig = Partial<
-	Omit<Config, 'pkg' | 'dir' | 'devServer'> & {
+export type UserConfig<M extends MetaData> = Partial<
+	Omit<Config<M>, 'pkg' | 'dir' | 'devServer'> & {
 		readonly dir: Partial<DirectoryConfig>;
-		readonly devServer: Partial<DevServerConfig>;
-		readonly compilers?: readonly CustomCompilerWithMetadata[];
+		readonly devServer: Partial<DevServerConfig<M>>;
+		readonly compilers?: readonly CustomCompilerWithMetadata<M>[];
 	}
 >;
 
@@ -90,7 +90,7 @@ export interface DirectoryConfig {
  * Response transform context
  * Provides information about the current request and response
  */
-export interface TransformContext {
+export interface TransformContext<M extends MetaData> {
 	/**
 	 * Request path (relative to output directory)
 	 */
@@ -118,7 +118,7 @@ export interface TransformContext {
 	/**
 	 * Execution context (config + mode)
 	 */
-	readonly context: Context;
+	readonly context: Context<M>;
 	/**
 	 * Compile function for compiling other files during transformation
 	 */
@@ -129,7 +129,7 @@ export interface TransformContext {
  * Transform object that processes content
  * Used by both page-compiler transforms and devServer.transforms
  */
-export interface Transform {
+export interface Transform<M extends MetaData> {
 	/**
 	 * Transform name (used for find/filter/map customization)
 	 */
@@ -149,14 +149,14 @@ export interface Transform {
 	 */
 	readonly transform: (
 		content: string | ArrayBuffer,
-		ctx: TransformContext,
+		ctx: TransformContext<M>,
 	) => Promise<string | ArrayBuffer> | string | ArrayBuffer;
 }
 
 /**
  * Development server configuration
  */
-export interface DevServerConfig {
+export interface DevServerConfig<M extends MetaData> {
 	/**
 	 * Server port number
 	 */
@@ -194,7 +194,7 @@ export interface DevServerConfig {
 	 * ]
 	 * ```
 	 */
-	readonly transforms?: readonly Transform[];
+	readonly transforms?: readonly Transform<M>[];
 }
 
 /**

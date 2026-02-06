@@ -1,6 +1,6 @@
 import type { GlobalData } from './types.js';
 import type { Config } from '../config/types.js';
-import type { CompilableFile } from '../files/types.js';
+import type { CompilableFile, MetaData } from '../files/types.js';
 
 import path from 'node:path';
 
@@ -18,7 +18,10 @@ import { getAssetGroup } from './get-asset-group.js';
  * @param config - Configuration object
  * @returns Global data object containing package info, all pages, page list with titles, and date filter
  */
-export async function getGlobalData(dir: string, config: Config): Promise<GlobalData> {
+export async function getGlobalData<M extends MetaData>(
+	dir: string,
+	config: Config<M>,
+): Promise<GlobalData<M>> {
 	let data: Record<string, unknown> = {};
 	if (dir) {
 		const dataFileGlob = path.resolve(dir, '*');
@@ -49,7 +52,7 @@ export async function getGlobalData(dir: string, config: Config): Promise<Global
 		: pageAssetFiles;
 
 	return {
-		pkg: config.pkg as unknown as GlobalData['pkg'],
+		pkg: config.pkg as unknown as GlobalData<M>['pkg'],
 		...data,
 		pageAssetFiles,
 		pageList,

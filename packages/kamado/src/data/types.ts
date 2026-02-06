@@ -1,11 +1,11 @@
-import type { CompilableFile, PageData } from '../files/types.js';
+import type { CompilableFile, MetaData, PageData } from '../files/types.js';
 import type dayjs from 'dayjs';
 
 /**
  * Global data interface
  * Defines global data available in templates
  */
-export interface GlobalData {
+export interface GlobalData<M extends MetaData> {
 	/**
 	 * Package information
 	 */
@@ -49,7 +49,7 @@ export interface GlobalData {
 	/**
 	 * List of pages with optional metadata (from user-defined page list)
 	 */
-	readonly pageList: PageData[];
+	readonly pageList: PageData<M>[];
 	/**
 	 * Filter functions
 	 */

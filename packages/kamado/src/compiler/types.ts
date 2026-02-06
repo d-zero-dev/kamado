@@ -1,5 +1,5 @@
 import type { Context } from '../config/types.js';
-import type { CompilableFile } from '../files/types.js';
+import type { CompilableFile, MetaData } from '../files/types.js';
 
 /**
  * Compile function interface
@@ -28,7 +28,7 @@ export interface CompileFunction {
  * Compiler context with compile function map
  * Extends Context to include a map of compiler functions by output extension
  */
-export interface CompilerContext extends Context {
+export interface CompilerContext<M extends MetaData> extends Context<M> {
 	/**
 	 * Map of compiler functions keyed by output file extension (e.g., '.html', '.css', '.js')
 	 */
@@ -59,24 +59,24 @@ export interface CustomCompileFunction {
  * Compiler interface
  * Function that takes execution context and returns a compile function
  */
-export interface CustomCompiler {
+export interface CustomCompiler<M extends MetaData> {
 	/**
 	 * @param context - Execution context (config + mode)
 	 * @returns Compile function
 	 */
-	(context: Context): Promise<CustomCompileFunction> | CustomCompileFunction;
+	(context: Context<M>): Promise<CustomCompileFunction> | CustomCompileFunction;
 }
 
 /**
  * Compiler plugin interface
  * Function that takes options and returns a compiler
  */
-export interface CustomCompilerPlugin<CustomCompileOptions = void> {
+export interface CustomCompilerPlugin<M extends MetaData, CustomCompileOptions = void> {
 	/**
 	 * @param options - Compile options
 	 * @returns Compiler function
 	 */
-	(options?: CustomCompileOptions): CustomCompiler;
+	(options?: CustomCompileOptions): CustomCompiler<M>;
 }
 
 /**
@@ -103,7 +103,7 @@ export interface CustomCompilerMetadataOptions {
  * Compiler with metadata
  * Contains compiler function and metadata for file matching
  */
-export interface CustomCompilerWithMetadata {
+export interface CustomCompilerWithMetadata<M extends MetaData> {
 	/**
 	 * Glob pattern for files to compile (joined with dir.input)
 	 */
@@ -120,13 +120,13 @@ export interface CustomCompilerWithMetadata {
 	/**
 	 * Compiler function
 	 */
-	readonly compiler: CustomCompiler;
+	readonly compiler: CustomCompiler<M>;
 }
 
 /**
  * Result of compiler factory function
  */
-export interface CustomCompilerFactoryResult<CustomCompileOptions> {
+export interface CustomCompilerFactoryResult<M extends MetaData, CustomCompileOptions> {
 	/**
 	 * Default glob pattern for files to compile
 	 */
@@ -140,5 +140,5 @@ export interface CustomCompilerFactoryResult<CustomCompileOptions> {
 	 */
 	readonly compile: (
 		options?: CustomCompileOptions & CustomCompilerMetadataOptions,
-	) => CustomCompiler;
+	) => CustomCompiler<M>;
 }

@@ -1,5 +1,5 @@
 import type { UserConfig, Context } from '../config/types.js';
-import type { CompilableFile } from '../files/types.js';
+import type { CompilableFile, MetaData } from '../files/types.js';
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -38,11 +38,13 @@ interface BuildConfig {
  * @param buildConfig.targetGlob - Glob pattern for build targets
  * @param buildConfig.verbose - Whether to enable verbose logging
  */
-export async function build(buildConfig: UserConfig & BuildConfig) {
+export async function build<M extends MetaData>(
+	buildConfig: UserConfig<M> & BuildConfig,
+) {
 	const config = await mergeConfig(buildConfig, buildConfig.rootDir);
 
 	// Create execution context
-	const context: Context = {
+	const context: Context<M> = {
 		...config,
 		mode: 'build',
 	};
