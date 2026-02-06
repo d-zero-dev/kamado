@@ -127,11 +127,11 @@ export interface PageCompilerOptions {
 	 * @example
 	 * ```typescript
 	 * pageCompiler({
-	 *   filter: (node) => !node.url.includes('/drafts/'),
+	 *   filterNavigationNode: (node) => !node.url.includes('/drafts/'),
 	 * });
 	 * ```
 	 */
-	readonly filter?: (node: NavNode) => boolean;
+	readonly filterNavigationNode?: (node: NavNode) => boolean;
 }
 
 /**

@@ -78,7 +78,7 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 						{ currentPage: file, pages: globalData?.pageList ?? [] },
 						{
 							...navOptions,
-							filter: options?.filter,
+							filter: options?.filterNavigationNode,
 						},
 					),
 				titleList: (options: TitleListOptions) =>
