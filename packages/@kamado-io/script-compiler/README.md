@@ -13,10 +13,10 @@ yarn add @kamado-io/script-compiler
 ## Usage
 
 ```ts
+import { defineConfig } from 'kamado/config';
 import { scriptCompiler } from '@kamado-io/script-compiler';
-import type { UserConfig } from 'kamado/config';
 
-export const config: UserConfig = {
+export default defineConfig({
 	compilers: [
 		scriptCompiler({
 			alias: { '@': './src' },
@@ -24,7 +24,7 @@ export const config: UserConfig = {
 			banner: 'Generated file',
 		}),
 	],
-};
+});
 ```
 
 ## Options
