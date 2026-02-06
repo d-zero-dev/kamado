@@ -102,27 +102,13 @@ export function getNavTree(
 		{
 			ignoreGlobs: options?.ignoreGlobs,
 			currentPath: currentPage.url,
-			addMetaData: (node) => {
-				const page = pages.find((item) => item.url === node.url);
-				return {
-					...page?.metaData,
-					title:
-						(page?.metaData?.title as string | undefined)?.trim() ??
-						(page ? `__NO_TITLE__` : `⛔️ NOT FOUND (${node.stem})`),
-				};
-			},
+			addMetaData: (node) => getMeta(node.url, pages),
 		},
 	);
 
 	// Ensure root node has meta (pathListToTree may skip addMetaData for root)
 	if (!tree.meta?.title && tree.url) {
-		const page = pages.find((item) => item.url === tree.url);
-		tree.meta = {
-			...page?.metaData,
-			title:
-				(page?.metaData?.title as string | undefined)?.trim() ||
-				(page ? `__NO_TITLE__` : `⛔️ NOT FOUND (${tree.stem})`),
-		};
+		tree.meta = getMeta(tree.url, pages);
 	}
 
 	const parentTree = getParentNodeTree(currentPage.url, tree, options?.baseDepth);
@@ -234,4 +220,19 @@ function getParentNodeTree(
 	);
 
 	return ancestor;
+}
+
+/**
+ * Gets metadata for a navigation node from page list
+ * @param url
+ * @param pages
+ */
+function getMeta(url: string, pages: readonly PageData[]): NavNodeMetaData {
+	const page = pages.find((item) => item.url === url);
+	return {
+		...page?.metaData,
+		title:
+			(page?.metaData?.title as string | undefined)?.trim() ??
+			(page ? `__NO_TITLE__` : `⛔️ NOT FOUND (${url})`),
+	};
 }
