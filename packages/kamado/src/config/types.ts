@@ -1,5 +1,5 @@
 import type { CompileFunction, CustomCompilerWithMetadata } from '../compiler/types.js';
-import type { CompilableFile } from '../files/types.js';
+import type { CompilableFile, PageData } from '../files/types.js';
 
 /**
  * Application configuration
@@ -21,14 +21,12 @@ export interface Config {
 	 * Function to filter or transform the page list
 	 * @param pageAssetFiles - Page asset files
 	 * @param config - Configuration object
-	 * @returns Filtered or transformed page list with optional title
+	 * @returns Filtered or transformed page list with optional metadata
 	 */
 	readonly pageList?: (
 		pageAssetFiles: readonly CompilableFile[],
 		config: Config,
-	) =>
-		| (CompilableFile & { title?: string })[]
-		| Promise<(CompilableFile & { title?: string })[]>;
+	) => PageData[] | Promise<PageData[]>;
 	/**
 	 * Compiler configuration (array to guarantee processing order)
 	 */

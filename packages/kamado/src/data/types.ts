@@ -1,4 +1,4 @@
-import type { CompilableFile } from '../files/types.js';
+import type { CompilableFile, PageData } from '../files/types.js';
 import type dayjs from 'dayjs';
 
 /**
@@ -47,9 +47,9 @@ export interface GlobalData {
 	 */
 	readonly pageAssetFiles: CompilableFile[];
 	/**
-	 * List of pages with optional titles (from user-defined page list)
+	 * List of pages with optional metadata (from user-defined page list)
 	 */
-	readonly pageList: (CompilableFile & { title?: string })[];
+	readonly pageList: PageData[];
 	/**
 	 * Filter functions
 	 */

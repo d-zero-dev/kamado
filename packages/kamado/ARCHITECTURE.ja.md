@@ -271,7 +271,15 @@ export interface CustomCompileFunction {
 pageList?: (
 	pageAssetFiles: readonly CompilableFile[],
 	config: Config,
-) => (CompilableFile & { title?: string })[] | Promise<(CompilableFile & { title?: string })[]>;
+) => PageData[] | Promise<PageData[]>;
+```
+
+`PageData`は`CompilableFile`を拡張しオプションの`metaData`を持ちます：
+
+```typescript
+interface PageData extends CompilableFile {
+	metaData?: MetaData;
+}
 ```
 
 **パラメータ:**
@@ -279,13 +287,15 @@ pageList?: (
 - `pageAssetFiles`: 全てのページファイルの配列（ページコンパイラの`files`パターンにマッチするファイル）
 - `config`: 設定オブジェクト
 
-**戻り値:** フィルター/変換されたページファイルの配列。オプションで`title`プロパティを追加可能
+**戻り値:** フィルター/変換された`PageData`オブジェクトの配列
+
+**注記:** `pageList`フック時点では、`metaData`はまだフロントマターから展開されていません。パンくずリストやナビゲーションでタイトルが必要な場合は、このフック内で明示的に`metaData.title`を設定してください。
 
 **ユースケース:**
 
 - 下書きや未公開ページをナビゲーションから除外
 - 日付やカスタム順序でページをソート
-- ページにカスタムメタデータ（`title`など）を追加
+- ページにカスタムメタデータ（`metaData.title`など）を追加
 - カテゴリやタグでページをフィルタリング
 
 **例:**

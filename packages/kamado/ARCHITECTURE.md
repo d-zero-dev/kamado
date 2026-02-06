@@ -271,7 +271,15 @@ The `pageList` hook allows users to filter or transform the list of pages availa
 pageList?: (
 	pageAssetFiles: readonly CompilableFile[],
 	config: Config,
-) => (CompilableFile & { title?: string })[] | Promise<(CompilableFile & { title?: string })[]>;
+) => PageData[] | Promise<PageData[]>;
+```
+
+Where `PageData` extends `CompilableFile` with optional `metaData`:
+
+```typescript
+interface PageData extends CompilableFile {
+	metaData?: MetaData;
+}
 ```
 
 **Parameters:**
@@ -279,13 +287,15 @@ pageList?: (
 - `pageAssetFiles`: Array of all page files (files matching the page compiler's `files` pattern)
 - `config`: Configuration object
 
-**Returns:** Filtered/transformed array of page files, optionally with `title` property added
+**Returns:** Filtered/transformed array of `PageData` objects
+
+**Note:** At `pageList` hook time, `metaData` is not yet populated from frontmatter. If you need titles for breadcrumbs/navigation, explicitly set `metaData.title` in this hook.
 
 **Use Cases:**
 
 - Excluding draft or unpublished pages from navigation
 - Sorting pages by date or custom order
-- Adding custom metadata (like `title`) to pages
+- Adding custom metadata (like `metaData.title`) to pages
 - Filtering pages by category or tag
 
 **Example:**

@@ -242,14 +242,14 @@ export const config: UserConfig = {
 		// Filter pages (e.g., exclude drafts)
 		const filtered = pageAssetFiles.filter((page) => !page.url.includes('/drafts/'));
 
-		// Add external pages with custom titles
+		// Add external pages with custom metadata
 		const externalPage = {
 			...urlToFile('/external-page/', {
 				inputDir: config.dir.input,
 				outputDir: config.dir.output,
 				outputExtension: '.html',
 			}),
-			title: 'External Page Title',
+			metaData: { title: 'External Page Title' },
 		};
 
 		return [...filtered, externalPage];
@@ -262,7 +262,14 @@ The function receives:
 - `pageAssetFiles`: Array of all page files found in the file system
 - `config`: The full configuration object
 
-Returns an array of `CompilableFile` objects, optionally with a `title` property. If `title` is provided, it will be used instead of extracting from the page content.
+Returns an array of `PageData` objects (extends `CompilableFile` with optional `metaData`).
+
+**Note about `metaData` and titles:**
+
+- During individual page compilation, `metaData` is automatically populated from frontmatter
+- However, at `pageList` hook time (globalData collection), `metaData` is NOT yet populated
+- If you need titles for breadcrumbs/navigation, you must explicitly set `metaData.title` in the `pageList` hook
+- Without explicit `metaData.title`, breadcrumbs and navigation will show `__NO_TITLE__`
 
 #### Hook Functions
 
