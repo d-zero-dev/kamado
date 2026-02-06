@@ -449,7 +449,6 @@ describe('pageCompiler with custom transforms', async () => {
 			date: new Date(),
 		};
 		setMockFileContent('/path/to/page.html', {
-			metaData: {},
 			content,
 			raw: content,
 		});
