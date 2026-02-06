@@ -24,7 +24,7 @@
 		"dist"
 	],
 	"dependencies": {
-		"esbuild": "0.27.2",
+		"esbuild": "0.27.3",
 		"kamado": "2.0.0-alpha.0"
 	},
 	"devDependencies": {
