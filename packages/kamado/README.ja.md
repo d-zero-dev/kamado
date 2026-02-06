@@ -242,14 +242,14 @@ export const config: UserConfig = {
 		// ページをフィルタリング（例: 下書きを除外）
 		const filtered = pageAssetFiles.filter((page) => !page.url.includes('/drafts/'));
 
-		// カスタムタイトル付きの外部ページを追加
+		// カスタムメタデータ付きの外部ページを追加
 		const externalPage = {
 			...urlToFile('/external-page/', {
 				inputDir: config.dir.input,
 				outputDir: config.dir.output,
 				outputExtension: '.html',
 			}),
-			title: '外部ページのタイトル',
+			metaData: { title: '外部ページのタイトル' },
 		};
 
 		return [...filtered, externalPage];
@@ -262,7 +262,14 @@ export const config: UserConfig = {
 - `pageAssetFiles`: ファイルシステムで見つかったすべてのページファイルの配列
 - `config`: 完全な設定オブジェクト
 
-`CompilableFile`オブジェクトの配列を返します。オプションで`title`プロパティを含めることができます。`title`が指定された場合、ページコンテンツからタイトルを抽出する代わりにその値が使用されます。
+`PageData`オブジェクト（`CompilableFile`を拡張しオプションで`metaData`を含む）の配列を返します。
+
+**`metaData`とタイトルに関する注意:**
+
+- 各ページのコンパイル時には、`metaData`はフロントマターから自動的に展開されます
+- ただし、`pageList`フック時点（globalData収集時）では、`metaData`はまだ展開されていません
+- パンくずリストやナビゲーションでタイトルが必要な場合は、`pageList`フックで明示的に`metaData.title`を設定する必要があります
+- 明示的な`metaData.title`がない場合、パンくずリストやナビゲーションには`__NO_TITLE__`と表示されます
 
 #### フック関数
 

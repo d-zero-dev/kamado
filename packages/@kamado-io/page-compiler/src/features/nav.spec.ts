@@ -1,18 +1,18 @@
-import type { CompilableFile } from 'kamado/files';
+import type { PageData } from 'kamado/files';
 
 import { describe, test, expect } from 'vitest';
 
 import { getNavTree, type NavNode } from './nav.js';
 
 /**
- * Creates a mock CompilableFile for testing
+ * Creates a mock PageData for testing
  * The filePathStem is derived from URL to match directory structure:
  * - `/` → `/index`
  * - `/about/` → `/about/index`
  * @param url - URL path ending with `/`
  * @param title - Page title
  */
-function createMockPage(url: string, title: string): CompilableFile & { title: string } {
+function createMockPage(url: string, title: string): PageData {
 	const filePathStem = url === '/' ? '/index' : url.replace(/\/$/, '/index');
 	const slug = url === '/' ? 'index' : url.split('/').findLast(Boolean) || 'index';
 
@@ -24,17 +24,8 @@ function createMockPage(url: string, title: string): CompilableFile & { title: s
 		url,
 		extension: '.html',
 		date: new Date(),
-		title,
+		metaData: { title },
 	};
-}
-
-/**
- * Recursively counts all nodes in a tree
- * @param node
- */
-function countNodes(node: NavNode | null): number {
-	if (!node) return 0;
-	return 1 + node.children.reduce((sum, child) => sum + countNodes(child as NavNode), 0);
 }
 
 /**
@@ -42,11 +33,11 @@ function countNodes(node: NavNode | null): number {
  * @param node
  * @param url
  */
-function findNodeByUrl(node: NavNode | null, url: string): NavNode | null {
+function findNodeByUrl(node: NavNode | null | undefined, url: string): NavNode | null {
 	if (!node) return null;
 	if (node.url === url) return node;
 	for (const child of node.children) {
-		const found = findNodeByUrl(child as NavNode, url);
+		const found = findNodeByUrl(child, url);
 		if (found) return found;
 	}
 	return null;
@@ -80,7 +71,7 @@ describe('getNavTree', () => {
 
 			expect(navTree).not.toBeNull();
 			expect(navTree?.url).toBe('/about/history/');
-			expect(navTree?.title).toBe('History');
+			expect(navTree?.meta?.title).toBe('History');
 		});
 
 		test('should include children in the returned tree', () => {
@@ -127,98 +118,6 @@ describe('getNavTree', () => {
 	});
 
 	describe('transformNode option', () => {
-		test('should apply transformNode synchronously', () => {
-			const indexPage = createMockPage('/', 'Home');
-			const aboutPage = createMockPage('/about/', 'About');
-			const aboutHistoryPage = createMockPage('/about/history/', 'History');
-			const aboutHistory2025Page = createMockPage('/about/history/2025/', '2025');
-			const pageList = [indexPage, aboutPage, aboutHistoryPage, aboutHistory2025Page];
-
-			const badgeMap: Record<string, string> = {
-				'/about/history/': 'section',
-				'/about/history/2025/': 'new',
-			};
-
-			const navTree = getNavTree(
-				{ currentPage: aboutHistory2025Page, pages: pageList },
-				{
-					transformNode: (node) => ({
-						...node,
-						badge: badgeMap[node.url] ?? 'default',
-					}),
-				},
-			);
-
-			expect(navTree).not.toBeNull();
-			expect(navTree?.url).toBe('/about/history/');
-			expect((navTree as NavNode & { badge: string }).badge).toBe('section');
-
-			// Check children nodes are also transformed
-			const child2025 = navTree?.children.find((c) => c.url === '/about/history/2025/');
-			expect(child2025).toBeDefined();
-			expect((child2025 as NavNode & { badge: string }).badge).toBe('new');
-		});
-
-		test('should apply transformNode asynchronously with page.get()', () => {
-			const indexPage = createMockPage('/', 'Home');
-			const aboutPage = createMockPage('/about/', 'About');
-			const aboutHistoryPage = createMockPage('/about/history/', 'History', {
-				badge: 'history-badge',
-			});
-			const aboutHistory2025Page = createMockPage('/about/history/2025/', '2025', {
-				badge: '2025-badge',
-			});
-			const pageList = [indexPage, aboutPage, aboutHistoryPage, aboutHistory2025Page];
-
-			const navTree = getNavTree<{ badge: string | undefined }>(
-				{ currentPage: aboutHistory2025Page, pages: pageList },
-				{
-					transformNode: (node) => {
-						return {
-							...node,
-							badge: 'new',
-						};
-					},
-				},
-			);
-
-			expect(navTree).not.toBeNull();
-			expect(navTree?.badge).toBe('new');
-
-			const child2025 = navTree?.children.find((c) => c.url === '/about/history/2025/');
-			expect((child2025 as NavNode & { badge: string }).badge).toBe('new');
-		});
-
-		test('should transform all nodes recursively in deep hierarchy', () => {
-			const indexPage = createMockPage('/', 'Home');
-			const aboutPage = createMockPage('/about/', 'About');
-			const historyPage = createMockPage('/about/history/', 'History');
-			const y2025Page = createMockPage('/about/history/2025/', '2025');
-			const janPage = createMockPage('/about/history/2025/jan/', 'January');
-			const pageList = [indexPage, aboutPage, historyPage, y2025Page, janPage];
-
-			let transformCount = 0;
-			const navTree = getNavTree(
-				{ currentPage: janPage, pages: pageList },
-				{
-					transformNode: (node) => {
-						transformCount++;
-						return { ...node, transformed: true };
-					},
-				},
-			);
-
-			expect(navTree).not.toBeNull();
-			// All nodes in the subtree should be transformed
-			const totalNodes = countNodes(navTree!);
-			expect(transformCount).toBe(totalNodes);
-
-			// Verify deep child is transformed
-			const janNode = findNodeByUrl(navTree!, '/about/history/2025/jan/');
-			expect(janNode).not.toBeNull();
-			expect((janNode as NavNode & { transformed: boolean }).transformed).toBe(true);
-		});
-
 		test('should propagate error from transformNode', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
@@ -229,7 +128,7 @@ describe('getNavTree', () => {
 				getNavTree(
 					{ currentPage: historyPage, pages: pageList },
 					{
-						transformNode: () => {
+						filter: () => {
 							throw new Error('Transform error');
 						},
 					},
@@ -253,7 +152,7 @@ describe('getNavTree', () => {
 			);
 
 			expect(navTree).not.toBeNull();
-			expect(navTree?.title).toBe('About');
+			expect(navTree?.meta?.title).toBe('About');
 			expect(navTree?.url).toBe('/about/');
 		});
 
@@ -316,12 +215,7 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: (node) => {
-						if (node.url === '/about/') {
-							return null;
-						}
-						return node;
-					},
+					filter: (node) => node.url !== '/about/',
 				},
 			);
 
@@ -331,7 +225,9 @@ describe('getNavTree', () => {
 				depth: 0,
 				isAncestor: false,
 				stem: '/',
-				title: 'Home',
+				meta: {
+					title: 'Home',
+				},
 				url: '/',
 			});
 		});
@@ -345,12 +241,7 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: (node) => {
-						if (node.url === '/about/') {
-							return;
-						}
-						return node;
-					},
+					filter: (node) => node.url !== '/about/',
 				},
 			);
 
@@ -360,7 +251,9 @@ describe('getNavTree', () => {
 				depth: 0,
 				isAncestor: false,
 				stem: '/',
-				title: 'Home',
+				meta: {
+					title: 'Home',
+				},
 				url: '/',
 			});
 		});
@@ -384,13 +277,8 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: (node) => {
-						// Remove /about/ and all its descendants should disappear
-						if (node.url === '/about/') {
-							return null;
-						}
-						return node;
-					},
+					// Remove /about/ and all its descendants should disappear
+					filter: (node) => node.url !== '/about/',
 				},
 			);
 
@@ -400,10 +288,10 @@ describe('getNavTree', () => {
 			expect(navTree?.children[0]?.url).toBe('/contact/');
 
 			// Verify that all /about/ descendants are gone from the entire tree
-			expect(findNodeByUrl(navTree!, '/about/')).toBeNull();
-			expect(findNodeByUrl(navTree!, '/about/history/')).toBeNull();
-			expect(findNodeByUrl(navTree!, '/about/history/2025/')).toBeNull();
-			expect(findNodeByUrl(navTree!, '/about/history/2025/jan/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/2025/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/2025/jan/')).toBeNull();
 		});
 
 		test('should not call transformNode for descendants when parent returns null', () => {
@@ -418,12 +306,9 @@ describe('getNavTree', () => {
 			getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: (node) => {
+					filter: (node) => {
 						calledUrls.push(node.url);
-						if (node.url === '/about/') {
-							return null;
-						}
-						return node;
+						return node.url !== '/about/';
 					},
 				},
 			);
@@ -455,12 +340,7 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: aboutHistory2025Page, pages: pageList },
 				{
-					transformNode: (node) => {
-						if (node.url === '/about/history/2024/') {
-							return null;
-						}
-						return node;
-					},
+					filter: (node) => node.url !== '/about/history/2024/',
 				},
 			);
 
@@ -469,7 +349,7 @@ describe('getNavTree', () => {
 			expect(navTree?.children).toHaveLength(1);
 			expect(navTree?.children[0]?.url).toBe('/about/history/2025/');
 			// Verify removed node is not findable anywhere
-			expect(findNodeByUrl(navTree!, '/about/history/2024/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/2024/')).toBeNull();
 		});
 
 		test('should remove multiple child nodes when transformNode returns null or undefined', () => {
@@ -491,15 +371,8 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: aboutHistory2025Page, pages: pageList },
 				{
-					transformNode: (node) => {
-						if (node.url === '/about/history/2024/') {
-							return null;
-						}
-						if (node.url === '/about/history/2023/') {
-							return;
-						}
-						return node;
-					},
+					filter: (node) =>
+						node.url !== '/about/history/2024/' && node.url !== '/about/history/2023/',
 				},
 			);
 
@@ -508,8 +381,8 @@ describe('getNavTree', () => {
 			expect(navTree?.children).toHaveLength(1);
 			expect(navTree?.children[0]?.url).toBe('/about/history/2025/');
 			// Both removed nodes should not exist anywhere
-			expect(findNodeByUrl(navTree!, '/about/history/2024/')).toBeNull();
-			expect(findNodeByUrl(navTree!, '/about/history/2023/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/2024/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/2023/')).toBeNull();
 		});
 
 		test('should result in empty children when all child nodes are removed', () => {
@@ -522,18 +395,12 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: (node) => {
-						// Remove all children of /about/
-						if (node.url === '/about/history/' || node.url === '/about/team/') {
-							return null;
-						}
-						return node;
-					},
+					filter: (node) => node.url !== '/about/history/' && node.url !== '/about/team/',
 				},
 			);
 
 			expect(navTree).not.toBeNull();
-			const aboutNode = findNodeByUrl(navTree!, '/about/');
+			const aboutNode = findNodeByUrl(navTree, '/about/');
 			expect(aboutNode).not.toBeNull();
 			expect(aboutNode?.children).toHaveLength(0);
 			expect(aboutNode?.children).toStrictEqual([]);
@@ -549,12 +416,7 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: (node) => {
-						if (node.url === '/contact/') {
-							return null;
-						}
-						return node;
-					},
+					filter: (node) => node.url !== '/contact/',
 				},
 			);
 
@@ -563,10 +425,10 @@ describe('getNavTree', () => {
 			const urls = navTree?.children.map((c) => c.url).toSorted();
 			expect(urls).toEqual(['/about/', '/services/']);
 			// Verify each sibling still has correct properties
-			const aboutNode = findNodeByUrl(navTree!, '/about/');
-			const servicesNode = findNodeByUrl(navTree!, '/services/');
-			expect(aboutNode?.title).toBe('About');
-			expect(servicesNode?.title).toBe('Services');
+			const aboutNode = findNodeByUrl(navTree, '/about/');
+			const servicesNode = findNodeByUrl(navTree, '/services/');
+			expect(aboutNode?.meta?.title).toBe('About');
+			expect(servicesNode?.meta?.title).toBe('Services');
 		});
 
 		test('should remove grandchild while keeping parent and child intact', () => {
@@ -586,25 +448,20 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: history2025Page, pages: pageList },
 				{
-					transformNode: (node) => {
-						// Remove only a grandchild (2024)
-						if (node.url === '/about/history/2024/') {
-							return null;
-						}
-						return node;
-					},
+					// Remove only a grandchild (2024)
+					filter: (node) => node.url !== '/about/history/2024/',
 				},
 			);
 
 			expect(navTree).not.toBeNull();
 			// Parent (/about/history/) should exist
 			expect(navTree?.url).toBe('/about/history/');
-			expect(navTree?.title).toBe('History');
+			expect(navTree?.meta?.title).toBe('History');
 			// Only one child should remain
 			expect(navTree?.children).toHaveLength(1);
 			expect(navTree?.children[0]?.url).toBe('/about/history/2025/');
 			// Grandchild should be gone
-			expect(findNodeByUrl(navTree!, '/about/history/2024/')).toBeNull();
+			expect(findNodeByUrl(navTree, '/about/history/2024/')).toBeNull();
 		});
 
 		test('should return null when root node is removed by transformNode', () => {
@@ -616,7 +473,7 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: () => null,
+					filter: () => false,
 				},
 			);
 
@@ -633,11 +490,11 @@ describe('getNavTree', () => {
 				{ currentPage: indexPage, pages: pageList },
 				{
 					// @ts-ignore
-					transformNode: () => {},
+					filter: () => {},
 				},
 			);
 
-			expect(navTree).toBeUndefined();
+			expect(navTree).toBeNull();
 		});
 
 		test('should preserve order of remaining siblings after removal', () => {
@@ -651,13 +508,8 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: (node) => {
-						// Remove B and D
-						if (node.url === '/b/' || node.url === '/d/') {
-							return null;
-						}
-						return node;
-					},
+					// Remove B and D
+					filter: (node) => node.url !== '/b/' && node.url !== '/d/',
 				},
 			);
 
@@ -680,12 +532,7 @@ describe('getNavTree', () => {
 				{ currentPage: indexPage, pages: pageList },
 				{
 					baseDepth: 0,
-					transformNode: (node) => {
-						if (node.url === '/about/') {
-							return null;
-						}
-						return node;
-					},
+					filter: (node) => node.url !== '/about/',
 				},
 			);
 
@@ -696,7 +543,9 @@ describe('getNavTree', () => {
 				depth: 0,
 				current: true,
 				isAncestor: false,
-				title: 'Home',
+				meta: {
+					title: 'Home',
+				},
 				children: [
 					{
 						url: '/contact/',
@@ -704,7 +553,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'Contact',
+						meta: {
+							title: 'Contact',
+						},
 						children: [],
 					},
 				],
@@ -722,12 +573,7 @@ describe('getNavTree', () => {
 				{ currentPage: indexPage, pages: pageList },
 				{
 					baseDepth: 0,
-					transformNode: (node) => {
-						if (node.url === '/contact/') {
-							return null;
-						}
-						return node;
-					},
+					filter: (node) => node.url !== '/contact/',
 				},
 			);
 
@@ -737,7 +583,9 @@ describe('getNavTree', () => {
 				depth: 0,
 				current: true,
 				isAncestor: false,
-				title: 'Home',
+				meta: {
+					title: 'Home',
+				},
 				children: [
 					{
 						url: '/about/',
@@ -745,7 +593,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'About',
+						meta: {
+							title: 'About',
+						},
 						children: [],
 					},
 					{
@@ -754,7 +604,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'Services',
+						meta: {
+							title: 'Services',
+						},
 						children: [],
 					},
 				],
@@ -779,12 +631,7 @@ describe('getNavTree', () => {
 				{ currentPage: history2025Page, pages: pageList },
 				{
 					baseDepth: 2,
-					transformNode: (node) => {
-						if (node.url === '/about/history/2024/') {
-							return null;
-						}
-						return node;
-					},
+					filter: (node) => node.url !== '/about/history/2024/',
 				},
 			);
 
@@ -794,7 +641,9 @@ describe('getNavTree', () => {
 				depth: 2,
 				current: false,
 				isAncestor: true,
-				title: 'History',
+				meta: {
+					title: 'History',
+				},
 				children: [
 					{
 						url: '/about/history/2025/',
@@ -802,7 +651,9 @@ describe('getNavTree', () => {
 						depth: 3,
 						current: true,
 						isAncestor: false,
-						title: '2025',
+						meta: {
+							title: '2025',
+						},
 						children: [],
 					},
 				],
@@ -822,11 +673,7 @@ describe('getNavTree', () => {
 				{ currentPage: indexPage, pages: pageList },
 				{
 					baseDepth: 0,
-					transformNode: (node) => {
-						if (node.url === '/b/') return null;
-						if (node.url === '/d/') return;
-						return node;
-					},
+					filter: (node) => node.url !== '/b/' && node.url !== '/d/',
 				},
 			);
 
@@ -836,7 +683,9 @@ describe('getNavTree', () => {
 				depth: 0,
 				current: true,
 				isAncestor: false,
-				title: 'Home',
+				meta: {
+					title: 'Home',
+				},
 				children: [
 					{
 						url: '/a/',
@@ -844,7 +693,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'A',
+						meta: {
+							title: 'A',
+						},
 						children: [],
 					},
 					{
@@ -853,7 +704,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'C',
+						meta: {
+							title: 'C',
+						},
 						children: [],
 					},
 					{
@@ -862,7 +715,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'E',
+						meta: {
+							title: 'E',
+						},
 						children: [],
 					},
 				],
@@ -889,12 +744,7 @@ describe('getNavTree', () => {
 				{ currentPage: janPage, pages: pageList },
 				{
 					baseDepth: 2,
-					transformNode: (node) => {
-						if (node.url === '/about/history/2025/feb/') {
-							return null;
-						}
-						return node;
-					},
+					filter: (node) => node.url !== '/about/history/2025/feb/',
 				},
 			);
 
@@ -904,7 +754,9 @@ describe('getNavTree', () => {
 				depth: 2,
 				current: false,
 				isAncestor: true,
-				title: 'History',
+				meta: {
+					title: 'History',
+				},
 				children: [
 					{
 						url: '/about/history/2025/',
@@ -912,7 +764,9 @@ describe('getNavTree', () => {
 						depth: 3,
 						current: false,
 						isAncestor: true,
-						title: '2025',
+						meta: {
+							title: '2025',
+						},
 						children: [
 							{
 								url: '/about/history/2025/jan/',
@@ -920,7 +774,9 @@ describe('getNavTree', () => {
 								depth: 4,
 								current: true,
 								isAncestor: false,
-								title: 'January',
+								meta: {
+									title: 'January',
+								},
 								children: [],
 							},
 						],
@@ -940,12 +796,7 @@ describe('getNavTree', () => {
 				{ currentPage: indexPage, pages: pageList },
 				{
 					baseDepth: 0,
-					transformNode: (node) => {
-						if (node.url === '/about/history/' || node.url === '/about/team/') {
-							return null;
-						}
-						return node;
-					},
+					filter: (node) => node.url !== '/about/history/' && node.url !== '/about/team/',
 				},
 			);
 
@@ -955,7 +806,9 @@ describe('getNavTree', () => {
 				depth: 0,
 				current: true,
 				isAncestor: false,
-				title: 'Home',
+				meta: {
+					title: 'Home',
+				},
 				children: [
 					{
 						url: '/about/',
@@ -963,7 +816,9 @@ describe('getNavTree', () => {
 						depth: 1,
 						current: false,
 						isAncestor: false,
-						title: 'About',
+						meta: {
+							title: 'About',
+						},
 						children: [],
 					},
 				],

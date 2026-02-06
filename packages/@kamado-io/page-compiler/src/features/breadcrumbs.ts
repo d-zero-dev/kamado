@@ -1,8 +1,6 @@
-import type { CompilableFile } from 'kamado/files';
+import type { PageData } from 'kamado/files';
 
 import path from 'node:path';
-
-import { getTitle } from './get-title.js';
 
 /**
  * Breadcrumb item
@@ -34,10 +32,6 @@ export type GetBreadcrumbsOptions<
 	 * @default '/'
 	 */
 	readonly baseURL?: string;
-	/**
-	 * Function to optimize titles
-	 */
-	readonly optimizeTitle?: (title: string) => string;
 	/**
 	 * Transform each breadcrumb item
 	 * @param item - Original breadcrumb item
@@ -75,8 +69,8 @@ export type GetBreadcrumbsOptions<
  * Required context for breadcrumbs generation
  */
 export interface GetBreadcrumbsContext {
-	readonly page: CompilableFile & { title?: string };
-	readonly pageList: readonly (CompilableFile & { title?: string })[];
+	readonly page: PageData;
+	readonly pageList: readonly PageData[];
 }
 
 /**
@@ -92,16 +86,12 @@ export function getBreadcrumbs<
 ): (BreadcrumbItem & TOut)[] {
 	const { page, pageList } = context;
 	const baseURL = options?.baseURL ?? '/';
-	const optimizeTitle = options?.optimizeTitle;
 	const baseDepth = baseURL.split('/').filter(Boolean).length;
 	const pages = pageList.filter((item) =>
 		isAncestor(page.filePathStem, item.filePathStem),
 	);
 	const breadcrumbs = pages.map((sourcePage) => ({
-		title:
-			sourcePage.title?.trim() ||
-			getTitle(sourcePage, { optimizeTitle, safe: true }) ||
-			'__NO_TITLE__',
+		title: (sourcePage.metaData?.title as string | undefined)?.trim() || '__NO_TITLE__',
 		href: sourcePage.url,
 		depth: sourcePage.url.split('/').filter(Boolean).length,
 	}));

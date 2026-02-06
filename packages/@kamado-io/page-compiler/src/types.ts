@@ -99,10 +99,6 @@ export interface PageCompilerOptions {
 		| Transform[]
 		| ((defaultTransforms: readonly Transform[]) => Transform[]);
 	/**
-	 * Function to optimize titles
-	 */
-	readonly optimizeTitle?: (title: string) => string;
-	/**
 	 * Compilation hooks for customizing compile process
 	 * Can be an object or a function that returns an object
 	 */
@@ -123,33 +119,19 @@ export interface PageCompilerOptions {
 	 */
 	readonly transformBreadcrumbItem?: (item: BreadcrumbItem) => BreadcrumbItem;
 	/**
-	 * Transform each navigation node
-	 * @param node - Original navigation node
-	 * @returns Transformed navigation node (can include additional properties, or null/undefined to remove the node)
+	 * Filter navigation nodes
+	 *
+	 * Return `true` to keep the node, `false` to remove it from the tree.
+	 * @param node - Navigation node to filter
+	 * @returns Whether to keep the node
 	 * @example
 	 * ```typescript
 	 * pageCompiler({
-	 *   transformNavNode: (node) => {
-	 *     return { ...node, badge: 'new' };
-	 *   },
+	 *   filterNavigationNode: (node) => !node.url.includes('/drafts/'),
 	 * });
 	 * ```
 	 */
-	readonly transformNavNode?: (node: NavNode) => NavNode | null | undefined;
-}
-
-/**
- * Options for getting page title
- */
-export interface GetTitleOptions {
-	/**
-	 * Function to optimize title (optional)
-	 */
-	readonly optimizeTitle?: (title: string) => string;
-	/**
-	 * Whether to return an empty string if the page content is not found (optional)
-	 */
-	readonly safe?: boolean;
+	readonly filterNavigationNode?: (node: NavNode) => boolean;
 }
 
 /**

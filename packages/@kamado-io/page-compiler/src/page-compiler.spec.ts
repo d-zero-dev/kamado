@@ -242,13 +242,13 @@ describe('type inference for transform options', () => {
 
 		test('transformNavNode should accept valid function', () => {
 			const options: PageCompilerOptions = {
-				transformNavNode: (node) => ({
+				filterNavigationNode: (node) => ({
 					...node,
 					badge: 'test',
 				}),
 			};
 
-			expectTypeOf(options.transformNavNode).toExtend<
+			expectTypeOf(options.filterNavigationNode).toExtend<
 				((node: NavNode) => NavNode | null | undefined) | undefined
 			>();
 		});
@@ -267,14 +267,14 @@ describe('type inference for transform options', () => {
 
 		test('transformNavNode should accept sync function', () => {
 			const options: PageCompilerOptions = {
-				transformNavNode: (node) => {
+				filterNavigationNode: (node) => {
 					return {
 						...node,
 					};
 				},
 			};
 
-			expect(options.transformNavNode).toBeDefined();
+			expect(options.filterNavigationNode).toBeDefined();
 		});
 	});
 });

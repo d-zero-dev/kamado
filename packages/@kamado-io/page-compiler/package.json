@@ -58,6 +58,10 @@
 		"./dev-transform/ssi-shim": {
 			"types": "./dist/transform/ssi-shim.d.ts",
 			"default": "./dist/transform/ssi-shim.js"
+		},
+		"./title": {
+			"types": "./dist/features/title-utils.d.ts",
+			"default": "./dist/features/title-utils.js"
 		}
 	},
 	"scripts": {

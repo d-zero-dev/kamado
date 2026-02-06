@@ -72,3 +72,10 @@ export interface CompilableFile extends FileObject {
 	 */
 	readonly date: Date;
 }
+
+/**
+ * Page data with optional metadata
+ */
+export interface PageData extends CompilableFile {
+	metaData?: MetaData;
+}

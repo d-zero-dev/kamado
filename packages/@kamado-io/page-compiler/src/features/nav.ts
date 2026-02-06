@@ -1,126 +1,112 @@
 import type { Node } from '@d-zero/shared/path-list-to-tree';
-import type { CompilableFile } from 'kamado/files';
+import type { CompilableFile, PageData } from 'kamado/files';
 
 import path from 'node:path';
 
 import { pathListToTree } from '@d-zero/shared/path-list-to-tree';
 
-import { getTitleFromStaticFile } from './get-title-from-static-file.js';
+/**
+ * Navigation node with metadata
+ *
+ * Uses `Node<NavNodeMetaData>` from `@d-zero/shared/path-list-to-tree`.
+ * Access title via `node.meta.title`.
+ */
+export type NavNode = Node<NavNodeMetaData>;
 
 /**
- * Navigation node with title
+ * Metadata for navigation node
  */
-export type NavNode = Node & {
+export interface NavNodeMetaData {
 	/**
-	 * Title
+	 * Page title
 	 */
 	readonly title: string;
-};
-
-/**
- * Options for getting navigation tree
- * @template TOut - Type of additional properties added by transformNode
- */
-export type GetNavTreeOptions<
-	TOut extends Record<string, unknown> = Record<never, never>,
-> = {
-	/**
-	 * List of glob patterns for files to ignore
-	 */
-	readonly ignoreGlobs?: string[];
-	/**
-	 * Function to optimize titles
-	 */
-	readonly optimizeTitle?: (title: string) => string;
-	/**
-	 * Base depth for navigation tree (default: 1)
-	 * - 0: Level 2 (e.g. /about/)
-	 * - 1: Level 3 (e.g. /about/history/)
-	 */
-	readonly baseDepth?: number;
-	/**
-	 * Transform each navigation node
-	 * @param node - Original navigation node
-	 * @returns Transformed navigation node with additional properties (or null/undefined to remove the node)
-	 */
-	readonly transformNode?: (node: NavNode) => (NavNode & TOut) | null | undefined;
-};
-
-/**
- * Gets navigation tree corresponding to the current page
- * @template TOut - Type of additional properties added by transformNode
- * @param currentPage - Current page file
- * @param pages - List of all page files (with titles)
- * @param options - Options for getting navigation tree
- * @returns Navigation tree node at the specified baseDepth (default: current page's depth - 1) or null if not found
- * @example
- * ```typescript
- * const navTree = getNavTree(currentPage, pageList, {
- *   ignoreGlobs: ['./drafts'],
- * });
- * ```
- * @example
- * ```typescript
- * // With transformNode for adding custom properties
- * const navTree = getNavTree(currentPage, pageList, {
- *   transformNode: (node) => {
- *     return {
- *       ...node,
- *       badge: 'new',
- *     };
- *   },
- * });
- * ```
- */
-/**
- * Required context for navigation tree generation
- */
-export interface GetNavTreeContext {
-	readonly currentPage: CompilableFile;
-	readonly pages: readonly (CompilableFile & { title: string })[];
 }
 
 /**
- *
- * @param context
- * @param options
+ * Options for getting navigation tree
  */
-export function getNavTree<TOut extends Record<string, unknown> = Record<never, never>>(
+export interface GetNavTreeOptions {
+	/**
+	 * Glob patterns for files to ignore
+	 */
+	readonly ignoreGlobs?: string[];
+	/**
+	 * Base depth for navigation tree (default: current page's depth - 1)
+	 *
+	 * Depth corresponds to URL hierarchy:
+	 * - depth 0: `/`
+	 * - depth 1: `/about/`
+	 * - depth 2: `/about/history/`
+	 */
+	readonly baseDepth?: number;
+	/**
+	 * Filter navigation nodes
+	 *
+	 * Return `true` to keep the node, `false` to remove it from the tree.
+	 */
+	readonly filter?: (node: NavNode) => boolean;
+}
+
+/**
+ * Context for navigation tree generation
+ */
+export interface GetNavTreeContext {
+	/**
+	 * Current page file
+	 */
+	readonly currentPage: CompilableFile;
+	/**
+	 * List of all pages with metadata
+	 */
+	readonly pages: readonly PageData[];
+}
+
+/**
+ * Gets navigation tree corresponding to the current page
+ *
+ * Title is accessed via `node.meta.title`.
+ * @param context - Context containing current page and page list
+ * @param options - Options for tree generation
+ * @returns Navigation tree or null if not found
+ * @example
+ * ```typescript
+ * const navTree = getNavTree(
+ *   { currentPage, pages: pageList },
+ *   { ignoreGlobs: ['./drafts'] },
+ * );
+ *
+ * // Access title
+ * console.log(navTree?.meta.title);
+ * ```
+ * @example
+ * ```typescript
+ * // Filter nodes
+ * const navTree = getNavTree(
+ *   { currentPage, pages: pageList },
+ *   {
+ *     filter: (node) => !node.url.includes('/drafts/'),
+ *   },
+ * );
+ * ```
+ */
+export function getNavTree(
 	context: GetNavTreeContext,
-	options?: GetNavTreeOptions<TOut>,
-): (NavNode & TOut) | null | undefined {
+	options?: GetNavTreeOptions,
+): NavNode | null | undefined {
 	const { currentPage, pages } = context;
-	const tree = pathListToTree(
+	const tree = pathListToTree<NavNodeMetaData>(
 		pages.map((item) => item.url),
 		{
 			ignoreGlobs: options?.ignoreGlobs,
 			currentPath: currentPage.url,
-			filter: (node) => {
-				const page = pages.find((item) => item.url === node.url);
-				if (page) {
-					// @ts-ignore
-					node.title = page.title;
-				} else {
-					const filePath = node.url + (node.url.endsWith('/') ? 'index.html' : '');
-					// @ts-ignore
-					node.title =
-						getTitleFromStaticFile(
-							path.join(process.cwd(), 'htdocs', filePath),
-							options?.optimizeTitle,
-						) ?? `⛔️ NOT FOUND (${node.stem})`;
-				}
-				return true;
-			},
+			addMetaData: (node) => getMeta(node.url, pages),
 		},
-	) as NavNode;
+	);
 
-	// Ensure root node has title (pathListToTree might skip filter for root)
-	if (!tree.title && tree.url) {
-		const page = pages.find((item) => item.url === tree.url);
-		if (page) {
-			// @ts-ignore
-			tree.title = page.title;
-		}
+	// Ensure root node has meta (pathListToTree may skip addMetaData for root)
+	if (!tree.meta?.title && tree.url) {
+		tree.meta = getMeta(tree.url, pages);
 	}
 
 	const parentTree = getParentNodeTree(currentPage.url, tree, options?.baseDepth);
@@ -130,41 +116,41 @@ export function getNavTree<TOut extends Record<string, unknown> = Record<never, 
 	}
 
 	// Apply transformNode if specified
-	if (options?.transformNode) {
-		return transformTreeNodes(parentTree, options.transformNode);
+	if (options?.filter) {
+		return filterTreeNodes(parentTree, options.filter);
 	}
 
-	return parentTree as NavNode & TOut;
+	return parentTree;
 }
 
 /**
- * Recursively transforms all nodes in a tree
- * @param node - Root node to transform
- * @param transformNode - Transform function
- * @returns Transformed tree
+ * Recursively filters all nodes in a tree
+ * @param node - Root node to filter
+ * @param filterNode - Filter function returning true to keep, false to remove
  */
-function transformTreeNodes<TOut extends Record<string, unknown>>(
+function filterTreeNodes(
 	node: NavNode,
-	transformNode: (node: NavNode) => (NavNode & TOut) | null | undefined,
-): (NavNode & TOut) | null | undefined {
-	const transformedChildren = node.children
-		.map((child) => transformTreeNodes(child as NavNode, transformNode))
-		.filter((child): child is NavNode & TOut => !!child);
+	filterNode: (node: NavNode) => boolean,
+): NavNode | null | undefined {
+	const filteredChildren = node.children
+		.map((child) => filterTreeNodes(child as NavNode, filterNode))
+		.filter((child): child is NavNode => !!child);
 
-	const transformedNode = transformNode({
+	const newNode = {
 		...node,
-		children: transformedChildren,
-	});
+		children: filteredChildren,
+	};
 
-	return transformedNode;
+	const isExists = filterNode(newNode);
+
+	return isExists ? newNode : null;
 }
 
 /**
- * Finds the node corresponding to the current page in the tree
- * @param tree - Navigation tree
- * @returns Found node or null if not found
+ * Finds the node marked as current in the tree
+ * @param tree - Navigation tree to search
  */
-function findCurrentNode(tree: Node): Node | null {
+function findCurrentNode(tree: NavNode): NavNode | null {
 	if (tree.current) {
 		return tree;
 	}
@@ -180,9 +166,8 @@ function findCurrentNode(tree: Node): Node | null {
 /**
  * Finds ancestor node at the specified depth
  * @param currentUrl - Current page URL
- * @param tree - Navigation tree
+ * @param tree - Navigation tree to search
  * @param targetDepth - Target depth to find ancestor
- * @returns Found ancestor node or null if not found
  */
 function findAncestorAtDepth(
 	currentUrl: string,
@@ -201,7 +186,7 @@ function findAncestorAtDepth(
 		return null;
 	}
 
-	const found = findAncestorAtDepth(currentUrl, candidateParent as NavNode, targetDepth);
+	const found = findAncestorAtDepth(currentUrl, candidateParent, targetDepth);
 	if (found) {
 		return found;
 	}
@@ -210,18 +195,10 @@ function findAncestorAtDepth(
 }
 
 /**
- * Returns the navigation tree corresponding to the current page at the specified base depth
- *
- * Note: The relationship between specification "level N" and path-list-to-tree "depth" is as follows:
- * - Specification level 1 (/) = depth 0
- * - Specification level 2 (/about/) = depth 1
- * - Specification level 3 (/about/history/) = depth 2
- * - Specification level 4 (/about/history/2025/) = depth 3
- * In other words, specification "level N" = depth (N-1)
+ * Returns the subtree starting from the ancestor at the specified base depth
  * @param currentUrl - Current page URL
  * @param tree - Navigation tree
- * @param baseDepth - Base depth for navigation tree (default: current page's depth - 1)
- * @returns Ancestor node at baseDepth or null if not found
+ * @param baseDepth - Base depth for navigation tree
  */
 function getParentNodeTree(
 	currentUrl: string,
@@ -243,4 +220,19 @@ function getParentNodeTree(
 	);
 
 	return ancestor;
+}
+
+/**
+ * Gets metadata for a navigation node from page list
+ * @param url - Page URL
+ * @param pages - List of pages with metadata
+ */
+function getMeta(url: string, pages: readonly PageData[]): NavNodeMetaData {
+	const page = pages.find((item) => item.url === url);
+	return {
+		...page?.metaData,
+		title:
+			(page?.metaData?.title as string | undefined)?.trim() ??
+			(page ? `__NO_TITLE__` : `⛔️ NOT FOUND (${url})`),
+	};
 }

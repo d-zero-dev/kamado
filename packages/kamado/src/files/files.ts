@@ -9,4 +9,5 @@ export type {
 	FileObject,
 	GetFileOptions,
 	MetaData,
+	PageData,
 } from './types.js';

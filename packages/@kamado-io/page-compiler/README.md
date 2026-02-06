@@ -49,9 +49,8 @@ export const config: UserConfig = {
   - `(defaultTransforms: readonly Transform[]) => Transform[]` - Function that receives default transforms (5 transforms) and returns modified array
   - If omitted, uses `defaultPageTransforms` (5 transforms: manipulateDOM, doctype, prettier, minifier, lineBreak). See [Transform Pipeline](#transform-pipeline) for details.
   - **Note**: Uses the same `Transform` interface as `devServer.transforms`, but applies only to HTML pages in both build and serve modes. The `filter` option is ignored here (use `devServer.transforms` for filtering).
-- `optimizeTitle`: Function to optimize titles
 - `transformBreadcrumbItem`: Function to transform each breadcrumb item. Can add custom properties to breadcrumb items. `(item: BreadcrumbItem) => BreadcrumbItem`
-- `transformNavNode`: Function to transform each navigation node. Can add custom properties or filter nodes by returning `null`/`undefined`. `(node: NavNode) => NavNode | null | undefined`
+- `filterNavigationNode`: Function to filter navigation nodes. Return `true` to keep the node, `false` to remove it. `(node: NavNode) => boolean`
 - `compileHooks`: Compilation hooks for customizing compile process
   - Can be an object or a function `(options: PageCompilerOptions) => CompileHooksObject | Promise<CompileHooksObject>` that returns an object (sync or async)
   - `main`: Hooks for main content compilation
@@ -706,6 +705,9 @@ import {
 	minifier,
 	lineBreak,
 
+	// Title utilities
+	getTitleFromHtmlString,
+
 	// Types
 	type PageCompilerOptions,
 	type Transform,
@@ -736,6 +738,18 @@ import {
 	type SSIShimOptions,
 	type SSIShimTransformOptions,
 } from '@kamado-io/page-compiler/transform/ssi-shim';
+```
+
+### Title Utilities
+
+```typescript
+// Extract title from HTML string (searches only in <head> section for performance)
+import { getTitleFromHtmlString } from '@kamado-io/page-compiler/title';
+
+const title = getTitleFromHtmlString(
+	'<html><head><title>My Page</title></head>...</html>',
+);
+// Returns: 'My Page'
 ```
 
 ### Individual Transforms (Subpath Exports)
