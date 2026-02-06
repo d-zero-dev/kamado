@@ -35,7 +35,6 @@ describe('getContentFromFileObject', () => {
 
 		expect(result.content).toBe('html\n  body\n    block content');
 		expect(result.raw).toBe('html\n  body\n    block content');
-		expect(result.metaData).toEqual({});
 	});
 
 	test('should return empty metaData always', async () => {
@@ -45,7 +44,6 @@ describe('getContentFromFileObject', () => {
 		const result = await getContentFromFileObject(file);
 
 		// Unlike getContentFromFile, this does not parse front matter
-		expect(result.metaData).toEqual({});
 		expect(result.content).toBe('Some content with --- markers ---');
 	});
 
@@ -61,7 +59,6 @@ html
 		const result = await getContentFromFileObject(file);
 
 		// Front matter should NOT be parsed - content includes everything
-		expect(result.metaData).toEqual({});
 		expect(result.content).toBe(content);
 		expect(result.raw).toBe(content);
 	});

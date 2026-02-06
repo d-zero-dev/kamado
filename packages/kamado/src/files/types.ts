@@ -22,10 +22,6 @@ export interface FileObject {
  */
 export interface FileContent {
 	/**
-	 * Metadata (front matter, etc.)
-	 */
-	readonly metaData: MetaData;
-	/**
 	 * File content (excluding metadata)
 	 */
 	readonly content: string;
