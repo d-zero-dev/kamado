@@ -173,7 +173,7 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 export type * from './types.js';
 
 // Re-export page transforms
-export { defaultPageTransforms } from './page-transform.js';
+export { createDefaultPageTransforms } from './page-transform.js';
 export { manipulateDOM } from './transform/manipulate-dom.js';
 export { characterEntities } from './transform/character-entities.js';
 export { doctype } from './transform/doctype.js';
