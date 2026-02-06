@@ -65,7 +65,6 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 				{ page: file, pageList: globalData?.pageList ?? [] },
 				{
 					baseURL: context.pkg.production?.baseURL,
-					optimizeTitle: options?.optimizeTitle,
 					transformItem: options?.transformBreadcrumbItem,
 				},
 			);
@@ -78,7 +77,6 @@ export const pageCompiler = createCustomCompiler<PageCompilerOptions>(() => ({
 					getNavTree(
 						{ currentPage: file, pages: globalData?.pageList ?? [] },
 						{
-							optimizeTitle: options?.optimizeTitle,
 							...navOptions,
 							transformNode: options?.transformNavNode,
 						},
@@ -185,5 +183,4 @@ export { lineBreak } from './transform/line-break.js';
 
 // Re-export for backward compatibility
 export { getLayouts, type GetLayoutsOptions } from './layouts.js';
-export { getTitle } from './features/get-title.js';
-export { getTitleFromStaticFile } from './features/get-title-from-static-file.js';
+export { getTitleFromHtmlString } from './features/title-utils.js';

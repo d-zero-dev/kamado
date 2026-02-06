@@ -1,11 +1,11 @@
-import type { CompilableFile } from 'kamado/files';
+import type { PageData } from 'kamado/files';
 
 import { describe, test, expect } from 'vitest';
 
 import { getBreadcrumbs } from './breadcrumbs.js';
 
 /**
- * Creates a mock CompilableFile for testing
+ * Creates a mock PageData for testing
  * The filePathStem is derived from URL to match the isAncestor logic:
  * - `/` → `/index` (index file at root)
  * - `/about/` → `/about/index` (index file in about directory)
@@ -13,7 +13,7 @@ import { getBreadcrumbs } from './breadcrumbs.js';
  * @param url - URL path ending with `/`
  * @param title - Page title
  */
-function createMockPage(url: string, title: string): CompilableFile & { title: string } {
+function createMockPage(url: string, title: string): PageData {
 	// Convert URL to filePathStem matching isAncestor logic
 	// /about/ → /about/index, / → /index
 	const filePathStem = url === '/' ? '/index' : url.replace(/\/$/, '/index');
@@ -27,7 +27,7 @@ function createMockPage(url: string, title: string): CompilableFile & { title: s
 		url,
 		extension: '.html',
 		date: new Date(),
-		title,
+		metaData: { title },
 	};
 }
 
@@ -181,7 +181,7 @@ describe('getBreadcrumbs', () => {
 
 		test('should return empty array when pageList is empty', () => {
 			const aboutPage = createMockPage('/about/', 'About');
-			const pageList: (CompilableFile & { title: string })[] = [];
+			const pageList: PageData[] = [];
 
 			const breadcrumbs = getBreadcrumbs({ page: aboutPage, pageList });
 

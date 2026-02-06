@@ -1,18 +1,18 @@
-import type { CompilableFile } from 'kamado/files';
+import type { PageData } from 'kamado/files';
 
 import { describe, test, expect } from 'vitest';
 
 import { getNavTree, type NavNode } from './nav.js';
 
 /**
- * Creates a mock CompilableFile for testing
+ * Creates a mock PageData for testing
  * The filePathStem is derived from URL to match directory structure:
  * - `/` → `/index`
  * - `/about/` → `/about/index`
  * @param url - URL path ending with `/`
  * @param title - Page title
  */
-function createMockPage(url: string, title: string): CompilableFile & { title: string } {
+function createMockPage(url: string, title: string): PageData {
 	const filePathStem = url === '/' ? '/index' : url.replace(/\/$/, '/index');
 	const slug = url === '/' ? 'index' : url.split('/').findLast(Boolean) || 'index';
 
@@ -24,7 +24,7 @@ function createMockPage(url: string, title: string): CompilableFile & { title: s
 		url,
 		extension: '.html',
 		date: new Date(),
-		title,
+		metaData: { title },
 	};
 }
 
@@ -162,12 +162,8 @@ describe('getNavTree', () => {
 		test('should apply transformNode asynchronously with page.get()', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
-			const aboutHistoryPage = createMockPage('/about/history/', 'History', {
-				badge: 'history-badge',
-			});
-			const aboutHistory2025Page = createMockPage('/about/history/2025/', '2025', {
-				badge: '2025-badge',
-			});
+			const aboutHistoryPage = createMockPage('/about/history/', 'History');
+			const aboutHistory2025Page = createMockPage('/about/history/2025/', '2025');
 			const pageList = [indexPage, aboutPage, aboutHistoryPage, aboutHistory2025Page];
 
 			const navTree = getNavTree<{ badge: string | undefined }>(

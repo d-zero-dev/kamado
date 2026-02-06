@@ -1,11 +1,9 @@
 import type { Node } from '@d-zero/shared/path-list-to-tree';
-import type { CompilableFile } from 'kamado/files';
+import type { CompilableFile, PageData } from 'kamado/files';
 
 import path from 'node:path';
 
 import { pathListToTree } from '@d-zero/shared/path-list-to-tree';
-
-import { getTitleFromStaticFile } from './get-title-from-static-file.js';
 
 /**
  * Navigation node with title
@@ -28,10 +26,6 @@ export type GetNavTreeOptions<
 	 * List of glob patterns for files to ignore
 	 */
 	readonly ignoreGlobs?: string[];
-	/**
-	 * Function to optimize titles
-	 */
-	readonly optimizeTitle?: (title: string) => string;
 	/**
 	 * Base depth for navigation tree (default: 1)
 	 * - 0: Level 2 (e.g. /about/)
@@ -77,7 +71,7 @@ export type GetNavTreeOptions<
  */
 export interface GetNavTreeContext {
 	readonly currentPage: CompilableFile;
-	readonly pages: readonly (CompilableFile & { title: string })[];
+	readonly pages: readonly PageData[];
 }
 
 /**
@@ -97,18 +91,10 @@ export function getNavTree<TOut extends Record<string, unknown> = Record<never, 
 			currentPath: currentPage.url,
 			filter: (node) => {
 				const page = pages.find((item) => item.url === node.url);
-				if (page) {
-					// @ts-ignore
-					node.title = page.title;
-				} else {
-					const filePath = node.url + (node.url.endsWith('/') ? 'index.html' : '');
-					// @ts-ignore
-					node.title =
-						getTitleFromStaticFile(
-							path.join(process.cwd(), 'htdocs', filePath),
-							options?.optimizeTitle,
-						) ?? `⛔️ NOT FOUND (${node.stem})`;
-				}
+				// @ts-ignore
+				node.title =
+					(page?.metaData?.title as string | undefined)?.trim() ||
+					(page ? `__NO_TITLE__` : `⛔️ NOT FOUND (${node.stem})`);
 				return true;
 			},
 		},
@@ -117,10 +103,10 @@ export function getNavTree<TOut extends Record<string, unknown> = Record<never, 
 	// Ensure root node has title (pathListToTree might skip filter for root)
 	if (!tree.title && tree.url) {
 		const page = pages.find((item) => item.url === tree.url);
-		if (page) {
-			// @ts-ignore
-			tree.title = page.title;
-		}
+		// @ts-ignore
+		tree.title =
+			(page?.metaData?.title as string | undefined)?.trim() ||
+			(page ? `__NO_TITLE__` : `⛔️ NOT FOUND (${tree.stem})`);
 	}
 
 	const parentTree = getParentNodeTree(currentPage.url, tree, options?.baseDepth);
