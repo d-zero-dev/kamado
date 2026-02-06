@@ -45,7 +45,7 @@ export interface GetNavTreeOptions {
 	 *
 	 * Return `null` or `undefined` to remove the node from the tree.
 	 */
-	readonly transformNode?: (node: NavNode) => NavNode | null | undefined;
+	readonly transformNode?: (node: NavNode) => boolean;
 }
 
 /**
@@ -132,18 +132,20 @@ export function getNavTree(
  */
 function transformTreeNodes(
 	node: NavNode,
-	transformNode: (node: NavNode) => NavNode | null | undefined,
+	transformNode: (node: NavNode) => boolean,
 ): NavNode | null | undefined {
 	const transformedChildren = node.children
 		.map((child) => transformTreeNodes(child as NavNode, transformNode))
 		.filter((child): child is NavNode => !!child);
 
-	const transformedNode = transformNode({
+	const newNode = {
 		...node,
 		children: transformedChildren,
-	});
+	};
 
-	return transformedNode;
+	const isExists = transformNode(newNode);
+
+	return isExists ? newNode : null;
 }
 
 /**

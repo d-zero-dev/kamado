@@ -131,7 +131,7 @@ export interface PageCompilerOptions {
 	 * });
 	 * ```
 	 */
-	readonly transformNavNode?: (node: NavNode) => NavNode | null | undefined;
+	readonly transformNavNode?: (node: NavNode) => boolean;
 }
 
 /**
