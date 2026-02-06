@@ -119,19 +119,19 @@ export interface PageCompilerOptions {
 	 */
 	readonly transformBreadcrumbItem?: (item: BreadcrumbItem) => BreadcrumbItem;
 	/**
-	 * Transform each navigation node
-	 * @param node - Original navigation node
-	 * @returns Transformed navigation node (can include additional properties, or null/undefined to remove the node)
+	 * Filter navigation nodes
+	 *
+	 * Return `true` to keep the node, `false` to remove it from the tree.
+	 * @param node - Navigation node to filter
+	 * @returns Whether to keep the node
 	 * @example
 	 * ```typescript
 	 * pageCompiler({
-	 *   transformNavNode: (node) => {
-	 *     return { ...node, badge: 'new' };
-	 *   },
+	 *   filter: (node) => !node.url.includes('/drafts/'),
 	 * });
 	 * ```
 	 */
-	readonly transformNavNode?: (node: NavNode) => boolean;
+	readonly filter?: (node: NavNode) => boolean;
 }
 
 /**

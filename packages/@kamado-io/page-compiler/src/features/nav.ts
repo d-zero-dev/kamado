@@ -41,11 +41,11 @@ export interface GetNavTreeOptions {
 	 */
 	readonly baseDepth?: number;
 	/**
-	 * Transform each navigation node
+	 * Filter navigation nodes
 	 *
-	 * Return `null` or `undefined` to remove the node from the tree.
+	 * Return `true` to keep the node, `false` to remove it from the tree.
 	 */
-	readonly transformNode?: (node: NavNode) => boolean;
+	readonly filter?: (node: NavNode) => boolean;
 }
 
 /**
@@ -66,8 +66,9 @@ export interface GetNavTreeContext {
  * Gets navigation tree corresponding to the current page
  *
  * Title is accessed via `node.meta.title`.
- * @param context
- * @param options
+ * @param context - Context containing current page and page list
+ * @param options - Options for tree generation
+ * @returns Navigation tree or null if not found
  * @example
  * ```typescript
  * const navTree = getNavTree(
@@ -80,14 +81,11 @@ export interface GetNavTreeContext {
  * ```
  * @example
  * ```typescript
- * // Transform nodes
+ * // Filter nodes
  * const navTree = getNavTree(
  *   { currentPage, pages: pageList },
  *   {
- *     transformNode: (node) => ({
- *       ...node,
- *       badge: node.current ? 'current' : undefined,
- *     }),
+ *     filter: (node) => !node.url.includes('/drafts/'),
  *   },
  * );
  * ```
@@ -118,39 +116,39 @@ export function getNavTree(
 	}
 
 	// Apply transformNode if specified
-	if (options?.transformNode) {
-		return transformTreeNodes(parentTree, options.transformNode);
+	if (options?.filter) {
+		return filterTreeNodes(parentTree, options.filter);
 	}
 
 	return parentTree;
 }
 
 /**
- * Recursively transforms all nodes in a tree
- * @param node
- * @param transformNode
+ * Recursively filters all nodes in a tree
+ * @param node - Root node to filter
+ * @param filterNode - Filter function returning true to keep, false to remove
  */
-function transformTreeNodes(
+function filterTreeNodes(
 	node: NavNode,
-	transformNode: (node: NavNode) => boolean,
+	filterNode: (node: NavNode) => boolean,
 ): NavNode | null | undefined {
-	const transformedChildren = node.children
-		.map((child) => transformTreeNodes(child as NavNode, transformNode))
+	const filteredChildren = node.children
+		.map((child) => filterTreeNodes(child as NavNode, filterNode))
 		.filter((child): child is NavNode => !!child);
 
 	const newNode = {
 		...node,
-		children: transformedChildren,
+		children: filteredChildren,
 	};
 
-	const isExists = transformNode(newNode);
+	const isExists = filterNode(newNode);
 
 	return isExists ? newNode : null;
 }
 
 /**
  * Finds the node marked as current in the tree
- * @param tree
+ * @param tree - Navigation tree to search
  */
 function findCurrentNode(tree: NavNode): NavNode | null {
 	if (tree.current) {
@@ -167,9 +165,9 @@ function findCurrentNode(tree: NavNode): NavNode | null {
 
 /**
  * Finds ancestor node at the specified depth
- * @param currentUrl
- * @param tree
- * @param targetDepth
+ * @param currentUrl - Current page URL
+ * @param tree - Navigation tree to search
+ * @param targetDepth - Target depth to find ancestor
  */
 function findAncestorAtDepth(
 	currentUrl: string,
@@ -198,9 +196,9 @@ function findAncestorAtDepth(
 
 /**
  * Returns the subtree starting from the ancestor at the specified base depth
- * @param currentUrl
- * @param tree
- * @param baseDepth
+ * @param currentUrl - Current page URL
+ * @param tree - Navigation tree
+ * @param baseDepth - Base depth for navigation tree
  */
 function getParentNodeTree(
 	currentUrl: string,
@@ -226,8 +224,8 @@ function getParentNodeTree(
 
 /**
  * Gets metadata for a navigation node from page list
- * @param url
- * @param pages
+ * @param url - Page URL
+ * @param pages - List of pages with metadata
  */
 function getMeta(url: string, pages: readonly PageData[]): NavNodeMetaData {
 	const page = pages.find((item) => item.url === url);

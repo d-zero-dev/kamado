@@ -128,7 +128,7 @@ describe('getNavTree', () => {
 				getNavTree(
 					{ currentPage: historyPage, pages: pageList },
 					{
-						transformNode: () => {
+						filter: () => {
 							throw new Error('Transform error');
 						},
 					},
@@ -215,7 +215,7 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: (node) => node.url !== '/about/',
+					filter: (node) => node.url !== '/about/',
 				},
 			);
 
@@ -241,7 +241,7 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: (node) => node.url !== '/about/',
+					filter: (node) => node.url !== '/about/',
 				},
 			);
 
@@ -278,7 +278,7 @@ describe('getNavTree', () => {
 				{ currentPage: indexPage, pages: pageList },
 				{
 					// Remove /about/ and all its descendants should disappear
-					transformNode: (node) => node.url !== '/about/',
+					filter: (node) => node.url !== '/about/',
 				},
 			);
 
@@ -306,7 +306,7 @@ describe('getNavTree', () => {
 			getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: (node) => {
+					filter: (node) => {
 						calledUrls.push(node.url);
 						return node.url !== '/about/';
 					},
@@ -340,7 +340,7 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: aboutHistory2025Page, pages: pageList },
 				{
-					transformNode: (node) => node.url !== '/about/history/2024/',
+					filter: (node) => node.url !== '/about/history/2024/',
 				},
 			);
 
@@ -371,7 +371,7 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: aboutHistory2025Page, pages: pageList },
 				{
-					transformNode: (node) =>
+					filter: (node) =>
 						node.url !== '/about/history/2024/' && node.url !== '/about/history/2023/',
 				},
 			);
@@ -395,8 +395,7 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: (node) =>
-						node.url !== '/about/history/' && node.url !== '/about/team/',
+					filter: (node) => node.url !== '/about/history/' && node.url !== '/about/team/',
 				},
 			);
 
@@ -417,7 +416,7 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: (node) => node.url !== '/contact/',
+					filter: (node) => node.url !== '/contact/',
 				},
 			);
 
@@ -450,7 +449,7 @@ describe('getNavTree', () => {
 				{ currentPage: history2025Page, pages: pageList },
 				{
 					// Remove only a grandchild (2024)
-					transformNode: (node) => node.url !== '/about/history/2024/',
+					filter: (node) => node.url !== '/about/history/2024/',
 				},
 			);
 
@@ -474,7 +473,7 @@ describe('getNavTree', () => {
 			const navTree = getNavTree(
 				{ currentPage: indexPage, pages: pageList },
 				{
-					transformNode: () => false,
+					filter: () => false,
 				},
 			);
 
@@ -491,7 +490,7 @@ describe('getNavTree', () => {
 				{ currentPage: indexPage, pages: pageList },
 				{
 					// @ts-ignore
-					transformNode: () => {},
+					filter: () => {},
 				},
 			);
 
@@ -510,7 +509,7 @@ describe('getNavTree', () => {
 				{ currentPage: indexPage, pages: pageList },
 				{
 					// Remove B and D
-					transformNode: (node) => node.url !== '/b/' && node.url !== '/d/',
+					filter: (node) => node.url !== '/b/' && node.url !== '/d/',
 				},
 			);
 
@@ -533,7 +532,7 @@ describe('getNavTree', () => {
 				{ currentPage: indexPage, pages: pageList },
 				{
 					baseDepth: 0,
-					transformNode: (node) => node.url !== '/about/',
+					filter: (node) => node.url !== '/about/',
 				},
 			);
 
@@ -574,7 +573,7 @@ describe('getNavTree', () => {
 				{ currentPage: indexPage, pages: pageList },
 				{
 					baseDepth: 0,
-					transformNode: (node) => node.url !== '/contact/',
+					filter: (node) => node.url !== '/contact/',
 				},
 			);
 
@@ -632,7 +631,7 @@ describe('getNavTree', () => {
 				{ currentPage: history2025Page, pages: pageList },
 				{
 					baseDepth: 2,
-					transformNode: (node) => node.url !== '/about/history/2024/',
+					filter: (node) => node.url !== '/about/history/2024/',
 				},
 			);
 
@@ -674,7 +673,7 @@ describe('getNavTree', () => {
 				{ currentPage: indexPage, pages: pageList },
 				{
 					baseDepth: 0,
-					transformNode: (node) => node.url !== '/b/' && node.url !== '/d/',
+					filter: (node) => node.url !== '/b/' && node.url !== '/d/',
 				},
 			);
 
@@ -745,7 +744,7 @@ describe('getNavTree', () => {
 				{ currentPage: janPage, pages: pageList },
 				{
 					baseDepth: 2,
-					transformNode: (node) => node.url !== '/about/history/2025/feb/',
+					filter: (node) => node.url !== '/about/history/2025/feb/',
 				},
 			);
 
@@ -797,8 +796,7 @@ describe('getNavTree', () => {
 				{ currentPage: indexPage, pages: pageList },
 				{
 					baseDepth: 0,
-					transformNode: (node) =>
-						node.url !== '/about/history/' && node.url !== '/about/team/',
+					filter: (node) => node.url !== '/about/history/' && node.url !== '/about/team/',
 				},
 			);
 
