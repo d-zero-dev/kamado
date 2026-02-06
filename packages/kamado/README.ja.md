@@ -71,15 +71,14 @@ yarn add kamado
 プロジェクトルートに`kamado.config.ts`を作成します：
 
 ```ts
-import type { UserConfig } from 'kamado/config';
-
 import path from 'node:path';
 
+import { defineConfig } from 'kamado/config';
 import { pageCompiler } from '@kamado-io/page-compiler';
 import { scriptCompiler } from '@kamado-io/script-compiler';
 import { styleCompiler } from '@kamado-io/style-compiler';
 
-export const config: UserConfig = {
+export default defineConfig({
 	dir: {
 		root: import.meta.dirname,
 		input: path.resolve(import.meta.dirname, '__assets', 'htdocs'),
@@ -127,9 +126,7 @@ export const config: UserConfig = {
 		// ビルド後の処理
 		// context.mode が利用可能: 'build' または 'serve'
 	},
-};
-
-export default config;
+});
 ```
 
 ### 設定項目の説明
@@ -234,9 +231,10 @@ scriptCompiler({
 `pageList`オプションを使用すると、ナビゲーション、パンくずリスト、その他ページリストを必要とする機能で使用されるページリストをカスタマイズできます。
 
 ```ts
+import { defineConfig } from 'kamado/config';
 import { urlToFile, getFile } from 'kamado/files';
 
-export const config: UserConfig = {
+export default defineConfig({
 	// ... その他の設定
 	pageList: async (pageAssetFiles, config) => {
 		// ページをフィルタリング（例: 下書きを除外）
@@ -254,7 +252,7 @@ export const config: UserConfig = {
 
 		return [...filtered, externalPage];
 	},
-};
+});
 ```
 
 この関数は以下を受け取ります：
@@ -300,11 +298,12 @@ export const config: UserConfig = {
 **設定例:**
 
 ```typescript
-import type { UserConfig } from 'kamado/config';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 
-export const config: UserConfig = {
+import { defineConfig } from 'kamado/config';
+
+export default defineConfig({
 	devServer: {
 		port: 3000,
 		transforms: [
@@ -378,7 +377,7 @@ export const config: UserConfig = {
 			},
 		],
 	},
-};
+});
 ```
 
 **ResponseTransformインターフェース:**

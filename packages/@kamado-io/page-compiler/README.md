@@ -13,10 +13,10 @@ yarn add @kamado-io/page-compiler
 ## Usage
 
 ```ts
+import { defineConfig } from 'kamado/config';
 import { pageCompiler } from '@kamado-io/page-compiler';
-import type { UserConfig } from 'kamado/config';
 
-export const config: UserConfig = {
+export default defineConfig({
 	compilers: [
 		pageCompiler({
 			globalData: {
@@ -29,7 +29,7 @@ export const config: UserConfig = {
 			// If omitted, uses defaultPageTransforms
 		}),
 	],
-};
+});
 ```
 
 ## Options
@@ -380,10 +380,10 @@ pageCompiler({
 ## Example: Using compileHooks
 
 ```ts
+import { defineConfig } from 'kamado/config';
 import { pageCompiler } from '@kamado-io/page-compiler';
-import type { UserConfig } from 'kamado/config';
 
-export const config: UserConfig = {
+export default defineConfig({
 	compilers: [
 		pageCompiler({
 			compileHooks: {
@@ -407,7 +407,7 @@ export const config: UserConfig = {
 			},
 		}),
 	],
-};
+});
 ```
 
 ## Development Transform Utilities
@@ -421,10 +421,10 @@ The page-compiler package provides utilities for Kamado's Transform API, which a
 Inject content into the HTML `<head>` element. Useful for adding development scripts, meta tags, or stylesheets during local development.
 
 ```ts
+import { defineConfig } from 'kamado/config';
 import { injectToHead } from '@kamado-io/page-compiler/transform/inject-to-head';
-import type { UserConfig } from 'kamado/config';
 
-export const config: UserConfig = {
+export default defineConfig({
 	devServer: {
 		transforms: [
 			injectToHead({
@@ -433,7 +433,7 @@ export const config: UserConfig = {
 			}),
 		],
 	},
-};
+});
 ```
 
 **Important:** The `devServer.transforms` array only applies during development server mode (`kamado server`). Transforms in this array are automatically applied to responses in serve mode only.
@@ -464,14 +464,14 @@ transforms: [
 Implement pseudo Server Side Includes (SSI) for development. Processes `<!--#include virtual="/path/to/file.html" -->` directives and replaces them with file content.
 
 ```ts
+import { defineConfig } from 'kamado/config';
 import { createSSIShim } from '@kamado-io/page-compiler/transform/ssi-shim';
-import type { UserConfig } from 'kamado/config';
 
-export const config: UserConfig = {
+export default defineConfig({
 	devServer: {
 		transforms: [createSSIShim()],
 	},
-};
+});
 ```
 
 **Usage in HTML:**
@@ -663,11 +663,11 @@ const fileBasedTransform = {
 For advanced use cases, you can use the lower-level transform functions to create custom `ResponseTransform` objects:
 
 ```ts
+import { defineConfig } from 'kamado/config';
 import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
 import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
-import type { UserConfig } from 'kamado/config';
 
-export const config: UserConfig = {
+export default defineConfig({
 	devServer: {
 		transforms: [
 			{
@@ -680,7 +680,7 @@ export const config: UserConfig = {
 			},
 		],
 	},
-};
+});
 ```
 
 These functions return the raw transform function `(content, context) => Promise<string | ArrayBuffer>` without the name and filter configuration, allowing you to create fully custom `ResponseTransform` objects.

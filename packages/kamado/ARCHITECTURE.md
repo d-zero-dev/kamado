@@ -68,7 +68,7 @@ Key directories under `packages/kamado/src` and their roles:
 - **`builder/`**: Execution logic for static builds (`kamado build`).
 - **`server/`**: Logic for the development server (`kamado server`) using Hono.
 - **`compiler/`**: Management of compiler plugin interfaces and the function map.
-- **`config/`**: Loading and merging configuration files, defining default values.
+- **`config/`**: Loading and merging configuration files, defining default values, and providing the `defineConfig()` helper.
 - **`data/`**: Listing files for compilation and managing asset groups.
 - **`deprecated/`**: Deprecated internal utilities (not exported). Contains legacy code for backward compatibility.
 - **`files/`**: File abstraction layer for reading files, processing Frontmatter, and managing cache.
@@ -302,12 +302,14 @@ interface PageData extends CompilableFile {
 
 ```typescript
 // kamado.config.ts
-export default {
+import { defineConfig } from 'kamado/config';
+
+export default defineConfig({
 	pageList: async (pages, config) => {
 		// Exclude pages starting with underscore (drafts)
 		return pages.filter((page) => !page.inputPath.includes('/_'));
 	},
-};
+});
 ```
 
 ### Lifecycle Hooks

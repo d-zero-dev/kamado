@@ -68,7 +68,7 @@ export interface Context extends Config {
 - **`builder/`**: 静的ビルド（`kamado build`）の実行ロジック。
 - **`server/`**: 開発サーバー（`kamado server`）のロジック。Hono を使用。
 - **`compiler/`**: コンパイラ・プラグインのインターフェースと、機能マップの管理。
-- **`config/`**: 設定ファイルのロードとマージ、デフォルト値の定義。
+- **`config/`**: 設定ファイルのロードとマージ、デフォルト値の定義、`defineConfig()`ヘルパーの提供。
 - **`data/`**: コンパイル対象ファイルのリストアップ、アセットグループの管理。
 - **`deprecated/`**: 非推奨の内部ユーティリティ（エクスポートされません）。後方互換性のための旧コード。
 - **`files/`**: ファイル読み込み、Frontmatter 処理、キャッシュ管理などのファイル抽象レイヤー。
@@ -302,12 +302,14 @@ interface PageData extends CompilableFile {
 
 ```typescript
 // kamado.config.ts
-export default {
+import { defineConfig } from 'kamado/config';
+
+export default defineConfig({
 	pageList: async (pages, config) => {
 		// アンダースコアで始まるページ（下書き）を除外
 		return pages.filter((page) => !page.inputPath.includes('/_'));
 	},
-};
+});
 ```
 
 ### ライフサイクルフック
