@@ -6,10 +6,10 @@
   - [x] `getBreadcrumbs` を `@kamado-io/page-compiler` 内部に移動
   - [x] `getNavTree` を `@kamado-io/page-compiler` 内部に移動
   - [x] `getTitleList` を `@kamado-io/page-compiler` 内部に移動
-  - [x] `getTitle` を `@kamado-io/page-compiler` 内部に移動
-  - [x] `getTitleFromStaticFile` を `@kamado-io/page-compiler` 内部に移動
+  - [x] `getTitle` を削除（`getTitleFromHtmlString` を `@kamado-io/page-compiler/title` で公開）
+  - [x] `getTitleFromStaticFile` を削除
   - [x] `kamado/features` に deprecation 警告を追加（v2.0.0 で削除予定）
-  - [ ] `CompilableFile` 型の再設計を検討
+  - [x] `PageData` 型を追加（`metaData.title` でタイトル管理）
 
 ## Migration Guide
 
@@ -39,12 +39,12 @@ ul.breadcrumbs
 
 nav
   each item in nav({ depth: 2 })
-    a(href=item.url)= item.title
+    a(href=item.url)= item.meta.title
 ```
 
 #### カスタマイズが必要な場合
 
-`PageCompilerOptions` の `transformBreadcrumbItem` および `transformNavNode` オプションを使用してください。
+`PageCompilerOptions` の `transformBreadcrumbItem` および `filterNavigationNode` オプションを使用してください。
 
 ```ts
 import { pageCompiler } from '@kamado-io/page-compiler';
@@ -56,10 +56,7 @@ export const config = {
 				...item,
 				icon: item.href === '/' ? 'home' : 'page',
 			}),
-			transformNavNode: (node) => ({
-				...node,
-				badge: node.url === '/new' ? 'NEW' : undefined,
-			}),
+			filterNavigationNode: (node) => !node.url.includes('/drafts/'),
 		}),
 	],
 };
