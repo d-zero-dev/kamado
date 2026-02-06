@@ -2250,10 +2250,12 @@ __metadata:
   dependencies:
     "@kamado-io/page-compiler": "npm:2.0.0-alpha.0"
     "@types/pug": "npm:2.0.10"
+    kamado: "npm:2.0.0-alpha.0"
     pug: "npm:3.0.3"
     typescript: "npm:5.9.3"
   peerDependencies:
     "@kamado-io/page-compiler": ^1.0.0
+    kamado: ^1.0.0
   languageName: unknown
   linkType: soft
 
