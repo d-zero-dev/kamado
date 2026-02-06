@@ -1,5 +1,6 @@
 import type { CompilerFunction, PugCompilerOptions } from './types.js';
 import type { CompileHooksObject } from '@kamado-io/page-compiler';
+import type { MetaData } from 'kamado/files';
 
 import { compilePug } from './compile-pug.js';
 
@@ -47,9 +48,9 @@ function createCompilerWithExtensionCheck(
  * };
  * ```
  */
-export function createCompileHooks(
+export function createCompileHooks<M extends MetaData>(
 	options: PugCompilerOptions,
-): () => CompileHooksObject {
+): () => CompileHooksObject<M> {
 	const compiler = compilePug(options);
 	const compilerWithExtensionCheck = createCompilerWithExtensionCheck(compiler);
 	return () => ({
