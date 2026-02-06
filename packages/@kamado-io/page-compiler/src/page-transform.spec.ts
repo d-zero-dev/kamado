@@ -1,9 +1,12 @@
-import type { Context, TransformContext } from 'kamado/config';
+import type { TransformContext } from 'kamado/config';
+import type { MetaData } from 'kamado/files';
 
 import { describe, expect, test } from 'vitest';
 
-import { defaultPageTransforms } from './page-transform.js';
+import { createDefaultPageTransforms } from './page-transform.js';
 import { prettier } from './transform/prettier.js';
+
+const defaultPageTransforms = createDefaultPageTransforms<MetaData>();
 
 /**
  * Creates a mock transform info object for testing
@@ -11,9 +14,9 @@ import { prettier } from './transform/prettier.js';
  * @returns Mock transform info
  */
 function createMockTransformInfo(
-	overrides?: Partial<TransformContext>,
-): TransformContext {
-	const defaultContext: TransformContext = {
+	overrides?: Partial<TransformContext<MetaData>>,
+): TransformContext<MetaData> {
+	const defaultContext: TransformContext<MetaData> = {
 		path: 'page.html',
 		filePath: 'page.html',
 		inputPath: '/test/input/page.html',
@@ -26,7 +29,6 @@ function createMockTransformInfo(
 				root: '/test',
 				input: '/test/input',
 				output: '/test/output',
-				public: '/test/public',
 			},
 			pkg: {
 				production: {
@@ -37,8 +39,9 @@ function createMockTransformInfo(
 			devServer: {
 				host: 'localhost',
 				port: 3000,
+				open: false,
 			},
-		} as Context,
+		},
 		compile: () => Promise.resolve('<div>mock</div>'),
 	};
 
