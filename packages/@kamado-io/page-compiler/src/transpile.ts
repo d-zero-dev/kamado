@@ -1,11 +1,12 @@
 import type { CompileData, CompileHook } from './types.js';
+import type { MetaData } from 'kamado/files';
 
 import c from 'ansi-colors';
 
 /**
  * Required context for the transpile function
  */
-export interface TranspileContext {
+export interface TranspileContext<M extends MetaData> {
 	/**
 	 * Content to transpile
 	 */
@@ -13,7 +14,7 @@ export interface TranspileContext {
 	/**
 	 * Data object passed to the compiler and hooks
 	 */
-	readonly compileData: CompileData;
+	readonly compileData: CompileData<M>;
 	/**
 	 * File extension for the compiler
 	 */
@@ -23,11 +24,11 @@ export interface TranspileContext {
 /**
  * Optional options for the transpile function
  */
-export interface TranspileOptions {
+export interface TranspileOptions<M extends MetaData> {
 	/**
 	 * Compile hook configuration
 	 */
-	readonly compileHook?: CompileHook;
+	readonly compileHook?: CompileHook<M>;
 	/**
 	 * Optional logging function
 	 */
@@ -66,9 +67,9 @@ export interface TranspileOptions {
  * @returns Transpiled HTML content
  * @throws {Error} if compilation fails
  */
-export async function transpile(
-	context: TranspileContext,
-	options?: TranspileOptions,
+export async function transpile<M extends MetaData>(
+	context: TranspileContext<M>,
+	options?: TranspileOptions<M>,
 ): Promise<string> {
 	const { content, compileData, extension } = context;
 	const {

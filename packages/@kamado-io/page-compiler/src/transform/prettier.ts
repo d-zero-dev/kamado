@@ -1,4 +1,5 @@
 import type { Transform } from 'kamado/config';
+import type { MetaData } from 'kamado/files';
 
 import {
 	format as prettierFormat,
@@ -18,7 +19,7 @@ export interface PrettierOptions {
  * @param options - Prettier options
  * @returns Transform object
  */
-export function prettier(options?: PrettierOptions): Transform {
+export function prettier<M extends MetaData>(options?: PrettierOptions): Transform<M> {
 	return {
 		name: 'prettier',
 		transform: async (content, ctx) => {

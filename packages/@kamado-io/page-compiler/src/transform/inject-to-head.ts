@@ -1,4 +1,5 @@
 import type { Transform, TransformContext } from 'kamado/config';
+import type { MetaData } from 'kamado/files';
 
 /**
  * Position where content should be injected in the head element
@@ -78,13 +79,15 @@ export interface InjectToHeadOptions extends InjectToHeadTransformOptions {
  * };
  * ```
  */
-export function createInjectToHeadTransform(options: InjectToHeadTransformOptions) {
+export function createInjectToHeadTransform<M extends MetaData>(
+	options: InjectToHeadTransformOptions,
+) {
 	const position = options.position ?? 'head-end';
 
 	return async (
 		content: string | ArrayBuffer,
 		// eslint-disable-next-line @typescript-eslint/no-unused-vars
-		_ctx: TransformContext,
+		_ctx: TransformContext<M>,
 	): Promise<string | ArrayBuffer> => {
 		// Decode ArrayBuffer to string if needed
 		let htmlContent: string;
@@ -152,7 +155,9 @@ export function createInjectToHeadTransform(options: InjectToHeadTransformOption
  * })
  * ```
  */
-export function injectToHead(options: InjectToHeadOptions): Transform {
+export function injectToHead<M extends MetaData>(
+	options: InjectToHeadOptions,
+): Transform<M> {
 	const name = options.name ?? 'injectToHead';
 
 	return {

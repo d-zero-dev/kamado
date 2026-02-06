@@ -1,5 +1,5 @@
 import type { CompileData, CompileHook } from './types.js';
-import type { CompilableFile, FileObject } from 'kamado/files';
+import type { CompilableFile, FileObject, MetaData } from 'kamado/files';
 
 import c from 'ansi-colors';
 
@@ -8,9 +8,9 @@ import { transpile } from './transpile.js';
 /**
  * Required context for transpiling layout
  */
-export interface TranspileLayoutContext {
+export interface TranspileLayoutContext<M extends MetaData> {
 	readonly layoutContent: string;
-	readonly layoutCompileData: CompileData;
+	readonly layoutCompileData: CompileData<M>;
 	readonly layoutExtension: string;
 	readonly layout: FileObject;
 	readonly file: CompilableFile;
@@ -19,8 +19,8 @@ export interface TranspileLayoutContext {
 /**
  * Optional options for transpiling layout
  */
-export interface TranspileLayoutOptions {
-	readonly compileHook?: CompileHook;
+export interface TranspileLayoutOptions<M extends MetaData> {
+	readonly compileHook?: CompileHook<M>;
 	readonly log?: (message: string) => void;
 }
 
@@ -36,9 +36,9 @@ export interface TranspileLayoutOptions {
  * @returns Transpiled HTML content
  * @throws {Error} if compilation fails
  */
-export async function transpileLayout(
-	context: TranspileLayoutContext,
-	options?: TranspileLayoutOptions,
+export async function transpileLayout<M extends MetaData>(
+	context: TranspileLayoutContext<M>,
+	options?: TranspileLayoutOptions<M>,
 ): Promise<string> {
 	const { layoutContent, layoutCompileData, layoutExtension, layout, file } = context;
 	const { compileHook, log } = options ?? {};

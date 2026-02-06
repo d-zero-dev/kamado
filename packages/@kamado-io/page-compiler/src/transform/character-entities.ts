@@ -1,4 +1,5 @@
 import type { Transform } from 'kamado/config';
+import type { MetaData } from 'kamado/files';
 
 import { characterEntities as characterEntitiesMap } from 'character-entities';
 
@@ -12,7 +13,7 @@ export interface CharacterEntitiesOptions {}
  * Creates a transform for character entities conversion
  * @returns Transform object
  */
-export function characterEntities(): Transform {
+export function characterEntities<M extends MetaData>(): Transform<M> {
 	return {
 		name: 'characterEntities',
 		transform: (content) => {

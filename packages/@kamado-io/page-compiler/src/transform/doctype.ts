@@ -1,4 +1,5 @@
 import type { Transform } from 'kamado/config';
+import type { MetaData } from 'kamado/files';
 
 /**
  * Options for doctype
@@ -10,7 +11,7 @@ export interface DoctypeOptions {}
  * Creates a transform for adding DOCTYPE
  * @returns Transform object
  */
-export function doctype(): Transform {
+export function doctype<M extends MetaData>(): Transform<M> {
 	return {
 		name: 'doctype',
 		transform: (content) => {

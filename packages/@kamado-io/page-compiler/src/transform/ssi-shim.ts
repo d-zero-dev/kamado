@@ -1,4 +1,5 @@
 import type { Transform, TransformContext } from 'kamado/config';
+import type { MetaData } from 'kamado/files';
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -89,13 +90,13 @@ export interface SSIShimOptions extends SSIShimTransformOptions {
  * };
  * ```
  */
-export function createSSIShimTransform(
+export function createSSIShimTransform<M extends MetaData>(
 	options: SSIShimTransformOptions = {},
 	name = 'ssiShim',
 ) {
 	return async (
 		content: string | ArrayBuffer,
-		ctx: TransformContext,
+		ctx: TransformContext<M>,
 	): Promise<string | ArrayBuffer> => {
 		// Decode ArrayBuffer to string if needed
 		let htmlContent: string;
@@ -224,7 +225,9 @@ export function createSSIShimTransform(
  * </html>
  * ```
  */
-export function createSSIShim(options: SSIShimOptions = {}): Transform {
+export function createSSIShim<M extends MetaData>(
+	options: SSIShimOptions = {},
+): Transform<M> {
 	return {
 		name: 'ssiShim',
 		filter: {

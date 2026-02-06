@@ -2,12 +2,12 @@ import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { GetNavTreeOptions, NavNode } from './features/nav.js';
 import type { TitleListOptions } from './features/title-list.js';
 import type { Transform } from 'kamado/config';
-import type { CompilableFile, FileObject } from 'kamado/files';
+import type { CompilableFile, FileObject, MetaData } from 'kamado/files';
 
 /**
  * Options for the page compiler
  */
-export interface PageCompilerOptions {
+export interface PageCompilerOptions<M extends MetaData> {
 	/**
 	 * Global data configuration
 	 */
@@ -96,13 +96,13 @@ export interface PageCompilerOptions {
 	 * ```
 	 */
 	readonly transforms?:
-		| Transform[]
-		| ((defaultTransforms: readonly Transform[]) => Transform[]);
+		| Transform<M>[]
+		| ((defaultTransforms: readonly Transform<M>[]) => Transform<M>[]);
 	/**
 	 * Compilation hooks for customizing compile process
 	 * Can be an object or a function that returns an object
 	 */
-	readonly compileHooks?: CompileHooks;
+	readonly compileHooks?: CompileHooks<M>;
 	/**
 	 * Transform each breadcrumb item
 	 * @param item - Original breadcrumb item
@@ -131,13 +131,13 @@ export interface PageCompilerOptions {
 	 * });
 	 * ```
 	 */
-	readonly filterNavigationNode?: (node: NavNode) => boolean;
+	readonly filterNavigationNode?: (node: NavNode<M>) => boolean;
 }
 
 /**
  * Compile data object passed to templates and hooks
  */
-export interface CompileData extends Record<string, unknown> {
+export interface CompileData<M extends MetaData> extends Record<string, unknown> {
 	/**
 	 * Current page file
 	 */
@@ -145,7 +145,7 @@ export interface CompileData extends Record<string, unknown> {
 	/**
 	 * Navigation tree function
 	 */
-	readonly nav: (options: GetNavTreeOptions) => NavNode | null | undefined;
+	readonly nav: (options: GetNavTreeOptions<M>) => NavNode<M> | null | undefined;
 	/**
 	 * Title list function
 	 */
@@ -159,68 +159,70 @@ export interface CompileData extends Record<string, unknown> {
 /**
  * Hook function type for processing content
  */
-export type ContentHook = (
+export type ContentHook<M extends MetaData> = (
 	content: string,
-	data: CompileData,
+	data: CompileData<M>,
 ) => Promise<string> | string;
 
 /**
  * Compiler function type
  */
-export type CompilerFunction = (
+export type CompilerFunction<M extends MetaData> = (
 	content: string,
-	data: CompileData,
+	data: CompileData<M>,
 	extension: string,
 ) => Promise<string> | string;
 
 /**
  * Compile hook configuration
  */
-export interface CompileHook {
+export interface CompileHook<M extends MetaData> {
 	/**
 	 * Hook called before compilation
 	 * @param content - Template content
 	 * @param data - Compile data object
 	 * @returns Processed content (can be modified)
 	 */
-	readonly before?: ContentHook;
+	readonly before?: ContentHook<M>;
 	/**
 	 * Hook called after compilation
 	 * @param html - Compiled HTML
 	 * @param data - Compile data object
 	 * @returns Processed HTML (can be modified)
 	 */
-	readonly after?: ContentHook;
+	readonly after?: ContentHook<M>;
 	/**
 	 * Custom compiler function
 	 * @param content - Template content
 	 * @param data - Compile data object
 	 * @returns Compiled HTML
 	 */
-	readonly compiler?: CompilerFunction;
+	readonly compiler?: CompilerFunction<M>;
 }
 
 /**
  * Compile hooks object
  */
-export interface CompileHooksObject {
+export interface CompileHooksObject<M extends MetaData> {
 	/**
 	 * Hooks for main content compilation
 	 */
-	readonly main?: CompileHook;
+	readonly main?: CompileHook<M>;
 	/**
 	 * Hooks for layout compilation
 	 */
-	readonly layout?: CompileHook;
+	readonly layout?: CompileHook<M>;
 }
 
 /**
  * Compilation hooks for customizing compile process
  * Can be an object or a function that returns an object (sync or async)
  */
-export type CompileHooks =
-	| CompileHooksObject
-	| ((options: PageCompilerOptions) => CompileHooksObject | Promise<CompileHooksObject>);
+export type CompileHooks<M extends MetaData> =
+	| CompileHooksObject<M>
+	| ((
+			options: PageCompilerOptions<M>,
+	  ) => CompileHooksObject<M> | Promise<CompileHooksObject<M>>);
 
 /**
  * File path information

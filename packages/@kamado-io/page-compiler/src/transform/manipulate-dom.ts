@@ -1,5 +1,6 @@
 import type { ImageSizesOptions } from '../image.js';
 import type { Transform, TransformContext } from 'kamado/config';
+import type { MetaData } from 'kamado/files';
 
 import path from 'node:path';
 
@@ -10,11 +11,11 @@ import { imageSizes } from '../image.js';
 /**
  * Options for manipulateDOM
  */
-export interface ManipulateDOMOptions {
+export interface ManipulateDOMOptions<M extends MetaData> {
 	readonly hook?: (
 		elements: readonly Element[],
 		window: Window,
-		context: TransformContext,
+		context: TransformContext<M>,
 	) => Promise<void> | void;
 	readonly host?: string;
 	readonly imageSizes?: ImageSizesOptions | boolean;
@@ -25,7 +26,9 @@ export interface ManipulateDOMOptions {
  * @param options - DOM manipulation options
  * @returns Transform object
  */
-export function manipulateDOM(options?: ManipulateDOMOptions): Transform {
+export function manipulateDOM<M extends MetaData>(
+	options?: ManipulateDOMOptions<M>,
+): Transform<M> {
 	return {
 		name: 'manipulateDOM',
 		transform: async (content, ctx) => {
