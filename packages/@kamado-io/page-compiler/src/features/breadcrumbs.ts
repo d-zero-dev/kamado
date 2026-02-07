@@ -89,7 +89,10 @@ export function getBreadcrumbs<
 		isAncestor(page.filePathStem, item.filePathStem),
 	);
 	const breadcrumbs = pages.map((sourcePage) => ({
-		title: (sourcePage.metaData?.title as string | undefined)?.trim() || '__NO_TITLE__',
+		title:
+			(
+				(sourcePage.metaData as Record<string, unknown>)?.title as string | undefined
+			)?.trim() || '__NO_TITLE__',
 		href: sourcePage.url,
 		depth: sourcePage.url.split('/').filter(Boolean).length,
 	}));

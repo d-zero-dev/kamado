@@ -105,10 +105,13 @@ export function createPageCompiler<M extends MetaData>() {
 				let html = mainContentHtml;
 
 				// Apply layout if specified
-				if (metaData?.layout) {
-					const layout = layouts[metaData.layout as string];
+				const layoutName = (metaData as Record<string, unknown>)?.layout as
+					| string
+					| undefined;
+				if (layoutName) {
+					const layout = layouts[layoutName];
 					if (!layout) {
-						throw new Error(`Layout not found: ${metaData.layout}`);
+						throw new Error(`Layout not found: ${layoutName}`);
 					}
 
 					const { content: layoutContent } = await getContentFromFileObject(

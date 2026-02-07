@@ -238,7 +238,7 @@ function getMeta<M extends MetaData>(
 ): NavNodeMetaData & M {
 	const page = pages.find((item) => item.url === url);
 	const title =
-		(page?.metaData?.title as string | undefined)?.trim() ??
+		((page?.metaData as Record<string, unknown>)?.title as string | undefined)?.trim() ??
 		(page ? `__NO_TITLE__` : `⛔️ NOT FOUND (${url})`);
 	const meta = {
 		...(page?.metaData ?? ({} as M)),
