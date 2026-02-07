@@ -14,11 +14,11 @@ yarn add @kamado-io/style-compiler
 
 ```ts
 import { defineConfig } from 'kamado/config';
-import { styleCompiler } from '@kamado-io/style-compiler';
+import { createStyleCompiler } from '@kamado-io/style-compiler';
 
 export default defineConfig({
-	compilers: [
-		styleCompiler({
+	compilers: (def) => [
+		def(createStyleCompiler(), {
 			alias: { '@': './src/styles' },
 			banner: 'Generated file',
 		}),
