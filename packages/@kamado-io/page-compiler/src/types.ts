@@ -47,18 +47,18 @@ export interface PageCompilerOptions<M extends MetaData> {
 	};
 	/**
 	 * Array of transform functions to apply to compiled HTML, or a function that receives and returns transforms
-	 * If omitted, uses defaultPageTransforms
+	 * If omitted, uses createDefaultPageTransforms()
 	 * @example
 	 * ```typescript
-	 * import { defaultPageTransforms } from '@kamado-io/page-compiler/page-transform';
+	 * import { createDefaultPageTransforms } from '@kamado-io/page-compiler';
 	 * import { manipulateDOM } from '@kamado-io/page-compiler/transform/manipulate-dom';
 	 * import { prettier } from '@kamado-io/page-compiler/transform/prettier';
 	 *
 	 * // Use defaults
-	 * pageCompiler({ transforms: defaultPageTransforms });
+	 * createPageCompiler()({ transforms: createDefaultPageTransforms() });
 	 *
 	 * // Custom selection
-	 * pageCompiler({
+	 * createPageCompiler()({
 	 *   transforms: [
 	 *     manipulateDOM({ imageSizes: true }),
 	 *     prettier({ options: { printWidth: 120 } }),
@@ -66,7 +66,8 @@ export interface PageCompilerOptions<M extends MetaData> {
 	 * });
 	 *
 	 * // Extend defaults with custom transform (requires import)
-	 * pageCompiler({
+	 * const defaults = createDefaultPageTransforms();
+	 * createPageCompiler()({
 	 *   transforms: [
 	 *     {
 	 *       name: 'custom',
@@ -75,12 +76,12 @@ export interface PageCompilerOptions<M extends MetaData> {
 	 *         return content;
 	 *       },
 	 *     },
-	 *     ...defaultPageTransforms,
+	 *     ...defaults,
 	 *   ],
 	 * });
 	 *
 	 * // Use function to extend defaults (no import needed)
-	 * pageCompiler({
+	 * createPageCompiler()({
 	 *   transforms: (defaults) => [
 	 *     {
 	 *       name: 'prepend-transform',

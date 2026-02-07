@@ -26,11 +26,10 @@ import { transpileMainContent } from './transpile-main.js';
  * @example
  * ```typescript
  * const config = {
- *   compilers: [
- *     pageCompiler({
+ *   compilers: (def) => [
+ *     def(createPageCompiler(), {
  *       layouts: { dir: './layouts' },
  *       globalData: { dir: './data' },
- *       imageSizes: true,
  *     }),
  *   ],
  * };

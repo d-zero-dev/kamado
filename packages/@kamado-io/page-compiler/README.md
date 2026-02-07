@@ -670,7 +670,7 @@ const fileBasedTransform = {
 
 ### Advanced: Transform Functions
 
-For advanced use cases, you can use the lower-level transform functions to create custom `ResponseTransform` objects:
+For advanced use cases, you can use the lower-level transform functions to create custom `Transform` objects:
 
 ```ts
 import { defineConfig } from 'kamado/config';
@@ -693,7 +693,7 @@ export default defineConfig({
 });
 ```
 
-These functions return the raw transform function `(content, context) => Promise<string | ArrayBuffer>` without the name and filter configuration, allowing you to create fully custom `ResponseTransform` objects.
+These functions return the raw transform function `(content, context) => Promise<string | ArrayBuffer>` without the name and filter configuration, allowing you to create fully custom `Transform` objects.
 
 ## API Exports
 
