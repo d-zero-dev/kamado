@@ -1,6 +1,6 @@
 {
 	"name": "@kamado-io/style-compiler",
-	"version": "2.0.0-alpha.0",
+	"version": "2.0.0-alpha.1",
 	"description": "Style compiler for Kamado",
 	"author": "D-ZERO Co., Ltd.",
 	"license": "MIT",
@@ -25,7 +25,7 @@
 	],
 	"dependencies": {
 		"cssnano": "7.1.2",
-		"kamado": "2.0.0-alpha.0",
+		"kamado": "2.0.0-alpha.1",
 		"postcss": "8.5.6",
 		"postcss-import": "16.1.1",
 		"postcss-load-config": "6.0.1"

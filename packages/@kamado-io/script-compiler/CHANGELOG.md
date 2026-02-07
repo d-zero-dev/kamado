@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.1](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.0...v2.0.0-alpha.1) (2026-02-07)
+
+- feat(script-compiler)!: convert scriptCompiler to createScriptCompiler generic factory ([77bc9ca](https://github.com/d-zero-dev/kamado/commit/77bc9ca83fcc343aa7760b53e2effeea5a27b0a2))
+
+### BREAKING CHANGES
+
+- Replace scriptCompiler constant with
+  createScriptCompiler<M>() factory function to support generic
+  MetaData type parameter
+
 # [2.0.0-alpha.0](https://github.com/d-zero-dev/kamado/compare/v1.3.0...v2.0.0-alpha.0) (2026-02-03)
 
 - refactor(script-compiler)!: remove index.ts and use script-compiler.ts ([657147d](https://github.com/d-zero-dev/kamado/commit/657147d3317f0c416599d4f8d9c8a98d83dfb90e))

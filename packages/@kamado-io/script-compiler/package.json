@@ -1,6 +1,6 @@
 {
 	"name": "@kamado-io/script-compiler",
-	"version": "2.0.0-alpha.0",
+	"version": "2.0.0-alpha.1",
 	"description": "Script compiler for Kamado",
 	"author": "D-ZERO Co., Ltd.",
 	"license": "MIT",
@@ -25,7 +25,7 @@
 	],
 	"dependencies": {
 		"esbuild": "0.27.3",
-		"kamado": "2.0.0-alpha.0"
+		"kamado": "2.0.0-alpha.1"
 	},
 	"devDependencies": {
 		"typescript": "5.9.3"

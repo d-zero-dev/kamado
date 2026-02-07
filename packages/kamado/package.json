@@ -1,6 +1,6 @@
 {
 	"name": "kamado",
-	"version": "2.0.0-alpha.0",
+	"version": "2.0.0-alpha.1",
 	"description": "Bake your HTML hard. The on-demand static site generator.",
 	"repository": "https://github.com/d-zero-dev/kamodo.git",
 	"author": "D-ZERO Co., Ltd.",

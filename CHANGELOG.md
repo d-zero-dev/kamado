@@ -3,6 +3,139 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.1](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.0...v2.0.0-alpha.1) (2026-02-07)
+
+### Bug Fixes
+
+- **kamado:** correct lifecycle hook parameter types from Config to Context ([cac8c31](https://github.com/d-zero-dev/kamado/commit/cac8c31cbf36ee3042db7faea538f73ef280c295))
+
+- feat(kamado)!: add Compilers callback API types ([c47a4b5](https://github.com/d-zero-dev/kamado/commit/c47a4b52f17000825d8acf3da453c94a46a9c917))
+- feat(style-compiler)!: convert styleCompiler to createStyleCompiler generic factory ([2571217](https://github.com/d-zero-dev/kamado/commit/2571217adb54b6ee88c0c46be5c5595c42cd8089))
+- feat(script-compiler)!: convert scriptCompiler to createScriptCompiler generic factory ([77bc9ca](https://github.com/d-zero-dev/kamado/commit/77bc9ca83fcc343aa7760b53e2effeea5a27b0a2))
+- feat(pug-compiler)!: add generic MetaData type parameter to createCompileHooks ([51319e2](https://github.com/d-zero-dev/kamado/commit/51319e266cfea6cd4be6317e0dc80b26170d8a4b))
+- feat(page-compiler)!: convert pageCompiler to createPageCompiler generic factory ([606037c](https://github.com/d-zero-dev/kamado/commit/606037c56377bf3631a491efe657c877d209ceaf))
+- feat(page-compiler)!: convert defaultPageTransforms to generic factory function ([c7523d4](https://github.com/d-zero-dev/kamado/commit/c7523d4d3809812476469eff5f6800ff24b1501d))
+- feat(page-compiler)!: add generic MetaData type parameter to interfaces and transforms ([3b48bd9](https://github.com/d-zero-dev/kamado/commit/3b48bd94bd76004772566d35182207dd014037a6))
+- feat(kamado)!: add generic MetaData type parameter to core interfaces ([c0fe5f9](https://github.com/d-zero-dev/kamado/commit/c0fe5f9fb40852c9a2aa7b3cb73c17cdd5dc4eaa))
+- refactor(page-compiler)!: rename filter to filterNavigationNode ([83d3573](https://github.com/d-zero-dev/kamado/commit/83d35738a2a41dba9f3ed76ccef0c88bbf5eda1c))
+- refactor(page-compiler)!: rename transformNode to filter ([21ee93e](https://github.com/d-zero-dev/kamado/commit/21ee93e51af1a9585ca4f5528b50a88a560d8e3d))
+- refactor(page-compiler)!: change transformNode return type to boolean ([fafc368](https://github.com/d-zero-dev/kamado/commit/fafc368183d50ddf7924f60d75f5c7a9d71ca1a1))
+- refactor(page-compiler)!: use addMetaData API from @d-zero/shared 0.18.0 ([1742e52](https://github.com/d-zero-dev/kamado/commit/1742e529ad1da9402d02ec2493de85577a630b45))
+- refactor(page-compiler)!: simplify title handling and use metaData.title ([5616bee](https://github.com/d-zero-dev/kamado/commit/5616bee0b80bb4aed34943ccb7ccec35567dc4d1))
+- refactor(kamado)!: change pageList return type from title to PageData ([436fdde](https://github.com/d-zero-dev/kamado/commit/436fddebe7a6841ceb5716afbf5a06be42afa5e1))
+- refactor(kamado)!: remove deprecated title.ts and title auto-population ([0dd6870](https://github.com/d-zero-dev/kamado/commit/0dd6870e3f806b6c5b23cc404356724c4cb15486))
+- refactor(kamado)!: extract getContentFromFile and getContentFromFileObject functions ([4421f8f](https://github.com/d-zero-dev/kamado/commit/4421f8fc3ede85b058dce4266afe741441ee55b7))
+
+### Features
+
+- **kamado:** add createCompileFunctions utility ([f91c7d1](https://github.com/d-zero-dev/kamado/commit/f91c7d180be2ca1ab12eb8614e94b8ee6046b9a0))
+- **kamado:** add default generic parameters to user-facing types ([387d820](https://github.com/d-zero-dev/kamado/commit/387d820b17db7da0256cb003236d045f71d057dd))
+- **kamado:** add defineConfig helper for type-safe configuration ([41cb4c4](https://github.com/d-zero-dev/kamado/commit/41cb4c4e2394a6bb35888a71df352407ebcbb5ef))
+- **kamado:** change MetaData to empty interface and document Config<M> invariance ([414956b](https://github.com/d-zero-dev/kamado/commit/414956b09c6d73cc504dbf4d9aab24d9077f962a))
+
+### BREAKING CHANGES
+
+- Config.compilers is now a callback function instead of
+  an array. Users must use `compilers: (def) => [def(factory(), opts)]`
+  form for type-safe compiler definition.
+
+Add CompilerDefine<M>, CustomCompilerFactory<M>, and Compilers<M> types.
+Update mergeConfig default to callback form.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+- Replace styleCompiler constant with
+  createStyleCompiler<M>() factory function to support generic
+  MetaData type parameter
+- Replace scriptCompiler constant with
+  createScriptCompiler<M>() factory function to support generic
+  MetaData type parameter
+- createCompileHooks now requires a generic type
+  parameter <M extends MetaData> and returns () => CompileHooksObject<M>
+  to support type-safe custom metadata
+- Replace pageCompiler constant with
+  createPageCompiler<M>() factory function. NavNode type now includes
+  custom metadata via Node<NavNodeMetaData & M>. Breadcrumbs and nav
+  features are generalized to propagate type-safe metadata throughout
+  the compilation pipeline.
+- Replace defaultPageTransforms constant with
+  createDefaultPageTransforms<M>() factory function to support
+  generic MetaData type parameter
+- Add generic type parameter <M extends MetaData> to
+  PageCompilerOptions, CompileData, CompileHook, CompilerFunction, and
+  all transform functions to propagate type-safe metadata support from
+  the kamado package
+- Add generic type parameter <M extends MetaData> to
+  Config, Context, UserConfig, and related interfaces/functions for
+  type-safe custom metadata support
+- Rename PageCompilerOptions.filter to filterNavigationNode
+
+More descriptive name to clarify this filters navigation nodes specifically.
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- Rename transformNode/transformNavNode to filter
+
+* Rename GetNavTreeOptions.transformNode to filter
+* Rename PageCompilerOptions.transformNavNode to filter
+* Rename internal transformTreeNodes to filterTreeNodes
+* Update JSDoc with @param descriptions
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- transformNode now returns boolean instead of NavNode
+
+* Return true to keep the node, false to remove it
+* Simplifies the API by focusing on filtering rather than transformation
+* Remove tests for node property transformation (no longer supported)
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- NavNode now uses node.meta.title instead of node.title
+
+* Use pathListToTree addMetaData option instead of filter with @ts-ignore
+* Remove generic type parameter <TOut> from getNavTree and related types
+* Access title via node.meta.title (type-safe)
+* Simplify JSDoc comments
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- Remove getTitle, getTitleFromStaticFile, and optimizeTitle
+
+* Remove getTitle and getTitleFromStaticFile functions
+* Remove optimizeTitle option from PageCompilerOptions and feature options
+* Replace getTitleFromDOM with getTitleFromHtmlString (public API)
+* Update breadcrumbs and nav to use metaData.title instead of title
+* Add ./title export for users to use in pageList hook
+* Update tests to use metaData.title in mock data
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- pageList hook now returns PageData[] instead of
+  (CompilableFile & { title?: string })[]
+
+* Add PageData interface extending CompilableFile with optional metaData
+* Title should now be set via metaData.title instead of title property
+* Update documentation to reflect new PageData type and metaData usage
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- kamado no longer auto-populates pageList titles.
+  Users should set titles via config.pageList hook, or rely on
+  page-compiler's getTitle fallback in breadcrumbs/nav.
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- Remove get() method from FileObject and CompilableFile interfaces
+
+* Add getContentFromFile() for CompilableFile (parses front matter, merges JSON metadata)
+* Add getContentFromFileObject() for FileObject (simple read, no parsing)
+* Remove get() method from types.ts and get-file.ts implementation
+* Update internal usages in create-compiler.ts and deprecated/title.ts
+* Add unit tests for new functions
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
 # [2.0.0-alpha.0](https://github.com/d-zero-dev/kamado/compare/v1.3.0...v2.0.0-alpha.0) (2026-02-03)
 
 ### Bug Fixes

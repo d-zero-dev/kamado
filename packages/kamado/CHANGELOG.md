@@ -3,6 +3,64 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.1](https://github.com/d-zero-dev/kamodo/compare/v2.0.0-alpha.0...v2.0.0-alpha.1) (2026-02-07)
+
+### Bug Fixes
+
+- **kamado:** correct lifecycle hook parameter types from Config to Context ([cac8c31](https://github.com/d-zero-dev/kamodo/commit/cac8c31cbf36ee3042db7faea538f73ef280c295))
+
+- feat(kamado)!: add Compilers callback API types ([c47a4b5](https://github.com/d-zero-dev/kamodo/commit/c47a4b52f17000825d8acf3da453c94a46a9c917))
+- feat(kamado)!: add generic MetaData type parameter to core interfaces ([c0fe5f9](https://github.com/d-zero-dev/kamodo/commit/c0fe5f9fb40852c9a2aa7b3cb73c17cdd5dc4eaa))
+- refactor(kamado)!: change pageList return type from title to PageData ([436fdde](https://github.com/d-zero-dev/kamodo/commit/436fddebe7a6841ceb5716afbf5a06be42afa5e1))
+- refactor(kamado)!: remove deprecated title.ts and title auto-population ([0dd6870](https://github.com/d-zero-dev/kamodo/commit/0dd6870e3f806b6c5b23cc404356724c4cb15486))
+- refactor(kamado)!: extract getContentFromFile and getContentFromFileObject functions ([4421f8f](https://github.com/d-zero-dev/kamodo/commit/4421f8fc3ede85b058dce4266afe741441ee55b7))
+
+### Features
+
+- **kamado:** add createCompileFunctions utility ([f91c7d1](https://github.com/d-zero-dev/kamodo/commit/f91c7d180be2ca1ab12eb8614e94b8ee6046b9a0))
+- **kamado:** add default generic parameters to user-facing types ([387d820](https://github.com/d-zero-dev/kamodo/commit/387d820b17db7da0256cb003236d045f71d057dd))
+- **kamado:** add defineConfig helper for type-safe configuration ([41cb4c4](https://github.com/d-zero-dev/kamodo/commit/41cb4c4e2394a6bb35888a71df352407ebcbb5ef))
+- **kamado:** change MetaData to empty interface and document Config<M> invariance ([414956b](https://github.com/d-zero-dev/kamodo/commit/414956b09c6d73cc504dbf4d9aab24d9077f962a))
+
+### BREAKING CHANGES
+
+- Config.compilers is now a callback function instead of
+  an array. Users must use `compilers: (def) => [def(factory(), opts)]`
+  form for type-safe compiler definition.
+
+Add CompilerDefine<M>, CustomCompilerFactory<M>, and Compilers<M> types.
+Update mergeConfig default to callback form.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+- Add generic type parameter <M extends MetaData> to
+  Config, Context, UserConfig, and related interfaces/functions for
+  type-safe custom metadata support
+- pageList hook now returns PageData[] instead of
+  (CompilableFile & { title?: string })[]
+
+* Add PageData interface extending CompilableFile with optional metaData
+* Title should now be set via metaData.title instead of title property
+* Update documentation to reflect new PageData type and metaData usage
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- kamado no longer auto-populates pageList titles.
+  Users should set titles via config.pageList hook, or rely on
+  page-compiler's getTitle fallback in breadcrumbs/nav.
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- Remove get() method from FileObject and CompilableFile interfaces
+
+* Add getContentFromFile() for CompilableFile (parses front matter, merges JSON metadata)
+* Add getContentFromFileObject() for FileObject (simple read, no parsing)
+* Remove get() method from types.ts and get-file.ts implementation
+* Update internal usages in create-compiler.ts and deprecated/title.ts
+* Add unit tests for new functions
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
 # [2.0.0-alpha.0](https://github.com/d-zero-dev/kamodo/compare/v1.3.0...v2.0.0-alpha.0) (2026-02-03)
 
 - refactor(kamado)!: unify Transform interface for page-compiler and devServer ([513e654](https://github.com/d-zero-dev/kamodo/commit/513e654b0c794cadda2ba3074b6b82947b600d98))

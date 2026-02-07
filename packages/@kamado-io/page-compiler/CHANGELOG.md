@@ -3,6 +3,74 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.1](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.0...v2.0.0-alpha.1) (2026-02-07)
+
+- feat(page-compiler)!: convert pageCompiler to createPageCompiler generic factory ([606037c](https://github.com/d-zero-dev/kamado/commit/606037c56377bf3631a491efe657c877d209ceaf))
+- feat(page-compiler)!: convert defaultPageTransforms to generic factory function ([c7523d4](https://github.com/d-zero-dev/kamado/commit/c7523d4d3809812476469eff5f6800ff24b1501d))
+- feat(page-compiler)!: add generic MetaData type parameter to interfaces and transforms ([3b48bd9](https://github.com/d-zero-dev/kamado/commit/3b48bd94bd76004772566d35182207dd014037a6))
+- refactor(page-compiler)!: rename filter to filterNavigationNode ([83d3573](https://github.com/d-zero-dev/kamado/commit/83d35738a2a41dba9f3ed76ccef0c88bbf5eda1c))
+- refactor(page-compiler)!: rename transformNode to filter ([21ee93e](https://github.com/d-zero-dev/kamado/commit/21ee93e51af1a9585ca4f5528b50a88a560d8e3d))
+- refactor(page-compiler)!: change transformNode return type to boolean ([fafc368](https://github.com/d-zero-dev/kamado/commit/fafc368183d50ddf7924f60d75f5c7a9d71ca1a1))
+- refactor(page-compiler)!: use addMetaData API from @d-zero/shared 0.18.0 ([1742e52](https://github.com/d-zero-dev/kamado/commit/1742e529ad1da9402d02ec2493de85577a630b45))
+- refactor(page-compiler)!: simplify title handling and use metaData.title ([5616bee](https://github.com/d-zero-dev/kamado/commit/5616bee0b80bb4aed34943ccb7ccec35567dc4d1))
+
+### BREAKING CHANGES
+
+- Replace pageCompiler constant with
+  createPageCompiler<M>() factory function. NavNode type now includes
+  custom metadata via Node<NavNodeMetaData & M>. Breadcrumbs and nav
+  features are generalized to propagate type-safe metadata throughout
+  the compilation pipeline.
+- Replace defaultPageTransforms constant with
+  createDefaultPageTransforms<M>() factory function to support
+  generic MetaData type parameter
+- Add generic type parameter <M extends MetaData> to
+  PageCompilerOptions, CompileData, CompileHook, CompilerFunction, and
+  all transform functions to propagate type-safe metadata support from
+  the kamado package
+- Rename PageCompilerOptions.filter to filterNavigationNode
+
+More descriptive name to clarify this filters navigation nodes specifically.
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- Rename transformNode/transformNavNode to filter
+
+* Rename GetNavTreeOptions.transformNode to filter
+* Rename PageCompilerOptions.transformNavNode to filter
+* Rename internal transformTreeNodes to filterTreeNodes
+* Update JSDoc with @param descriptions
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- transformNode now returns boolean instead of NavNode
+
+* Return true to keep the node, false to remove it
+* Simplifies the API by focusing on filtering rather than transformation
+* Remove tests for node property transformation (no longer supported)
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- NavNode now uses node.meta.title instead of node.title
+
+* Use pathListToTree addMetaData option instead of filter with @ts-ignore
+* Remove generic type parameter <TOut> from getNavTree and related types
+* Access title via node.meta.title (type-safe)
+* Simplify JSDoc comments
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+- Remove getTitle, getTitleFromStaticFile, and optimizeTitle
+
+* Remove getTitle and getTitleFromStaticFile functions
+* Remove optimizeTitle option from PageCompilerOptions and feature options
+* Replace getTitleFromDOM with getTitleFromHtmlString (public API)
+* Update breadcrumbs and nav to use metaData.title instead of title
+* Add ./title export for users to use in pageList hook
+* Update tests to use metaData.title in mock data
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
 # [2.0.0-alpha.0](https://github.com/d-zero-dev/kamado/compare/v1.3.0...v2.0.0-alpha.0) (2026-02-03)
 
 ### Bug Fixes
