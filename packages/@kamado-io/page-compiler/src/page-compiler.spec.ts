@@ -6,7 +6,7 @@ import type { CompilableFile, FileContent, MetaData } from 'kamado/files';
 import { mergeConfig } from 'kamado/config';
 import { describe, test, expect, expectTypeOf, vi } from 'vitest';
 
-import { pageCompiler } from './page-compiler.js';
+import { createPageCompiler } from './page-compiler.js';
 import { createDefaultPageTransforms } from './page-transform.js';
 import { manipulateDOM } from './transform/manipulate-dom.js';
 
@@ -61,7 +61,7 @@ describe('page compiler', async () => {
 	 * @param options
 	 */
 	async function compilePage(page: CompilableFile, options: PageCompilerOptions) {
-		const pageC = pageCompiler(options);
+		const pageC = createPageCompiler()(options);
 		const fn = await pageC.compiler(config);
 		return fn(page, () => '');
 	}
@@ -280,7 +280,7 @@ describe('type inference for transform options', () => {
 	});
 });
 
-describe('pageCompiler with custom transforms', async () => {
+describe('createPageCompiler with custom transforms', async () => {
 	const config = await mergeConfig({});
 
 	/**
@@ -289,7 +289,7 @@ describe('pageCompiler with custom transforms', async () => {
 	 * @param options
 	 */
 	async function compilePage(page: CompilableFile, options: PageCompilerOptions) {
-		const pageC = pageCompiler(options);
+		const pageC = createPageCompiler()(options);
 		const fn = await pageC.compiler(config);
 		return fn(page, () => '');
 	}
