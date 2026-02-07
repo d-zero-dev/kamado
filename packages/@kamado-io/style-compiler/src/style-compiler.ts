@@ -33,8 +33,8 @@ export interface StyleCompilerOptions {
  * @example
  * ```typescript
  * const config = {
- *   compilers: [
- *     styleCompiler({
+ *   compilers: (def) => [
+ *     def(createStyleCompiler(), {
  *       alias: { '@': './src/styles' },
  *       banner: 'Generated file',
  *     }),
