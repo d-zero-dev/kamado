@@ -47,11 +47,11 @@ nav
 `PageCompilerOptions` の `transformBreadcrumbItem` および `filterNavigationNode` オプションを使用してください。
 
 ```ts
-import { pageCompiler } from '@kamado-io/page-compiler';
+import { createPageCompiler } from '@kamado-io/page-compiler';
 
 export const config = {
-	compilers: [
-		pageCompiler({
+	compilers: (def) => [
+		def(createPageCompiler(), {
 			transformBreadcrumbItem: (item) => ({
 				...item,
 				icon: item.href === '/' ? 'home' : 'page',
