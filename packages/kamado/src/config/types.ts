@@ -1,4 +1,8 @@
-import type { CompileFunction, CustomCompilerWithMetadata } from '../compiler/types.js';
+import type {
+	CompileFunction,
+	CompilerDefine,
+	CustomCompilerWithMetadata,
+} from '../compiler/types.js';
 import type { CompilableFile, MetaData, PageData } from '../files/types.js';
 
 /**
@@ -30,7 +34,7 @@ export interface Config<M extends MetaData> {
 	/**
 	 * Compiler configuration (array to guarantee processing order)
 	 */
-	readonly compilers: readonly CustomCompilerWithMetadata<M>[];
+	readonly compilers: Compilers<M>;
 	/**
 	 * Hook function called before build
 	 * @param context - Execution context (Config + mode)
@@ -41,6 +45,10 @@ export interface Config<M extends MetaData> {
 	 * @param context - Execution context (Config + mode)
 	 */
 	readonly onAfterBuild?: (context: Context<M>) => Promise<void> | void;
+}
+
+export interface Compilers<M extends MetaData> {
+	(define: CompilerDefine<M>): readonly CustomCompilerWithMetadata<M>[];
 }
 
 /**
@@ -64,7 +72,6 @@ export type UserConfig<M extends MetaData> = Partial<
 	Omit<Config<M>, 'pkg' | 'dir' | 'devServer'> & {
 		readonly dir: Partial<DirectoryConfig>;
 		readonly devServer: Partial<DevServerConfig<M>>;
-		readonly compilers?: readonly CustomCompilerWithMetadata<M>[];
 	}
 >;
 

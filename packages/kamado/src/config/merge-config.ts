@@ -37,7 +37,7 @@ export async function mergeConfig<M extends MetaData>(
 			...config.devServer,
 		},
 		pageList: config.pageList,
-		compilers: config.compilers ?? [],
+		compilers: config.compilers ?? (() => []),
 		onBeforeBuild: config.onBeforeBuild,
 		onAfterBuild: config.onAfterBuild,
 	};

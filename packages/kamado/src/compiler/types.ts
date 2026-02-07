@@ -123,6 +123,15 @@ export interface CustomCompilerWithMetadata<M extends MetaData> {
 	readonly compiler: CustomCompiler<M>;
 }
 
+export type CompilerDefine<M extends MetaData> = <CustomCompileOptions>(
+	factory: CustomCompilerFactory<M, CustomCompileOptions>,
+	options?: CustomCompileOptions,
+) => CustomCompilerWithMetadata<M>;
+
+export type CustomCompilerFactory<M extends MetaData, CustomCompileOptions> = (
+	options?: CustomCompileOptions,
+) => CustomCompilerWithMetadata<M>;
+
 /**
  * Result of compiler factory function
  */
