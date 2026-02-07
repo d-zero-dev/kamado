@@ -33,11 +33,11 @@ export interface FileContent {
 
 /**
  * Metadata interface
- * Object with arbitrary key-value pairs
+ * Empty base interface for page metadata.
+ * Users can extend this with custom properties via generics.
  */
-export interface MetaData {
-	readonly [key: string]: unknown;
-}
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface MetaData {}
 
 /**
  * Compilable file interface

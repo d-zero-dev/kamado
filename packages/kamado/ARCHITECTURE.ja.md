@@ -235,6 +235,38 @@ graph TD
 
 Kamado の機能拡張は、コンパイラプラグインを追加することで行います。すべてのコンパイラ関連型は、型安全なカスタムメタデータのためにジェネリック `M extends MetaData` 型パラメータを受け取ります。
 
+#### `MetaData` ベースインターフェース
+
+`MetaData` はページメタデータの空のベースインターフェース（`{}`）です。任意のユーザー定義 `interface` や `type` が `extends MetaData` 制約を満たします。
+
+#### `Config<M>` の不変性（Invariance）
+
+`Config<M>` は型パラメータ `M` に対して**不変（invariant）**です。これは TypeScript の型システムの固有の性質であり、`M` が共変位置と反変位置の両方に現れるため避けることができません。
+
+**反変位置**（`M` が入力として流れるコールバック引数）：
+
+- `pageList: (pageAssetFiles, config: Config<M>) => PageData<M>[]`
+- `onBeforeBuild: (context: Context<M>) => ...`
+- `onAfterBuild: (context: Context<M>) => ...`
+- `compilers: (def: CompilerDefine<M>) => ...`
+- `devServer.transforms[].transform: (content, context: TransformContext<M>) => ...`
+
+**共変位置**（`M` が出力として流れる戻り値型）：
+
+- `pageList: (...) => PageData<M>[]`
+
+さらに、`Context<M> extends Config<M>` が再帰的な不変性チェーンを形成します。
+
+**結果:** `Config<PageMetaData>` は `Config<MetaData>` に**決して代入できません**（逆も同様）。`Config` を受け取る関数はジェネリックにする必要があります：
+
+```typescript
+// ✅ 良い例 — 任意のメタデータ型で動作
+function helper<M extends MetaData>(config: Config<M>) { ... }
+
+// ❌ 悪い例 — Config<PageMetaData> は Config<MetaData> に代入できない
+function helper(config: Config<MetaData>) { ... }
+```
+
 #### ジェネリック型パラメータ (`M extends MetaData`)
 
 型パラメータ `M` は型システム全体を通じて伝搬します：

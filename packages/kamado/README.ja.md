@@ -492,6 +492,8 @@ const transform: Transform = {
 
 #### カスタムメタデータ
 
+ベースの `MetaData` インターフェースは空のインターフェース（`{}`）です。任意の `interface` や `type` が `extends MetaData` 制約を満たします。ジェネリクスを通じてカスタムメタデータプロパティを定義できます。
+
 プロジェクト全体にカスタムメタデータ型を伝搬するには、`defineConfig` に型引数を渡します：
 
 ```typescript
@@ -514,6 +516,20 @@ export default defineConfig<MyMeta>({
 	},
 });
 ```
+
+> **注意: `Config<M>` は `M` に対して不変（invariant）です。**
+>
+> TypeScript の型システムの仕様により、`Config<M>` は型パラメータ `M` に対して不変です。つまり、`Config<PageMetaData>` を `Config<MetaData>` に代入することはできません（逆も同様）。これは `M` が共変位置（`PageData<M>[]` などの戻り値型）と反変位置（`config: Config<M>` などのコールバック引数）の両方に現れるためです。
+>
+> `Config` を受け取るヘルパー関数を書く場合は、ジェネリックにしてください：
+>
+> ```typescript
+> // ✅ 良い例 — 任意のメタデータ型で動作
+> function helper<M extends MetaData>(config: Config<M>) { ... }
+>
+> // ❌ 悪い例 — Config<PageMetaData> は Config<MetaData> に代入できない
+> function helper(config: Config<MetaData>) { ... }
+> ```
 
 #### `def` コールバック
 

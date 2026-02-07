@@ -492,6 +492,8 @@ const transform: Transform = {
 
 #### Custom Metadata
 
+The base `MetaData` interface is an empty interface (`{}`). Any `interface` or `type` satisfies the `extends MetaData` constraint. You can define custom metadata properties via generics.
+
 To propagate custom metadata types throughout your project, pass a type argument to `defineConfig`:
 
 ```typescript
@@ -514,6 +516,20 @@ export default defineConfig<MyMeta>({
 	},
 });
 ```
+
+> **Note: `Config<M>` is invariant in `M`.**
+>
+> Due to TypeScript's type system, `Config<M>` is invariant in its type parameter `M`. This means `Config<PageMetaData>` cannot be assigned to `Config<MetaData>` (or vice versa), because `M` appears in both covariant positions (return types like `PageData<M>[]`) and contravariant positions (callback parameters like `config: Config<M>`).
+>
+> If you write a helper function that receives a `Config`, make it generic:
+>
+> ```typescript
+> // ✅ Good — works with any metadata type
+> function helper<M extends MetaData>(config: Config<M>) { ... }
+>
+> // ❌ Bad — Config<PageMetaData> is NOT assignable to Config<MetaData>
+> function helper(config: Config<MetaData>) { ... }
+> ```
 
 #### The `def` Callback
 

@@ -235,6 +235,38 @@ The map is built once at server startup and used for all subsequent requests.
 
 Kamado's features are extended by adding compiler plugins. All compiler-related types accept a generic `M extends MetaData` type parameter for type-safe custom metadata.
 
+#### The `MetaData` Base Interface
+
+`MetaData` is an empty base interface (`{}`) for page metadata. Any user-defined `interface` or `type` satisfies the `extends MetaData` constraint.
+
+#### `Config<M>` Invariance
+
+`Config<M>` is **invariant** in its type parameter `M`. This is an inherent property of TypeScript's type system and cannot be avoided, because `M` appears in both covariant and contravariant positions:
+
+**Contravariant positions** (callback parameters where `M` flows in):
+
+- `pageList: (pageAssetFiles, config: Config<M>) => PageData<M>[]`
+- `onBeforeBuild: (context: Context<M>) => ...`
+- `onAfterBuild: (context: Context<M>) => ...`
+- `compilers: (def: CompilerDefine<M>) => ...`
+- `devServer.transforms[].transform: (content, context: TransformContext<M>) => ...`
+
+**Covariant positions** (return types where `M` flows out):
+
+- `pageList: (...) => PageData<M>[]`
+
+Additionally, `Context<M> extends Config<M>` creates a recursive invariance chain.
+
+**Consequence:** `Config<PageMetaData>` is **never** assignable to `Config<MetaData>` (or vice versa). Functions that accept a `Config` should be made generic:
+
+```typescript
+// ✅ Good — works with any metadata type
+function helper<M extends MetaData>(config: Config<M>) { ... }
+
+// ❌ Bad — Config<PageMetaData> is NOT assignable to Config<MetaData>
+function helper(config: Config<MetaData>) { ... }
+```
+
 #### Generic Type Parameter (`M extends MetaData`)
 
 The type parameter `M` propagates through the entire type system:
