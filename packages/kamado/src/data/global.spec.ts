@@ -59,7 +59,7 @@ describe('getAssetGroup with virtual file system', async () => {
 	test('use no compiler', async () => {
 		const configWithCompilers = {
 			...config,
-			compilers: [
+			compilers: () => [
 				{
 					files: '**/*.{html,pug}',
 					outputExtension: '.html',

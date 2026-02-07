@@ -81,7 +81,7 @@ describe('getAssetGroup with virtual file system', async () => {
 				input: '/mock/input/dir',
 				output: '/mock/output/dir',
 			},
-			compilers: [],
+			compilers: () => [],
 			verbose: true,
 		});
 
@@ -103,7 +103,7 @@ describe('getAssetGroup with virtual file system', async () => {
 				input: '/mock/input/dir',
 				output: '/mock/output/dir',
 			},
-			compilers: [
+			compilers: () => [
 				{
 					files: '**/*.{html,pug}',
 					outputExtension: '.html',
