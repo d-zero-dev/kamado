@@ -69,7 +69,7 @@ export interface SSIShimOptions extends SSIShimTransformOptions {
  * and replaces them with the content of the referenced files.
  * Can be used in both development and build contexts.
  * @param options - Transform options
- * @param name
+ * @param name - Transform name used for logging (default: 'ssiShim')
  * @returns Transform function (content, context) => Promise<string | ArrayBuffer>
  * @example Creating a custom ResponseTransform
  * ```typescript

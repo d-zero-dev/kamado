@@ -41,31 +41,6 @@ export type GetBreadcrumbsOptions<
 };
 
 /**
- * Gets breadcrumb list for a page
- * @template TOut - Type of additional properties added by transformItem
- * @param page - Target page file
- * @param pageList - List of all page files
- * @param options - Options for getting breadcrumbs
- * @returns Array of breadcrumb items (with additional properties if transformItem is specified)
- * @example
- * ```typescript
- * const breadcrumbs = getBreadcrumbs(currentPage, pageList, {
- *   baseURL: '/',
- *   optimizeTitle: (title) => title.trim(),
- * });
- * ```
- * @example
- * ```typescript
- * // With transformItem for adding custom properties
- * const breadcrumbs = getBreadcrumbs(currentPage, pageList, {
- *   transformItem: (item) => ({
- *     ...item,
- *     icon: item.href === '/' ? 'home' : 'page',
- *   }),
- * });
- * ```
- */
-/**
  * Required context for breadcrumbs generation
  */
 export interface GetBreadcrumbsContext<M extends MetaData> {
@@ -74,9 +49,31 @@ export interface GetBreadcrumbsContext<M extends MetaData> {
 }
 
 /**
- *
- * @param context
- * @param options
+ * Gets breadcrumb list for a page
+ * @template TOut - Type of additional properties added by transformItem
+ * @param context - Context containing current page and page list
+ * @param options - Options for getting breadcrumbs
+ * @returns Array of breadcrumb items (with additional properties if transformItem is specified)
+ * @example
+ * ```typescript
+ * const breadcrumbs = getBreadcrumbs(
+ *   { page: currentPage, pageList },
+ *   { baseURL: '/' },
+ * );
+ * ```
+ * @example
+ * ```typescript
+ * // With transformItem for adding custom properties
+ * const breadcrumbs = getBreadcrumbs(
+ *   { page: currentPage, pageList },
+ *   {
+ *     transformItem: (item) => ({
+ *       ...item,
+ *       icon: item.href === '/' ? 'home' : 'page',
+ *     }),
+ *   },
+ * );
+ * ```
  */
 export function getBreadcrumbs<
 	M extends MetaData,

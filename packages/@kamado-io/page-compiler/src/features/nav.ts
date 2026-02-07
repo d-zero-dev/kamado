@@ -127,6 +127,7 @@ export function getNavTree<M extends MetaData>(
  * Recursively filters all nodes in a tree
  * @param node - Root node to filter
  * @param filterNode - Filter function returning true to keep, false to remove
+ * @returns Filtered node or null if the node was removed
  */
 function filterTreeNodes<M extends MetaData>(
 	node: NavNode<M>,
@@ -149,6 +150,7 @@ function filterTreeNodes<M extends MetaData>(
 /**
  * Finds the node marked as current in the tree
  * @param tree - Navigation tree to search
+ * @returns The current node or null if not found
  */
 function findCurrentNode<M extends MetaData>(tree: NavNode<M>): NavNode<M> | null {
 	if (tree.current) {
@@ -168,6 +170,7 @@ function findCurrentNode<M extends MetaData>(tree: NavNode<M>): NavNode<M> | nul
  * @param currentUrl - Current page URL
  * @param tree - Navigation tree to search
  * @param targetDepth - Target depth to find ancestor
+ * @returns Ancestor node at the specified depth or null if not found
  */
 function findAncestorAtDepth<M extends MetaData>(
 	currentUrl: string,
@@ -199,6 +202,7 @@ function findAncestorAtDepth<M extends MetaData>(
  * @param currentUrl - Current page URL
  * @param tree - Navigation tree
  * @param baseDepth - Base depth for navigation tree
+ * @returns Subtree from the ancestor node or null if the current node is not found
  */
 function getParentNodeTree<M extends MetaData>(
 	currentUrl: string,
@@ -226,6 +230,7 @@ function getParentNodeTree<M extends MetaData>(
  * Gets metadata for a navigation node from page list
  * @param url - Page URL
  * @param pages - List of pages with metadata
+ * @returns Navigation node metadata with title
  */
 function getMeta<M extends MetaData>(
 	url: string,
