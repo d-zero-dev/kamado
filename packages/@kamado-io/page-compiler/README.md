@@ -50,17 +50,17 @@ export default defineConfig({
   - If omitted, uses `createDefaultPageTransforms()` (5 transforms: manipulateDOM, doctype, prettier, minifier, lineBreak). See [Transform Pipeline](#transform-pipeline) for details.
   - **Note**: Uses the same `Transform` interface as `devServer.transforms`, but applies only to HTML pages in both build and serve modes. The `filter` option is ignored here (use `devServer.transforms` for filtering).
 - `transformBreadcrumbItem`: Function to transform each breadcrumb item. Can add custom properties to breadcrumb items. `(item: BreadcrumbItem) => BreadcrumbItem`
-- `filterNavigationNode`: Function to filter navigation nodes. Return `true` to keep the node, `false` to remove it. `(node: NavNode) => boolean`
+- `filterNavigationNode`: Function to filter navigation nodes. Return `true` to keep the node, `false` to remove it. `(node: NavNode<M>) => boolean`
 - `compileHooks`: Compilation hooks for customizing compile process
-  - Can be an object or a function `(options: PageCompilerOptions) => CompileHooksObject | Promise<CompileHooksObject>` that returns an object (sync or async)
+  - Can be an object or a function `(options: PageCompilerOptions<M>) => CompileHooksObject<M> | Promise<CompileHooksObject<M>>` that returns an object (sync or async)
   - `main`: Hooks for main content compilation
     - `before`: Hook called before compilation (receives content and data, returns processed content)
     - `after`: Hook called after compilation (receives HTML and data, returns processed HTML)
-    - `compiler`: Custom compiler function `(content: string, data: CompileData, extension: string) => Promise<string> | string`
+    - `compiler`: Custom compiler function `(content: string, data: CompileData<M>, extension: string) => Promise<string> | string`
   - `layout`: Hooks for layout compilation
     - `before`: Hook called before compilation (receives content and data, returns processed content)
     - `after`: Hook called after compilation (receives HTML and data, returns processed HTML)
-    - `compiler`: Custom compiler function `(content: string, data: CompileData, extension: string) => Promise<string> | string`
+    - `compiler`: Custom compiler function `(content: string, data: CompileData<M>, extension: string) => Promise<string> | string`
 
 **Note**: To use Pug templates, install `@kamado-io/pug-compiler` and use `createCompileHooks` helper. See the [@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md) for integration examples.
 
@@ -85,14 +85,14 @@ interface Transform<M extends MetaData> {
 }
 
 interface TransformContext<M extends MetaData> {
-	path: string; // Request path relative to output directory
-	filePath: string; // Same as path (for compatibility)
-	inputPath?: string; // Original input file path (always provided by page compiler)
-	outputPath: string; // Output file path
-	outputDir: string; // Output directory path
-	isServe: boolean; // true in serve mode, false in build mode
-	context: Context<M>; // Kamado Context (Config + mode)
-	compile: CompileFunction; // Function to compile other files
+	readonly path: string; // Request path relative to output directory
+	readonly filePath: string; // File path (alias for path)
+	readonly inputPath?: string; // Original input file path (always provided by page compiler)
+	readonly outputPath: string; // Output file path
+	readonly outputDir: string; // Output directory path
+	readonly isServe: boolean; // true in serve mode, false in build mode
+	readonly context: Context<M>; // Kamado Context (Config + mode)
+	readonly compile: CompileFunction; // Function to compile other files
 }
 ```
 
@@ -108,7 +108,7 @@ The package provides **6 transform factory functions** (5 included in default pi
      (
        elements: readonly Element[],
        window: Window,
-       context: TransformContext
+       context: TransformContext<M>
      ) => Promise<void> | void
      ```
    - `options.imageSizes`: Enable/configure automatic image size detection (default: `true`)
@@ -121,12 +121,12 @@ The package provides **6 transform factory functions** (5 included in default pi
      - Note: Uses kamado's `domSerialize` utility which preserves fragments as fragments and full documents as full documents
    - `options.host`: URL for DOM resolution context (defaults to `http://{devServer.host}:{devServer.port}` in serve mode, or production `baseURL`/`host` in build mode)
 
-2. **`characterEntities(options?)`** - Convert characters to HTML entities
+2. **`characterEntities()`** - Convert characters to HTML entities
    - Converts non-ASCII characters (code points ≥ 127) to their HTML entity equivalents (e.g., `©` → `&copy;`)
    - **Note**: Not included in `createDefaultPageTransforms()` - must be explicitly added if needed
    - No options currently available
 
-3. **`doctype(options?)`** - Add DOCTYPE declaration
+3. **`doctype()`** - Add DOCTYPE declaration
    - No options currently available
 
 4. **`prettier(options?)`** - Format HTML with Prettier
@@ -452,7 +452,7 @@ export default defineConfig({
 
 - `content`: String or function that returns the content to inject
 - `position`: `'head-start'` (after `<head>`) or `'head-end'` (before `</head>`, default)
-- `name`: Optional name for debugging (default: `'inject-to-head'`)
+- `name`: Optional name for debugging (default: `'injectToHead'`)
 - `filter`: Optional filter options
   - `include`: Glob pattern(s) to include (default: `'**/*.html'`)
   - `exclude`: Glob pattern(s) to exclude
@@ -502,7 +502,6 @@ export default defineConfig({
 
 **Options:**
 
-- `name`: Optional name for debugging (default: `'ssi-shim'`)
 - `filter`: Optional filter options
   - `include`: Glob pattern(s) to include (default: `'**/*.html'`)
   - `exclude`: Glob pattern(s) to exclude
