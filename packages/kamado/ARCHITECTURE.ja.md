@@ -376,6 +376,7 @@ export interface Transform<M extends MetaData> {
 // 変換コンテキストはリクエスト/レスポンス情報を提供
 export interface TransformContext<M extends MetaData> {
 	readonly path: string; // リクエストパス（出力ディレクトリからの相対パス）
+	readonly filePath: string; // ファイルパス（pathのエイリアス）
 	readonly inputPath?: string; // ソースファイルパス（コンパイラから利用可能な場合）
 	readonly outputPath: string; // 出力ファイルパス
 	readonly outputDir: string; // 出力ディレクトリパス

@@ -376,6 +376,7 @@ export interface Transform<M extends MetaData> {
 // Transform context provides request/response information
 export interface TransformContext<M extends MetaData> {
 	readonly path: string; // Request path (relative to output directory)
+	readonly filePath: string; // File path (alias for path)
 	readonly inputPath?: string; // Source file path (if available from compiler)
 	readonly outputPath: string; // Output file path
 	readonly outputDir: string; // Output directory path

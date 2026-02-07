@@ -397,6 +397,7 @@ interface Transform<M extends MetaData> {
 
 interface TransformContext<M extends MetaData> {
 	readonly path: string; // リクエストパス
+	readonly filePath: string; // ファイルパス（pathのエイリアス）
 	readonly inputPath?: string; // 元の入力ファイルパス（利用可能な場合）
 	readonly outputPath: string; // 出力ファイルパス
 	readonly outputDir: string; // 出力ディレクトリパス
