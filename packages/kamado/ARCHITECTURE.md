@@ -235,6 +235,41 @@ The map is built once at server startup and used for all subsequent requests.
 
 Kamado's features are extended by adding compiler plugins. All compiler-related types accept a generic `M extends MetaData` type parameter for type-safe custom metadata.
 
+#### Generic Type Parameter (`M extends MetaData`)
+
+The type parameter `M` propagates through the entire type system:
+
+```
+defineConfig<M>() → Config<M> → Context<M> → TransformContext<M>
+                                            → PageData<M>
+                                            → CompileData<M> → NavNode<M>
+```
+
+**Types with defaults (`= MetaData`):**
+
+User-facing types that appear in type annotations have a default: `Config`, `Context`, `UserConfig`, `Transform`, `TransformContext`, `PageData`, `GlobalData`. This means users who don't need custom metadata can write `Config` instead of `Config<MetaData>`.
+
+**Types without defaults:**
+
+Compiler-related types (`CustomCompiler`, `CustomCompilerPlugin`, `CustomCompilerWithMetadata`, `CompilerDefine`, `CustomCompilerFactory`, `CustomCompilerFactoryResult`, `Compilers`, `CompilerContext`) and page-compiler types (`PageCompilerOptions`, `CompileData`, `CompileHooks`, `NavNode`, etc.) do **not** have defaults. This is intentional — if a 3rd-party compiler author omits `<M>`, TypeScript reports an error rather than silently defaulting to the base `MetaData`, which could cause type mismatches at integration time.
+
+**Why functions don't need defaults:**
+
+Functions like `defineConfig<M>()` and `createPageCompiler<M>()` infer `M` from their arguments. Adding a default to function type parameters would hide type errors rather than surfacing them.
+
+**The `CompilerDefine` pattern:**
+
+The `compilers` callback receives a `def: CompilerDefine<M>` helper. `CompilerDefine<M>` is a generic function that infers `CustomCompileOptions` from the factory's return type:
+
+```typescript
+type CompilerDefine<M extends MetaData> = <CustomCompileOptions>(
+	factory: CustomCompilerFactory<M, CustomCompileOptions>,
+	options?: CustomCompileOptions,
+) => CustomCompilerWithMetadata<M>;
+```
+
+This two-level generic (`M` from config, `CustomCompileOptions` from factory) allows each `def()` call to have fully inferred option types without manual annotation.
+
 #### Compiler Configuration (`Compilers<M>`)
 
 The `Config.compilers` field uses a callback form for type-safe compiler definition:

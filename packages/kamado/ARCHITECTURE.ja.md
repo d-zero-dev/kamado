@@ -235,6 +235,41 @@ graph TD
 
 Kamado の機能拡張は、コンパイラプラグインを追加することで行います。すべてのコンパイラ関連型は、型安全なカスタムメタデータのためにジェネリック `M extends MetaData` 型パラメータを受け取ります。
 
+#### ジェネリック型パラメータ (`M extends MetaData`)
+
+型パラメータ `M` は型システム全体を通じて伝搬します：
+
+```
+defineConfig<M>() → Config<M> → Context<M> → TransformContext<M>
+                                            → PageData<M>
+                                            → CompileData<M> → NavNode<M>
+```
+
+**デフォルト値を持つ型 (`= MetaData`):**
+
+型注釈で直接書くユーザー向け型にはデフォルトがあります：`Config`、`Context`、`UserConfig`、`Transform`、`TransformContext`、`PageData`、`GlobalData`。カスタムメタデータが不要なユーザーは `Config<MetaData>` ではなく `Config` とそのまま書けます。
+
+**デフォルト値を持たない型:**
+
+コンパイラ関連型（`CustomCompiler`、`CustomCompilerPlugin`、`CustomCompilerWithMetadata`、`CompilerDefine`、`CustomCompilerFactory`、`CustomCompilerFactoryResult`、`Compilers`、`CompilerContext`）とpage-compiler型（`PageCompilerOptions`、`CompileData`、`CompileHooks`、`NavNode`など）にはデフォルトがありません。これは意図的です — 3rdパーティのコンパイラ開発者が `<M>` を省略した場合、TypeScriptが暗黙的にベースの `MetaData` にフォールバックするのではなくエラーを報告し、統合時の型の不一致を防ぎます。
+
+**関数にデフォルトが不要な理由:**
+
+`defineConfig<M>()`や`createPageCompiler<M>()`などの関数は、引数から `M` を自動推論します。関数の型パラメータにデフォルトを追加すると、型エラーが表面化するのではなく隠蔽されてしまいます。
+
+**`CompilerDefine` パターン:**
+
+`compilers` コールバックは `def: CompilerDefine<M>` ヘルパーを受け取ります。`CompilerDefine<M>` はファクトリの戻り値型から `CustomCompileOptions` を推論するジェネリック関数です：
+
+```typescript
+type CompilerDefine<M extends MetaData> = <CustomCompileOptions>(
+	factory: CustomCompilerFactory<M, CustomCompileOptions>,
+	options?: CustomCompileOptions,
+) => CustomCompilerWithMetadata<M>;
+```
+
+この2段階のジェネリクス（`M` はconfigから、`CustomCompileOptions` はファクトリから）により、各 `def()` 呼び出しで手動の型注釈なしに完全な型推論が得られます。
+
 #### コンパイラ設定 (`Compilers<M>`)
 
 `Config.compilers` フィールドは、型安全なコンパイラ定義のためにコールバック形式を使用します：

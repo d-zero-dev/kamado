@@ -469,3 +469,74 @@ kamado server -c ./dev.config.js
 # Enable verbose logging during build
 kamado build --verbose
 ```
+
+### Type Safety & Generics
+
+Kamado's core types accept a generic type parameter `M extends MetaData` for type-safe custom metadata. This section explains how to use it.
+
+#### Default Generics
+
+Most user-facing types (`Config`, `Context`, `UserConfig`, `Transform`, `TransformContext`, `PageData`, `GlobalData`) have a default of `= MetaData`. If you don't need custom metadata, you can use the types without a type argument:
+
+```typescript
+import type { Config, Transform, PageData } from 'kamado/config';
+
+// No type argument needed — defaults to MetaData
+const config: Config = {
+	/* ... */
+};
+const transform: Transform = {
+	/* ... */
+};
+```
+
+#### Custom Metadata
+
+To propagate custom metadata types throughout your project, pass a type argument to `defineConfig`:
+
+```typescript
+interface MyMeta {
+	title: string;
+	description?: string;
+	draft?: boolean;
+}
+
+export default defineConfig<MyMeta>({
+	pageList: async (pageAssetFiles, config) => {
+		// pageAssetFiles are CompilableFile[], return PageData<MyMeta>[]
+		return pageAssetFiles.map((file) => ({
+			...file,
+			metaData: { title: 'Default Title' },
+		}));
+	},
+	async onBeforeBuild(context) {
+		// context is Context<MyMeta> — fully typed
+	},
+});
+```
+
+#### The `def` Callback
+
+The `compilers` option uses a callback form: `compilers: (def) => [...]`. The `def` parameter is a `CompilerDefine<M>` function that binds a compiler factory to its options. This exists so TypeScript can automatically infer each compiler's option types — you never need to write type arguments manually:
+
+```typescript
+compilers: (def) => [
+	// TypeScript infers the options type from createPageCompiler's return type
+	def(createPageCompiler(), {
+		files: '**/*.html',
+		outputExtension: '.html',
+	}),
+];
+```
+
+#### `M` Propagation Chain
+
+The type parameter `M` flows through the system:
+
+```
+defineConfig<M>() → Config<M> → Context<M> → TransformContext<M>
+                                            → PageData<M>
+                                            → CompileData<M> → NavNode<M>
+```
+
+This ensures that custom metadata types are consistent across configuration, compilation, and template data.

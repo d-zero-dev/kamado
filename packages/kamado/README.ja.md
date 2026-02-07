@@ -469,3 +469,74 @@ kamado server -c ./dev.config.js
 # ビルド時に詳細ログを出力
 kamado build --verbose
 ```
+
+### 型安全性とジェネリクス
+
+Kamadoのコア型は、型安全なカスタムメタデータのためにジェネリック型パラメータ `M extends MetaData` を受け取ります。このセクションではその使い方を説明します。
+
+#### デフォルトジェネリクス
+
+ほとんどのユーザー向け型（`Config`、`Context`、`UserConfig`、`Transform`、`TransformContext`、`PageData`、`GlobalData`）は `= MetaData` デフォルトを持ちます。カスタムメタデータが不要な場合、型引数なしでそのまま使えます：
+
+```typescript
+import type { Config, Transform, PageData } from 'kamado/config';
+
+// 型引数不要 — MetaData がデフォルト
+const config: Config = {
+	/* ... */
+};
+const transform: Transform = {
+	/* ... */
+};
+```
+
+#### カスタムメタデータ
+
+プロジェクト全体にカスタムメタデータ型を伝搬するには、`defineConfig` に型引数を渡します：
+
+```typescript
+interface MyMeta {
+	title: string;
+	description?: string;
+	draft?: boolean;
+}
+
+export default defineConfig<MyMeta>({
+	pageList: async (pageAssetFiles, config) => {
+		// pageAssetFiles は CompilableFile[]、戻り値は PageData<MyMeta>[]
+		return pageAssetFiles.map((file) => ({
+			...file,
+			metaData: { title: 'デフォルトタイトル' },
+		}));
+	},
+	async onBeforeBuild(context) {
+		// context は Context<MyMeta> — 完全に型付けされています
+	},
+});
+```
+
+#### `def` コールバック
+
+`compilers` オプションはコールバック形式を使用します：`compilers: (def) => [...]`。`def` パラメータは `CompilerDefine<M>` 型の関数で、コンパイラファクトリとオプションをバインドします。これはTypeScriptが各コンパイラのオプション型を自動推論するために存在します — 手動で型引数を指定する必要はありません：
+
+```typescript
+compilers: (def) => [
+	// TypeScript は createPageCompiler の戻り値型からオプション型を推論
+	def(createPageCompiler(), {
+		files: '**/*.html',
+		outputExtension: '.html',
+	}),
+];
+```
+
+#### `M` の伝搬チェーン
+
+型パラメータ `M` はシステム全体を通じて伝搬します：
+
+```
+defineConfig<M>() → Config<M> → Context<M> → TransformContext<M>
+                                            → PageData<M>
+                                            → CompileData<M> → NavNode<M>
+```
+
+これにより、カスタムメタデータ型が設定、コンパイル、テンプレートデータ全体で一貫性を持ちます。
