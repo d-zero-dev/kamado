@@ -34,8 +34,8 @@ export interface ScriptCompilerOptions {
  * @example
  * ```typescript
  * const config = {
- *   compilers: [
- *     scriptCompiler({
+ *   compilers: (def) => [
+ *     def(createScriptCompiler(), {
  *       alias: { '@': './src' },
  *       minifier: true,
  *       banner: 'Generated file',
