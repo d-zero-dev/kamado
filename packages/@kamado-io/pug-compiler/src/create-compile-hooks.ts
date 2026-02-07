@@ -32,12 +32,12 @@ function createCompilerWithExtensionCheck(
  * @returns Function that returns compile hooks object
  * @example
  * ```typescript
- * import { pageCompiler } from '@kamado-io/page-compiler';
+ * import { createPageCompiler } from '@kamado-io/page-compiler';
  * import { createCompileHooks } from '@kamado-io/pug-compiler';
  *
  * export const config = {
- *   compilers: [
- *     pageCompiler({
+ *   compilers: (def) => [
+ *     def(createPageCompiler(), {
  *       compileHooks: createCompileHooks({
  *         pathAlias: './src',
  *         doctype: 'html',
