@@ -5,7 +5,7 @@ import type dayjs from 'dayjs';
  * Global data interface
  * Defines global data available in templates
  */
-export interface GlobalData<M extends MetaData> {
+export interface GlobalData<M extends MetaData = MetaData> {
 	/**
 	 * Package information
 	 */

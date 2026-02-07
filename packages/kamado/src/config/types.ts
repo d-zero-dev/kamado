@@ -8,7 +8,7 @@ import type { CompilableFile, MetaData, PageData } from '../files/types.js';
 /**
  * Application configuration
  */
-export interface Config<M extends MetaData> {
+export interface Config<M extends MetaData = MetaData> {
 	/**
 	 * Package information
 	 */
@@ -56,7 +56,7 @@ export interface Compilers<M extends MetaData> {
  * Config + execution mode information
  * Created by CLI commands (build/serve)
  */
-export interface Context<M extends MetaData> extends Config<M> {
+export interface Context<M extends MetaData = MetaData> extends Config<M> {
 	/**
 	 * Execution mode (set by CLI)
 	 * Users cannot configure this - it's automatically set by the command
@@ -68,7 +68,7 @@ export interface Context<M extends MetaData> extends Config<M> {
  * Type for user-configurable settings
  * Partial version of Config
  */
-export type UserConfig<M extends MetaData> = Partial<
+export type UserConfig<M extends MetaData = MetaData> = Partial<
 	Omit<Config<M>, 'pkg' | 'dir' | 'devServer'> & {
 		readonly dir: Partial<DirectoryConfig>;
 		readonly devServer: Partial<DevServerConfig<M>>;
@@ -97,7 +97,7 @@ export interface DirectoryConfig {
  * Response transform context
  * Provides information about the current request and response
  */
-export interface TransformContext<M extends MetaData> {
+export interface TransformContext<M extends MetaData = MetaData> {
 	/**
 	 * Request path (relative to output directory)
 	 */
@@ -136,7 +136,7 @@ export interface TransformContext<M extends MetaData> {
  * Transform object that processes content
  * Used by both page-compiler transforms and devServer.transforms
  */
-export interface Transform<M extends MetaData> {
+export interface Transform<M extends MetaData = MetaData> {
 	/**
 	 * Transform name (used for find/filter/map customization)
 	 */
