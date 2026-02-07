@@ -6,8 +6,9 @@ import { createCompileFunctions } from '../compiler/compile-functions.js';
 import { getAssetGroup } from './get-asset-group.js';
 
 /**
- *
- * @param config
+ * Creates a map of output paths to compilable file objects for all configured compilers
+ * @param config - Configuration object containing compiler entries and directory settings
+ * @returns Map of output file paths to CompilableFile objects
  */
 export async function getCompilableFileMap<M extends MetaData>(config: Config<M>) {
 	const map = new Map<string, CompilableFile>();

@@ -7,9 +7,10 @@ import path from 'node:path';
 import { toAbsolutePath } from '../path/absolute-path.js';
 
 /**
- *
- * @param config
- * @param dir
+ * Merges user configuration with default values to produce a complete Config
+ * @param config - User configuration or existing full configuration
+ * @param dir - Project root directory (defaults to process.cwd())
+ * @returns Complete configuration with all defaults applied
  */
 export async function mergeConfig<M extends MetaData>(
 	config: UserConfig<M> | Config<M>,

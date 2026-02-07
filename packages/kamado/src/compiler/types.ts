@@ -123,11 +123,22 @@ export interface CustomCompilerWithMetadata<M extends MetaData> {
 	readonly compiler: CustomCompiler<M>;
 }
 
+/**
+ * Compiler define helper function type
+ * Binds a compiler factory to its options and returns a compiler entry with metadata
+ * @template M - Metadata type
+ */
 export type CompilerDefine<M extends MetaData> = <CustomCompileOptions>(
 	factory: CustomCompilerFactory<M, CustomCompileOptions>,
 	options?: CustomCompileOptions,
 ) => CustomCompilerWithMetadata<M>;
 
+/**
+ * Compiler factory function type
+ * Takes compiler-specific options and returns a compiler entry with metadata
+ * @template M - Metadata type
+ * @template CustomCompileOptions - Compiler-specific options type
+ */
 export type CustomCompilerFactory<M extends MetaData, CustomCompileOptions> = (
 	options?: CustomCompileOptions,
 ) => CustomCompilerWithMetadata<M>;

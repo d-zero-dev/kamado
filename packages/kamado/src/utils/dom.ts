@@ -38,9 +38,10 @@ export async function domSerialize(html: string, options: DomSerializeOptions) {
 }
 
 /**
- *
- * @param html
- * @param url
+ * Parses HTML string into a JSDOM instance and returns DOM elements
+ * @param html - HTML content to parse
+ * @param url - URL for JSDOM context (optional)
+ * @returns Object containing parsed elements, document, window, and whether the input is a fragment
  */
 function getDOM(
 	html: string,
