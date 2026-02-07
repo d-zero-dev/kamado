@@ -14,11 +14,11 @@ yarn add @kamado-io/page-compiler
 
 ```ts
 import { defineConfig } from 'kamado/config';
-import { pageCompiler } from '@kamado-io/page-compiler';
+import { createPageCompiler } from '@kamado-io/page-compiler';
 
 export default defineConfig({
-	compilers: [
-		pageCompiler({
+	compilers: (def) => [
+		def(createPageCompiler(), {
 			globalData: {
 				dir: './data',
 			},
@@ -26,7 +26,7 @@ export default defineConfig({
 				dir: './layouts',
 			},
 			// Transform pipeline is configured via transforms option
-			// If omitted, uses defaultPageTransforms
+			// If omitted, uses createDefaultPageTransforms()
 		}),
 	],
 });
@@ -47,7 +47,7 @@ export default defineConfig({
 - `transforms`: Transform functions to apply to compiled HTML in both build and serve modes. Can be:
   - `Transform[]` - Array of transform functions (uses `kamado/config` Transform interface)
   - `(defaultTransforms: readonly Transform[]) => Transform[]` - Function that receives default transforms (5 transforms) and returns modified array
-  - If omitted, uses `defaultPageTransforms` (5 transforms: manipulateDOM, doctype, prettier, minifier, lineBreak). See [Transform Pipeline](#transform-pipeline) for details.
+  - If omitted, uses `createDefaultPageTransforms()` (5 transforms: manipulateDOM, doctype, prettier, minifier, lineBreak). See [Transform Pipeline](#transform-pipeline) for details.
   - **Note**: Uses the same `Transform` interface as `devServer.transforms`, but applies only to HTML pages in both build and serve modes. The `filter` option is ignored here (use `devServer.transforms` for filtering).
 - `transformBreadcrumbItem`: Function to transform each breadcrumb item. Can add custom properties to breadcrumb items. `(item: BreadcrumbItem) => BreadcrumbItem`
 - `filterNavigationNode`: Function to filter navigation nodes. Return `true` to keep the node, `false` to remove it. `(node: NavNode) => boolean`
@@ -71,32 +71,32 @@ The page compiler uses a Transform Pipeline to process HTML content after compil
 ### Transform Interface
 
 ```typescript
-interface Transform {
+interface Transform<M extends MetaData> {
 	readonly name: string;
 	readonly filter?: {
-		// Note: filter is ignored in pageCompiler transforms
+		// Note: filter is ignored in page compiler transforms
 		readonly include?: string | readonly string[];
 		readonly exclude?: string | readonly string[];
 	};
 	readonly transform: (
 		content: string | ArrayBuffer,
-		context: TransformContext,
+		context: TransformContext<M>,
 	) => Promise<string | ArrayBuffer> | string | ArrayBuffer;
 }
 
-interface TransformContext {
+interface TransformContext<M extends MetaData> {
 	path: string; // Request path relative to output directory
 	filePath: string; // Same as path (for compatibility)
-	inputPath?: string; // Original input file path (always provided by pageCompiler)
+	inputPath?: string; // Original input file path (always provided by page compiler)
 	outputPath: string; // Output file path
 	outputDir: string; // Output directory path
 	isServe: boolean; // true in serve mode, false in build mode
-	context: Context; // Kamado Context (Config + mode)
+	context: Context<M>; // Kamado Context (Config + mode)
 	compile: CompileFunction; // Function to compile other files
 }
 ```
 
-**Note**: The `Transform` interface is shared with `devServer.transforms` (from `kamado/config`). However, the `filter` option is only effective in `devServer.transforms` and is ignored when used in `pageCompiler({ transforms })`. All HTML pages are processed regardless of filter settings.
+**Note**: The `Transform` interface is shared with `devServer.transforms` (from `kamado/config`). However, the `filter` option is only effective in `devServer.transforms` and is ignored when used in `createPageCompiler()({ transforms })`. All HTML pages are processed regardless of filter settings.
 
 ### Transform Factory Functions
 
@@ -123,7 +123,7 @@ The package provides **6 transform factory functions** (5 included in default pi
 
 2. **`characterEntities(options?)`** - Convert characters to HTML entities
    - Converts non-ASCII characters (code points ≥ 127) to their HTML entity equivalents (e.g., `©` → `&copy;`)
-   - **Note**: Not included in `defaultPageTransforms` - must be explicitly added if needed
+   - **Note**: Not included in `createDefaultPageTransforms()` - must be explicitly added if needed
    - No options currently available
 
 3. **`doctype(options?)`** - Add DOCTYPE declaration
@@ -160,16 +160,18 @@ The package provides **6 transform factory functions** (5 included in default pi
 ### Default Transform Pipeline
 
 ```typescript
-import { defaultPageTransforms } from '@kamado-io/page-compiler';
+import { createDefaultPageTransforms } from '@kamado-io/page-compiler';
 
 // The default pipeline includes 5 transforms:
-const defaultPageTransforms = [
-	manipulateDOM({ imageSizes: true }), // 1. DOM manipulation
-	doctype(), // 2. DOCTYPE injection
-	prettier(), // 3. HTML formatting
-	minifier(), // 4. HTML minification
-	lineBreak(), // 5. Line break normalization
-];
+const defaultPageTransforms = createDefaultPageTransforms();
+// Equivalent to:
+// [
+// 	manipulateDOM({ imageSizes: true }), // 1. DOM manipulation
+// 	doctype(),                           // 2. DOCTYPE injection
+// 	prettier(),                          // 3. HTML formatting
+// 	minifier(),                          // 4. HTML minification
+// 	lineBreak(),                         // 5. Line break normalization
+// ]
 // Note: characterEntities() is NOT included by default
 ```
 
@@ -178,28 +180,31 @@ const defaultPageTransforms = [
 #### Using Default Transforms
 
 ```typescript
-import { pageCompiler, defaultPageTransforms } from '@kamado-io/page-compiler';
+import {
+	createPageCompiler,
+	createDefaultPageTransforms,
+} from '@kamado-io/page-compiler';
 
-pageCompiler({
+createPageCompiler()({
 	layouts: { dir: './layouts' },
-	transforms: defaultPageTransforms, // Explicitly use defaults
+	transforms: createDefaultPageTransforms(), // Explicitly use defaults
 });
 
 // Or simply omit transforms to use defaults
-pageCompiler({
+createPageCompiler()({
 	layouts: { dir: './layouts' },
-	// transforms defaults to defaultPageTransforms
+	// transforms defaults to createDefaultPageTransforms()
 });
 ```
 
 #### Extending Defaults with Function (Recommended)
 
-Use a function to extend defaults without importing `defaultPageTransforms`:
+Use a function to extend defaults without importing `createDefaultPageTransforms`:
 
 ```typescript
-import { pageCompiler } from '@kamado-io/page-compiler';
+import { createPageCompiler } from '@kamado-io/page-compiler';
 
-pageCompiler({
+createPageCompiler()({
 	layouts: { dir: './layouts' },
 	transforms: (defaults) => [
 		// Add custom transform before defaults
@@ -226,10 +231,15 @@ pageCompiler({
 #### Extending Defaults with Array (Requires Import)
 
 ```typescript
-import { pageCompiler, defaultPageTransforms } from '@kamado-io/page-compiler';
+import {
+	createPageCompiler,
+	createDefaultPageTransforms,
+} from '@kamado-io/page-compiler';
+
+const defaultPageTransforms = createDefaultPageTransforms();
 
 // Add custom transform after defaults
-pageCompiler({
+createPageCompiler()({
 	layouts: { dir: './layouts' },
 	transforms: [
 		...defaultPageTransforms,
@@ -247,9 +257,9 @@ pageCompiler({
 #### Custom Transform Selection
 
 ```typescript
-import { pageCompiler, manipulateDOM, prettier } from '@kamado-io/page-compiler';
+import { createPageCompiler, manipulateDOM, prettier } from '@kamado-io/page-compiler';
 
-pageCompiler({
+createPageCompiler()({
 	layouts: { dir: './layouts' },
 	transforms: [
 		manipulateDOM({
@@ -268,10 +278,10 @@ pageCompiler({
 #### Customizing Specific Transforms
 
 ```typescript
-import { pageCompiler, prettier, minifier } from '@kamado-io/page-compiler';
+import { createPageCompiler, prettier, minifier } from '@kamado-io/page-compiler';
 
 // Replace specific transforms using function
-pageCompiler({
+createPageCompiler()({
 	layouts: { dir: './layouts' },
 	transforms: (defaults) =>
 		defaults.map((t) => {
@@ -289,10 +299,10 @@ pageCompiler({
 #### Filtering Transforms
 
 ```typescript
-import { pageCompiler } from '@kamado-io/page-compiler';
+import { createPageCompiler } from '@kamado-io/page-compiler';
 
 // Remove specific transforms
-pageCompiler({
+createPageCompiler()({
 	layouts: { dir: './layouts' },
 	transforms: (defaults) => defaults.filter((t) => t.name !== 'minifier'),
 });
@@ -300,13 +310,13 @@ pageCompiler({
 
 #### Adding Character Entities Transform
 
-The `characterEntities` transform is not included in `defaultPageTransforms`. Add it explicitly if needed:
+The `characterEntities` transform is not included in `createDefaultPageTransforms()`. Add it explicitly if needed:
 
 ```typescript
-import { pageCompiler, characterEntities } from '@kamado-io/page-compiler';
+import { createPageCompiler, characterEntities } from '@kamado-io/page-compiler';
 
 // Add characterEntities to the pipeline
-pageCompiler({
+createPageCompiler()({
 	layouts: { dir: './layouts' },
 	transforms: (defaults) => [
 		...defaults.slice(0, 1), // manipulateDOM
@@ -319,11 +329,11 @@ pageCompiler({
 #### Environment-Specific Transforms
 
 ```typescript
-import { pageCompiler, prettier, minifier } from '@kamado-io/page-compiler';
+import { createPageCompiler, prettier, minifier } from '@kamado-io/page-compiler';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
-pageCompiler({
+createPageCompiler()({
 	layouts: { dir: './layouts' },
 	transforms: (defaults) =>
 		defaults.map((t) => {
@@ -350,9 +360,9 @@ pageCompiler({
 #### Advanced: Custom Transform with imageSizes Configuration
 
 ```typescript
-import { pageCompiler, manipulateDOM } from '@kamado-io/page-compiler';
+import { createPageCompiler, manipulateDOM } from '@kamado-io/page-compiler';
 
-pageCompiler({
+createPageCompiler()({
 	layouts: { dir: './layouts' },
 	transforms: (defaults) => [
 		// Replace manipulateDOM with custom configuration
@@ -381,11 +391,11 @@ pageCompiler({
 
 ```ts
 import { defineConfig } from 'kamado/config';
-import { pageCompiler } from '@kamado-io/page-compiler';
+import { createPageCompiler } from '@kamado-io/page-compiler';
 
 export default defineConfig({
-	compilers: [
-		pageCompiler({
+	compilers: (def) => [
+		def(createPageCompiler(), {
 			compileHooks: {
 				main: {
 					before: (content, data) => {
@@ -692,10 +702,10 @@ These functions return the raw transform function `(content, context) => Promise
 ```typescript
 import {
 	// Compiler
-	pageCompiler,
+	createPageCompiler,
 
 	// Default transforms
-	defaultPageTransforms,
+	createDefaultPageTransforms,
 
 	// Transform factory functions
 	manipulateDOM,
