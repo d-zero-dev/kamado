@@ -22,10 +22,6 @@ export interface FileObject {
  */
 export interface FileContent {
 	/**
-	 * Metadata (front matter, etc.)
-	 */
-	readonly metaData: MetaData;
-	/**
 	 * File content (excluding metadata)
 	 */
 	readonly content: string;
@@ -37,11 +33,11 @@ export interface FileContent {
 
 /**
  * Metadata interface
- * Object with arbitrary key-value pairs
+ * Empty base interface for page metadata.
+ * Users can extend this with custom properties via generics.
  */
-export interface MetaData {
-	readonly [key: string]: unknown;
-}
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface MetaData {}
 
 /**
  * Compilable file interface
@@ -76,6 +72,9 @@ export interface CompilableFile extends FileObject {
 /**
  * Page data with optional metadata
  */
-export interface PageData extends CompilableFile {
-	metaData?: MetaData;
+export interface PageData<M extends MetaData = MetaData> extends CompilableFile {
+	/**
+	 * Metadata (front matter, etc.)
+	 */
+	metaData?: M;
 }

@@ -47,19 +47,19 @@ export function functionName(
 
    ```ts
    // ❌ 悪い例: 空のcontextを強制
-   export function pageCompiler(
+   export function createPageCompiler(
    	context: {}, // 中身がない！
    	options?: PageCompilerOptions,
    );
 
    // ✅ 良い例: 単一のoptionalパラメータ
-   export function pageCompiler(options?: PageCompilerOptions);
+   export function createPageCompiler(options?: PageCompilerOptions);
    ```
 
 2. **公開API関数（特にbuilder/factory functions）**
    - ユーザー向けの公開API関数は、利便性を優先
    - 内部API関数のみcontext+optionsパターンを適用
-   - 例: `pageCompiler()`, `scriptCompiler()` などのビルダー関数
+   - 例: `createPageCompiler()`, `createScriptCompiler()` などのビルダー関数
 
 3. **シンプルな関数（1-2個の必須パラメータのみ）**
 

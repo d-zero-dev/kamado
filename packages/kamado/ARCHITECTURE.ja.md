@@ -33,7 +33,7 @@ Kamado は、「オンデマンドで HTML を焼き上げる」静的サイト�
 `Context`は`Config`を拡張し、実行時情報を追加します：
 
 ```typescript
-export interface Context extends Config {
+export interface Context<M extends MetaData> extends Config<M> {
 	readonly mode: 'serve' | 'build';
 }
 ```
@@ -47,8 +47,8 @@ export interface Context extends Config {
 
 実行モードは以下のようにシステム全体に伝播します：
 
-1. **CLI**（`src/index.ts`）：ユーザーが`kamado build`または`kamado server`を実行
-2. **Builder/Server**（`src/builder/index.ts`または`src/server/app.ts`）：`Config`をスプレッドして`mode`を追加し、`Context`を作成
+1. **CLI**（`src/cli.ts`）：ユーザーが`kamado build`または`kamado server`を実行
+2. **Builder/Server**（`src/builder/build.ts`または`src/server/app.ts`）：`Config`をスプレッドして`mode`を追加し、`Context`を作成
 3. **コンパイラ**：`Config`ではなく`Context`を受け取り、実行モードを検出可能
 4. **フック**：ライフサイクルフック（`onBeforeBuild`、`onAfterBuild`）とpage compilerのtransform関数が`TransformContext`経由で実行モードを受け取る
 
@@ -64,7 +64,7 @@ export interface Context extends Config {
 
 `packages/kamado/src` 配下の主要なディレクトリとその役割です。
 
-- **`index.ts`**: CLI のエントリポイント。`@d-zero/roar` を使用してコマンドを処理します。
+- **`cli.ts`**: CLI のエントリポイント。`@d-zero/roar` を使用してコマンドを処理します。
 - **`builder/`**: 静的ビルド（`kamado build`）の実行ロジック。
 - **`server/`**: 開発サーバー（`kamado server`）のロジック。Hono を使用。
 - **`compiler/`**: コンパイラ・プラグインのインターフェースと、機能マップの管理。
@@ -132,7 +132,7 @@ export function functionName(
    ```
 
 3. **公開API/builder関数**: 一貫性よりも使いやすさを優先
-   - 例: `pageCompiler(options)`、`scriptCompiler(options)`
+   - 例: `createPageCompiler()(options)`、`createScriptCompiler()(options)`
 
 4. **プリミティブを受け取る関数**: オブジェクト化しない
    - すでにオブジェクトを受け取る → context+optionsに分割
@@ -233,12 +233,104 @@ graph TD
 
 ### コンパイラ・プラグイン
 
-Kamado の機能拡張は、`CustomCompilerPlugin` を追加することで行います。
+Kamado の機能拡張は、コンパイラプラグインを追加することで行います。すべてのコンパイラ関連型は、型安全なカスタムメタデータのためにジェネリック `M extends MetaData` 型パラメータを受け取ります。
+
+#### `MetaData` ベースインターフェース
+
+`MetaData` はページメタデータの空のベースインターフェース（`{}`）です。任意のユーザー定義 `interface` や `type` が `extends MetaData` 制約を満たします。
+
+#### `Config<M>` の不変性（Invariance）
+
+`Config<M>` は型パラメータ `M` に対して**不変（invariant）**です。これは TypeScript の型システムの固有の性質であり、`M` が共変位置と反変位置の両方に現れるため避けることができません。
+
+**反変位置**（`M` が入力として流れるコールバック引数）：
+
+- `pageList: (pageAssetFiles, config: Config<M>) => PageData<M>[]`
+- `onBeforeBuild: (context: Context<M>) => ...`
+- `onAfterBuild: (context: Context<M>) => ...`
+- `compilers: (def: CompilerDefine<M>) => ...`
+- `devServer.transforms[].transform: (content, context: TransformContext<M>) => ...`
+
+**共変位置**（`M` が出力として流れる戻り値型）：
+
+- `pageList: (...) => PageData<M>[]`
+
+さらに、`Context<M> extends Config<M>` が再帰的な不変性チェーンを形成します。
+
+**結果:** `Config<PageMetaData>` は `Config<MetaData>` に**決して代入できません**（逆も同様）。`Config` を受け取る関数はジェネリックにする必要があります：
+
+```typescript
+// ✅ 良い例 — 任意のメタデータ型で動作
+function helper<M extends MetaData>(config: Config<M>) { ... }
+
+// ❌ 悪い例 — Config<PageMetaData> は Config<MetaData> に代入できない
+function helper(config: Config<MetaData>) { ... }
+```
+
+#### ジェネリック型パラメータ (`M extends MetaData`)
+
+型パラメータ `M` は型システム全体を通じて伝搬します：
+
+```
+defineConfig<M>() → Config<M> → Context<M> → TransformContext<M>
+                                            → PageData<M>
+                                            → CompileData<M> → NavNode<M>
+```
+
+**デフォルト値を持つ型 (`= MetaData`):**
+
+型注釈で直接書くユーザー向け型にはデフォルトがあります：`Config`、`Context`、`UserConfig`、`Transform`、`TransformContext`、`PageData`、`GlobalData`。カスタムメタデータが不要なユーザーは `Config<MetaData>` ではなく `Config` とそのまま書けます。
+
+**デフォルト値を持たない型:**
+
+コンパイラ関連型（`CustomCompiler`、`CustomCompilerPlugin`、`CustomCompilerWithMetadata`、`CompilerDefine`、`CustomCompilerFactory`、`CustomCompilerFactoryResult`、`Compilers`、`CompilerContext`）とpage-compiler型（`PageCompilerOptions`、`CompileData`、`CompileHooks`、`NavNode`など）にはデフォルトがありません。これは意図的です — 3rdパーティのコンパイラ開発者が `<M>` を省略した場合、TypeScriptが暗黙的にベースの `MetaData` にフォールバックするのではなくエラーを報告し、統合時の型の不一致を防ぎます。
+
+**関数にデフォルトが不要な理由:**
+
+`defineConfig<M>()`や`createPageCompiler<M>()`などの関数は、引数から `M` を自動推論します。関数の型パラメータにデフォルトを追加すると、型エラーが表面化するのではなく隠蔽されてしまいます。
+
+**`CompilerDefine` パターン:**
+
+`compilers` コールバックは `def: CompilerDefine<M>` ヘルパーを受け取ります。`CompilerDefine<M>` はファクトリの戻り値型から `CustomCompileOptions` を推論するジェネリック関数です：
+
+```typescript
+type CompilerDefine<M extends MetaData> = <CustomCompileOptions>(
+	factory: CustomCompilerFactory<M, CustomCompileOptions>,
+	options?: CustomCompileOptions,
+) => CustomCompilerWithMetadata<M>;
+```
+
+この2段階のジェネリクス（`M` はconfigから、`CustomCompileOptions` はファクトリから）により、各 `def()` 呼び出しで手動の型注釈なしに完全な型推論が得られます。
+
+#### コンパイラ設定 (`Compilers<M>`)
+
+`Config.compilers` フィールドは、型安全なコンパイラ定義のためにコールバック形式を使用します：
+
+```typescript
+export interface Compilers<M extends MetaData> {
+	(define: CompilerDefine<M>): readonly CustomCompilerWithMetadata<M>[];
+}
+
+export type CompilerDefine<M extends MetaData> = <CustomCompileOptions>(
+	factory: CustomCompilerFactory<M, CustomCompileOptions>,
+	options?: CustomCompileOptions,
+) => CustomCompilerWithMetadata<M>;
+
+export type CustomCompilerFactory<M extends MetaData, CustomCompileOptions> = (
+	options?: CustomCompileOptions,
+) => CustomCompilerWithMetadata<M>;
+```
+
+コールバックはオプションをバインドする `define` ヘルパーを受け取ります。`M` 型パラメータは `defineConfig<M>` からコールバックを通じてフローし、各コンパイラのオプションの完全な型推論を可能にします。
+
+実行時には、`createCompileFunctions()`（`src/compiler/compile-functions.ts`）が `factory(options)` を呼び出すヘルパーを渡してコールバックを解決します。
+
+#### コンパイラインターフェース
 
 ```typescript
 // CustomCompilerインターフェースはContextを受け取る
-export interface CustomCompiler {
-	(context: Context): Promise<CustomCompileFunction> | CustomCompileFunction;
+export interface CustomCompiler<M extends MetaData> {
+	(context: Context<M>): Promise<CustomCompileFunction> | CustomCompileFunction;
 }
 
 // CustomCompileFunctionは個別のファイルコンパイルを処理
@@ -252,7 +344,7 @@ export interface CustomCompileFunction {
 }
 ```
 
-`CustomCompiler`は`Context`オブジェクト（`mode: 'serve' | 'build'`を含む）を受け取り、`CustomCompileFunction`を返します。`CustomCompileFunction`は以下のパラメータを受け取ります：
+`CustomCompiler`は`Context<M>`オブジェクト（`mode: 'serve' | 'build'`を含む）を受け取り、`CustomCompileFunction`を返します。`CustomCompileFunction`は以下のパラメータを受け取ります：
 
 - `compilableFile`: コンパイル対象のファイル
 - `compile`: コンパイル中に他のファイルを再帰的にコンパイルできる関数（レイアウトやインクルードなど）
@@ -270,15 +362,15 @@ export interface CustomCompileFunction {
 ```typescript
 pageList?: (
 	pageAssetFiles: readonly CompilableFile[],
-	config: Config,
-) => PageData[] | Promise<PageData[]>;
+	config: Config<M>,
+) => PageData<M>[] | Promise<PageData<M>[]>;
 ```
 
-`PageData`は`CompilableFile`を拡張しオプションの`metaData`を持ちます：
+`PageData<M>`は`CompilableFile`を拡張しオプションの`metaData`を持ちます：
 
 ```typescript
-interface PageData extends CompilableFile {
-	metaData?: MetaData;
+interface PageData<M extends MetaData> extends CompilableFile {
+	metaData?: M;
 }
 ```
 
@@ -287,7 +379,7 @@ interface PageData extends CompilableFile {
 - `pageAssetFiles`: 全てのページファイルの配列（ページコンパイラの`files`パターンにマッチするファイル）
 - `config`: 設定オブジェクト
 
-**戻り値:** フィルター/変換された`PageData`オブジェクトの配列
+**戻り値:** フィルター/変換された`PageData<M>`オブジェクトの配列
 
 **注記:** `pageList`フック時点では、`metaData`はまだフロントマターから展開されていません。パンくずリストやナビゲーションでタイトルが必要な場合は、このフック内で明示的に`metaData.title`を設定してください。
 
@@ -316,8 +408,8 @@ export default defineConfig({
 
 ユーザーは `kamado.config.ts` を通じてビルドの前後に任意の処理を挿入できます。
 
-- `onBeforeBuild(context: Context)`: ビルド開始前に実行（アセットの事前準備など）。`mode`フィールドを持つ`Context`を受け取ります。
-- `onAfterBuild(context: Context)`: ビルド完了後に実行（サイトマップ生成、通知など）。`mode`フィールドを持つ`Context`を受け取ります。
+- `onBeforeBuild(context: Context<M>)`: ビルド開始前に実行（アセットの事前準備など）。`mode`フィールドを持つ`Context`を受け取ります。
+- `onAfterBuild(context: Context<M>)`: ビルド完了後に実行（サイトマップ生成、通知など）。`mode`フィールドを持つ`Context`を受け取ります。
 
 両方のフックは`Config`ではなく`Context`を受け取るため、ビルドモードか開発サーバーモードかを検出できます。
 
@@ -325,36 +417,39 @@ export default defineConfig({
 
 レスポンス変換APIは、開発サーバーモード（`serve`モードのみ）でレスポンスコンテンツを変更できます。`src/server/transform.ts`に実装され、`src/server/route.ts`のリクエスト処理フローに統合されています。
 
-**注記:** レスポンス変換API（`devServer.transforms`）とpage compilerのTransform Pipeline API（`pageCompiler({ transforms })`）は、どちらも`kamado/config`の同じ`Transform`インターフェースを使用します。ただし、適用範囲が異なります：
+**注記:** レスポンス変換API（`devServer.transforms`）とpage compilerのTransform Pipeline API（`createPageCompiler()({ transforms })`）は、どちらも`kamado/config`の同じ`Transform`インターフェースを使用します。ただし、適用範囲が異なります：
 
 - レスポンス変換は開発モードのみで全てのファイルタイプに適用され、`filter`オプションが有効です
 - ページ変換はビルドモードと開発モードの両方でHTMLページに適用され、`filter`オプションは無視されます
 
-ページ変換システムについては`@kamado-io/page-compiler`を参照してください。`defaultPageTransforms`は`packages/@kamado-io/page-compiler/src/page-transform.ts`からエクスポートされています。
+ページ変換システムについては`@kamado-io/page-compiler`を参照してください。`createDefaultPageTransforms()`は`packages/@kamado-io/page-compiler/src/page-transform.ts`からエクスポートされています。
 
 #### アーキテクチャ
 
 ```typescript
 // 変換インターフェース
-export interface ResponseTransform {
-	readonly name?: string;
+export interface Transform<M extends MetaData> {
+	readonly name: string;
 	readonly filter?: {
 		readonly include?: string | readonly string[];
 		readonly exclude?: string | readonly string[];
 	};
 	readonly transform: (
 		content: string | ArrayBuffer,
-		context: TransformContext,
+		context: TransformContext<M>,
 	) => Promise<string | ArrayBuffer> | string | ArrayBuffer;
 }
 
 // 変換コンテキストはリクエスト/レスポンス情報を提供
-export interface TransformContext {
+export interface TransformContext<M extends MetaData> {
 	readonly path: string; // リクエストパス（出力ディレクトリからの相対パス）
+	readonly filePath: string; // ファイルパス（pathのエイリアス）
 	readonly inputPath?: string; // ソースファイルパス（コンパイラから利用可能な場合）
 	readonly outputPath: string; // 出力ファイルパス
+	readonly outputDir: string; // 出力ディレクトリパス
 	readonly isServe: boolean; // 開発サーバーモードで実行中かどうか
-	readonly context: Context; // 完全な実行コンテキスト（config + mode）
+	readonly context: Context<M>; // 完全な実行コンテキスト（config + mode）
+	readonly compile: CompileFunction; // 他のファイルをコンパイルする関数
 }
 ```
 

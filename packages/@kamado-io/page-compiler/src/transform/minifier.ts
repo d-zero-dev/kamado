@@ -1,4 +1,5 @@
 import type { Transform } from 'kamado/config';
+import type { MetaData } from 'kamado/files';
 
 import { minify, type Options as HMTOptions } from 'html-minifier-terser';
 
@@ -14,7 +15,7 @@ export interface MinifierOptions {
  * @param options - Minifier options
  * @returns Transform object
  */
-export function minifier(options?: MinifierOptions): Transform {
+export function minifier<M extends MetaData>(options?: MinifierOptions): Transform<M> {
 	return {
 		name: 'minifier',
 		transform: async (content) => {

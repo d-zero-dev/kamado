@@ -74,9 +74,9 @@ Create `kamado.config.ts` in the project root:
 import path from 'node:path';
 
 import { defineConfig } from 'kamado/config';
-import { pageCompiler } from '@kamado-io/page-compiler';
-import { scriptCompiler } from '@kamado-io/script-compiler';
-import { styleCompiler } from '@kamado-io/style-compiler';
+import { createPageCompiler } from '@kamado-io/page-compiler';
+import { createScriptCompiler } from '@kamado-io/script-compiler';
+import { createStyleCompiler } from '@kamado-io/style-compiler';
 
 export default defineConfig({
 	dir: {
@@ -88,8 +88,8 @@ export default defineConfig({
 		open: true,
 		port: 8000,
 	},
-	compilers: [
-		pageCompiler({
+	compilers: (def) => [
+		def(createPageCompiler(), {
 			files: '**/*.{html,pug}',
 			outputExtension: '.html',
 			globalData: {
@@ -98,10 +98,10 @@ export default defineConfig({
 			layouts: {
 				dir: path.resolve(import.meta.dirname, '__assets', '_libs', 'layouts'),
 			},
-			// Transform pipeline (optional, defaults to defaultPageTransforms)
+			// Transform pipeline (optional, defaults to createDefaultPageTransforms())
 			// See @kamado-io/page-compiler documentation for customization
 		}),
-		styleCompiler({
+		def(createStyleCompiler(), {
 			files: '**/*.{css,scss,sass}',
 			ignore: '**/*.{scss,sass}',
 			outputExtension: '.css',
@@ -109,7 +109,7 @@ export default defineConfig({
 				'@': path.resolve(import.meta.dirname, '__assets', '_libs'),
 			},
 		}),
-		scriptCompiler({
+		def(createScriptCompiler(), {
 			files: '**/*.{js,ts,jsx,tsx,mjs,cjs}',
 			outputExtension: '.js',
 			minifier: true,
@@ -147,16 +147,16 @@ export default defineConfig({
 
 #### Compiler Settings
 
-The `compilers` array defines how files are compiled. Each entry is a compiler function call that returns a compiler with metadata. The compiler function accepts optional options including:
+The `compilers` option uses a callback form for type-safe compiler configuration. The callback receives a `def` helper function that binds compiler factories to their options. Each `def(factory(), options)` call returns a compiler with metadata. The compiler options include:
 
 - `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input`. Default values are provided by each compiler (see below).
 - `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.scss'` will ignore all `.scss` files in the input directory and subdirectories.
 - `outputExtension` (optional): Output file extension (e.g., `.html`, `.css`, `.js`, `.php`). Default values are provided by each compiler (see below).
 - Other compiler-specific options (see each compiler's documentation below)
 
-The order of entries in the array determines the processing order.
+The order of entries in the returned array determines the processing order.
 
-##### pageCompiler
+##### createPageCompiler
 
 - `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input` (default: `'**/*.html'`)
 - `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.tmp'` will ignore all `.tmp` files.
@@ -165,14 +165,14 @@ The order of entries in the array determines the processing order.
 - `globalData.data`: Additional global data
 - `layouts.dir`: Layout file directory
 - `compileHooks`: Compilation hooks for customizing compile process (required for Pug templates)
-- `transforms`: Array of transform functions to apply to compiled HTML. If omitted, uses `defaultPageTransforms`. See [@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md) for details on the Transform Pipeline API.
+- `transforms`: Array of transform functions to apply to compiled HTML. If omitted, uses `createDefaultPageTransforms()`. See [@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md) for details on the Transform Pipeline API.
 
 **Note**: `page-compiler` is a generic container compiler and does not compile Pug templates by default. To use Pug templates, install `@kamado-io/pug-compiler` and configure `compileHooks`. See [@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md) for details.
 
 **Example**: To compile `.pug` files to `.html`:
 
 ```ts
-pageCompiler({
+def(createPageCompiler(), {
 	files: '**/*.pug',
 	outputExtension: '.html',
 	compileHooks: {
@@ -183,7 +183,7 @@ pageCompiler({
 });
 ```
 
-##### styleCompiler
+##### createStyleCompiler
 
 - `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input` (default: `'**/*.css'`)
 - `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.{scss,sass}'` will ignore all `.scss` and `.sass` files.
@@ -194,7 +194,7 @@ pageCompiler({
 **Example**: To compile `.scss` files to `.css` while ignoring source files:
 
 ```ts
-styleCompiler({
+def(createStyleCompiler(), {
 	files: '**/*.{css,scss,sass}',
 	ignore: '**/*.{scss,sass}',
 	outputExtension: '.css',
@@ -204,7 +204,7 @@ styleCompiler({
 });
 ```
 
-##### scriptCompiler
+##### createScriptCompiler
 
 - `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input` (default: `'**/*.{js,ts,jsx,tsx,mjs,cjs}'`)
 - `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.test.ts'` will ignore all test files.
@@ -216,7 +216,7 @@ styleCompiler({
 **Example**: To compile TypeScript files to JavaScript:
 
 ```ts
-scriptCompiler({
+def(createScriptCompiler(), {
 	files: '**/*.{js,ts,jsx,tsx}',
 	outputExtension: '.js',
 	minifier: true,
@@ -283,7 +283,7 @@ The Response Transform API allows you to modify response content during developm
 Both use the same `Transform` interface (`kamado/config`), but differ in scope and application:
 
 - **`devServer.transforms`**: Applied to ALL responses during development server mode only (`kamado server`). Middleware-style transforms that can process any file type (HTML, CSS, JS, images, etc.). The `filter` option (include/exclude) is respected here. Does not run during builds.
-- **`pageCompiler({ transforms })`**: Applied to compiled HTML pages in both build and serve modes. Transform pipeline for HTML processing only. The `filter` option is ignored (all HTML pages are processed). See [@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md) for details.
+- **`createPageCompiler()({ transforms })`**: Applied to compiled HTML pages in both build and serve modes. Transform pipeline for HTML processing only. The `filter` option is ignored (all HTML pages are processed). See [@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md) for details.
 
 You can reuse the same transform functions (like `manipulateDOM()`, `prettier()`, or custom transforms) in both places.
 
@@ -380,27 +380,30 @@ export default defineConfig({
 });
 ```
 
-**ResponseTransform Interface:**
+**Transform Interface:**
 
 ```typescript
-interface ResponseTransform {
-	name?: string; // Transform name for debugging
-	filter?: {
-		include?: string | string[]; // Glob patterns to include
-		exclude?: string | string[]; // Glob patterns to exclude
+interface Transform<M extends MetaData> {
+	readonly name: string; // Transform name for debugging
+	readonly filter?: {
+		readonly include?: string | readonly string[]; // Glob patterns to include
+		readonly exclude?: string | readonly string[]; // Glob patterns to exclude
 	};
-	transform: (
+	readonly transform: (
 		content: string | ArrayBuffer,
-		context: TransformContext,
+		context: TransformContext<M>,
 	) => Promise<string | ArrayBuffer> | string | ArrayBuffer;
 }
 
-interface TransformContext {
-	path: string; // Request path
-	inputPath?: string; // Original input file path (if available)
-	outputPath: string; // Output file path
-	isServe: boolean; // Always true in dev server
-	context: Context; // Full execution context
+interface TransformContext<M extends MetaData> {
+	readonly path: string; // Request path
+	readonly filePath: string; // File path (alias for path)
+	readonly inputPath?: string; // Original input file path (if available)
+	readonly outputPath: string; // Output file path
+	readonly outputDir: string; // Output directory path
+	readonly isServe: boolean; // Always true in dev server
+	readonly context: Context<M>; // Full execution context
+	readonly compile: CompileFunction; // Function to compile other files
 }
 ```
 
@@ -466,3 +469,90 @@ kamado server -c ./dev.config.js
 # Enable verbose logging during build
 kamado build --verbose
 ```
+
+### Type Safety & Generics
+
+Kamado's core types accept a generic type parameter `M extends MetaData` for type-safe custom metadata. This section explains how to use it.
+
+#### Default Generics
+
+Most user-facing types (`Config`, `Context`, `UserConfig`, `Transform`, `TransformContext`, `PageData`, `GlobalData`) have a default of `= MetaData`. If you don't need custom metadata, you can use the types without a type argument:
+
+```typescript
+import type { Config, Transform, PageData } from 'kamado/config';
+
+// No type argument needed — defaults to MetaData
+const config: Config = {
+	/* ... */
+};
+const transform: Transform = {
+	/* ... */
+};
+```
+
+#### Custom Metadata
+
+The base `MetaData` interface is an empty interface (`{}`). Any `interface` or `type` satisfies the `extends MetaData` constraint. You can define custom metadata properties via generics.
+
+To propagate custom metadata types throughout your project, pass a type argument to `defineConfig`:
+
+```typescript
+interface MyMeta {
+	title: string;
+	description?: string;
+	draft?: boolean;
+}
+
+export default defineConfig<MyMeta>({
+	pageList: async (pageAssetFiles, config) => {
+		// pageAssetFiles are CompilableFile[], return PageData<MyMeta>[]
+		return pageAssetFiles.map((file) => ({
+			...file,
+			metaData: { title: 'Default Title' },
+		}));
+	},
+	async onBeforeBuild(context) {
+		// context is Context<MyMeta> — fully typed
+	},
+});
+```
+
+> **Note: `Config<M>` is invariant in `M`.**
+>
+> Due to TypeScript's type system, `Config<M>` is invariant in its type parameter `M`. This means `Config<PageMetaData>` cannot be assigned to `Config<MetaData>` (or vice versa), because `M` appears in both covariant positions (return types like `PageData<M>[]`) and contravariant positions (callback parameters like `config: Config<M>`).
+>
+> If you write a helper function that receives a `Config`, make it generic:
+>
+> ```typescript
+> // ✅ Good — works with any metadata type
+> function helper<M extends MetaData>(config: Config<M>) { ... }
+>
+> // ❌ Bad — Config<PageMetaData> is NOT assignable to Config<MetaData>
+> function helper(config: Config<MetaData>) { ... }
+> ```
+
+#### The `def` Callback
+
+The `compilers` option uses a callback form: `compilers: (def) => [...]`. The `def` parameter is a `CompilerDefine<M>` function that binds a compiler factory to its options. This exists so TypeScript can automatically infer each compiler's option types — you never need to write type arguments manually:
+
+```typescript
+compilers: (def) => [
+	// TypeScript infers the options type from createPageCompiler's return type
+	def(createPageCompiler(), {
+		files: '**/*.html',
+		outputExtension: '.html',
+	}),
+];
+```
+
+#### `M` Propagation Chain
+
+The type parameter `M` flows through the system:
+
+```
+defineConfig<M>() → Config<M> → Context<M> → TransformContext<M>
+                                            → PageData<M>
+                                            → CompileData<M> → NavNode<M>
+```
+
+This ensures that custom metadata types are consistent across configuration, compilation, and template data.

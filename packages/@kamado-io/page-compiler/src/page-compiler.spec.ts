@@ -1,15 +1,16 @@
 import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { NavNode } from './features/nav.js';
-import type { Transform } from './page-compiler.js';
 import type { PageCompilerOptions } from './types.js';
-import type { CompilableFile, FileContent } from 'kamado/files';
+import type { CompilableFile, FileContent, MetaData } from 'kamado/files';
 
 import { mergeConfig } from 'kamado/config';
 import { describe, test, expect, expectTypeOf, vi } from 'vitest';
 
-import { pageCompiler } from './page-compiler.js';
-import { defaultPageTransforms } from './page-transform.js';
+import { createPageCompiler } from './page-compiler.js';
+import { createDefaultPageTransforms } from './page-transform.js';
 import { manipulateDOM } from './transform/manipulate-dom.js';
+
+const defaultPageTransforms = createDefaultPageTransforms<MetaData>();
 
 // Mock file content storage for tests
 const mockFileContents = new Map<string, FileContent>();
@@ -60,7 +61,7 @@ describe('page compiler', async () => {
 	 * @param options
 	 */
 	async function compilePage(page: CompilableFile, options: PageCompilerOptions) {
-		const pageC = pageCompiler(options);
+		const pageC = createPageCompiler()(options);
 		const fn = await pageC.compiler(config);
 		return fn(page, () => '');
 	}
@@ -279,7 +280,7 @@ describe('type inference for transform options', () => {
 	});
 });
 
-describe('pageCompiler with custom transforms', async () => {
+describe('createPageCompiler with custom transforms', async () => {
 	const config = await mergeConfig({});
 
 	/**
@@ -288,7 +289,7 @@ describe('pageCompiler with custom transforms', async () => {
 	 * @param options
 	 */
 	async function compilePage(page: CompilableFile, options: PageCompilerOptions) {
-		const pageC = pageCompiler(options);
+		const pageC = createPageCompiler()(options);
 		const fn = await pageC.compiler(config);
 		return fn(page, () => '');
 	}
@@ -449,7 +450,6 @@ describe('pageCompiler with custom transforms', async () => {
 			date: new Date(),
 		};
 		setMockFileContent('/path/to/page.html', {
-			metaData: {},
 			content,
 			raw: content,
 		});

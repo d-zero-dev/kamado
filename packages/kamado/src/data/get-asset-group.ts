@@ -1,5 +1,5 @@
 import type { CustomCompilerWithMetadata } from '../compiler/types.js';
-import type { CompilableFile } from '../files/types.js';
+import type { CompilableFile, MetaData } from '../files/types.js';
 
 import path from 'node:path';
 
@@ -11,10 +11,10 @@ import { getFile } from '../files/get-file.js';
 /**
  * Required context for getting asset files
  */
-export interface GetAssetGroupContext {
+export interface GetAssetGroupContext<M extends MetaData> {
 	readonly inputDir: string;
 	readonly outputDir: string;
-	readonly compilerEntry: CustomCompilerWithMetadata;
+	readonly compilerEntry: CustomCompilerWithMetadata<M>;
 }
 
 /**
@@ -30,8 +30,8 @@ export interface GetAssetGroupOptions {
  * @param options - Optional options (glob)
  * @returns List of asset files
  */
-export async function getAssetGroup(
-	context: GetAssetGroupContext,
+export async function getAssetGroup<M extends MetaData>(
+	context: GetAssetGroupContext<M>,
 	options?: GetAssetGroupOptions,
 ): Promise<CompilableFile[]> {
 	const { inputDir, outputDir, compilerEntry } = context;

@@ -10,7 +10,7 @@ describe('createCompileFunctionMap', async () => {
 	test('should create a compile function map', async () => {
 		const compileFunctionMap = await createCompileFunctionMap({
 			...config,
-			compilers: [
+			compilers: () => [
 				{
 					files: '**/*.html',
 					outputExtension: '.html',

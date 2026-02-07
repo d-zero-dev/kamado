@@ -1,3 +1,5 @@
+import type { MetaData } from 'kamado/files';
+
 import path from 'node:path';
 
 import cssnano from 'cssnano';
@@ -31,8 +33,8 @@ export interface StyleCompilerOptions {
  * @example
  * ```typescript
  * const config = {
- *   compilers: [
- *     styleCompiler({
+ *   compilers: (def) => [
+ *     def(createStyleCompiler(), {
  *       alias: { '@': './src/styles' },
  *       banner: 'Generated file',
  *     }),
@@ -40,85 +42,87 @@ export interface StyleCompilerOptions {
  * };
  * ```
  */
-export const styleCompiler = createCustomCompiler<StyleCompilerOptions>(() => ({
-	defaultFiles: '**/*.css',
-	defaultOutputExtension: '.css',
-	compile: (options) => () => {
-		return async (file, _, __, cache) => {
-			// Configure plugins with alias resolver for postcss-import
-			const plugins: postcss.AcceptedPlugin[] = [
-				postcssImport({
-					// Add postcss-import plugin with alias resolver
-					resolve:
-						// Create alias resolver for postcss-import
-						(id: string, basedir: string) => {
-							// Check if the import starts with an alias
-							for (const [alias, aliasPath] of Object.entries(options?.alias ?? {})) {
-								// Arias must be followed by a slash
-								if (id.startsWith(alias + '/')) {
-									const resolvedPath = id.replace(alias, aliasPath);
-									return [path.resolve(basedir, resolvedPath)];
+export function createStyleCompiler<M extends MetaData>() {
+	return createCustomCompiler<StyleCompilerOptions, M>(() => ({
+		defaultFiles: '**/*.css',
+		defaultOutputExtension: '.css',
+		compile: (options) => () => {
+			return async (file, _, __, cache) => {
+				// Configure plugins with alias resolver for postcss-import
+				const plugins: postcss.AcceptedPlugin[] = [
+					postcssImport({
+						// Add postcss-import plugin with alias resolver
+						resolve:
+							// Create alias resolver for postcss-import
+							(id: string, basedir: string) => {
+								// Check if the import starts with an alias
+								for (const [alias, aliasPath] of Object.entries(options?.alias ?? {})) {
+									// Arias must be followed by a slash
+									if (id.startsWith(alias + '/')) {
+										const resolvedPath = id.replace(alias, aliasPath);
+										return [path.resolve(basedir, resolvedPath)];
+									}
 								}
-							}
-							// For non-alias imports, fallback to default postcss-import resolution
-							return [id];
-						},
-				}),
-				cssnano({
-					preset: [
-						'default',
-						{
-							// Preserve !important comments (license, copyright, etc.)
-							discardComments: {
-								removeAll: false,
-								removeAllButFirst: false,
+								// For non-alias imports, fallback to default postcss-import resolution
+								return [id];
 							},
-							// Custom comment removal that preserves ! comments
-							cssDeclarationSorter: false,
-						},
-					],
-				}),
-			];
+					}),
+					cssnano({
+						preset: [
+							'default',
+							{
+								// Preserve !important comments (license, copyright, etc.)
+								discardComments: {
+									removeAll: false,
+									removeAllButFirst: false,
+								},
+								// Custom comment removal that preserves ! comments
+								cssDeclarationSorter: false,
+							},
+						],
+					}),
+				];
 
-			// Try to load PostCSS config from project root
-			let config;
-			try {
-				config = await postcssLoadConfig();
-			} catch {
-				// Fallback to default config if no config found
-				config = { plugins: [] };
-			}
-
-			// Add other plugins from config (excluding postcss-import if it exists)
-			if (config.plugins) {
-				for (const plugin of config.plugins) {
-					// Skip postcss-import plugin to avoid duplicates
-					if (
-						typeof plugin === 'object' &&
-						plugin &&
-						'pluginName' in plugin &&
-						plugin.pluginName === 'postcss-import'
-					) {
-						continue;
-					}
-					plugins.push(plugin);
+				// Try to load PostCSS config from project root
+				let config;
+				try {
+					config = await postcssLoadConfig();
+				} catch {
+					// Fallback to default config if no config found
+					config = { plugins: [] };
 				}
-			}
 
-			const css = await getContentFromFile(file, cache);
+				// Add other plugins from config (excluding postcss-import if it exists)
+				if (config.plugins) {
+					for (const plugin of config.plugins) {
+						// Skip postcss-import plugin to avoid duplicates
+						if (
+							typeof plugin === 'object' &&
+							plugin &&
+							'pluginName' in plugin &&
+							plugin.pluginName === 'postcss-import'
+						) {
+							continue;
+						}
+						plugins.push(plugin);
+					}
+				}
 
-			// Process CSS with PostCSS
-			const result = await postcss(plugins).process(css.content, {
-				from: file.inputPath,
-				to: undefined,
-			});
+				const css = await getContentFromFile(file, cache);
 
-			const banner =
-				typeof options?.banner === 'string'
-					? options.banner
-					: createBanner(options?.banner?.());
+				// Process CSS with PostCSS
+				const result = await postcss(plugins).process(css.content, {
+					from: file.inputPath,
+					to: undefined,
+				});
 
-			return banner + '\n' + result.css;
-		};
-	},
-}));
+				const banner =
+					typeof options?.banner === 'string'
+						? options.banner
+						: createBanner(options?.banner?.());
+
+				return banner + '\n' + result.css;
+			};
+		},
+	}));
+}

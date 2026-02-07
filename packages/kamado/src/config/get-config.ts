@@ -1,4 +1,5 @@
 import type { Config, UserConfig } from './types.js';
+import type { MetaData } from '../files/types.js';
 
 import path from 'node:path';
 
@@ -15,7 +16,9 @@ const explorer = cosmiconfig('kamado');
  * @returns Configuration object
  * @throws {Error} If the specified config file does not exist
  */
-export async function getConfig(configPath?: string): Promise<Config> {
+export async function getConfig<M extends MetaData>(
+	configPath?: string,
+): Promise<Config<M>> {
 	const res = configPath
 		? await explorer.load(configPath).catch((error: NodeJS.ErrnoException) => {
 				if (error.code === 'ENOENT') {
@@ -24,7 +27,7 @@ export async function getConfig(configPath?: string): Promise<Config> {
 				throw error;
 			})
 		: await explorer.search();
-	const config: UserConfig = res?.config ?? {};
+	const config: UserConfig<M> = res?.config ?? {};
 
-	return mergeConfig(config, path.dirname(res?.filepath ?? ''));
+	return mergeConfig<M>(config, path.dirname(res?.filepath ?? ''));
 }

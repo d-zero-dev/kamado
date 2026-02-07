@@ -1,5 +1,5 @@
 import type { UserConfig, Context } from '../config/types.js';
-import type { CompilableFile } from '../files/types.js';
+import type { CompilableFile, MetaData } from '../files/types.js';
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -7,6 +7,7 @@ import path from 'node:path';
 import { deal } from '@d-zero/dealer';
 import c from 'ansi-colors';
 
+import { createCompileFunctions } from '../compiler/compile-functions.js';
 import { createCompiler } from '../compiler/create-compiler.js';
 import { createCompileFunctionMap } from '../compiler/function-map.js';
 import { mergeConfig } from '../config/merge-config.js';
@@ -38,11 +39,13 @@ interface BuildConfig {
  * @param buildConfig.targetGlob - Glob pattern for build targets
  * @param buildConfig.verbose - Whether to enable verbose logging
  */
-export async function build(buildConfig: UserConfig & BuildConfig) {
+export async function build<M extends MetaData>(
+	buildConfig: UserConfig<M> & BuildConfig,
+) {
 	const config = await mergeConfig(buildConfig, buildConfig.rootDir);
 
 	// Create execution context
-	const context: Context = {
+	const context: Context<M> = {
 		...config,
 		mode: 'build',
 	};
@@ -63,8 +66,10 @@ export async function build(buildConfig: UserConfig & BuildConfig) {
 	const compileFunctionMap = await createCompileFunctionMap(context);
 	const compile = createCompiler({ ...context, compileFunctionMap });
 
+	const compilers = createCompileFunctions(context);
+
 	const fileArrays = await Promise.all(
-		context.compilers.map((compilerEntry) =>
+		compilers.map((compilerEntry) =>
 			getAssetGroup(
 				{
 					inputDir: context.dir.input,

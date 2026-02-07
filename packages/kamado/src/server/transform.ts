@@ -1,4 +1,5 @@
 import type { Transform, TransformContext } from '../config/types.js';
+import type { MetaData } from '../files/types.js';
 
 import c from 'ansi-colors';
 import picomatch from 'picomatch';
@@ -6,16 +7,16 @@ import picomatch from 'picomatch';
 /**
  * Required context for applying transforms
  */
-export interface ApplyTransformsContext {
+export interface ApplyTransformsContext<M extends MetaData> {
 	readonly content: string | ArrayBuffer;
-	readonly transformContext: TransformContext;
+	readonly transformContext: TransformContext<M>;
 }
 
 /**
  * Optional options for applying transforms
  */
-export interface ApplyTransformsOptions {
-	readonly transforms?: readonly Transform[];
+export interface ApplyTransformsOptions<M extends MetaData> {
+	readonly transforms?: readonly Transform<M>[];
 }
 
 /**
@@ -26,9 +27,9 @@ export interface ApplyTransformsOptions {
  * @param options - Optional options (transforms)
  * @returns Transformed content
  */
-export async function applyTransforms(
-	context: ApplyTransformsContext,
-	options?: ApplyTransformsOptions,
+export async function applyTransforms<M extends MetaData>(
+	context: ApplyTransformsContext<M>,
+	options?: ApplyTransformsOptions<M>,
 ): Promise<string | ArrayBuffer> {
 	const { content, transformContext } = context;
 	const { transforms } = options ?? {};
@@ -72,7 +73,10 @@ export async function applyTransforms(
  * @param context - Transform context with request/response information
  * @returns true if transform should be applied
  */
-function shouldApplyTransform(transform: Transform, context: TransformContext): boolean {
+function shouldApplyTransform<M extends MetaData>(
+	transform: Transform<M>,
+	context: TransformContext<M>,
+): boolean {
 	const filter = transform.filter;
 
 	if (!filter) {

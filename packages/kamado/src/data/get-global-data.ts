@@ -1,6 +1,6 @@
 import type { GlobalData } from './types.js';
 import type { Config } from '../config/types.js';
-import type { CompilableFile } from '../files/types.js';
+import type { CompilableFile, MetaData } from '../files/types.js';
 
 import path from 'node:path';
 
@@ -8,6 +8,7 @@ import dayjs from 'dayjs';
 import fg from 'fast-glob';
 import yaml from 'yaml';
 
+import { createCompileFunctions } from '../compiler/compile-functions.js';
 import { getFileContent } from '../files/file-content.js';
 
 import { getAssetGroup } from './get-asset-group.js';
@@ -18,7 +19,10 @@ import { getAssetGroup } from './get-asset-group.js';
  * @param config - Configuration object
  * @returns Global data object containing package info, all pages, page list with titles, and date filter
  */
-export async function getGlobalData(dir: string, config: Config): Promise<GlobalData> {
+export async function getGlobalData<M extends MetaData>(
+	dir: string,
+	config: Config<M>,
+): Promise<GlobalData<M>> {
 	let data: Record<string, unknown> = {};
 	if (dir) {
 		const dataFileGlob = path.resolve(dir, '*');
@@ -31,10 +35,10 @@ export async function getGlobalData(dir: string, config: Config): Promise<Global
 		}
 	}
 
+	const compilers = createCompileFunctions(config);
+
 	// Find page compiler entry (outputExtension is .html)
-	const pageCompilerEntry = config.compilers.find(
-		(entry) => entry.outputExtension === '.html',
-	);
+	const pageCompilerEntry = compilers.find((entry) => entry.outputExtension === '.html');
 
 	const pageAssetFiles = pageCompilerEntry
 		? await getAssetGroup({
@@ -49,7 +53,7 @@ export async function getGlobalData(dir: string, config: Config): Promise<Global
 		: pageAssetFiles;
 
 	return {
-		pkg: config.pkg as unknown as GlobalData['pkg'],
+		pkg: config.pkg as unknown as GlobalData<M>['pkg'],
 		...data,
 		pageAssetFiles,
 		pageList,

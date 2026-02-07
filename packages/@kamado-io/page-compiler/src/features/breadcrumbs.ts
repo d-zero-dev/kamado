@@ -1,4 +1,4 @@
-import type { PageData } from 'kamado/files';
+import type { MetaData, PageData } from 'kamado/files';
 
 import path from 'node:path';
 
@@ -41,47 +41,45 @@ export type GetBreadcrumbsOptions<
 };
 
 /**
+ * Required context for breadcrumbs generation
+ */
+export interface GetBreadcrumbsContext<M extends MetaData> {
+	readonly page: PageData<M>;
+	readonly pageList: readonly PageData<M>[];
+}
+
+/**
  * Gets breadcrumb list for a page
  * @template TOut - Type of additional properties added by transformItem
- * @param page - Target page file
- * @param pageList - List of all page files
+ * @param context - Context containing current page and page list
  * @param options - Options for getting breadcrumbs
  * @returns Array of breadcrumb items (with additional properties if transformItem is specified)
  * @example
  * ```typescript
- * const breadcrumbs = getBreadcrumbs(currentPage, pageList, {
- *   baseURL: '/',
- *   optimizeTitle: (title) => title.trim(),
- * });
+ * const breadcrumbs = getBreadcrumbs(
+ *   { page: currentPage, pageList },
+ *   { baseURL: '/' },
+ * );
  * ```
  * @example
  * ```typescript
  * // With transformItem for adding custom properties
- * const breadcrumbs = getBreadcrumbs(currentPage, pageList, {
- *   transformItem: (item) => ({
- *     ...item,
- *     icon: item.href === '/' ? 'home' : 'page',
- *   }),
- * });
+ * const breadcrumbs = getBreadcrumbs(
+ *   { page: currentPage, pageList },
+ *   {
+ *     transformItem: (item) => ({
+ *       ...item,
+ *       icon: item.href === '/' ? 'home' : 'page',
+ *     }),
+ *   },
+ * );
  * ```
  */
-/**
- * Required context for breadcrumbs generation
- */
-export interface GetBreadcrumbsContext {
-	readonly page: PageData;
-	readonly pageList: readonly PageData[];
-}
-
-/**
- *
- * @param context
- * @param options
- */
 export function getBreadcrumbs<
+	M extends MetaData,
 	TOut extends Record<string, unknown> = Record<never, never>,
 >(
-	context: GetBreadcrumbsContext,
+	context: GetBreadcrumbsContext<M>,
 	options?: GetBreadcrumbsOptions<TOut>,
 ): (BreadcrumbItem & TOut)[] {
 	const { page, pageList } = context;
@@ -91,7 +89,10 @@ export function getBreadcrumbs<
 		isAncestor(page.filePathStem, item.filePathStem),
 	);
 	const breadcrumbs = pages.map((sourcePage) => ({
-		title: (sourcePage.metaData?.title as string | undefined)?.trim() || '__NO_TITLE__',
+		title:
+			(
+				(sourcePage.metaData as Record<string, unknown>)?.title as string | undefined
+			)?.trim() || '__NO_TITLE__',
 		href: sourcePage.url,
 		depth: sourcePage.url.split('/').filter(Boolean).length,
 	}));

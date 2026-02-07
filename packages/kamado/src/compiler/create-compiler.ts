@@ -1,4 +1,5 @@
 import type { CompileFunction, CompilerContext } from './types.js';
+import type { MetaData } from '../files/types.js';
 
 import path from 'node:path';
 
@@ -10,7 +11,9 @@ import { getFile } from '../files/get-file.js';
  * @param context - Compiler context with function map
  * @returns Compile function that selects appropriate compiler based on file extension
  */
-export function createCompiler(context: CompilerContext): CompileFunction {
+export function createCompiler<M extends MetaData>(
+	context: CompilerContext<M>,
+): CompileFunction {
 	const self: CompileFunction = async (fileSeed, log, cache) => {
 		const file =
 			'outputPath' in fileSeed

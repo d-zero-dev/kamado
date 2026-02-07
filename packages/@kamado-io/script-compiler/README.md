@@ -14,11 +14,11 @@ yarn add @kamado-io/script-compiler
 
 ```ts
 import { defineConfig } from 'kamado/config';
-import { scriptCompiler } from '@kamado-io/script-compiler';
+import { createScriptCompiler } from '@kamado-io/script-compiler';
 
 export default defineConfig({
-	compilers: [
-		scriptCompiler({
+	compilers: (def) => [
+		def(createScriptCompiler(), {
 			alias: { '@': './src' },
 			minifier: true,
 			banner: 'Generated file',
