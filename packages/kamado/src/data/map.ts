@@ -1,6 +1,8 @@
 import type { Config } from '../config/types.js';
 import type { CompilableFile, MetaData } from '../files/types.js';
 
+import { createCompileFunctions } from '../compiler/compile-functions.js';
+
 import { getAssetGroup } from './get-asset-group.js';
 
 /**
@@ -10,7 +12,9 @@ import { getAssetGroup } from './get-asset-group.js';
 export async function getCompilableFileMap<M extends MetaData>(config: Config<M>) {
 	const map = new Map<string, CompilableFile>();
 
-	for (const compilerEntry of config.compilers) {
+	const compilers = createCompileFunctions(config);
+
+	for (const compilerEntry of compilers) {
 		const files = await getAssetGroup({
 			inputDir: config.dir.input,
 			outputDir: config.dir.output,

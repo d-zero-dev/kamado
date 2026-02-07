@@ -8,6 +8,7 @@ import dayjs from 'dayjs';
 import fg from 'fast-glob';
 import yaml from 'yaml';
 
+import { createCompileFunctions } from '../compiler/compile-functions.js';
 import { getFileContent } from '../files/file-content.js';
 
 import { getAssetGroup } from './get-asset-group.js';
@@ -34,10 +35,10 @@ export async function getGlobalData<M extends MetaData>(
 		}
 	}
 
+	const compilers = createCompileFunctions(config);
+
 	// Find page compiler entry (outputExtension is .html)
-	const pageCompilerEntry = config.compilers.find(
-		(entry) => entry.outputExtension === '.html',
-	);
+	const pageCompilerEntry = compilers.find((entry) => entry.outputExtension === '.html');
 
 	const pageAssetFiles = pageCompilerEntry
 		? await getAssetGroup({

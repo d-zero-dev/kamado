@@ -7,6 +7,7 @@ import path from 'node:path';
 import { deal } from '@d-zero/dealer';
 import c from 'ansi-colors';
 
+import { createCompileFunctions } from '../compiler/compile-functions.js';
 import { createCompiler } from '../compiler/create-compiler.js';
 import { createCompileFunctionMap } from '../compiler/function-map.js';
 import { mergeConfig } from '../config/merge-config.js';
@@ -65,8 +66,10 @@ export async function build<M extends MetaData>(
 	const compileFunctionMap = await createCompileFunctionMap(context);
 	const compile = createCompiler({ ...context, compileFunctionMap });
 
+	const compilers = createCompileFunctions(context);
+
 	const fileArrays = await Promise.all(
-		context.compilers.map((compilerEntry) =>
+		compilers.map((compilerEntry) =>
 			getAssetGroup(
 				{
 					inputDir: context.dir.input,
