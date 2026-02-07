@@ -303,7 +303,7 @@ Where `PageData<M>` extends `CompilableFile` with optional `metaData`:
 
 ```typescript
 interface PageData<M extends MetaData> extends CompilableFile {
-	metaData?: M & { title?: string };
+	metaData?: M;
 }
 ```
 

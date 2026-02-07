@@ -380,27 +380,29 @@ export default defineConfig({
 });
 ```
 
-**ResponseTransform Interface:**
+**Transform Interface:**
 
 ```typescript
-interface ResponseTransform {
-	name?: string; // Transform name for debugging
-	filter?: {
-		include?: string | string[]; // Glob patterns to include
-		exclude?: string | string[]; // Glob patterns to exclude
+interface Transform<M extends MetaData> {
+	readonly name: string; // Transform name for debugging
+	readonly filter?: {
+		readonly include?: string | readonly string[]; // Glob patterns to include
+		readonly exclude?: string | readonly string[]; // Glob patterns to exclude
 	};
-	transform: (
+	readonly transform: (
 		content: string | ArrayBuffer,
-		context: TransformContext,
+		context: TransformContext<M>,
 	) => Promise<string | ArrayBuffer> | string | ArrayBuffer;
 }
 
-interface TransformContext {
-	path: string; // Request path
-	inputPath?: string; // Original input file path (if available)
-	outputPath: string; // Output file path
-	isServe: boolean; // Always true in dev server
-	context: Context; // Full execution context
+interface TransformContext<M extends MetaData> {
+	readonly path: string; // Request path
+	readonly inputPath?: string; // Original input file path (if available)
+	readonly outputPath: string; // Output file path
+	readonly outputDir: string; // Output directory path
+	readonly isServe: boolean; // Always true in dev server
+	readonly context: Context<M>; // Full execution context
+	readonly compile: CompileFunction; // Function to compile other files
 }
 ```
 
