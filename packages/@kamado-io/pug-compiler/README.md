@@ -69,7 +69,7 @@ yarn add @kamado-io/page-compiler @kamado-io/pug-compiler
 ### Pattern 1: Individual Definition (Explicit but Verbose)
 
 ```ts
-import { pageCompiler } from '@kamado-io/page-compiler';
+import { createPageCompiler } from '@kamado-io/page-compiler';
 import { createCompileHooks } from '@kamado-io/pug-compiler';
 
 const hooks = createCompileHooks({
@@ -79,8 +79,8 @@ const hooks = createCompileHooks({
 })();
 
 export const config = {
-	compilers: [
-		pageCompiler({
+	compilers: (def) => [
+		def(createPageCompiler(), {
 			layouts: { dir: './layouts' },
 			globalData: { dir: './data' },
 			compileHooks: {
@@ -101,7 +101,7 @@ Note: `compilePug` cannot be directly used with `compileHooks` because `page-com
 ### Pattern 2: Function Form (Define main and layout together)
 
 ```ts
-import { pageCompiler } from '@kamado-io/page-compiler';
+import { createPageCompiler } from '@kamado-io/page-compiler';
 import { createCompileHooks } from '@kamado-io/pug-compiler';
 
 const hooksFactory = createCompileHooks({
@@ -111,8 +111,8 @@ const hooksFactory = createCompileHooks({
 });
 
 export const config = {
-	compilers: [
-		pageCompiler({
+	compilers: (def) => [
+		def(createPageCompiler(), {
 			layouts: { dir: './layouts' },
 			globalData: { dir: './data' },
 			compileHooks: () => hooksFactory(),
@@ -124,12 +124,12 @@ export const config = {
 ### Pattern 3: Dynamic Options
 
 ```ts
-import { pageCompiler } from '@kamado-io/page-compiler';
+import { createPageCompiler } from '@kamado-io/page-compiler';
 import { createCompileHooks } from '@kamado-io/pug-compiler';
 
 export const config = {
-	compilers: [
-		pageCompiler({
+	compilers: (def) => [
+		def(createPageCompiler(), {
 			layouts: { dir: './layouts' },
 			globalData: { dir: './data' },
 			compileHooks: () => {
@@ -148,12 +148,12 @@ export const config = {
 ### Pattern 4: Using `createCompileHooks` Helper (Most Concise)
 
 ```ts
-import { pageCompiler } from '@kamado-io/page-compiler';
+import { createPageCompiler } from '@kamado-io/page-compiler';
 import { createCompileHooks } from '@kamado-io/pug-compiler';
 
 export const config = {
-	compilers: [
-		pageCompiler({
+	compilers: (def) => [
+		def(createPageCompiler(), {
 			layouts: { dir: './layouts' },
 			globalData: { dir: './data' },
 			compileHooks: createCompileHooks({
