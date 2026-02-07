@@ -33,7 +33,7 @@ This document explains Kamado's internal structure, the flow from CLI to build/s
 `Context` extends `Config` and adds runtime execution information:
 
 ```typescript
-export interface Context extends Config {
+export interface Context<M extends MetaData> extends Config<M> {
 	readonly mode: 'serve' | 'build';
 }
 ```
@@ -47,8 +47,8 @@ The `mode` field is **not user-configurable**. It is automatically set by the CL
 
 The execution mode flows through the system as follows:
 
-1. **CLI** (`src/index.ts`): User runs `kamado build` or `kamado server`
-2. **Builder/Server** (`src/builder/index.ts` or `src/server/app.ts`): Creates `Context` by spreading `Config` and adding `mode`
+1. **CLI** (`src/cli.ts`): User runs `kamado build` or `kamado server`
+2. **Builder/Server** (`src/builder/build.ts` or `src/server/app.ts`): Creates `Context` by spreading `Config` and adding `mode`
 3. **Compilers**: Receive `Context` instead of `Config`, allowing them to detect the execution mode
 4. **Hooks**: Lifecycle hooks (`onBeforeBuild`, `onAfterBuild`) and page compiler transform functions receive the execution mode via `TransformContext`
 
@@ -64,7 +64,7 @@ This architecture enables mode-specific behavior, such as:
 
 Key directories under `packages/kamado/src` and their roles:
 
-- **`index.ts`**: CLI entry point. Processes commands using `@d-zero/roar`.
+- **`cli.ts`**: CLI entry point. Processes commands using `@d-zero/roar`.
 - **`builder/`**: Execution logic for static builds (`kamado build`).
 - **`server/`**: Logic for the development server (`kamado server`) using Hono.
 - **`compiler/`**: Management of compiler plugin interfaces and the function map.
@@ -132,7 +132,7 @@ export function functionName(
    ```
 
 3. **Public API/builder functions**: Prioritize usability over consistency
-   - Example: `pageCompiler(options)`, `scriptCompiler(options)`
+   - Example: `createPageCompiler()(options)`, `createScriptCompiler()(options)`
 
 4. **Functions receiving primitives**: Don't objectify
    - If already receives object → split into context+options
@@ -233,12 +233,37 @@ The map is built once at server startup and used for all subsequent requests.
 
 ### Compiler Plugins
 
-Kamado's features are extended by adding `CustomCompilerPlugin`s.
+Kamado's features are extended by adding compiler plugins. All compiler-related types accept a generic `M extends MetaData` type parameter for type-safe custom metadata.
+
+#### Compiler Configuration (`Compilers<M>`)
+
+The `Config.compilers` field uses a callback form for type-safe compiler definition:
+
+```typescript
+export interface Compilers<M extends MetaData> {
+	(define: CompilerDefine<M>): readonly CustomCompilerWithMetadata<M>[];
+}
+
+export type CompilerDefine<M extends MetaData> = <CustomCompileOptions>(
+	factory: CustomCompilerFactory<M, CustomCompileOptions>,
+	options?: CustomCompileOptions,
+) => CustomCompilerWithMetadata<M>;
+
+export type CustomCompilerFactory<M extends MetaData, CustomCompileOptions> = (
+	options?: CustomCompileOptions,
+) => CustomCompilerWithMetadata<M>;
+```
+
+The callback receives a `define` helper that binds compiler factories to options. The `M` type parameter flows from `defineConfig<M>` through the callback, enabling full type inference for each compiler's options.
+
+At runtime, `createCompileFunctions()` (`src/compiler/compile-functions.ts`) resolves the callback by passing a helper that calls `factory(options)`.
+
+#### Compiler Interfaces
 
 ```typescript
 // CustomCompiler interface receives Context
-export interface CustomCompiler {
-	(context: Context): Promise<CustomCompileFunction> | CustomCompileFunction;
+export interface CustomCompiler<M extends MetaData> {
+	(context: Context<M>): Promise<CustomCompileFunction> | CustomCompileFunction;
 }
 
 // CustomCompileFunction handles individual file compilation
@@ -252,7 +277,7 @@ export interface CustomCompileFunction {
 }
 ```
 
-The `CustomCompiler` receives a `Context` object (which includes `mode: 'serve' | 'build'`) and returns a `CustomCompileFunction`. The `CustomCompileFunction` receives:
+The `CustomCompiler` receives a `Context<M>` object (which includes `mode: 'serve' | 'build'`) and returns a `CustomCompileFunction`. The `CustomCompileFunction` receives:
 
 - `compilableFile`: The file to compile
 - `compile`: A recursive compile function that can compile other files during compilation (e.g., layouts, includes)
@@ -270,15 +295,15 @@ The `pageList` hook allows users to filter or transform the list of pages availa
 ```typescript
 pageList?: (
 	pageAssetFiles: readonly CompilableFile[],
-	config: Config,
-) => PageData[] | Promise<PageData[]>;
+	config: Config<M>,
+) => PageData<M>[] | Promise<PageData<M>[]>;
 ```
 
-Where `PageData` extends `CompilableFile` with optional `metaData`:
+Where `PageData<M>` extends `CompilableFile` with optional `metaData`:
 
 ```typescript
-interface PageData extends CompilableFile {
-	metaData?: MetaData;
+interface PageData<M extends MetaData> extends CompilableFile {
+	metaData?: M & { title?: string };
 }
 ```
 
@@ -287,7 +312,7 @@ interface PageData extends CompilableFile {
 - `pageAssetFiles`: Array of all page files (files matching the page compiler's `files` pattern)
 - `config`: Configuration object
 
-**Returns:** Filtered/transformed array of `PageData` objects
+**Returns:** Filtered/transformed array of `PageData<M>` objects
 
 **Note:** At `pageList` hook time, `metaData` is not yet populated from frontmatter. If you need titles for breadcrumbs/navigation, explicitly set `metaData.title` in this hook.
 
@@ -316,8 +341,8 @@ export default defineConfig({
 
 Users can insert custom logic before and after the build via `kamado.config.ts`.
 
-- `onBeforeBuild(context: Context)`: Executed before the build starts (e.g., preparing assets). Receives `Context` with `mode` field.
-- `onAfterBuild(context: Context)`: Executed after the build completes (e.g., generating sitemaps, notifications). Receives `Context` with `mode` field.
+- `onBeforeBuild(context: Context<M>)`: Executed before the build starts (e.g., preparing assets). Receives `Context` with `mode` field.
+- `onAfterBuild(context: Context<M>)`: Executed after the build completes (e.g., generating sitemaps, notifications). Receives `Context` with `mode` field.
 
 Both hooks receive `Context` instead of `Config`, allowing them to detect whether they are running in build or serve mode.
 
@@ -325,36 +350,38 @@ Both hooks receive `Context` instead of `Config`, allowing them to detect whethe
 
 The Response Transform API allows modification of response content during development server mode (`serve` mode only). It is implemented in `src/server/transform.ts` and integrated into the request handling flow in `src/server/route.ts`.
 
-**Note:** Both Response Transform API (`devServer.transforms`) and page compiler's Transform Pipeline API (`pageCompiler({ transforms })`) use the same `Transform` interface from `kamado/config`. However, they differ in scope:
+**Note:** Both Response Transform API (`devServer.transforms`) and page compiler's Transform Pipeline API (`createPageCompiler()({ transforms })`) use the same `Transform` interface from `kamado/config`. However, they differ in scope:
 
 - Response transforms apply to all file types in dev mode only, and respect the `filter` option
 - Page transforms apply to HTML pages in both build and serve modes, and ignore the `filter` option
 
-See `@kamado-io/page-compiler` for the page transform system, which includes `defaultPageTransforms` (exported from `packages/@kamado-io/page-compiler/src/page-transform.ts`).
+See `@kamado-io/page-compiler` for the page transform system, which includes `createDefaultPageTransforms()` (exported from `packages/@kamado-io/page-compiler/src/page-transform.ts`).
 
 #### Architecture
 
 ```typescript
 // Transform interface
-export interface ResponseTransform {
-	readonly name?: string;
+export interface Transform<M extends MetaData> {
+	readonly name: string;
 	readonly filter?: {
 		readonly include?: string | readonly string[];
 		readonly exclude?: string | readonly string[];
 	};
 	readonly transform: (
 		content: string | ArrayBuffer,
-		context: TransformContext,
+		context: TransformContext<M>,
 	) => Promise<string | ArrayBuffer> | string | ArrayBuffer;
 }
 
 // Transform context provides request/response information
-export interface TransformContext {
+export interface TransformContext<M extends MetaData> {
 	readonly path: string; // Request path (relative to output directory)
 	readonly inputPath?: string; // Source file path (if available from compiler)
 	readonly outputPath: string; // Output file path
+	readonly outputDir: string; // Output directory path
 	readonly isServe: boolean; // Whether running in development server mode
-	readonly context: Context; // Full execution context (config + mode)
+	readonly context: Context<M>; // Full execution context (config + mode)
+	readonly compile: CompileFunction; // Function to compile other files
 }
 ```
 

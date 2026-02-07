@@ -74,9 +74,9 @@ yarn add kamado
 import path from 'node:path';
 
 import { defineConfig } from 'kamado/config';
-import { pageCompiler } from '@kamado-io/page-compiler';
-import { scriptCompiler } from '@kamado-io/script-compiler';
-import { styleCompiler } from '@kamado-io/style-compiler';
+import { createPageCompiler } from '@kamado-io/page-compiler';
+import { createScriptCompiler } from '@kamado-io/script-compiler';
+import { createStyleCompiler } from '@kamado-io/style-compiler';
 
 export default defineConfig({
 	dir: {
@@ -88,8 +88,8 @@ export default defineConfig({
 		open: true,
 		port: 8000,
 	},
-	compilers: [
-		pageCompiler({
+	compilers: (def) => [
+		def(createPageCompiler(), {
 			files: '**/*.{html,pug}',
 			outputExtension: '.html',
 			globalData: {
@@ -98,10 +98,10 @@ export default defineConfig({
 			layouts: {
 				dir: path.resolve(import.meta.dirname, '__assets', '_libs', 'layouts'),
 			},
-			// Transform パイプライン（オプション、省略時は defaultPageTransforms を使用）
+			// Transform パイプライン（オプション、省略時は createDefaultPageTransforms() を使用）
 			// カスタマイズについては @kamado-io/page-compiler のドキュメントを参照してください
 		}),
-		styleCompiler({
+		def(createStyleCompiler(), {
 			files: '**/*.{css,scss,sass}',
 			ignore: '**/*.{scss,sass}',
 			outputExtension: '.css',
@@ -109,7 +109,7 @@ export default defineConfig({
 				'@': path.resolve(import.meta.dirname, '__assets', '_libs'),
 			},
 		}),
-		scriptCompiler({
+		def(createScriptCompiler(), {
 			files: '**/*.{js,ts,jsx,tsx,mjs,cjs}',
 			outputExtension: '.js',
 			minifier: true,
@@ -147,16 +147,16 @@ export default defineConfig({
 
 #### コンパイラ設定
 
-`compilers`配列でファイルのコンパイル方法を定義します。各エントリはコンパイラ関数の呼び出しで、メタデータ付きのコンパイラを返します。コンパイラ関数は以下のオプションを受け取ります：
+`compilers`オプションは型安全なコンパイラ設定のためにコールバック形式を使用します。コールバックは`def`ヘルパー関数を受け取り、コンパイラファクトリとオプションをバインドします。各`def(factory(), options)`呼び出しはメタデータ付きのコンパイラを返します。コンパイラオプションは以下を含みます：
 
 - `files`（オプション）: コンパイルするファイルのglobパターン。パターンは`dir.input`を基準に解決されます。デフォルト値は各コンパイラで提供されます（下記参照）。
 - `ignore`（オプション）: コンパイルから除外するファイルのglobパターン。パターンは`dir.input`を基準に解決されます。例えば、`'**/*.scss'`と指定すると、入力ディレクトリとそのサブディレクトリ内のすべての`.scss`ファイルが無視されます。
 - `outputExtension`（オプション）: 出力ファイルの拡張子（例: `.html`, `.css`, `.js`, `.php`）。デフォルト値は各コンパイラで提供されます（下記参照）。
 - その他のコンパイラ固有のオプション（各コンパイラのドキュメントを参照）。
 
-配列の順序が処理順序を決定します。
+返却される配列の順序が処理順序を決定します。
 
-##### pageCompiler
+##### createPageCompiler
 
 - `files`（オプション）: コンパイルするファイルのglobパターン。パターンは`dir.input`を基準に解決されます（デフォルト: `'**/*.html'`）
 - `ignore`（オプション）: コンパイルから除外するファイルのglobパターン。パターンは`dir.input`を基準に解決されます。例えば、`'**/*.tmp'`と指定すると、すべての`.tmp`ファイルが無視されます
@@ -165,14 +165,14 @@ export default defineConfig({
 - `globalData.data`: 追加のグローバルデータ
 - `layouts.dir`: レイアウトファイルのディレクトリ
 - `compileHooks`: コンパイルプロセスをカスタマイズするコンパイルフック（Pugテンプレートを使用する場合は必須）
-- `transforms`: コンパイル済みHTMLに適用する変換関数の配列。省略時は`defaultPageTransforms`を使用。Transform Pipeline APIの詳細は[@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md)を参照してください
+- `transforms`: コンパイル済みHTMLに適用する変換関数の配列。省略時は`createDefaultPageTransforms()`を使用。Transform Pipeline APIの詳細は[@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md)を参照してください
 
 **注意**: `page-compiler`は汎用コンテナコンパイラであり、デフォルトではPugテンプレートをコンパイルしません。Pugテンプレートを使用するには、`@kamado-io/pug-compiler`をインストールし、`compileHooks`を設定してください。詳細は[@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md)を参照してください。
 
 **例**: `.pug`ファイルを`.html`にコンパイルする場合：
 
 ```ts
-pageCompiler({
+def(createPageCompiler(), {
 	files: '**/*.pug',
 	outputExtension: '.html',
 	compileHooks: {
@@ -183,7 +183,7 @@ pageCompiler({
 });
 ```
 
-##### styleCompiler
+##### createStyleCompiler
 
 - `files`（オプション）: コンパイルするファイルのglobパターン。パターンは`dir.input`を基準に解決されます（デフォルト: `'**/*.css'`）
 - `ignore`（オプション）: コンパイルから除外するファイルのglobパターン。パターンは`dir.input`を基準に解決されます。例えば、`'**/*.{scss,sass}'`と指定すると、すべての`.scss`と`.sass`ファイルが無視されます
@@ -194,7 +194,7 @@ pageCompiler({
 **例**: `.scss`ファイルを`.css`にコンパイルし、ソースファイルを無視する場合：
 
 ```ts
-styleCompiler({
+def(createStyleCompiler(), {
 	files: '**/*.{css,scss,sass}',
 	ignore: '**/*.{scss,sass}',
 	outputExtension: '.css',
@@ -204,7 +204,7 @@ styleCompiler({
 });
 ```
 
-##### scriptCompiler
+##### createScriptCompiler
 
 - `files`（オプション）: コンパイルするファイルのglobパターン。パターンは`dir.input`を基準に解決されます（デフォルト: `'**/*.{js,ts,jsx,tsx,mjs,cjs}'`）
 - `ignore`（オプション）: コンパイルから除外するファイルのglobパターン。パターンは`dir.input`を基準に解決されます。例えば、`'**/*.test.ts'`と指定すると、すべてのテストファイルが無視されます
@@ -216,7 +216,7 @@ styleCompiler({
 **例**: TypeScriptファイルをJavaScriptにコンパイルする場合：
 
 ```ts
-scriptCompiler({
+def(createScriptCompiler(), {
 	files: '**/*.{js,ts,jsx,tsx}',
 	outputExtension: '.js',
 	minifier: true,
@@ -283,7 +283,7 @@ export default defineConfig({
 両方とも同じ `Transform` インターフェース（`kamado/config`）を使用しますが、適用範囲と動作が異なります：
 
 - **`devServer.transforms`**: 開発サーバーモード時のみ（`kamado server`）、全てのレスポンスに適用されます。HTML、CSS、JS、画像など、あらゆるファイルタイプを処理できるミドルウェア形式の変換です。`filter` オプション（include/exclude）がここで有効です。ビルド時には実行されません。
-- **`pageCompiler({ transforms })`**: ビルドモードと開発サーバーモードの両方で、コンパイル済みHTMLページに適用されます。HTML処理専用の変換パイプラインです。`filter` オプションは無視されます（全てのHTMLページが処理されます）。詳細は[@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md)を参照してください。
+- **`def(createPageCompiler(), { transforms })`**: ビルドモードと開発サーバーモードの両方で、コンパイル済みHTMLページに適用されます。HTML処理専用の変換パイプラインです。`filter` オプションは無視されます（全てのHTMLページが処理されます）。詳細は[@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md)を参照してください。
 
 同じTransform関数（`manipulateDOM()`、`prettier()`、カスタムTransformなど）を両方で再利用できます。
 
@@ -383,24 +383,26 @@ export default defineConfig({
 **ResponseTransformインターフェース:**
 
 ```typescript
-interface ResponseTransform {
-	name?: string; // デバッグ用の変換名
-	filter?: {
-		include?: string | string[]; // インクルードするGlobパターン
-		exclude?: string | string[]; // エクスクルードするGlobパターン
+interface Transform<M extends MetaData> {
+	readonly name: string; // デバッグ用の変換名
+	readonly filter?: {
+		readonly include?: string | readonly string[]; // インクルードするGlobパターン
+		readonly exclude?: string | readonly string[]; // エクスクルードするGlobパターン
 	};
-	transform: (
+	readonly transform: (
 		content: string | ArrayBuffer,
-		context: TransformContext,
+		context: TransformContext<M>,
 	) => Promise<string | ArrayBuffer> | string | ArrayBuffer;
 }
 
-interface TransformContext {
-	path: string; // リクエストパス
-	inputPath?: string; // 元の入力ファイルパス（利用可能な場合）
-	outputPath: string; // 出力ファイルパス
-	isServe: boolean; // 開発サーバーでは常にtrue
-	context: Context; // 完全な実行コンテキスト
+interface TransformContext<M extends MetaData> {
+	readonly path: string; // リクエストパス
+	readonly inputPath?: string; // 元の入力ファイルパス（利用可能な場合）
+	readonly outputPath: string; // 出力ファイルパス
+	readonly outputDir: string; // 出力ディレクトリパス
+	readonly isServe: boolean; // 開発サーバーでは常にtrue
+	readonly context: Context<M>; // 完全な実行コンテキスト
+	readonly compile: CompileFunction; // 他のファイルをコンパイルする関数
 }
 ```
 
