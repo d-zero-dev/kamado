@@ -40,7 +40,7 @@
 		"dayjs": "1.11.19",
 		"fast-glob": "3.3.3",
 		"gray-matter": "4.0.3",
-		"hono": "4.12.1",
+		"hono": "4.12.2",
 		"jsdom": "28.1.0",
 		"open": "11.0.0",
 		"picomatch": "4.0.3",
