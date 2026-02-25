@@ -60,15 +60,27 @@ export async function setRoute<M extends MetaData>(
 	});
 	const fileIds = new Map<string, number>();
 
-	let fileIdIterator = 0;
+	// Start at 1 to avoid zero-multiplication collisions in extension-based ID namespacing
+	let fileIdIterator = 1;
 
 	const f = filePathColorizer(kamadoContext.dir.input);
+
+	const resolvedOutputDir = path.resolve(kamadoContext.dir.output);
 
 	const routes = app.get('*', async (ctx) => {
 		const url = new URL(ctx.req.url, `http://${hostname}`);
 		const requestFilePath = urlToLocalPath(url.toString(), '.html');
 
 		const refLocalFilePath = path.resolve(kamadoContext.dir.output, requestFilePath);
+
+		// Guard: Prevent path traversal outside the output directory
+		if (
+			!refLocalFilePath.startsWith(resolvedOutputDir + path.sep) &&
+			refLocalFilePath !== resolvedOutputDir
+		) {
+			return ctx.text('Forbidden', 403);
+		}
+
 		let fileId = fileIds.get(refLocalFilePath) ?? fileIdIterator++;
 
 		// Helper to apply transforms and return response
@@ -203,10 +215,8 @@ async function readFile(filePath: string) {
 	if (!buffer) {
 		return null;
 	}
-	if (buffer.buffer instanceof ArrayBuffer) {
-		return buffer.buffer;
-	}
-	return null;
+	// Convert Buffer to ArrayBuffer safely
+	return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 }
 
 /**

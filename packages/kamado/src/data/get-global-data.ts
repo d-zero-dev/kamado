@@ -66,6 +66,14 @@ export async function getGlobalData<M extends MetaData>(
 const dataCache = new Map<string, Record<string, unknown>>();
 
 /**
+ * Clears the global data cache
+ * Useful for ensuring fresh data in dev server mode
+ */
+export function clearGlobalDataCache(): void {
+	dataCache.clear();
+}
+
+/**
  * Gets global data from a data file (JS, JSON, or YAML) with caching
  * @param filePath - Path to the data file
  * @returns Record containing the data (keyed by filename without extension)
@@ -76,10 +84,18 @@ async function getGlobalDataFromDataFile(
 	if (dataCache.has(filePath)) {
 		return dataCache.get(filePath)!;
 	}
+
+	// Ensure the file path is absolute to prevent unexpected imports
+	if (!path.isAbsolute(filePath)) {
+		throw new Error(`Data file path must be absolute: ${filePath}`);
+	}
+
 	const ext = path.extname(filePath).toLowerCase();
 	const name = path.basename(filePath, ext);
 	switch (ext) {
 		case '.js': {
+			// NOTE: Dynamic import is intentional here - data files are loaded from
+			// a user-configured directory resolved via fast-glob, not from user input.
 			const scripts = await import(filePath);
 			const mainScript =
 				typeof scripts.default === 'function'
