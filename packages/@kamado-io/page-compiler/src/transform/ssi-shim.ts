@@ -133,6 +133,18 @@ export function createSSIShimTransform<M extends MetaData>(
 				filePath = path.resolve(ctx.context.dir.output, includePath.replace(/^\//, ''));
 			}
 
+			// Guard: Prevent path traversal outside the output directory
+			const resolvedOutputDir = path.resolve(ctx.context.dir.output);
+			if (
+				!filePath.startsWith(resolvedOutputDir + path.sep) &&
+				filePath !== resolvedOutputDir
+			) {
+				// eslint-disable-next-line no-console
+				console.warn(`[${name}] Blocked path traversal attempt: ${includePath}`);
+				result = result.replace(fullMatch, '');
+				continue;
+			}
+
 			try {
 				// Read the included file
 				const includeContent = await fs.readFile(filePath, 'utf8');

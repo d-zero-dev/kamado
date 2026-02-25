@@ -25,11 +25,20 @@ export async function start<M extends MetaData>(config: Config<M>) {
 
 	await setRoute({ app, context });
 
-	serve({
+	const server = serve({
 		fetch: app.fetch,
 		hostname: context.devServer.host,
 		port: context.devServer.port,
 	});
+
+	// Graceful shutdown on process signals
+	const shutdown = () => {
+		server.close(() => {
+			process.exit(0);
+		});
+	};
+	process.on('SIGINT', shutdown);
+	process.on('SIGTERM', shutdown);
 
 	const baseUrl = new URL(`http://${context.devServer.host}:${context.devServer.port}`);
 	baseUrl.pathname = context.devServer.startPath ?? '';

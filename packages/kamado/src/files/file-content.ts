@@ -13,6 +13,16 @@ export async function getFileContent(filePath: string, cache = true): Promise<st
 		return fileContentCache.get(filePath)!;
 	}
 	const fileContent = await fs.readFile(filePath, 'utf8');
-	fileContentCache.set(filePath, fileContent);
+	if (cache) {
+		fileContentCache.set(filePath, fileContent);
+	}
 	return fileContent;
+}
+
+/**
+ * Clears the file content cache
+ * Useful for freeing memory after build completion or resetting state
+ */
+export function clearFileContentCache(): void {
+	fileContentCache.clear();
 }
