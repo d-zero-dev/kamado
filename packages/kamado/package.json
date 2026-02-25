@@ -47,7 +47,7 @@
 		"yaml": "2.8.2"
 	},
 	"devDependencies": {
-		"@types/jsdom": "27.0.0",
+		"@types/jsdom": "28.0.0",
 		"@types/picomatch": "4.0.2"
 	}
 }
