@@ -30,7 +30,7 @@
 		"dist"
 	],
 	"dependencies": {
-		"@d-zero/dealer": "1.6.3",
+		"@d-zero/dealer": "1.6.4",
 		"@d-zero/roar": "0.2.0",
 		"@d-zero/shared": "0.20.0",
 		"@hono/node-server": "1.19.9",
