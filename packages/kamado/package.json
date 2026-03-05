@@ -31,7 +31,7 @@
 	],
 	"dependencies": {
 		"@d-zero/dealer": "1.6.4",
-		"@d-zero/roar": "0.2.0",
+		"@d-zero/roar": "0.2.1",
 		"@d-zero/shared": "0.20.0",
 		"@hono/node-server": "1.19.9",
 		"ansi-colors": "4.1.3",
