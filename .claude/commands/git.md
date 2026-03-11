@@ -1,94 +1,91 @@
 ---
-description: Git manipulation rules
+description: Git 操作ルール
 ---
 
-# Commit creation
+# コミット作成
 
-- When asked to "commit":
-  - **CRITICAL: ALWAYS start by checking `git status` to see current state**
-  - **CRITICAL: NEVER trust previous state or memory - always verify current staging area**
-  1. If files are already staged:
-     - **CRITICAL: NEVER use `git add` or `git restore` when staged files exist**
-     - **CRITICAL: NEVER modify the staging area in any way**
-     - Check staged files using `git diff --staged` and create a commit message using _only_ the staged files
-     - Execute `git commit` directly with the message (user will approve as appropriate)
-     - The user has already prepared the staging area - respect their decision completely
-  2. If no files are staged:
-     - Check the differences using `git status`
-     - Stage files sequentially based on the following commit granularity before committing:
-       - Separate commits by package
-       - Commit dependencies first (if dependency order is unclear, check using `npx lerna list --graph`)
-- **AFTER EACH COMMIT:**
-  - **CRITICAL: DO NOT automatically proceed to the next commit**
-  - **CRITICAL: DO NOT make assumptions about what to do next**
-  - **CRITICAL: DO NOT trust your memory of previous state**
-  - Stop and check the current state using `git status` and `git diff`
-  - Return to the beginning of this decision process (check if files are staged or not)
-  - Wait for user confirmation or new instructions before proceeding
-- If the OS, application settings, or context suggest a language other than English is being used, provide a translation and explanation of the commit message in that language immediately before executing the commit command.
+- 「コミット」を求められた場合:
+  - **重要: 必ず `git status` で現在の状態を確認すること**
+  - **重要: 以前の状態やメモリを信用しない — 必ずステージングエリアの現状を確認**
+  1. ファイルが既にステージングされている場合:
+     - **重要: ステージング済みファイルがある場合、`git add` や `git restore` を絶対に使わない**
+     - **重要: ステージングエリアを一切変更しない**
+     - `git diff --staged` でステージング済みファイルを確認し、そのファイル*のみ*に基づくコミットメッセージを作成
+     - メッセージ付きで `git commit` を直接実行（ユーザーが適宜承認する）
+     - ユーザーが既にステージングエリアを準備済み — その判断を完全に尊重すること
+  2. ステージングされたファイルがない場合:
+     - `git status` で差分を確認
+     - 以下のコミット粒度に基づいてファイルを順次ステージングしてからコミット:
+       - パッケージ単位でコミットを分割
+       - 依存元を先にコミット（依存順序が不明な場合は `npx lerna list --graph` で確認）
+- **各コミット後:**
+  - **重要: 自動的に次のコミットに進まない**
+  - **重要: 次に何をすべきか推測しない**
+  - **重要: 以前の状態のメモリを信用しない**
+  - `git status` と `git diff` で現在の状態を確認
+  - この判定プロセスの最初に戻る（ファイルがステージングされているかどうかの確認）
+  - 続行する前にユーザーの確認または新しい指示を待つ
+- OS、アプリケーション設定、またはコンテキストから英語以外の言語が使用されていると判断される場合、コミットコマンド実行の直前に、コミットメッセージの翻訳と説明をその言語で提供すること。
 
-# Commit message format
+# コミット前コンテンツチェック
 
-- You must write in English
-- You must use the imperative mood
-- You must use conventional commits
-  - You must use the following types:
-    - `feat`
-    - `fix`
-    - `docs`
-    - `refactor`
-    - `test`
-    - `chore`
-  - You must use the following scopes:
-    - Each package name (without namespace)
-    - `repo`
-    - `deps`
-    - `github`
-- The message body's lines must not be longer than 100 characters
-- The subject must not be sentence-case, start-case, pascal-case, upper-case
+- `git commit` を実行する前に、必ず `git diff --staged` をスキャンし、プロジェクト固有の名称、企業名、顧客情報など、リポジトリに含めるべきでない情報がないか確認する。
+- 該当するものがあれば、コミット前にステージングから除外する。
 
-# Commit message safety guidelines
+# コミットメッセージの形式
 
-- For breaking changes or complex commit messages, ALWAYS use heredoc format (see below)
-- For simple, single-line commits, use single quotes (')
-- NEVER use multiple -m flags for breaking changes (causes commitlint parse errors)
+- 英語で記述すること
+- 命令法を使用すること
+- Conventional Commits を使用すること
+  - 使用するタイプ: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+  - 使用するスコープ:
+    - 各パッケージ名（ネームスペースなし）
+    - `repo`, `deps`, `github`
+- メッセージ本文の各行は100文字以下
+- 件名は sentence-case, start-case, pascal-case, upper-case にしない
 
-## Heredoc Format (REQUIRED for Breaking Changes)
+# コミットメッセージの安全ガイドライン
 
-Use heredoc with command substitution to pass multi-line commit messages. This ensures:
+- 破壊的変更や複雑なコミットメッセージには、必ず heredoc 形式を使用（下記参照）
+- シンプルな1行コミットにはシングルクォート (') を使用
+- 破壊的変更で複数の -m フラグを絶対に使わない（commitlint のパースエラーの原因になる）
 
-- Special characters (like exclamation marks) are preserved correctly
-- Multi-line messages are properly formatted
-- commitlint can parse the message correctly
+## Heredoc 形式（破壊的変更では必須）
 
-**Format:**
+heredoc とコマンド置換を使って複数行のコミットメッセージを渡す。これにより:
+
+- 特殊文字（感嘆符など）が正しく保持される
+- 複数行メッセージが適切にフォーマットされる
+- commitlint がメッセージを正しくパースできる
+
+**形式:**
 
 ```bash
 git commit -m "$(cat <<'EOF'
 type(scope)!: subject line
 
-BREAKING CHANGE: Rename all compiler-related types and functions
+BREAKING CHANGE: 説明
 
-Type renames:
-- OldName -> NewName
-- Another -> Change
+詳細:
+- 変更点1
+- 変更点2
 EOF
 )"
 ```
 
-**Important notes:**
+**重要な注意点:**
 
-- Use `<<'EOF'` (with quotes) to prevent variable expansion
-- Close with `)` after `EOF` to complete command substitution
-- Do NOT use multiple `-m` flags for breaking changes
-- The entire message must be wrapped in `"$(cat <<'EOF' ... EOF)"`
+- `<<'EOF'`（クォート付き）で変数展開を防ぐ
+- `EOF` の後に `)` で閉じてコマンド置換を完了
+- 破壊的変更で複数の `-m` フラグを使用しない
+- メッセージ全体を `"$(cat <<'EOF' ... EOF)"` で囲む
 
-## Simple Commits (Non-Breaking)
+## シンプルなコミット（非破壊的変更）
 
-For simple, single-line commits without breaking changes:
+破壊的変更のないシンプルな1行コミット:
 
 ```bash
 git commit -m 'type(scope): subject line'
 ```
 
-For multi-line non-breaking commits, use heredoc format as well to ensure proper formatting
+複数行の非破壊的コミットにも、適切なフォーマットを確保するため heredoc 形式を使用すること
