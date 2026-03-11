@@ -1,4 +1,4 @@
-export { getFileContent } from './file-content.js';
+export { getFileContent, clearFileContentCache } from './file-content.js';
 export { getContentFromFile } from './get-content-from-file.js';
 export { getContentFromFileObject } from './get-content-from-file-object.js';
 export { getFile } from './get-file.js';

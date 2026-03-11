@@ -24,12 +24,19 @@ export async function getContentFromFile<M extends MetaData>(
 	const jsonFilePath = path.join(dir, `${name}.json`);
 
 	const jsonContent = await getFileContent(jsonFilePath, cache).catch(() => null);
-	const jsonData = jsonContent ? JSON.parse(jsonContent) : {};
+	let jsonData: Record<string, unknown> = {};
+	if (jsonContent) {
+		try {
+			jsonData = JSON.parse(jsonContent) as Record<string, unknown>;
+		} catch {
+			throw new Error(`Failed to parse JSON metadata file: ${jsonFilePath}`);
+		}
+	}
 	const raw = await getFileContent(filePath, cache);
 	const { data, content } = grayMatter(raw);
 
 	return {
-		metaData: { ...data, ...jsonData },
+		metaData: { ...data, ...jsonData } as M,
 		content,
 		raw,
 	};

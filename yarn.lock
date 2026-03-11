@@ -979,13 +979,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@d-zero/dealer@npm:1.5.4":
-  version: 1.5.4
-  resolution: "@d-zero/dealer@npm:1.5.4"
+"@d-zero/dealer@npm:1.6.4":
+  version: 1.6.4
+  resolution: "@d-zero/dealer@npm:1.6.4"
   dependencies:
-    "@d-zero/shared": "npm:0.18.0"
+    "@d-zero/shared": "npm:0.20.1"
     ansi-colors: "npm:4.1.3"
-  checksum: 10c0/0ec44612513ff2c7438ac0c4176118c312453f97fb6e1c19f453b1d8d04242e0d70a2473cfcb52909421625d7022f50af85b2d3eeab98f48d2fa9d5b68ab89c9
+  checksum: 10c0/86e1e6dd0904ee3b08501f9d5b405153f8226f6c563014c6a5e5c3786332c1f7c88c64d40ee81d0edf4f34ce6706dcb24a8062020f5e5dfa2a35f93d8daa6b80
   languageName: node
   linkType: hard
 
@@ -1039,16 +1039,33 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@d-zero/shared@npm:0.18.0":
-  version: 0.18.0
-  resolution: "@d-zero/shared@npm:0.18.0"
+"@d-zero/shared@npm:0.20.0":
+  version: 0.20.0
+  resolution: "@d-zero/shared@npm:0.20.0"
   dependencies:
     "@holiday-jp/holiday_jp": "npm:2.5.1"
     await-event-emitter: "npm:2.0.2"
     dayjs: "npm:1.11.19"
     escape-string-regexp: "npm:5.0.0"
     front-matter: "npm:4.0.2"
-  checksum: 10c0/ad489618b5d9b233a54f3ad8a3179324f43d77a89557129ecd41acd6e5dee5db6a310ee86588a1ff31f1a0c98bbd1379b6fbdf5ddb21fcc2d6215d4fdb9ecbee
+    micromatch: "npm:4.0.8"
+    sanitize-filename: "npm:1.6.3"
+  checksum: 10c0/eb2318ee20ab27241098a63fa2e7d8cc66597eea173a17b9b02efde77890b8e6bf766d3f84a8aa15b53eb2aef4e26debc3ade677e507a6a21ee90c18885311c6
+  languageName: node
+  linkType: hard
+
+"@d-zero/shared@npm:0.20.1":
+  version: 0.20.1
+  resolution: "@d-zero/shared@npm:0.20.1"
+  dependencies:
+    "@holiday-jp/holiday_jp": "npm:2.5.1"
+    await-event-emitter: "npm:2.0.2"
+    dayjs: "npm:1.11.19"
+    escape-string-regexp: "npm:5.0.0"
+    front-matter: "npm:4.0.2"
+    micromatch: "npm:4.0.8"
+    sanitize-filename: "npm:1.6.3"
+  checksum: 10c0/b4cfd509188b2e23f6d1c28baf18eafae2febefca4f5d3302ecee7972e9a412038757d7c4d8115b8879f1a9adc09e5aadf7df65dcc77aca5153cd0ef4deb0e14
   languageName: node
   linkType: hard
 
@@ -2071,7 +2088,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@kamado-io/page-compiler@workspace:packages/@kamado-io/page-compiler"
   dependencies:
-    "@d-zero/shared": "npm:0.18.0"
+    "@d-zero/shared": "npm:0.20.0"
     "@types/html-minifier-terser": "npm:7.0.2"
     ansi-colors: "npm:4.1.3"
     character-entities: "npm:2.0.2"
@@ -3436,14 +3453,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/jsdom@npm:27.0.0":
-  version: 27.0.0
-  resolution: "@types/jsdom@npm:27.0.0"
+"@types/jsdom@npm:28.0.0":
+  version: 28.0.0
+  resolution: "@types/jsdom@npm:28.0.0"
   dependencies:
     "@types/node": "npm:*"
     "@types/tough-cookie": "npm:*"
     parse5: "npm:^7.0.0"
-  checksum: 10c0/1ec7ff7177e1f7266e51279f07f3cd013e1713766b01eebceac783061675b31c672a47b0a508dcbaf040f7f22d90405858378c6c5358991989fbe8b95adde354
+    undici-types: "npm:^7.21.0"
+  checksum: 10c0/7b4b06dee1c611e37766ae2c5f92b0a881e3a2da8e38cc34999e812ab030b54b7250b0b9cc9af24dbeadc0fc2d341cc4e0adc5e5ca7d624d134ced1414a1ea5e
   languageName: node
   linkType: hard
 
@@ -7737,10 +7755,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:4.12.2":
-  version: 4.12.2
-  resolution: "hono@npm:4.12.2"
-  checksum: 10c0/c7a60969ea03384898b3ddd216912fee3ecb7640a250b95078ea6548afe5ad29ad2d378f45fa49eee5969dcbb2a5849dff808d0d38e7472ca2d886b59ba25e11
+"hono@npm:4.12.3":
+  version: 4.12.3
+  resolution: "hono@npm:4.12.3"
+  checksum: 10c0/df812884acf2f410809ecf14a6c66ff5ea3bb6eaaf75392fa265849186857518d71be18caf2a29ab2ced457d533ba00d285fa72051c08fb0f1bedf887254a4f7
   languageName: node
   linkType: hard
 
@@ -8837,11 +8855,11 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "kamado@workspace:packages/kamado"
   dependencies:
-    "@d-zero/dealer": "npm:1.5.4"
+    "@d-zero/dealer": "npm:1.6.4"
     "@d-zero/roar": "npm:0.2.0"
-    "@d-zero/shared": "npm:0.18.0"
+    "@d-zero/shared": "npm:0.20.0"
     "@hono/node-server": "npm:1.19.9"
-    "@types/jsdom": "npm:27.0.0"
+    "@types/jsdom": "npm:28.0.0"
     "@types/picomatch": "npm:4.0.2"
     ansi-colors: "npm:4.1.3"
     character-entities: "npm:2.0.2"
@@ -8849,7 +8867,7 @@ __metadata:
     dayjs: "npm:1.11.19"
     fast-glob: "npm:3.3.3"
     gray-matter: "npm:4.0.3"
-    hono: "npm:4.12.2"
+    hono: "npm:4.12.3"
     jsdom: "npm:28.1.0"
     open: "npm:11.0.0"
     picomatch: "npm:4.0.3"
@@ -9758,7 +9776,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"micromatch@npm:^4.0.2, micromatch@npm:^4.0.8":
+"micromatch@npm:4.0.8, micromatch@npm:^4.0.2, micromatch@npm:^4.0.8":
   version: 4.0.8
   resolution: "micromatch@npm:4.0.8"
   dependencies:
@@ -12602,6 +12620,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"sanitize-filename@npm:1.6.3":
+  version: 1.6.3
+  resolution: "sanitize-filename@npm:1.6.3"
+  dependencies:
+    truncate-utf8-bytes: "npm:^1.0.0"
+  checksum: 10c0/16ff47556a6e54e228c28db096bedd303da67b030d4bea4925fd71324932d6b02c7b0446f00ad33987b25b6414f24ae968e01a1a1679ce599542e82c4b07eb1f
+  languageName: node
+  linkType: hard
+
 "sax@npm:^1.4.1":
   version: 1.4.4
   resolution: "sax@npm:1.4.4"
@@ -13951,6 +13978,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"truncate-utf8-bytes@npm:^1.0.0":
+  version: 1.0.2
+  resolution: "truncate-utf8-bytes@npm:1.0.2"
+  dependencies:
+    utf8-byte-length: "npm:^1.0.1"
+  checksum: 10c0/af2b431fc4314f119b551e5fccfad49d4c0ef82e13ba9ca61be6567801195b08e732ce9643542e8ad1b3df44f3df2d7345b3dd34f723954b6bb43a14584d6b3c
+  languageName: node
+  linkType: hard
+
 "ts-api-utils@npm:^2.2.0":
   version: 2.4.0
   resolution: "ts-api-utils@npm:2.4.0"
@@ -14106,6 +14142,13 @@ __metadata:
   bin:
     uglifyjs: bin/uglifyjs
   checksum: 10c0/83b0a90eca35f778e07cad9622b80c448b6aad457c9ff8e568afed978212b42930a95f9e1be943a1ffa4258a3340fbb899f41461131c05bb1d0a9c303aed8479
+  languageName: node
+  linkType: hard
+
+"undici-types@npm:^7.21.0":
+  version: 7.22.0
+  resolution: "undici-types@npm:7.22.0"
+  checksum: 10c0/5e6f2513c41d07404c719eb7c1c499b8d4cde042f1269b3bc2be335f059e6ef53eb04f316696c728d5e8064c4d522b98f63d7ae8938adf6317351e07ae9c943e
   languageName: node
   linkType: hard
 
@@ -14360,6 +14403,13 @@ __metadata:
   dependencies:
     os-homedir: "npm:^1.0.0"
   checksum: 10c0/cbcb251c64f0dce8f3a598049afa5dadd42c928f9834c8720227ee17ededa819296582f9964d963974787f00a4d4cd68e90fd69bc5d8df528d666a6882f84b0c
+  languageName: node
+  linkType: hard
+
+"utf8-byte-length@npm:^1.0.1":
+  version: 1.0.5
+  resolution: "utf8-byte-length@npm:1.0.5"
+  checksum: 10c0/e69bda3299608f4cc75976da9fb74ac94801a58b9ca29fdad03a20ec952e7477d7f226c12716b5f36bd4cff8151d1d152d02ee1df3752f017d4b2c725ce3e47a
   languageName: node
   linkType: hard
 
