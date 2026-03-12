@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.2](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.1...v2.0.0-alpha.2) (2026-03-12)
+
+### Bug Fixes
+
+- security, performance, and robustness improvements across packages ([d352a2b](https://github.com/d-zero-dev/kamado/commit/d352a2b4c05eab35a1ef0acc321e41f4bef03c28))
+
+### Features
+
+- **page-compiler:** add comparator option for navigation sort order ([9b3d070](https://github.com/d-zero-dev/kamado/commit/9b3d070f147aec26423ea776b2b8f3e12d0c3138))
+
+### Reverts
+
+- Revert "chore: update yarn.lock" ([1d58d1e](https://github.com/d-zero-dev/kamado/commit/1d58d1e9ce45716c064a6ac959bb01c0b25f9882))
+
 # [2.0.0-alpha.1](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.0...v2.0.0-alpha.1) (2026-02-07)
 
 ### Bug Fixes

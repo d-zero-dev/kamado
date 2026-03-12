@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.2](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.1...v2.0.0-alpha.2) (2026-03-12)
+
+**Note:** Version bump only for package @kamado-io/pug-compiler
+
 # [2.0.0-alpha.1](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.0...v2.0.0-alpha.1) (2026-02-07)
 
 - feat(pug-compiler)!: add generic MetaData type parameter to createCompileHooks ([51319e2](https://github.com/d-zero-dev/kamado/commit/51319e266cfea6cd4be6317e0dc80b26170d8a4b))

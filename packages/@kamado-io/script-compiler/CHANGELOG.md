@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.2](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.1...v2.0.0-alpha.2) (2026-03-12)
+
+**Note:** Version bump only for package @kamado-io/script-compiler
+
 # [2.0.0-alpha.1](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.0...v2.0.0-alpha.1) (2026-02-07)
 
 - feat(script-compiler)!: convert scriptCompiler to createScriptCompiler generic factory ([77bc9ca](https://github.com/d-zero-dev/kamado/commit/77bc9ca83fcc343aa7760b53e2effeea5a27b0a2))
