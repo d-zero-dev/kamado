@@ -117,8 +117,8 @@ describe('getNavTree', () => {
 		});
 	});
 
-	describe('transformNode option', () => {
-		test('should propagate error from transformNode', () => {
+	describe('filter option', () => {
+		test('should propagate error from filter', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
 			const historyPage = createMockPage('/about/history/', 'History');
@@ -138,7 +138,7 @@ describe('getNavTree', () => {
 	});
 
 	describe('backward compatibility', () => {
-		test('should work without transformNode', () => {
+		test('should work without filter option', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
 			const aboutHistoryPage = createMockPage('/about/history/', 'History');
@@ -170,6 +170,58 @@ describe('getNavTree', () => {
 	});
 
 	describe('edge cases', () => {
+		test('should not confuse /about/ with /about-us/ when finding ancestor', () => {
+			const indexPage = createMockPage('/', 'Home');
+			const aboutPage = createMockPage('/about/', 'About');
+			const aboutUsPage = createMockPage('/about-us/', 'About Us');
+			const aboutDetailPage = createMockPage('/about/detail/', 'Detail');
+			const pageList = [indexPage, aboutPage, aboutUsPage, aboutDetailPage];
+
+			const navTree = getNavTree(
+				{ currentPage: aboutDetailPage, pages: pageList },
+				{ baseDepth: 0 },
+			);
+
+			expect(navTree).not.toBeNull();
+			// Must traverse through /about/, not /about-us/
+			const aboutNode = findNodeByUrl(navTree, '/about/');
+			expect(aboutNode).not.toBeNull();
+			expect(aboutNode?.children.some((c) => c.url === '/about/detail/')).toBe(true);
+			// /about-us/ should be a sibling, not contain /about/detail/
+			const aboutUsNode = findNodeByUrl(navTree, '/about-us/');
+			expect(aboutUsNode).not.toBeNull();
+			expect(aboutUsNode?.children).toHaveLength(0);
+		});
+
+		test('should return null when current page is not found in the tree', () => {
+			const indexPage = createMockPage('/', 'Home');
+			const aboutPage = createMockPage('/about/', 'About');
+			const pageList = [indexPage, aboutPage];
+
+			// Create a page that is not in the page list
+			const unknownPage = createMockPage('/unknown/', 'Unknown');
+
+			const navTree = getNavTree({ currentPage: unknownPage, pages: pageList });
+
+			expect(navTree).toBeNull();
+		});
+
+		test('should handle negative baseDepth by clamping to 0', () => {
+			const indexPage = createMockPage('/', 'Home');
+			const aboutPage = createMockPage('/about/', 'About');
+			const historyPage = createMockPage('/about/history/', 'History');
+			const pageList = [indexPage, aboutPage, historyPage];
+
+			const navTree = getNavTree(
+				{ currentPage: historyPage, pages: pageList },
+				{ baseDepth: -5 },
+			);
+
+			expect(navTree).not.toBeNull();
+			expect(navTree?.url).toBe('/');
+			expect(navTree?.depth).toBe(0);
+		});
+
 		test('should handle single page at level 3', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
@@ -206,7 +258,7 @@ describe('getNavTree', () => {
 	});
 
 	describe('removed nodes', () => {
-		test('should remove nodes when transformNode returns null', () => {
+		test('should remove nodes when filter returns false', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
 			const historyPage = createMockPage('/about/history/', 'History');
@@ -232,7 +284,7 @@ describe('getNavTree', () => {
 			});
 		});
 
-		test('should remove nodes when transformNode returns undefined', () => {
+		test('should remove nodes when filter returns false (duplicate verification)', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
 			const historyPage = createMockPage('/about/history/', 'History');
@@ -294,7 +346,7 @@ describe('getNavTree', () => {
 			expect(findNodeByUrl(navTree, '/about/history/2025/jan/')).toBeNull();
 		});
 
-		test('should not call transformNode for descendants when parent returns null', () => {
+		test('should call filter for all descendants even when parent is removed', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
 			const historyPage = createMockPage('/about/history/', 'History');
@@ -313,8 +365,8 @@ describe('getNavTree', () => {
 				},
 			);
 
-			// transformNode is called bottom-up (children first, then parent)
-			// When /about/ returns null, its children have already been processed
+			// filter is called bottom-up (children first, then parent)
+			// When /about/ is removed, its children have already been processed
 			// but the entire subtree is removed from the result
 			expect(calledUrls).toContain('/');
 			expect(calledUrls).toContain('/about/');
@@ -323,7 +375,7 @@ describe('getNavTree', () => {
 			expect(calledUrls).toContain('/about/history/2025/');
 		});
 
-		test('should remove child nodes from parent when transformNode returns null', () => {
+		test('should remove child nodes from parent when filter returns false', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
 			const aboutHistoryPage = createMockPage('/about/history/', 'History');
@@ -352,7 +404,7 @@ describe('getNavTree', () => {
 			expect(findNodeByUrl(navTree, '/about/history/2024/')).toBeNull();
 		});
 
-		test('should remove multiple child nodes when transformNode returns null or undefined', () => {
+		test('should remove multiple child nodes when filter returns false', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
 			const aboutHistoryPage = createMockPage('/about/history/', 'History');
@@ -464,7 +516,7 @@ describe('getNavTree', () => {
 			expect(findNodeByUrl(navTree, '/about/history/2024/')).toBeNull();
 		});
 
-		test('should return null when root node is removed by transformNode', () => {
+		test('should return null when root node is removed by filter', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
 			const historyPage = createMockPage('/about/history/', 'History');
@@ -480,7 +532,7 @@ describe('getNavTree', () => {
 			expect(navTree).toBeNull();
 		});
 
-		test('should return undefined when root node is removed by transformNode returning undefined', () => {
+		test('should return null when filter returns undefined (falsy)', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
 			const historyPage = createMockPage('/about/history/', 'History');
@@ -660,7 +712,7 @@ describe('getNavTree', () => {
 			});
 		});
 
-		test('should produce exact tree structure when multiple children are removed via null and undefined (toStrictEqual)', () => {
+		test('should produce exact tree structure when multiple children are removed by filter (toStrictEqual)', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aPage = createMockPage('/a/', 'A');
 			const bPage = createMockPage('/b/', 'B');

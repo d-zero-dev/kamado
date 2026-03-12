@@ -135,7 +135,7 @@ export function getNavTree<M extends MetaData>(
 		return null;
 	}
 
-	// Apply transformNode if specified
+	// Apply filter if specified
 	if (options?.filter) {
 		return filterTreeNodes(parentTree, options.filter);
 	}
@@ -202,9 +202,10 @@ function findAncestorAtDepth<M extends MetaData>(
 		return tree;
 	}
 	const dirName = path.dirname(currentUrl) + '/';
-	const candidateParent = tree.children.find((child) =>
-		dirName.startsWith(child.url.endsWith('/') ? child.url : path.dirname(child.url)),
-	);
+	const candidateParent = tree.children.find((child) => {
+		const childDir = child.url.endsWith('/') ? child.url : path.dirname(child.url) + '/';
+		return dirName.startsWith(childDir);
+	});
 	if (!candidateParent) {
 		return null;
 	}
