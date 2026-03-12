@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.3](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.2...v2.0.0-alpha.3) (2026-03-12)
+
+### Bug Fixes
+
+- **page-compiler:** prevent false prefix match in ancestor path traversal ([fd5781a](https://github.com/d-zero-dev/kamado/commit/fd5781a2fe0f4d5b23eb083c2a6e7142dfec7194))
+
 # [2.0.0-alpha.2](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.1...v2.0.0-alpha.2) (2026-03-12)
 
 ### Bug Fixes
