@@ -1,4 +1,4 @@
-import type { Node } from '@d-zero/shared/path-list-to-tree';
+import type { Node, PathListToTreeOptions } from '@d-zero/shared/path-list-to-tree';
 import type { CompilableFile, MetaData, PageData } from 'kamado/files';
 
 import path from 'node:path';
@@ -10,6 +10,7 @@ import { pathListToTree } from '@d-zero/shared/path-list-to-tree';
  *
  * Uses `Node<NavNodeMetaData>` from `@d-zero/shared/path-list-to-tree`.
  * Access title via `node.meta.title`.
+ * @template M - Custom metadata type extending MetaData
  */
 export type NavNode<M extends MetaData> = Node<NavNodeMetaData & M>;
 
@@ -25,6 +26,7 @@ export interface NavNodeMetaData {
 
 /**
  * Options for getting navigation tree
+ * @template M - Custom metadata type extending MetaData
  */
 export interface GetNavTreeOptions<M extends MetaData> {
 	/**
@@ -41,6 +43,13 @@ export interface GetNavTreeOptions<M extends MetaData> {
 	 */
 	readonly baseDepth?: number;
 	/**
+	 * Sort comparator for the path list.
+	 * - `'path'`: use pathComparator
+	 * - function: custom comparator `(a, b) => number`
+	 * - `null` (default): no sorting (preserve original order)
+	 */
+	readonly comparator?: PathListToTreeOptions['comparator'];
+	/**
 	 * Filter navigation nodes
 	 *
 	 * Return `true` to keep the node, `false` to remove it from the tree.
@@ -50,6 +59,7 @@ export interface GetNavTreeOptions<M extends MetaData> {
 
 /**
  * Context for navigation tree generation
+ * @template M - Custom metadata type extending MetaData
  */
 export interface GetNavTreeContext<M extends MetaData> {
 	/**
@@ -66,9 +76,10 @@ export interface GetNavTreeContext<M extends MetaData> {
  * Gets navigation tree corresponding to the current page
  *
  * Title is accessed via `node.meta.title`.
+ * @template M - Custom metadata type extending MetaData
  * @param context - Context containing current page and page list
  * @param options - Options for tree generation
- * @returns Navigation tree or null if not found
+ * @returns Navigation tree rooted at the ancestor node, or null if not found
  * @example
  * ```typescript
  * const navTree = getNavTree(
@@ -78,6 +89,14 @@ export interface GetNavTreeContext<M extends MetaData> {
  *
  * // Access title
  * console.log(navTree?.meta.title);
+ * ```
+ * @example
+ * ```typescript
+ * // Sort by path
+ * const navTree = getNavTree(
+ *   { currentPage, pages: pageList },
+ *   { comparator: 'path' },
+ * );
  * ```
  * @example
  * ```typescript
@@ -99,6 +118,7 @@ export function getNavTree<M extends MetaData>(
 		pages.map((item) => item.url),
 		{
 			ignoreGlobs: options?.ignoreGlobs,
+			comparator: options?.comparator ?? null,
 			currentPath: currentPage.url,
 			addMetaData: (node) => getMeta(node.url, pages),
 		},

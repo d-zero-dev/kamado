@@ -1,7 +1,7 @@
 import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { NavNode } from './features/nav.js';
-import type { PageCompilerOptions } from './types.js';
-import type { CompilableFile, FileContent, MetaData } from 'kamado/files';
+import type { CompileData, PageCompilerOptions } from './types.js';
+import type { CompilableFile, FileContent, MetaData, PageData } from 'kamado/files';
 
 import { mergeConfig } from 'kamado/config';
 import { describe, test, expect, expectTypeOf, vi } from 'vitest';
@@ -524,5 +524,130 @@ describe('createPageCompiler with custom transforms', async () => {
 		});
 
 		expect(result).toContain('Hello, world!');
+	});
+});
+
+describe('navigationComparator integration', async () => {
+	const config = await mergeConfig({});
+
+	/**
+	 * Creates a mock PageData for navigation tests
+	 * @param url - Page URL
+	 * @param title - Page title
+	 */
+	function createMockPageData(url: string, title: string): PageData {
+		const filePathStem = url === '/' ? '/index' : url.replace(/\/$/, '/index');
+		return {
+			inputPath: `/mock/input${filePathStem}.html`,
+			outputPath: `/mock/output${filePathStem}.html`,
+			fileSlug: url === '/' ? 'index' : url.split('/').findLast(Boolean) || 'index',
+			filePathStem,
+			url,
+			extension: '.html',
+			date: new Date(),
+			metaData: { title },
+		};
+	}
+
+	/**
+	 * Compiles a page and captures the nav function from compileData
+	 * @param currentPage - Current page
+	 * @param pageList - All pages
+	 * @param options - Page compiler options
+	 */
+	async function captureNav(
+		currentPage: CompilableFile,
+		pageList: PageData[],
+		options: PageCompilerOptions,
+	): Promise<CompileData['nav']> {
+		let capturedNav!: CompileData['nav'];
+		setMockFileContent(currentPage.inputPath, {
+			metaData: {},
+			content: '<p>test</p>',
+			raw: '<p>test</p>',
+		});
+		const pageC = createPageCompiler()({
+			...options,
+			globalData: { data: { pageList } },
+			transforms: [],
+			compileHooks: {
+				main: {
+					before: (_content, data) => {
+						capturedNav = data.nav;
+						return _content;
+					},
+				},
+			},
+		});
+		const fn = await pageC.compiler(config);
+		await fn(currentPage, () => '');
+		return capturedNav;
+	}
+
+	test('should apply navigationComparator from options', async () => {
+		clearMockFileContents();
+		const indexPage = createMockPageData('/', 'Home');
+		const cPage = createMockPageData('/c/', 'C');
+		const aPage = createMockPageData('/a/', 'A');
+		const bPage = createMockPageData('/b/', 'B');
+		const pageList = [indexPage, cPage, aPage, bPage];
+
+		const nav = await captureNav(indexPage, pageList, {
+			navigationComparator: 'path',
+		});
+
+		const tree = nav({ baseDepth: 0 });
+		expect(tree?.children.map((c) => c.url)).toEqual(['/a/', '/b/', '/c/']);
+	});
+
+	test('should use no sorting by default when navigationComparator is not set', async () => {
+		clearMockFileContents();
+		const indexPage = createMockPageData('/', 'Home');
+		const cPage = createMockPageData('/c/', 'C');
+		const aPage = createMockPageData('/a/', 'A');
+		const bPage = createMockPageData('/b/', 'B');
+		const pageList = [indexPage, cPage, aPage, bPage];
+
+		const nav = await captureNav(indexPage, pageList, {});
+
+		const tree = nav({ baseDepth: 0 });
+		expect(tree?.children.map((c) => c.url)).toEqual(['/c/', '/a/', '/b/']);
+	});
+
+	test('should allow per-call comparator to override navigationComparator', async () => {
+		clearMockFileContents();
+		const indexPage = createMockPageData('/', 'Home');
+		const cPage = createMockPageData('/c/', 'C');
+		const aPage = createMockPageData('/a/', 'A');
+		const bPage = createMockPageData('/b/', 'B');
+		const pageList = [indexPage, cPage, aPage, bPage];
+
+		const nav = await captureNav(indexPage, pageList, {
+			navigationComparator: 'path',
+		});
+
+		// Override with reverse order
+		const tree = nav({
+			baseDepth: 0,
+			comparator: (a, b) => b.localeCompare(a),
+		});
+		expect(tree?.children.map((c) => c.url)).toEqual(['/c/', '/b/', '/a/']);
+	});
+
+	test('should allow per-call comparator null to override navigationComparator', async () => {
+		clearMockFileContents();
+		const indexPage = createMockPageData('/', 'Home');
+		const cPage = createMockPageData('/c/', 'C');
+		const aPage = createMockPageData('/a/', 'A');
+		const bPage = createMockPageData('/b/', 'B');
+		const pageList = [indexPage, cPage, aPage, bPage];
+
+		const nav = await captureNav(indexPage, pageList, {
+			navigationComparator: 'path',
+		});
+
+		// Explicitly pass null to disable sorting despite navigationComparator: 'path'
+		const tree = nav({ baseDepth: 0, comparator: null });
+		expect(tree?.children.map((c) => c.url)).toEqual(['/c/', '/a/', '/b/']);
 	});
 });

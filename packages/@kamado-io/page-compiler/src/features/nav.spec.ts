@@ -825,4 +825,59 @@ describe('getNavTree', () => {
 			});
 		});
 	});
+
+	describe('comparator option', () => {
+		test('should preserve original order when comparator is not specified (default: null)', () => {
+			const indexPage = createMockPage('/', 'Home');
+			const cPage = createMockPage('/c/', 'C');
+			const aPage = createMockPage('/a/', 'A');
+			const bPage = createMockPage('/b/', 'B');
+			// Intentionally reverse order
+			const pageList = [indexPage, cPage, aPage, bPage];
+
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{ baseDepth: 0 },
+			);
+
+			expect(navTree).not.toBeNull();
+			expect(navTree?.children.map((c) => c.url)).toEqual(['/c/', '/a/', '/b/']);
+		});
+
+		test('should sort by path when comparator is "path"', () => {
+			const indexPage = createMockPage('/', 'Home');
+			const cPage = createMockPage('/c/', 'C');
+			const aPage = createMockPage('/a/', 'A');
+			const bPage = createMockPage('/b/', 'B');
+			const pageList = [indexPage, cPage, aPage, bPage];
+
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{ baseDepth: 0, comparator: 'path' },
+			);
+
+			expect(navTree).not.toBeNull();
+			expect(navTree?.children.map((c) => c.url)).toEqual(['/a/', '/b/', '/c/']);
+		});
+
+		test('should sort by custom comparator function', () => {
+			const indexPage = createMockPage('/', 'Home');
+			const aPage = createMockPage('/a/', 'A');
+			const bPage = createMockPage('/b/', 'B');
+			const cPage = createMockPage('/c/', 'C');
+			const pageList = [indexPage, aPage, bPage, cPage];
+
+			const navTree = getNavTree(
+				{ currentPage: indexPage, pages: pageList },
+				{
+					baseDepth: 0,
+					// Reverse alphabetical order
+					comparator: (a, b) => b.localeCompare(a),
+				},
+			);
+
+			expect(navTree).not.toBeNull();
+			expect(navTree?.children.map((c) => c.url)).toEqual(['/c/', '/b/', '/a/']);
+		});
+	});
 });

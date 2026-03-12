@@ -1,6 +1,7 @@
 import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { GetNavTreeOptions, NavNode } from './features/nav.js';
 import type { TitleListOptions } from './features/title-list.js';
+import type { PathListToTreeOptions } from '@d-zero/shared/path-list-to-tree';
 import type { Transform } from 'kamado/config';
 import type { CompilableFile, FileObject, MetaData } from 'kamado/files';
 
@@ -133,6 +134,25 @@ export interface PageCompilerOptions<M extends MetaData> {
 	 * ```
 	 */
 	readonly filterNavigationNode?: (node: NavNode<M>) => boolean;
+	/**
+	 * Sort comparator for the navigation path list.
+	 * - `'path'`: use pathComparator
+	 * - function: custom comparator `(a, b) => number`
+	 * - `null` (default): no sorting (preserve original order)
+	 * @example
+	 * ```typescript
+	 * pageCompiler({
+	 *   navigationComparator: 'path',
+	 * });
+	 * ```
+	 * @example
+	 * ```typescript
+	 * pageCompiler({
+	 *   navigationComparator: (a, b) => b.localeCompare(a),
+	 * });
+	 * ```
+	 */
+	readonly navigationComparator?: PathListToTreeOptions['comparator'];
 }
 
 /**

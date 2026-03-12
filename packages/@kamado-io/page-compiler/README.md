@@ -51,6 +51,10 @@ export default defineConfig({
   - **Note**: Uses the same `Transform` interface as `devServer.transforms`, but applies only to HTML pages in both build and serve modes. The `filter` option is ignored here (use `devServer.transforms` for filtering).
 - `transformBreadcrumbItem`: Function to transform each breadcrumb item. Can add custom properties to breadcrumb items. `(item: BreadcrumbItem) => BreadcrumbItem`
 - `filterNavigationNode`: Function to filter navigation nodes. Return `true` to keep the node, `false` to remove it. `(node: NavNode<M>) => boolean`
+- `navigationComparator`: Sort comparator for the navigation path list. Can be overridden per-call via `nav({ comparator })` in templates.
+  - `'path'`: Sort by path using `pathComparator`
+  - `(a: string, b: string) => number`: Custom comparator function
+  - `null` (default): No sorting (preserve original order)
 - `compileHooks`: Compilation hooks for customizing compile process
   - Can be an object or a function `(options: PageCompilerOptions<M>) => CompileHooksObject<M> | Promise<CompileHooksObject<M>>` that returns an object (sync or async)
   - `main`: Hooks for main content compilation
@@ -386,6 +390,60 @@ createPageCompiler()({
 	],
 });
 ```
+
+## Navigation
+
+The page compiler provides a `nav()` function in template data (`CompileData`) that returns a navigation tree for the current page. The tree is built from the page list and reflects the URL hierarchy.
+
+### Configuration
+
+Set a project-wide default sort order via `navigationComparator`:
+
+```ts
+import { defineConfig } from 'kamado/config';
+import { createPageCompiler } from '@kamado-io/page-compiler';
+
+export default defineConfig({
+	compilers: (def) => [
+		def(createPageCompiler(), {
+			globalData: { dir: './data' },
+			layouts: { dir: './layouts' },
+			// Sort navigation by path order
+			navigationComparator: 'path',
+			// Filter out draft pages from navigation
+			filterNavigationNode: (node) => !node.url.includes('/drafts/'),
+		}),
+	],
+});
+```
+
+### Template Usage
+
+The `nav(options)` function is available in template data. It accepts `GetNavTreeOptions`:
+
+- `baseDepth`: Base depth for navigation tree (default: current page's depth - 1)
+- `ignoreGlobs`: Glob patterns for files to ignore
+- `comparator`: Sort comparator (overrides `navigationComparator` per-call)
+
+```pug
+//- Get navigation tree using project-wide default sort
+- const tree = nav({ baseDepth: 0 })
+
+//- Override sort for this call only (reverse alphabetical)
+- const tree = nav({ baseDepth: 0, comparator: (a, b) => b.localeCompare(a) })
+
+//- Disable sorting for this call (even if navigationComparator is set)
+- const tree = nav({ baseDepth: 0, comparator: null })
+```
+
+The returned `NavNode` has the following properties:
+
+- `url`: Page URL
+- `meta.title`: Page title
+- `children`: Child navigation nodes
+- `current`: Whether this node is the current page
+- `isAncestor`: Whether the current page is under this node
+- `depth`: Depth in the tree (0 for root)
 
 ## Example: Using compileHooks
 

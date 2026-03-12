@@ -79,6 +79,10 @@ export function createPageCompiler<M extends MetaData>() {
 							{ currentPage: file, pages: globalData?.pageList ?? [] },
 							{
 								...navOptions,
+								comparator:
+									'comparator' in navOptions
+										? navOptions.comparator
+										: options?.navigationComparator,
 								filter: options?.filterNavigationNode,
 							},
 						),
