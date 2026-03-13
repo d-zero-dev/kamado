@@ -11,10 +11,23 @@ import open from 'open';
 import { setRoute } from './route.js';
 
 /**
- * Starts the development server
- * @param config - Configuration object
+ * Options for starting the development server
  */
-export async function start<M extends MetaData>(config: Config<M>) {
+export interface StartOptions {
+	readonly verbose?: boolean;
+}
+
+/**
+ * Starts the development server
+ * @template M - Custom metadata type extending MetaData
+ * @param config - Configuration object
+ * @param options - Server start options
+ * @returns Resolves when the server is started and the browser is opened (if configured)
+ */
+export async function start<M extends MetaData>(
+	config: Config<M>,
+	options?: StartOptions,
+) {
 	// Create execution context
 	const context: Context<M> = {
 		...config,
@@ -23,7 +36,7 @@ export async function start<M extends MetaData>(config: Config<M>) {
 
 	const app = new Hono();
 
-	await setRoute({ app, context });
+	await setRoute({ app, context }, { verbose: options?.verbose });
 
 	const server = serve({
 		fetch: app.fetch,

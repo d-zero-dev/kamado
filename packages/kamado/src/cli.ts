@@ -2,7 +2,7 @@
 
 import path from 'node:path';
 
-import { roar } from '@d-zero/roar';
+import { parseCli } from '@d-zero/roar';
 import c from 'ansi-colors';
 
 import { build } from './builder/build.js';
@@ -10,28 +10,35 @@ import { getConfig } from './config/get-config.js';
 import { pathResolver } from './path/resolver.js';
 import { start } from './server/app.js';
 
-const cli = roar({
+const commonFlags = {
+	config: {
+		type: 'string' as const,
+		shortFlag: 'c',
+		desc: 'Path to config file',
+	},
+	verbose: {
+		type: 'boolean' as const,
+		desc: 'Enable verbose logging',
+	},
+} as const;
+
+const cli = parseCli({
 	name: 'kamado',
 	commands: {
 		build: {
 			desc: 'Build static files',
+			flags: {
+				...commonFlags,
+			},
 		},
 		server: {
 			desc: 'Start development server',
+			flags: {
+				...commonFlags,
+			},
 		},
 	},
-	flags: {
-		config: {
-			type: 'string',
-			shortFlag: 'c',
-			desc: 'Path to config file',
-		},
-		verbose: {
-			type: 'boolean',
-			desc: 'Enable verbose logging',
-		},
-	},
-	onError(error) {
+	onError(error: Error) {
 		// eslint-disable-next-line no-console
 		console.error(c.bold.red(error.message));
 		return true;
@@ -57,7 +64,7 @@ switch (cli.command) {
 		break;
 	}
 	case 'server': {
-		void start(config);
+		void start(config, { verbose: cli.flags.verbose });
 		break;
 	}
 }
