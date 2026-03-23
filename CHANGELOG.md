@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.5](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.4...v2.0.0-alpha.5) (2026-03-23)
+
+### Bug Fixes
+
+- add meta property to BreadcrumbItem for metadata access ([#106](https://github.com/d-zero-dev/kamado/issues/106)) ([beec417](https://github.com/d-zero-dev/kamado/commit/beec4170eb662d1b1bcf5eebfdf9945c13b8c160))
+- improve breadcrumb meta type safety and test coverage ([#106](https://github.com/d-zero-dev/kamado/issues/106)) ([729bea2](https://github.com/d-zero-dev/kamado/commit/729bea22e94785fb9197a8a79167f91902021e7d))
+
 # [2.0.0-alpha.4](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.3...v2.0.0-alpha.4) (2026-03-13)
 
 **Note:** Version bump only for package kamado-monorepo
