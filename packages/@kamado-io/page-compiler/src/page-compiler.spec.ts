@@ -266,6 +266,18 @@ describe('type inference for transform options', () => {
 			expect(options.transformBreadcrumbItem).toBeDefined();
 		});
 
+		test('transformBreadcrumbItem should have access to meta property', () => {
+			type CustomMeta = MetaData & { redirectUrl?: string };
+			const options: PageCompilerOptions<CustomMeta> = {
+				transformBreadcrumbItem: (item) => ({
+					...item,
+					href: item.meta.redirectUrl ?? item.href,
+				}),
+			};
+
+			expect(options.transformBreadcrumbItem).toBeDefined();
+		});
+
 		test('transformNavNode should accept sync function', () => {
 			const options: PageCompilerOptions = {
 				filterNavigationNode: (node) => {

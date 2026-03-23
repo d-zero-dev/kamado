@@ -21,6 +21,9 @@ export type BreadcrumbItem<M extends MetaData = MetaData> = {
 	readonly depth: number;
 	/**
 	 * Page metadata
+	 *
+	 * This is a direct reference to the source page's `metaData`, not a deep copy.
+	 * Mutating nested properties will affect the original page data.
 	 */
 	readonly meta: M;
 };

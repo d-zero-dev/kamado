@@ -174,7 +174,7 @@ export interface CompileData<M extends MetaData> extends Record<string, unknown>
 	/**
 	 * Breadcrumbs array
 	 */
-	readonly breadcrumbs: unknown;
+	readonly breadcrumbs: BreadcrumbItem<M>[];
 }
 
 /**
