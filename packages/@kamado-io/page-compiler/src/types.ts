@@ -7,6 +7,7 @@ import type { CompilableFile, FileObject, MetaData } from 'kamado/files';
 
 /**
  * Options for the page compiler
+ * @template M - Custom metadata type extending MetaData
  */
 export interface PageCompilerOptions<M extends MetaData> {
 	/**
@@ -107,13 +108,14 @@ export interface PageCompilerOptions<M extends MetaData> {
 	readonly compileHooks?: CompileHooks<M>;
 	/**
 	 * Transform each breadcrumb item
-	 * @param item - Original breadcrumb item
+	 * @param item - Original breadcrumb item (includes `meta` with page metadata)
 	 * @returns Transformed breadcrumb item (can include additional properties)
 	 * @example
 	 * ```typescript
-	 * pageCompiler({
+	 * createPageCompiler()({
 	 *   transformBreadcrumbItem: (item) => ({
 	 *     ...item,
+	 *     href: item.meta.redirectUrl ?? item.href,
 	 *     icon: item.href === '/' ? 'home' : 'page',
 	 *   }),
 	 * });
@@ -128,7 +130,7 @@ export interface PageCompilerOptions<M extends MetaData> {
 	 * @returns Whether to keep the node
 	 * @example
 	 * ```typescript
-	 * pageCompiler({
+	 * createPageCompiler()({
 	 *   filterNavigationNode: (node) => !node.url.includes('/drafts/'),
 	 * });
 	 * ```
@@ -141,13 +143,13 @@ export interface PageCompilerOptions<M extends MetaData> {
 	 * - `null` (default): no sorting (preserve original order)
 	 * @example
 	 * ```typescript
-	 * pageCompiler({
+	 * createPageCompiler()({
 	 *   navigationComparator: 'path',
 	 * });
 	 * ```
 	 * @example
 	 * ```typescript
-	 * pageCompiler({
+	 * createPageCompiler()({
 	 *   navigationComparator: (a, b) => b.localeCompare(a),
 	 * });
 	 * ```
@@ -157,6 +159,7 @@ export interface PageCompilerOptions<M extends MetaData> {
 
 /**
  * Compile data object passed to templates and hooks
+ * @template M - Custom metadata type extending MetaData
  */
 export interface CompileData<M extends MetaData> extends Record<string, unknown> {
 	/**
@@ -179,6 +182,10 @@ export interface CompileData<M extends MetaData> extends Record<string, unknown>
 
 /**
  * Hook function type for processing content
+ * @template M - Custom metadata type extending MetaData
+ * @param content - Template content or compiled HTML to process
+ * @param data - Compile data object containing page info, navigation, and breadcrumbs
+ * @returns Processed content string (sync or async)
  */
 export type ContentHook<M extends MetaData> = (
 	content: string,
@@ -187,6 +194,11 @@ export type ContentHook<M extends MetaData> = (
 
 /**
  * Compiler function type
+ * @template M - Custom metadata type extending MetaData
+ * @param content - Template content to compile
+ * @param data - Compile data object containing page info, navigation, and breadcrumbs
+ * @param extension - File extension of the source file (e.g., `.pug`, `.html`)
+ * @returns Compiled HTML string (sync or async)
  */
 export type CompilerFunction<M extends MetaData> = (
 	content: string,
@@ -196,6 +208,7 @@ export type CompilerFunction<M extends MetaData> = (
 
 /**
  * Compile hook configuration
+ * @template M - Custom metadata type extending MetaData
  */
 export interface CompileHook<M extends MetaData> {
 	/**
@@ -223,6 +236,7 @@ export interface CompileHook<M extends MetaData> {
 
 /**
  * Compile hooks object
+ * @template M - Custom metadata type extending MetaData
  */
 export interface CompileHooksObject<M extends MetaData> {
 	/**
@@ -238,6 +252,7 @@ export interface CompileHooksObject<M extends MetaData> {
 /**
  * Compilation hooks for customizing compile process
  * Can be an object or a function that returns an object (sync or async)
+ * @template M - Custom metadata type extending MetaData
  */
 export type CompileHooks<M extends MetaData> =
 	| CompileHooksObject<M>

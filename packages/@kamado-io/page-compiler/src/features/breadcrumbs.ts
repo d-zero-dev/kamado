@@ -30,6 +30,7 @@ export type BreadcrumbItem<M extends MetaData = MetaData> = {
 
 /**
  * Options for getting breadcrumbs
+ * @template M - Custom metadata type extending MetaData
  * @template TOut - Type of additional properties added by transformItem
  */
 export type GetBreadcrumbsOptions<
@@ -51,6 +52,7 @@ export type GetBreadcrumbsOptions<
 
 /**
  * Required context for breadcrumbs generation
+ * @template M - Custom metadata type extending MetaData
  */
 export interface GetBreadcrumbsContext<M extends MetaData> {
 	readonly page: PageData<M>;
@@ -59,6 +61,7 @@ export interface GetBreadcrumbsContext<M extends MetaData> {
 
 /**
  * Gets breadcrumb list for a page
+ * @template M - Custom metadata type extending MetaData
  * @template TOut - Type of additional properties added by transformItem
  * @param context - Context containing current page and page list
  * @param options - Options for getting breadcrumbs
