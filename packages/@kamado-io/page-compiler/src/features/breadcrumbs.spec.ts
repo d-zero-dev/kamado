@@ -6,19 +6,15 @@ import { getBreadcrumbs } from './breadcrumbs.js';
 import { titleList } from './title-list.js';
 
 /**
- * Creates a mock PageData for testing
+ * Creates a mock PageData with optional extra metadata
+ *
  * The filePathStem is derived from URL to match the isAncestor logic:
  * - `/` → `/index` (index file at root)
  * - `/about/` → `/about/index` (index file in about directory)
  * - `/about/team/` → `/about/team/index`
  * @param url - URL path ending with `/`
  * @param title - Page title
- */
-/**
- * Creates a mock PageData with optional extra metadata
- * @param url
- * @param title
- * @param extraMeta
+ * @param extraMeta - Additional metadata properties
  */
 function createMockPage<M extends Record<string, unknown> = Record<string, unknown>>(
 	url: string,
