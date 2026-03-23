@@ -44,9 +44,11 @@ describe('getBreadcrumbs', () => {
 			expect(breadcrumbs[0]?.title).toBe('Home');
 			expect(breadcrumbs[0]?.href).toBe('/');
 			expect(breadcrumbs[0]?.depth).toBe(0);
+			expect(breadcrumbs[0]?.meta).toEqual({ title: 'Home' });
 			expect(breadcrumbs[1]?.title).toBe('About');
 			expect(breadcrumbs[1]?.href).toBe('/about/');
 			expect(breadcrumbs[1]?.depth).toBe(1);
+			expect(breadcrumbs[1]?.meta).toEqual({ title: 'About' });
 		});
 
 		test('should handle deep hierarchy (3+ levels)', () => {
@@ -148,6 +150,30 @@ describe('getBreadcrumbs', () => {
 				href: '/about/',
 				icon: 'about-icon',
 			});
+		});
+
+		test('should allow transformItem to access meta for custom properties', () => {
+			const indexPage = createMockPage('/', 'Home');
+			(indexPage as { metaData: Record<string, unknown> }).metaData = {
+				title: 'Home',
+				redirectUrl: '/home-redirect/',
+			};
+			const aboutPage = createMockPage('/about/', 'About');
+			const pageList = [indexPage, aboutPage];
+
+			const breadcrumbs = getBreadcrumbs(
+				{ page: aboutPage, pageList },
+				{
+					transformItem: (item) => ({
+						...item,
+						href:
+							((item.meta as Record<string, unknown>).redirectUrl as string) ?? item.href,
+					}),
+				},
+			);
+
+			expect(breadcrumbs[0]?.href).toBe('/home-redirect/');
+			expect(breadcrumbs[1]?.href).toBe('/about/');
 		});
 
 		test('should propagate error from transformItem', () => {

@@ -119,7 +119,7 @@ export interface PageCompilerOptions<M extends MetaData> {
 	 * });
 	 * ```
 	 */
-	readonly transformBreadcrumbItem?: (item: BreadcrumbItem) => BreadcrumbItem;
+	readonly transformBreadcrumbItem?: (item: BreadcrumbItem<M>) => BreadcrumbItem<M>;
 	/**
 	 * Filter navigation nodes
 	 *
