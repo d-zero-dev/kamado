@@ -49,7 +49,7 @@ export default defineConfig({
   - `(defaultTransforms: readonly Transform[]) => Transform[]` - Function that receives default transforms (5 transforms) and returns modified array
   - If omitted, uses `createDefaultPageTransforms()` (5 transforms: manipulateDOM, doctype, prettier, minifier, lineBreak). See [Transform Pipeline](#transform-pipeline) for details.
   - **Note**: Uses the same `Transform` interface as `devServer.transforms`, but applies only to HTML pages in both build and serve modes. The `filter` option is ignored here (use `devServer.transforms` for filtering).
-- `transformBreadcrumbItem`: Function to transform each breadcrumb item. Can add custom properties to breadcrumb items. `(item: BreadcrumbItem) => BreadcrumbItem`
+- `transformBreadcrumbItem`: Function to transform each breadcrumb item. Each item includes a `meta` property containing the source page's metadata, enabling metadata-based transformations (e.g., redirect URLs). `(item: BreadcrumbItem<M>) => BreadcrumbItem<M>`
 - `filterNavigationNode`: Function to filter navigation nodes. Return `true` to keep the node, `false` to remove it. `(node: NavNode<M>) => boolean`
 - `navigationComparator`: Sort comparator for the navigation path list. Can be overridden per-call via `nav({ comparator })` in templates.
   - `'path'`: Sort by path using `pathComparator`
@@ -777,6 +777,7 @@ import {
 
 	// Types
 	type PageCompilerOptions,
+	type BreadcrumbItem,
 	type Transform,
 	type TransformContext,
 	type CompileData,

@@ -20,9 +20,12 @@ import { transpileLayout } from './transpile-layout.js';
 import { transpileMainContent } from './transpile-main.js';
 
 /**
- * Page compiler
+ * Page compiler factory
+ *
  * A generic container compiler that applies layouts and formats the output.
  * Template compilation is handled via `compileHooks`.
+ * @template M - Custom metadata type extending MetaData
+ * @returns Custom compiler definition that accepts {@link PageCompilerOptions}
  * @example
  * ```typescript
  * const config = {

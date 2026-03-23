@@ -3,17 +3,24 @@ import type { PageData } from 'kamado/files';
 import { describe, test, expect } from 'vitest';
 
 import { getBreadcrumbs } from './breadcrumbs.js';
+import { titleList } from './title-list.js';
 
 /**
- * Creates a mock PageData for testing
+ * Creates a mock PageData with optional extra metadata
+ *
  * The filePathStem is derived from URL to match the isAncestor logic:
  * - `/` → `/index` (index file at root)
  * - `/about/` → `/about/index` (index file in about directory)
  * - `/about/team/` → `/about/team/index`
  * @param url - URL path ending with `/`
  * @param title - Page title
+ * @param extraMeta - Additional metadata properties
  */
-function createMockPage(url: string, title: string): PageData {
+function createMockPage<M extends Record<string, unknown> = Record<string, unknown>>(
+	url: string,
+	title: string,
+	extraMeta?: M,
+): PageData {
 	// Convert URL to filePathStem matching isAncestor logic
 	// /about/ → /about/index, / → /index
 	const filePathStem = url === '/' ? '/index' : url.replace(/\/$/, '/index');
@@ -27,7 +34,7 @@ function createMockPage(url: string, title: string): PageData {
 		url,
 		extension: '.html',
 		date: new Date(),
-		metaData: { title },
+		metaData: { title, ...extraMeta },
 	};
 }
 
@@ -44,9 +51,11 @@ describe('getBreadcrumbs', () => {
 			expect(breadcrumbs[0]?.title).toBe('Home');
 			expect(breadcrumbs[0]?.href).toBe('/');
 			expect(breadcrumbs[0]?.depth).toBe(0);
+			expect(breadcrumbs[0]?.meta).toEqual({ title: 'Home' });
 			expect(breadcrumbs[1]?.title).toBe('About');
 			expect(breadcrumbs[1]?.href).toBe('/about/');
 			expect(breadcrumbs[1]?.depth).toBe(1);
+			expect(breadcrumbs[1]?.meta).toEqual({ title: 'About' });
 		});
 
 		test('should handle deep hierarchy (3+ levels)', () => {
@@ -150,6 +159,26 @@ describe('getBreadcrumbs', () => {
 			});
 		});
 
+		test('should allow transformItem to access meta for custom properties', () => {
+			const indexPage = createMockPage('/', 'Home', { redirectUrl: '/home-redirect/' });
+			const aboutPage = createMockPage('/about/', 'About');
+			const pageList = [indexPage, aboutPage];
+
+			const breadcrumbs = getBreadcrumbs(
+				{ page: aboutPage, pageList },
+				{
+					transformItem: (item) => ({
+						...item,
+						href:
+							((item.meta as Record<string, unknown>).redirectUrl as string) ?? item.href,
+					}),
+				},
+			);
+
+			expect(breadcrumbs[0]?.href).toBe('/home-redirect/');
+			expect(breadcrumbs[1]?.href).toBe('/about/');
+		});
+
 		test('should propagate error from transformItem', () => {
 			const indexPage = createMockPage('/', 'Home');
 			const aboutPage = createMockPage('/about/', 'About');
@@ -199,6 +228,59 @@ describe('getBreadcrumbs', () => {
 
 			// /contact/ should not be included
 			expect(breadcrumbs.map((b) => b.href)).toEqual(['/', '/about/', '/about/team/']);
+		});
+
+		test('should return meta as empty object when metaData has no title', () => {
+			const indexPage = createMockPage('/', '');
+			const pageList = [indexPage];
+
+			const breadcrumbs = getBreadcrumbs({ page: indexPage, pageList });
+
+			expect(breadcrumbs).toHaveLength(1);
+			expect(breadcrumbs[0]?.title).toBe('__NO_TITLE__');
+			expect(breadcrumbs[0]?.meta).toEqual({ title: '' });
+		});
+	});
+
+	describe('meta with transformItem and baseURL combination', () => {
+		test('should apply transformItem after baseURL filtering', () => {
+			const indexPage = createMockPage('/', 'Home', { redirectUrl: '/home-redirect/' });
+			const aboutPage = createMockPage('/about/', 'About', {
+				redirectUrl: '/about-redirect/',
+			});
+			const teamPage = createMockPage('/about/team/', 'Team');
+			const pageList = [indexPage, aboutPage, teamPage];
+
+			const breadcrumbs = getBreadcrumbs(
+				{ page: teamPage, pageList },
+				{
+					baseURL: '/about/',
+					transformItem: (item) => ({
+						...item,
+						href:
+							((item.meta as Record<string, unknown>).redirectUrl as string) ?? item.href,
+					}),
+				},
+			);
+
+			// Home page should be excluded by baseURL
+			expect(breadcrumbs).toHaveLength(2);
+			expect(breadcrumbs[0]?.href).toBe('/about-redirect/');
+			expect(breadcrumbs[1]?.href).toBe('/about/team/');
+		});
+	});
+
+	describe('titleList compatibility', () => {
+		test('should work with titleList when breadcrumbs include meta', () => {
+			const indexPage = createMockPage('/', 'Home', { redirectUrl: '/redirect/' });
+			const aboutPage = createMockPage('/about/', 'About');
+			const teamPage = createMockPage('/about/team/', 'Team');
+			const pageList = [indexPage, aboutPage, teamPage];
+
+			const breadcrumbs = getBreadcrumbs({ page: teamPage, pageList });
+			const title = titleList(breadcrumbs, { siteName: 'My Site' });
+
+			expect(title).toBe('Team | AboutMy Site');
 		});
 	});
 });

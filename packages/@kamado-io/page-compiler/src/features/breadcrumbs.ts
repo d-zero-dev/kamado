@@ -4,8 +4,9 @@ import path from 'node:path';
 
 /**
  * Breadcrumb item
+ * @template M - Custom metadata type extending MetaData
  */
-export type BreadcrumbItem = {
+export type BreadcrumbItem<M extends MetaData = MetaData> = {
 	/**
 	 * Title
 	 */
@@ -18,13 +19,22 @@ export type BreadcrumbItem = {
 	 * Hierarchy depth
 	 */
 	readonly depth: number;
+	/**
+	 * Page metadata
+	 *
+	 * This is a direct reference to the source page's `metaData`, not a deep copy.
+	 * Mutating nested properties will affect the original page data.
+	 */
+	readonly meta: M;
 };
 
 /**
  * Options for getting breadcrumbs
+ * @template M - Custom metadata type extending MetaData
  * @template TOut - Type of additional properties added by transformItem
  */
 export type GetBreadcrumbsOptions<
+	M extends MetaData = MetaData,
 	TOut extends Record<string, unknown> = Record<never, never>,
 > = {
 	/**
@@ -34,14 +44,15 @@ export type GetBreadcrumbsOptions<
 	readonly baseURL?: string;
 	/**
 	 * Transform each breadcrumb item
-	 * @param item - Original breadcrumb item
+	 * @param item - Original breadcrumb item with metadata
 	 * @returns Transformed breadcrumb item with additional properties
 	 */
-	readonly transformItem?: (item: BreadcrumbItem) => BreadcrumbItem & TOut;
+	readonly transformItem?: (item: BreadcrumbItem<M>) => BreadcrumbItem<M> & TOut;
 };
 
 /**
  * Required context for breadcrumbs generation
+ * @template M - Custom metadata type extending MetaData
  */
 export interface GetBreadcrumbsContext<M extends MetaData> {
 	readonly page: PageData<M>;
@@ -50,6 +61,7 @@ export interface GetBreadcrumbsContext<M extends MetaData> {
 
 /**
  * Gets breadcrumb list for a page
+ * @template M - Custom metadata type extending MetaData
  * @template TOut - Type of additional properties added by transformItem
  * @param context - Context containing current page and page list
  * @param options - Options for getting breadcrumbs
@@ -63,12 +75,13 @@ export interface GetBreadcrumbsContext<M extends MetaData> {
  * ```
  * @example
  * ```typescript
- * // With transformItem for adding custom properties
+ * // With transformItem for adding custom properties using metadata
  * const breadcrumbs = getBreadcrumbs(
  *   { page: currentPage, pageList },
  *   {
  *     transformItem: (item) => ({
  *       ...item,
+ *       href: item.meta.redirectUrl ?? item.href,
  *       icon: item.href === '/' ? 'home' : 'page',
  *     }),
  *   },
@@ -80,8 +93,8 @@ export function getBreadcrumbs<
 	TOut extends Record<string, unknown> = Record<never, never>,
 >(
 	context: GetBreadcrumbsContext<M>,
-	options?: GetBreadcrumbsOptions<TOut>,
-): (BreadcrumbItem & TOut)[] {
+	options?: GetBreadcrumbsOptions<M, TOut>,
+): (BreadcrumbItem<M> & TOut)[] {
 	const { page, pageList } = context;
 	const baseURL = options?.baseURL ?? '/';
 	const baseDepth = baseURL.split('/').filter(Boolean).length;
@@ -95,6 +108,7 @@ export function getBreadcrumbs<
 			)?.trim() || '__NO_TITLE__',
 		href: sourcePage.url,
 		depth: sourcePage.url.split('/').filter(Boolean).length,
+		meta: sourcePage.metaData as M,
 	}));
 
 	const filtered = breadcrumbs
@@ -103,10 +117,10 @@ export function getBreadcrumbs<
 
 	// Apply transformItem if specified
 	if (options?.transformItem) {
-		return filtered.map((item) => options.transformItem!(item as BreadcrumbItem));
+		return filtered.map((item) => options.transformItem!(item as BreadcrumbItem<M>));
 	}
 
-	return filtered as (BreadcrumbItem & TOut)[];
+	return filtered as (BreadcrumbItem<M> & TOut)[];
 }
 
 /**
