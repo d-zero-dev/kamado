@@ -35,6 +35,7 @@ export async function mergeConfig<M extends MetaData>(
 			host: 'localhost',
 			startPath: undefined,
 			transforms: [],
+			proxy: undefined,
 			...config.devServer,
 		},
 		pageList: config.pageList,
