@@ -474,7 +474,7 @@ With the configuration above:
 interface ProxyRule {
 	target: string; // Target URL to proxy to
 	pathRewrite?: (path: string) => string; // Rewrite path before proxying
-	changeOrigin?: boolean; // Change Origin/Host headers to match target (default: true)
+	changeOrigin?: boolean; // Change Origin/Host headers to match target (default: false)
 }
 ```
 
@@ -490,7 +490,7 @@ The `proxy` option is a record where:
 - Proxy routes are matched before file-serving routes, so proxy paths take priority over local files
 - Longer path prefixes are matched first (e.g., `/api/v2` takes priority over `/api`)
 - Query strings are preserved and forwarded to the target
-- Request headers are forwarded (with `Host` and `Origin` adjusted when `changeOrigin` is `true`)
+- Request headers are forwarded. Set `changeOrigin: true` to rewrite `Host` and `Origin` headers to match the target (useful when the target server validates the `Host` header)
 - On proxy failure, a `502 Bad Gateway` response is returned
 - Only applied in development server mode (`kamado server`), not during builds
 

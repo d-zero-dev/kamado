@@ -175,8 +175,18 @@ export interface ProxyRule {
 	 */
 	readonly pathRewrite?: (path: string) => string;
 	/**
-	 * Whether to change the Origin/Host headers to match the target
-	 * @default true
+	 * Whether to change the Origin/Host headers to match the target.
+	 * Set to `true` if the target server validates the `Host` header.
+	 * @default false
+	 * @example
+	 * ```typescript
+	 * proxy: {
+	 *   '/api': {
+	 *     target: 'https://api.example.com',
+	 *     changeOrigin: true,
+	 *   },
+	 * }
+	 * ```
 	 */
 	readonly changeOrigin?: boolean;
 }

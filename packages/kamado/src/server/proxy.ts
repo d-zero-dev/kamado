@@ -39,7 +39,7 @@ export function setProxyRoutes(
 	for (const [pathPrefix, rawRule] of sortedEntries) {
 		const rule = normalizeRule(rawRule);
 		const targetUrl = new URL(rule.target);
-		const changeOrigin = rule.changeOrigin !== false;
+		const changeOrigin = rule.changeOrigin === true;
 
 		const handler = async (ctx: Context) => {
 			const requestUrl = new URL(ctx.req.url);
@@ -55,6 +55,7 @@ export function setProxyRoutes(
 				headers.set('origin', targetUrl.origin);
 			}
 
+	
 			try {
 				const proxyResponse = await fetch(proxyUrl.toString(), {
 					method: ctx.req.method,

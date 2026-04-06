@@ -474,7 +474,7 @@ export default defineConfig({
 interface ProxyRule {
 	target: string; // プロキシ先のターゲットURL
 	pathRewrite?: (path: string) => string; // プロキシ前にパスを書き換える関数
-	changeOrigin?: boolean; // Origin/Hostヘッダーをターゲットに合わせて変更するか（デフォルト: true）
+	changeOrigin?: boolean; // Origin/Hostヘッダーをターゲットに合わせて変更するか（デフォルト: false）
 }
 ```
 
@@ -490,7 +490,7 @@ interface ProxyRule {
 - プロキシルートはファイルサーブルートよりも先にマッチするため、プロキシパスはローカルファイルよりも優先されます
 - 長いパスプレフィックスが先にマッチします（例: `/api/v2` は `/api` よりも優先）
 - クエリ文字列は保持されターゲットに転送されます
-- リクエストヘッダーは転送されます（`changeOrigin`が`true`の場合、`Host`と`Origin`が調整されます）
+- リクエストヘッダーは転送されます。ターゲットサーバーが `Host` ヘッダーを検証している場合は `changeOrigin: true` を設定すると `Host` と `Origin` ヘッダーがターゲットに合わせて書き換えられます
 - プロキシ失敗時は`502 Bad Gateway`レスポンスが返されます
 - 開発サーバーモード（`kamado server`）でのみ適用され、ビルド時には適用されません
 
