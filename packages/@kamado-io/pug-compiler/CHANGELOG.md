@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.11](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.10...v2.0.0-alpha.11) (2026-04-07)
+
+### Bug Fixes
+
+- **repo:** add repository field to [@kamado-io](https://github.com/kamado-io) packages for OIDC provenance ([90201ed](https://github.com/d-zero-dev/kamado/commit/90201edd92e1e5ac1e889e73ec64fd1f6a1b9e78))
+
 # [2.0.0-alpha.10](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.9...v2.0.0-alpha.10) (2026-04-07)
 
 **Note:** Version bump only for package @kamado-io/pug-compiler
