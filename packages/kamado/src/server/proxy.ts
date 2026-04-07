@@ -8,7 +8,7 @@ import c from 'ansi-colors';
  * @param rule - Proxy rule to normalize
  * @returns Normalized ProxyRule object
  */
-function normalizeRule(rule: ProxyRule | string): ProxyRule {
+export function normalizeRule(rule: ProxyRule | string): ProxyRule {
 	if (typeof rule === 'string') {
 		return { target: rule };
 	}
@@ -20,7 +20,7 @@ function normalizeRule(rule: ProxyRule | string): ProxyRule {
  * @param method - HTTP method
  * @returns Whether the method has a body
  */
-function hasBody(method: string): boolean {
+export function hasBody(method: string): boolean {
 	return !['GET', 'HEAD'].includes(method.toUpperCase());
 }
 

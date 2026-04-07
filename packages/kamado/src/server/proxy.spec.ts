@@ -1,7 +1,33 @@
 import { Hono } from 'hono';
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { setProxyRoutes } from './proxy.js';
+import { hasBody, normalizeRule, setProxyRoutes } from './proxy.js';
+
+describe('normalizeRule', () => {
+	test('converts string to ProxyRule object', () => {
+		expect(normalizeRule('https://example.com')).toEqual({
+			target: 'https://example.com',
+		});
+	});
+
+	test('returns ProxyRule object as-is', () => {
+		const rule = { target: 'https://example.com', changeOrigin: true };
+		expect(normalizeRule(rule)).toBe(rule);
+	});
+});
+
+describe('hasBody', () => {
+	test.each([
+		['GET', false],
+		['HEAD', false],
+		['POST', true],
+		['PUT', true],
+		['PATCH', true],
+		['DELETE', true],
+	])('%s → %s', (method, expected) => {
+		expect(hasBody(method)).toBe(expected);
+	});
+});
 
 describe('setProxyRoutes', () => {
 	beforeEach(() => {
@@ -35,7 +61,10 @@ describe('setProxyRoutes', () => {
 
 		await app.request('/api/v2/users');
 
-		expect(vi.mocked(fetch).mock.calls[0]![0]).toContain('v2.example.com');
+		expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
+		expect(vi.mocked(fetch).mock.calls[0]![0]).toBe(
+			'https://v2.example.com/api/v2/users',
+		);
 	});
 
 	test('fetches to the URL with pathRewrite applied', async () => {
@@ -77,6 +106,7 @@ describe('setProxyRoutes', () => {
 		const [, init] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
 		const headers = init.headers as Headers;
 		expect(headers.get('host')).not.toBe('backend.example.com');
+		expect(headers.get('origin')).toBeNull();
 	});
 
 	test('returns 502 when fetch fails', async () => {
@@ -107,5 +137,42 @@ describe('setProxyRoutes', () => {
 
 		const [, init] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
 		expect(init.body).toBeUndefined();
+	});
+
+	test('passes body to fetch for POST requests', async () => {
+		const app = new Hono();
+		setProxyRoutes(app, { '/api': 'https://backend.example.com' });
+
+		const body = JSON.stringify({ name: 'test' });
+		await app.request('/api/data', {
+			method: 'POST',
+			body,
+			headers: { 'Content-Type': 'application/json' },
+		});
+
+		const [, init] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
+		expect(init.method).toBe('POST');
+		expect(init.body).toBeDefined();
+	});
+
+	test('preserves query strings when forwarding to target', async () => {
+		const app = new Hono();
+		setProxyRoutes(app, { '/api': 'https://backend.example.com' });
+
+		await app.request('/api/users?page=2&limit=10');
+
+		expect(vi.mocked(fetch).mock.calls[0]![0]).toBe(
+			'https://backend.example.com/api/users?page=2&limit=10',
+		);
+	});
+
+	test('matches the prefix path exactly without trailing slash', async () => {
+		const app = new Hono();
+		setProxyRoutes(app, { '/api': 'https://backend.example.com' });
+
+		await app.request('/api');
+
+		expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
+		expect(vi.mocked(fetch).mock.calls[0]![0]).toBe('https://backend.example.com/api');
 	});
 });
