@@ -2,6 +2,11 @@
 	"name": "@kamado-io/style-compiler",
 	"version": "2.0.0-alpha.10",
 	"description": "Style compiler for Kamado",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/d-zero-dev/kamado.git",
+		"directory": "packages/@kamado-io/style-compiler"
+	},
 	"author": "D-ZERO Co., Ltd.",
 	"license": "MIT",
 	"publishConfig": {
