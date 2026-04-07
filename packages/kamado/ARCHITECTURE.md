@@ -66,7 +66,7 @@ Key directories under `packages/kamado/src` and their roles:
 
 - **`cli.ts`**: CLI entry point. Processes commands using `@d-zero/roar`.
 - **`builder/`**: Execution logic for static builds (`kamado build`).
-- **`server/`**: Logic for the development server (`kamado server`) using Hono.
+- **`server/`**: Logic for the development server (`kamado server`) using Hono. Includes proxy forwarding (`proxy.ts`), response transforms (`transform.ts`), and route handling (`route.ts`).
 - **`compiler/`**: Management of compiler plugin interfaces and the function map.
 - **`config/`**: Loading and merging configuration files, defining default values, and providing the `defineConfig()` helper.
 - **`data/`**: Listing files for compilation and managing asset groups.
@@ -198,9 +198,15 @@ graph TD
     A[CLI: server] --> B[Load config]
     B --> B2[Create Context with mode='serve']
     B2 --> C[Create compilableFileMap & compiler]
-    C --> C2[Start Hono server]
+    C --> C1{proxy configured?}
+    C1 -- Yes --> C1a[Register proxy routes]
+    C1a --> C2[Start Hono server]
+    C1 -- No --> C2
     C2 --> D[Receive browser request]
-    D --> E[Calculate local path from URL]
+    D --> D1{Matches proxy<br>path prefix?}
+    D1 -- Yes --> D2[Forward to target server]
+    D2 --> D3[Return proxy response]
+    D1 -- No --> E[Calculate local path from URL]
     E --> F{Exists in<br>compilableFileMap?}
     F -- Yes --> H[Perform in-memory compilation]
     H --> I[Apply Response Transforms]
@@ -496,6 +502,54 @@ A helper function `respondWithTransform()` consolidates the transform applicatio
 - **Mock Data**: Inject test data into API responses
 
 **Note**: This API is intentionally development-only. For production transformations, use the page compiler's Transform Pipeline (configure `transforms` option with transform factories like `manipulateDOM()`, `characterEntities()`, `prettier()`, etc.) or build-time processing.
+
+### Proxy API
+
+The Proxy API forwards requests matching configured path prefixes to external servers during development. It is implemented in `src/server/proxy.ts` and integrated into the Hono app in `src/server/app.ts`.
+
+#### Architecture
+
+```typescript
+// Proxy rule configuration
+export interface ProxyRule {
+	readonly target: string; // Target URL to proxy to
+	readonly pathRewrite?: (path: string) => string; // Rewrite path before proxying
+	readonly changeOrigin?: boolean; // Change Origin/Host headers (default: false)
+}
+
+// Configuration: Record<pathPrefix, ProxyRule | string>
+// e.g., { '/api': 'https://backend.example.com' }
+```
+
+#### Execution Flow
+
+1. **Route Registration**: `setProxyRoutes()` is called **before** `setRoute()` in `app.ts`, so proxy routes take priority over file-serving routes
+2. **Path Sorting**: Entries are sorted by path prefix length (longest first) to ensure specific routes match before general ones
+3. **Rule Normalization**: String shorthand values are normalized into `ProxyRule` objects via `normalizeRule()`
+4. **Request Forwarding**: Uses native `fetch()` with manual header management. Request headers are forwarded; `Host`/`Origin` are optionally rewritten when `changeOrigin: true`
+5. **Body Handling**: Request bodies are streamed for methods that carry a body (POST, PUT, PATCH, DELETE). GET and HEAD requests have no body
+6. **Error Handling**: On proxy failure, a `502 Bad Gateway` response is returned and the error is logged to the console
+
+#### Implementation Details
+
+**Location**: `src/server/proxy.ts`
+
+Key functions:
+
+- `setProxyRoutes(app, proxyConfig)`: Registers proxy routes on the Hono app
+- `normalizeRule(rule)`: Converts string shorthand to `ProxyRule` object
+- `hasBody(method)`: Determines if an HTTP method carries a request body
+
+**Integration**: `src/server/app.ts`
+
+Proxy routes are registered conditionally — only when `context.devServer.proxy` is defined. Both `${pathPrefix}/*` and `${pathPrefix}` patterns are registered to handle nested and exact-match requests.
+
+#### Design Decisions
+
+- **Native `fetch()`**: Uses the runtime's built-in `fetch()` rather than an HTTP proxy library, keeping the dependency footprint minimal
+- **`redirect: 'manual'`**: Preserves redirect responses from the target server instead of following them automatically
+- **`duplex: 'half'`**: Enables streaming request bodies in Node.js `fetch()` implementation
+- **No response transforms**: Proxy responses are returned as-is without passing through the Response Transform pipeline
 
 ---
 
