@@ -1,0 +1,44 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Enable Corepack and setup Yarn v4
+        run: |
+          corepack enable
+          yarn --version
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Build
+        run: yarn build
+
+      - name: Publish
+        run: npx lerna publish from-git --yes
