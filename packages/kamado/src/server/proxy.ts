@@ -34,7 +34,9 @@ export function setProxyRoutes(
 	app: Hono,
 	proxyConfig: Readonly<Record<string, ProxyRule | string>>,
 ): void {
-	const sortedEntries = Object.entries(proxyConfig).toSorted(([a], [b]) => b.length - a.length);
+	const sortedEntries = Object.entries(proxyConfig).toSorted(
+		([a], [b]) => b.length - a.length,
+	);
 
 	for (const [pathPrefix, rawRule] of sortedEntries) {
 		const rule = normalizeRule(rawRule);
@@ -44,7 +46,9 @@ export function setProxyRoutes(
 		const handler = async (ctx: Context) => {
 			const requestUrl = new URL(ctx.req.url);
 			const originalPath = requestUrl.pathname;
-			const rewrittenPath = rule.pathRewrite ? rule.pathRewrite(originalPath) : originalPath;
+			const rewrittenPath = rule.pathRewrite
+				? rule.pathRewrite(originalPath)
+				: originalPath;
 
 			const proxyUrl = new URL(rewrittenPath, targetUrl);
 			proxyUrl.search = requestUrl.search;
@@ -55,7 +59,6 @@ export function setProxyRoutes(
 				headers.set('origin', targetUrl.origin);
 			}
 
-	
 			try {
 				const proxyResponse = await fetch(proxyUrl.toString(), {
 					method: ctx.req.method,
@@ -72,10 +75,11 @@ export function setProxyRoutes(
 					headers: proxyResponse.headers,
 				});
 			} catch (error) {
-				const message =
-					error instanceof Error ? error.message : 'Unknown proxy error';
+				const message = error instanceof Error ? error.message : 'Unknown proxy error';
 				// eslint-disable-next-line no-console
-				console.error(c.red(`  Proxy error [${pathPrefix} → ${rule.target}]: ${message}`));
+				console.error(
+					c.red(`  Proxy error [${pathPrefix} → ${rule.target}]: ${message}`),
+				);
 				return ctx.text('Proxy error', 502);
 			}
 		};
