@@ -1,6 +1,6 @@
 {
 	"name": "@kamado-io/pug-compiler",
-	"version": "2.0.0-alpha.11",
+	"version": "2.0.0-alpha.12",
 	"description": "Pug compiler for Kamado",
 	"repository": {
 		"type": "git",
@@ -36,9 +36,9 @@
 		"kamado": "^1.0.0"
 	},
 	"devDependencies": {
-		"@kamado-io/page-compiler": "2.0.0-alpha.11",
+		"@kamado-io/page-compiler": "2.0.0-alpha.12",
 		"@types/pug": "2.0.10",
-		"kamado": "2.0.0-alpha.11",
+		"kamado": "2.0.0-alpha.12",
 		"typescript": "6.0.2"
 	}
 }
