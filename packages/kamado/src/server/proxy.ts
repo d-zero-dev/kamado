@@ -47,7 +47,7 @@ export function setProxyRoutes(
 			const requestUrl = new URL(ctx.req.url);
 			const originalPath = requestUrl.pathname;
 			const rewrittenPath = rule.pathRewrite
-				? rule.pathRewrite(originalPath)
+				? await rule.pathRewrite(originalPath)
 				: originalPath;
 
 			const proxyUrl = new URL(rewrittenPath, targetUrl);

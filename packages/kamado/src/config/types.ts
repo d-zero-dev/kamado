@@ -173,7 +173,7 @@ export interface ProxyRule {
 	 * Rewrite the path before proxying
 	 * @example (path) => path.replace(/^\/api/, '')
 	 */
-	readonly pathRewrite?: (path: string) => string;
+	readonly pathRewrite?: (path: string) => string | Promise<string>;
 	/**
 	 * Whether to change the Origin/Host headers to match the target.
 	 * Set to `true` if the target server validates the `Host` header.

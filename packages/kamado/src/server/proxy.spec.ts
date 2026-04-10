@@ -81,6 +81,20 @@ describe('setProxyRoutes', () => {
 		expect(vi.mocked(fetch).mock.calls[0]![0]).toBe('https://backend.example.com/users');
 	});
 
+	test('fetches to the URL with async pathRewrite applied', async () => {
+		const app = new Hono();
+		setProxyRoutes(app, {
+			'/api': {
+				target: 'https://backend.example.com',
+				pathRewrite: (p) => Promise.resolve(p.replace(/^\/api/, '')),
+			},
+		});
+
+		await app.request('/api/users');
+
+		expect(vi.mocked(fetch).mock.calls[0]![0]).toBe('https://backend.example.com/users');
+	});
+
 	test('rewrites Host/Origin headers to target when changeOrigin is true', async () => {
 		const app = new Hono();
 		setProxyRoutes(app, {
