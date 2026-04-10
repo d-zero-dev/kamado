@@ -1,7 +1,12 @@
 {
 	"name": "@kamado-io/pug-compiler",
-	"version": "2.0.0-alpha.8",
+	"version": "2.0.0-alpha.11",
 	"description": "Pug compiler for Kamado",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/d-zero-dev/kamado.git",
+		"directory": "packages/@kamado-io/pug-compiler"
+	},
 	"author": "D-ZERO Co., Ltd.",
 	"license": "MIT",
 	"publishConfig": {
@@ -31,9 +36,9 @@
 		"kamado": "^1.0.0"
 	},
 	"devDependencies": {
-		"@kamado-io/page-compiler": "2.0.0-alpha.8",
+		"@kamado-io/page-compiler": "2.0.0-alpha.11",
 		"@types/pug": "2.0.10",
-		"kamado": "2.0.0-alpha.8",
+		"kamado": "2.0.0-alpha.11",
 		"typescript": "6.0.2"
 	}
 }

@@ -3,6 +3,24 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.11](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.10...v2.0.0-alpha.11) (2026-04-07)
+
+### Bug Fixes
+
+- **repo:** add repository field to [@kamado-io](https://github.com/kamado-io) packages for OIDC provenance ([90201ed](https://github.com/d-zero-dev/kamado/commit/90201edd92e1e5ac1e889e73ec64fd1f6a1b9e78))
+
+# [2.0.0-alpha.10](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.9...v2.0.0-alpha.10) (2026-04-07)
+
+### Bug Fixes
+
+- **kamado:** fix repository URL typo in package.json ([91d2240](https://github.com/d-zero-dev/kamado/commit/91d2240ce07f0e1dfe360cedd53210cb991bec02))
+
+# [2.0.0-alpha.9](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.8...v2.0.0-alpha.9) (2026-04-07)
+
+### Bug Fixes
+
+- **repo:** add supply chain attack mitigations ([0dae91d](https://github.com/d-zero-dev/kamado/commit/0dae91d9721999377eb2bd5498ca9223cc0fd0a6))
+
 # [2.0.0-alpha.8](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.7...v2.0.0-alpha.8) (2026-03-24)
 
 **Note:** Version bump only for package kamado-monorepo

@@ -1,7 +1,12 @@
 {
 	"name": "@kamado-io/page-compiler",
-	"version": "2.0.0-alpha.8",
+	"version": "2.0.0-alpha.11",
 	"description": "Page compiler for Kamado",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/d-zero-dev/kamado.git",
+		"directory": "packages/@kamado-io/page-compiler"
+	},
 	"author": "D-ZERO Co., Ltd.",
 	"license": "MIT",
 	"publishConfig": {
@@ -78,7 +83,7 @@
 		"fast-glob": "3.3.3",
 		"html-minifier-terser": "7.2.0",
 		"image-size": "2.0.2",
-		"kamado": "2.0.0-alpha.8",
+		"kamado": "2.0.0-alpha.11",
 		"prettier": "3.8.1"
 	},
 	"devDependencies": {
