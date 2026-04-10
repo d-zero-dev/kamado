@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.13](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.12...v2.0.0-alpha.13) (2026-04-10)
+
+### Bug Fixes
+
+- **kamado:** change changeOrigin default to false and update docs ([add5398](https://github.com/d-zero-dev/kamado/commit/add5398052f4a001394ab003d15d727b1577df74))
+
+### Features
+
+- **kamado:** add proxy support for dev server ([795dd6a](https://github.com/d-zero-dev/kamado/commit/795dd6ae950ec8491ac17bf97270778029fdd036))
+- **kamado:** allow pathRewrite to return Promise<string> ([2c0e633](https://github.com/d-zero-dev/kamado/commit/2c0e6332381e0ddd583499345fbb5ef62b295558))
+
 # [2.0.0-alpha.12](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.11...v2.0.0-alpha.12) (2026-04-07)
 
 **Note:** Version bump only for package kamado

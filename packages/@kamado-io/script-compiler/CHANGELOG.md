@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.13](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.12...v2.0.0-alpha.13) (2026-04-10)
+
+**Note:** Version bump only for package @kamado-io/script-compiler
+
 # [2.0.0-alpha.12](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.11...v2.0.0-alpha.12) (2026-04-07)
 
 **Note:** Version bump only for package @kamado-io/script-compiler
