@@ -8,6 +8,7 @@ import c from 'ansi-colors';
 import { Hono } from 'hono';
 import open from 'open';
 
+import { setProxyRoutes } from './proxy.js';
 import { setRoute } from './route.js';
 
 /**
@@ -36,6 +37,10 @@ export async function start<M extends MetaData>(
 
 	const app = new Hono();
 
+	if (context.devServer.proxy) {
+		setProxyRoutes(app, context.devServer.proxy);
+	}
+
 	await setRoute({ app, context }, { verbose: options?.verbose });
 
 	const server = serve({
@@ -60,12 +65,21 @@ export async function start<M extends MetaData>(
 	const relDocumentRoot =
 		'.' + path.sep + path.relative(process.cwd(), context.dir.input);
 
+	const proxyLines = context.devServer.proxy
+		? Object.entries(context.devServer.proxy)
+				.map(([prefix, rule]) => {
+					const target = typeof rule === 'string' ? rule : rule.target;
+					return `  ${c.blue('Proxy')}: ${prefix} → ${c.bold.gray(target)}`;
+				})
+				.join('\n')
+		: '';
+
 	process.stdout.write(`
   ${c.bold.greenBright('Kamado Dev Server: Ignition🔥')}
 
   ${c.blue('Location')}: ${c.bold(location)}
   ${c.blue('DocumentRoot')}: ${c.bold.gray(relDocumentRoot)}
-`);
+${proxyLines ? `${proxyLines}\n` : ''}`);
 
 	if (context.devServer.open) {
 		await open(location);

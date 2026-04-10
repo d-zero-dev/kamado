@@ -144,6 +144,7 @@ export default defineConfig({
 - `devServer.open`: Whether to automatically open the browser on startup (default: `false`)
 - `devServer.startPath`: Custom path to open in the browser when starting the server (optional, e.g., `'__tmpl/'`)
 - `devServer.transforms`: Array of response transformation functions that modify responses during development (optional, see [Response Transform API](#response-transform-api))
+- `devServer.proxy`: Proxy rules for forwarding requests to external servers during development (optional, see [Proxy API](#proxy-api))
 
 #### Compiler Settings
 
@@ -424,6 +425,73 @@ interface TransformContext<M extends MetaData> {
 - Static files (non-compiled files) are typically passed as `ArrayBuffer`, so always decode them if you need to process as text
 - Errors in transform functions are logged but don't break the server (original content is returned)
 - Transforms are executed in array order
+- Only applied in development server mode (`kamado server`), not during builds
+
+#### Proxy API
+
+The Proxy API allows you to forward requests to external servers during development. This is useful when your static site makes AJAX requests to APIs on different domains, avoiding CORS issues during local development.
+
+**Key Features:**
+
+- **Development-only**: Proxy only applies in `serve` mode, not during builds
+- **All HTTP methods**: Supports GET, POST, PUT, DELETE, PATCH, and other methods
+- **Streaming**: Responses are streamed without buffering
+- **Path rewriting**: Optionally rewrite request paths before forwarding
+- **Simple and advanced forms**: Use a string shorthand for simple cases or an object for full control
+
+**Configuration:**
+
+```typescript
+import { defineConfig } from 'kamado/config';
+
+export default defineConfig({
+	devServer: {
+		port: 3000,
+		proxy: {
+			// Simple: string shorthand — forward /api/* to the target
+			'/api': 'https://backend.example.com',
+
+			// Advanced: object form with path rewriting
+			'/api/v2': {
+				target: 'https://api-v2.example.com',
+				// Rewrite /api/v2/users → /users
+				pathRewrite: (path) => path.replace(/^\/api\/v2/, ''),
+				changeOrigin: true,
+			},
+		},
+	},
+});
+```
+
+With the configuration above:
+
+- `GET /api/data` → `GET https://backend.example.com/api/data`
+- `POST /api/v2/users` → `POST https://api-v2.example.com/users` (path rewritten)
+
+**ProxyRule Interface:**
+
+```typescript
+interface ProxyRule {
+	target: string; // Target URL to proxy to
+	pathRewrite?: (path: string) => string | Promise<string>; // Rewrite path before proxying
+	changeOrigin?: boolean; // Change Origin/Host headers to match target (default: false)
+}
+```
+
+**Proxy Configuration:**
+
+The `proxy` option is a record where:
+
+- **Key**: Path prefix to match (e.g., `'/api'`)
+- **Value**: A target URL string (shorthand) or a `ProxyRule` object
+
+**Important Notes:**
+
+- Proxy routes are matched before file-serving routes, so proxy paths take priority over local files
+- Longer path prefixes are matched first (e.g., `/api/v2` takes priority over `/api`)
+- Query strings are preserved and forwarded to the target
+- Request headers are forwarded. Set `changeOrigin: true` to rewrite `Host` and `Origin` headers to match the target (useful when the target server validates the `Host` header)
+- On proxy failure, a `502 Bad Gateway` response is returned
 - Only applied in development server mode (`kamado server`), not during builds
 
 ### CLI Commands

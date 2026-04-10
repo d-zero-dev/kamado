@@ -66,7 +66,7 @@ export interface Context<M extends MetaData> extends Config<M> {
 
 - **`cli.ts`**: CLI のエントリポイント。`@d-zero/roar` を使用してコマンドを処理します。
 - **`builder/`**: 静的ビルド（`kamado build`）の実行ロジック。
-- **`server/`**: 開発サーバー（`kamado server`）のロジック。Hono を使用。
+- **`server/`**: 開発サーバー（`kamado server`）のロジック。Hono を使用。プロキシ転送（`proxy.ts`）、レスポンス変換（`transform.ts`）、ルートハンドリング（`route.ts`）を含む。
 - **`compiler/`**: コンパイラ・プラグインのインターフェースと、機能マップの管理。
 - **`config/`**: 設定ファイルのロードとマージ、デフォルト値の定義、`defineConfig()`ヘルパーの提供。
 - **`data/`**: コンパイル対象ファイルのリストアップ、アセットグループの管理。
@@ -198,9 +198,15 @@ graph TD
     A[CLI: server] --> B[config のロード]
     B --> B2[Context の作成 mode='serve']
     B2 --> C[compilableFileMap & コンパイラの作成]
-    C --> C2[Hono サーバーの起動]
+    C --> C1{proxy が設定<br>されているか?}
+    C1 -- Yes --> C1a[プロキシルートを登録]
+    C1a --> C2[Hono サーバーの起動]
+    C1 -- No --> C2
     C2 --> D[ブラウザからのリクエスト受領]
-    D --> E[URL からローカルパスを計算]
+    D --> D1{プロキシのパス<br>プレフィックスに一致?}
+    D1 -- Yes --> D2[ターゲットサーバーへ転送]
+    D2 --> D3[プロキシレスポンスを返却]
+    D1 -- No --> E[URL からローカルパスを計算]
     E --> F{compilableFileMap に<br>存在するか?}
     F -- Yes --> H[オンメモリでコンパイル実行]
     H --> I[レスポンス変換を適用]
@@ -496,6 +502,54 @@ export interface TransformContext<M extends MetaData> {
 - **モックデータ**: APIレスポンスにテストデータを挿入
 
 **注意**: このAPIは意図的に開発専用です。本番用の変換には、page compilerのTransform Pipeline（`transforms`オプションに`manipulateDOM()`、`characterEntities()`、`prettier()`などのtransform factoryを設定）またはビルド時処理を使用してください。
+
+### プロキシAPI
+
+プロキシAPIは、設定されたパスプレフィックスに一致するリクエストを外部サーバーへ転送します。`src/server/proxy.ts`に実装され、`src/server/app.ts`でHonoアプリに統合されています。
+
+#### アーキテクチャ
+
+```typescript
+// プロキシルール設定
+export interface ProxyRule {
+	readonly target: string; // プロキシ先のターゲットURL
+	readonly pathRewrite?: (path: string) => string | Promise<string>; // プロキシ前にパスを書き換え
+	readonly changeOrigin?: boolean; // Origin/Hostヘッダーを変更（デフォルト: false）
+}
+
+// 設定: Record<pathPrefix, ProxyRule | string>
+// 例: { '/api': 'https://backend.example.com' }
+```
+
+#### 実行フロー
+
+1. **ルート登録**: `setProxyRoutes()`は`app.ts`内で`setRoute()`**より前に**呼ばれるため、プロキシルートがファイルサーブルートよりも優先される
+2. **パスソート**: エントリはパスプレフィックスの長さでソートされ（長い順）、特定のルートが一般的なルートよりも先にマッチするようになっている
+3. **ルール正規化**: 文字列省略形の値は`normalizeRule()`により`ProxyRule`オブジェクトに正規化される
+4. **リクエスト転送**: ネイティブ`fetch()`を使用し、ヘッダーを手動管理。リクエストヘッダーは転送され、`changeOrigin: true`の場合は`Host`/`Origin`がオプションで書き換えられる
+5. **ボディ処理**: リクエストボディはボディを持つメソッド（POST、PUT、PATCH、DELETE）でストリーミングされる。GETとHEADリクエストにはボディがない
+6. **エラーハンドリング**: プロキシ失敗時は`502 Bad Gateway`レスポンスが返され、エラーはコンソールにログ出力される
+
+#### 実装の詳細
+
+**場所**: `src/server/proxy.ts`
+
+主要な関数:
+
+- `setProxyRoutes(app, proxyConfig)`: Honoアプリにプロキシルートを登録
+- `normalizeRule(rule)`: 文字列省略形を`ProxyRule`オブジェクトに変換
+- `hasBody(method)`: HTTPメソッドがリクエストボディを持つかどうかを判定
+
+**統合**: `src/server/app.ts`
+
+プロキシルートは条件付きで登録される — `context.devServer.proxy`が定義されている場合のみ。`${pathPrefix}/*`と`${pathPrefix}`の両パターンが登録され、ネストされたリクエストと完全一致リクエストの両方を処理する。
+
+#### 設計上の判断
+
+- **ネイティブ`fetch()`**: HTTPプロキシライブラリではなくランタイム組み込みの`fetch()`を使用し、依存関係を最小限に抑えている
+- **`redirect: 'manual'`**: ターゲットサーバーからのリダイレクトレスポンスを自動追従せず、そのまま保持する
+- **`duplex: 'half'`**: Node.jsの`fetch()`実装でストリーミングリクエストボディを有効にする
+- **レスポンス変換なし**: プロキシレスポンスはレスポンス変換パイプラインを通さず、そのまま返却される
 
 ---
 

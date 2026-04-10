@@ -144,6 +144,7 @@ export default defineConfig({
 - `devServer.open`: 起動時にブラウザを自動で開くか（デフォルト: `false`）
 - `devServer.startPath`: サーバー起動時にブラウザで開くカスタムパス（オプション、例: `'__tmpl/'`）
 - `devServer.transforms`: 開発時にレスポンスを変換する関数の配列（オプション、[レスポンス変換API](#レスポンス変換api)を参照）
+- `devServer.proxy`: 開発時に外部サーバーへリクエストを転送するプロキシルール（オプション、[プロキシAPI](#プロキシapi)を参照）
 
 #### コンパイラ設定
 
@@ -424,6 +425,73 @@ interface TransformContext<M extends MetaData> {
 - 静的ファイル（コンパイル対象外のファイル）は通常`ArrayBuffer`として渡されるため、テキストとして処理する場合は必ずデコードしてください
 - 変換関数のエラーはログに記録されますが、サーバーを停止させません（元のコンテンツが返されます）
 - 変換は配列の順序で実行されます
+- 開発サーバーモード（`kamado server`）でのみ適用され、ビルド時には適用されません
+
+#### プロキシAPI
+
+プロキシAPIを使用すると、開発サーバーモード時にリクエストを外部サーバーに転送できます。静的サイトから別ドメインのAPIにAJAXリクエストを送る場合に、ローカル開発時のCORS問題を回避できます。
+
+**主な特徴:**
+
+- **開発時のみ**: プロキシは`serve`モードでのみ適用され、ビルド時には適用されません
+- **全HTTPメソッド対応**: GET、POST、PUT、DELETE、PATCHなどすべてのメソッドをサポート
+- **ストリーミング**: レスポンスはバッファリングせずにストリーミングされます
+- **パスリライト**: リクエストパスを転送前に書き換え可能
+- **簡易・詳細形式**: シンプルな場合は文字列、詳細な制御が必要な場合はオブジェクトを使用
+
+**設定例:**
+
+```typescript
+import { defineConfig } from 'kamado/config';
+
+export default defineConfig({
+	devServer: {
+		port: 3000,
+		proxy: {
+			// 簡易形式: 文字列でターゲットURLを指定 — /api/* をターゲットに転送
+			'/api': 'https://backend.example.com',
+
+			// 詳細形式: パスリライト付きのオブジェクト形式
+			'/api/v2': {
+				target: 'https://api-v2.example.com',
+				// /api/v2/users → /users にリライト
+				pathRewrite: (path) => path.replace(/^\/api\/v2/, ''),
+				changeOrigin: true,
+			},
+		},
+	},
+});
+```
+
+上記の設定では:
+
+- `GET /api/data` → `GET https://backend.example.com/api/data`
+- `POST /api/v2/users` → `POST https://api-v2.example.com/users`（パスがリライトされます）
+
+**ProxyRuleインターフェース:**
+
+```typescript
+interface ProxyRule {
+	target: string; // プロキシ先のターゲットURL
+	pathRewrite?: (path: string) => string | Promise<string>; // プロキシ前にパスを書き換える関数
+	changeOrigin?: boolean; // Origin/Hostヘッダーをターゲットに合わせて変更するか（デフォルト: false）
+}
+```
+
+**プロキシ設定:**
+
+`proxy`オプションはレコード型で、以下の形式です:
+
+- **キー**: マッチするパスプレフィックス（例: `'/api'`）
+- **値**: ターゲットURL文字列（簡易形式）または`ProxyRule`オブジェクト
+
+**重要な注意事項:**
+
+- プロキシルートはファイルサーブルートよりも先にマッチするため、プロキシパスはローカルファイルよりも優先されます
+- 長いパスプレフィックスが先にマッチします（例: `/api/v2` は `/api` よりも優先）
+- クエリ文字列は保持されターゲットに転送されます
+- リクエストヘッダーは転送されます。ターゲットサーバーが `Host` ヘッダーを検証している場合は `changeOrigin: true` を設定すると `Host` と `Origin` ヘッダーがターゲットに合わせて書き換えられます
+- プロキシ失敗時は`502 Bad Gateway`レスポンスが返されます
 - 開発サーバーモード（`kamado server`）でのみ適用され、ビルド時には適用されません
 
 ### CLIコマンド

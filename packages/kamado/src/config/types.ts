@@ -161,6 +161,37 @@ export interface Transform<M extends MetaData = MetaData> {
 }
 
 /**
+ * Proxy rule configuration for dev server
+ */
+export interface ProxyRule {
+	/**
+	 * Target URL to proxy to
+	 * @example 'https://api.example.com'
+	 */
+	readonly target: string;
+	/**
+	 * Rewrite the path before proxying
+	 * @example (path) => path.replace(/^\/api/, '')
+	 */
+	readonly pathRewrite?: (path: string) => string | Promise<string>;
+	/**
+	 * Whether to change the Origin/Host headers to match the target.
+	 * Set to `true` if the target server validates the `Host` header.
+	 * @default false
+	 * @example
+	 * ```typescript
+	 * proxy: {
+	 *   '/api': {
+	 *     target: 'https://api.example.com',
+	 *     changeOrigin: true,
+	 *   },
+	 * }
+	 * ```
+	 */
+	readonly changeOrigin?: boolean;
+}
+
+/**
  * Development server configuration
  */
 export interface DevServerConfig<M extends MetaData> {
@@ -202,6 +233,22 @@ export interface DevServerConfig<M extends MetaData> {
 	 * ```
 	 */
 	readonly transforms?: readonly Transform<M>[];
+	/**
+	 * Proxy rules for dev server.
+	 * Key is the path prefix to match (e.g., '/api').
+	 * Value is a ProxyRule object or a target URL string (shorthand).
+	 * @example
+	 * ```typescript
+	 * proxy: {
+	 *   '/api': 'https://backend.example.com',
+	 *   '/api/v2': {
+	 *     target: 'https://api-v2.example.com',
+	 *     pathRewrite: (path) => path.replace(/^\/api\/v2/, ''),
+	 *   },
+	 * }
+	 * ```
+	 */
+	readonly proxy?: Readonly<Record<string, ProxyRule | string>>;
 }
 
 /**
