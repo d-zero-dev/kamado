@@ -513,7 +513,7 @@ export interface TransformContext<M extends MetaData> {
 // プロキシルール設定
 export interface ProxyRule {
 	readonly target: string; // プロキシ先のターゲットURL
-	readonly pathRewrite?: (path: string) => string; // プロキシ前にパスを書き換え
+	readonly pathRewrite?: (path: string) => string | Promise<string>; // プロキシ前にパスを書き換え
 	readonly changeOrigin?: boolean; // Origin/Hostヘッダーを変更（デフォルト: false）
 }
 

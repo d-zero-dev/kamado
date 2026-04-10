@@ -473,7 +473,7 @@ export default defineConfig({
 ```typescript
 interface ProxyRule {
 	target: string; // プロキシ先のターゲットURL
-	pathRewrite?: (path: string) => string; // プロキシ前にパスを書き換える関数
+	pathRewrite?: (path: string) => string | Promise<string>; // プロキシ前にパスを書き換える関数
 	changeOrigin?: boolean; // Origin/Hostヘッダーをターゲットに合わせて変更するか（デフォルト: false）
 }
 ```

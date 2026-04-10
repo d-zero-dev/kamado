@@ -513,7 +513,7 @@ The Proxy API forwards requests matching configured path prefixes to external se
 // Proxy rule configuration
 export interface ProxyRule {
 	readonly target: string; // Target URL to proxy to
-	readonly pathRewrite?: (path: string) => string; // Rewrite path before proxying
+	readonly pathRewrite?: (path: string) => string | Promise<string>; // Rewrite path before proxying
 	readonly changeOrigin?: boolean; // Change Origin/Host headers (default: false)
 }
 

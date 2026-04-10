@@ -473,7 +473,7 @@ With the configuration above:
 ```typescript
 interface ProxyRule {
 	target: string; // Target URL to proxy to
-	pathRewrite?: (path: string) => string; // Rewrite path before proxying
+	pathRewrite?: (path: string) => string | Promise<string>; // Rewrite path before proxying
 	changeOrigin?: boolean; // Change Origin/Host headers to match target (default: false)
 }
 ```
