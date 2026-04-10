@@ -3,6 +3,7 @@
 	"ignorePaths": ["**/CHANGELOG.md"],
 	"words": [
 		//
-		"kamado"
+		"kamado",
+		"unstub"
 	]
 }
