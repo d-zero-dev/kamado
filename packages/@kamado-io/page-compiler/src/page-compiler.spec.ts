@@ -52,6 +52,24 @@ function clearMockFileContents() {
 	mockFileContents.clear();
 }
 
+describe('createPageCompiler factory defaults', () => {
+	test('does not enable outputPathField by default', () => {
+		const entry = createPageCompiler()();
+		expect(entry.outputPathField).toBeUndefined();
+	});
+
+	test('forwards user-provided outputPathField to the entry', () => {
+		const entry = createPageCompiler()({ outputPathField: 'permalink' });
+		expect(entry.outputPathField).toBe('permalink');
+	});
+
+	test('uses default files and outputExtension', () => {
+		const entry = createPageCompiler()();
+		expect(entry.files).toBe('**/*.html');
+		expect(entry.outputExtension).toBe('.html');
+	});
+});
+
 describe('page compiler', async () => {
 	const config = await mergeConfig({});
 
