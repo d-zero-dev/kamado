@@ -270,6 +270,10 @@ Returns an array of `PageData` objects (extends `CompilableFile` with optional `
 - If you need titles for breadcrumbs/navigation, you must explicitly set `metaData.title` in the `pageList` hook
 - Without explicit `metaData.title`, breadcrumbs and navigation will show `__NO_TITLE__`
 
+**Output path override via frontmatter (opt-in):**
+
+The page compiler can be configured to read a frontmatter field as an output-path override. The feature is disabled by default — enable it by setting `outputPathField: '<your-field-name>'` in the page compiler's options (`def(createPageCompiler(), { outputPathField: 'path' })`). The same override applies in both `kamado build` and `kamado server`. See [@kamado-io/page-compiler](../@kamado-io/page-compiler/README.md#output-path-override-frontmatter-routing) for details.
+
 #### Hook Functions
 
 - `onBeforeBuild`: Function executed before build. Receives `Context` (which extends `Config` with `mode: 'build' | 'serve'`)

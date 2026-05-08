@@ -270,6 +270,10 @@ export default defineConfig({
 - パンくずリストやナビゲーションでタイトルが必要な場合は、`pageList`フックで明示的に`metaData.title`を設定する必要があります
 - 明示的な`metaData.title`がない場合、パンくずリストやナビゲーションには`__NO_TITLE__`と表示されます
 
+**フロントマターによる出力先上書き（オプトイン）:**
+
+page-compiler はフロントマターの任意のフィールドを「出力先パス」として解釈する設定を持ちます。**デフォルトは無効**で、page-compiler のオプションに `outputPathField: '<任意のフィールド名>'` を設定したとき（`def(createPageCompiler(), { outputPathField: 'path' })`）だけ有効になります。`kamado build` と `kamado server` の双方で同じパスが反映されます。詳細は [@kamado-io/page-compiler](../@kamado-io/page-compiler/README.md#output-path-override-frontmatter-routing) を参照してください。
+
 #### フック関数
 
 - `onBeforeBuild`: ビルド前に実行される関数。`Context`（`Config`を拡張し`mode: 'build' | 'serve'`を含む）を受け取ります

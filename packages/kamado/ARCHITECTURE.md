@@ -233,6 +233,16 @@ This map enables the dev server to:
 
 The map is built once at server startup and used for all subsequent requests.
 
+### Output-Path Override via `outputPathField`
+
+Compiler entries may opt in to frontmatter-driven output-path overrides by setting `outputPathField: '<field-name>'` on `CustomCompilerWithMetadata` (or via the user-facing compiler options). The factory result may also expose `defaultOutputPathField`, but the page compiler intentionally leaves it undefined — users opt in explicitly by passing `outputPathField: 'path'` (or another name) to `createPageCompiler()`. The default for every compiler is **off**, so existing projects' frontmatter keys are never reinterpreted as routing.
+
+When the field is configured, `getAssetGroup()` reads each matched file's frontmatter (and JSON sidecar) before returning. If the resolved value is a non-empty string, the file's `outputPath`, `url`, `filePathStem`, and `fileSlug` are recomputed from that override via `resolveMetaPath()` (`packages/kamado/src/path/resolve-meta-path.ts`). Non-string values (numbers, arrays, objects, null) are ignored.
+
+Three forms are accepted: `/foo/bar.html` (used as-is), `/foo/bar` (compiler's `outputExtension` is appended), and `/foo/bar/` (treated as a directory; `index<outputExtension>` is appended). Both `.` and `..` segments are rejected, and a final guard rejects any path that resolves outside `dir.output`. Two source files resolving to the same output path raise a collision error.
+
+The eager read warms the module-level cache in `files/file-content.ts`, so the build's later `getContentFromFile` call (with `cache=true`) does not re-read from disk. The dev server's per-request compile passes `cache=false` to pick up edits, so the eager read is paid only once at startup. Because the override is reflected in the `CompilableFile` returned by `getAssetGroup`, both `compilableFileMap` (dev server) and `build()` (which writes to `file.outputPath`) honor the override with no further changes.
+
 ---
 
 ## API and Extensibility

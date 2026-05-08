@@ -2,6 +2,7 @@ import { vol, fs as memfs } from 'memfs';
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { mergeConfig } from '../config/merge-config.js';
+import { clearFileContentCache } from '../files/file-content.js';
 
 import { getGlobalData } from './get-global-data.js';
 
@@ -114,5 +115,92 @@ describe('getAssetGroup with virtual file system', async () => {
 			undefined,
 			undefined,
 		]);
+	});
+});
+
+describe("getGlobalData honors frontmatter 'path' override", async () => {
+	const config = await mergeConfig({
+		pkg: { name: 'mock' },
+		dir: {
+			root: '/mock/',
+			input: '/mock/input/dir',
+			output: '/mock/output/',
+		},
+	});
+
+	beforeEach(() => {
+		clearFileContentCache();
+		vol.fromJSON({
+			'/mock/input/dir/landing.html':
+				'---\npath: /docs/getting-started/\n---\n<p>Landing</p>',
+			'/mock/input/dir/plain.html': '<p>Plain</p>',
+		});
+	});
+
+	afterEach(() => {
+		vol.reset();
+		clearFileContentCache();
+	});
+
+	test('pageAssetFiles and pageList expose the overridden url/outputPath', async () => {
+		const configWithCompilers = {
+			...config,
+			compilers: () => [
+				{
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					compiler: () => () => '',
+				},
+			],
+		};
+		const globalData = await getGlobalData('', configWithCompilers);
+
+		const byInput = (input: string) =>
+			globalData.pageAssetFiles.find((page) => page.inputPath === input);
+
+		expect(byInput('/mock/input/dir/landing.html')?.outputPath).toBe(
+			'/mock/output/docs/getting-started/index.html',
+		);
+		expect(byInput('/mock/input/dir/landing.html')?.url).toBe('/docs/getting-started/');
+		expect(byInput('/mock/input/dir/plain.html')?.outputPath).toBe(
+			'/mock/output/plain.html',
+		);
+
+		// pageList shares the same overridden objects when no pageList hook is given
+		expect(globalData.pageList).toBe(globalData.pageAssetFiles);
+	});
+
+	test('pageList hook receives the overridden CompilableFile objects', async () => {
+		const seen: { inputPath: string; url: string; outputPath: string }[] = [];
+		const configWithHook = {
+			...config,
+			compilers: () => [
+				{
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					compiler: () => () => '',
+				},
+			],
+			pageList: (pages) => {
+				for (const page of pages) {
+					seen.push({
+						inputPath: page.inputPath,
+						url: page.url,
+						outputPath: page.outputPath,
+					});
+				}
+				return pages;
+			},
+		} satisfies typeof config;
+
+		await getGlobalData('', configWithHook);
+
+		expect(seen).toContainEqual({
+			inputPath: '/mock/input/dir/landing.html',
+			url: '/docs/getting-started/',
+			outputPath: '/mock/output/docs/getting-started/index.html',
+		});
 	});
 });

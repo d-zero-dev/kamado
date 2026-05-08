@@ -97,6 +97,14 @@ export interface CustomCompilerMetadataOptions {
 	 * Output file extension (e.g., '.html', '.css', '.js', '.php')
 	 */
 	readonly outputExtension?: string;
+	/**
+	 * Frontmatter (or JSON sidecar) field whose value overrides the output path.
+	 * When set to a non-empty string, the orchestrator pre-reads frontmatter for
+	 * each matched file and uses the named field's value as a URL-style output
+	 * path override. Default: undefined (feature disabled — frontmatter is not
+	 * pre-read).
+	 */
+	readonly outputPathField?: string;
 }
 
 /**
@@ -117,6 +125,11 @@ export interface CustomCompilerWithMetadata<M extends MetaData> {
 	 * Output file extension (e.g., '.html', '.css', '.js', '.php')
 	 */
 	readonly outputExtension: string;
+	/**
+	 * Frontmatter (or JSON sidecar) field whose value overrides the output path.
+	 * See {@link CustomCompilerMetadataOptions.outputPathField} for details.
+	 */
+	readonly outputPathField?: string;
 	/**
 	 * Compiler function
 	 */
@@ -155,6 +168,12 @@ export interface CustomCompilerFactoryResult<M extends MetaData, CustomCompileOp
 	 * Default output file extension
 	 */
 	readonly defaultOutputExtension: string;
+	/**
+	 * Default value for `outputPathField`. Most factories should leave this
+	 * undefined so the feature is opt-in per project; users enable it by
+	 * passing `outputPathField: '<key>'` in their compiler options.
+	 */
+	readonly defaultOutputPathField?: string;
 	/**
 	 * Compiler function that takes options and returns a compiler
 	 */

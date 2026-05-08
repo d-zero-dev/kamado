@@ -233,6 +233,16 @@ graph TD
 
 マップはサーバー起動時に一度構築され、その後のすべてのリクエストで使用されます。
 
+### `outputPathField` による出力先上書き
+
+コンパイラエントリは `CustomCompilerWithMetadata` に `outputPathField: '<フィールド名>'` を設定する（あるいはユーザー向けオプションから設定する）ことで、frontmatter 駆動の出力先上書きにオプトインできます。ファクトリ結果に `defaultOutputPathField` を持たせることも可能ですが、page-compiler は意図的にこれを設定していません — 利用者が `createPageCompiler()` のオプションに `outputPathField: 'path'`（任意のフィールド名でよい）を明示することで初めて有効になります。すべてのコンパイラのデフォルトは **OFF** であり、既存プロジェクトの frontmatter キーが意図せず routing に解釈されることはありません。
+
+フィールドが設定されている場合、`getAssetGroup()` は各ファイルの frontmatter（および同名 `.json` サイドカー）を返却前に読み込みます。指定フィールドの値が非空の文字列であれば、`resolveMetaPath()`（`packages/kamado/src/path/resolve-meta-path.ts`）で `outputPath` / `url` / `filePathStem` / `fileSlug` を上書きパスから再計算します。文字列以外の値（数値・配列・オブジェクト・null など）は無視されます。
+
+許容形式は3種類です。`/foo/bar.html`（そのまま使用）、`/foo/bar`（コンパイラの `outputExtension` を補完）、`/foo/bar/`（ディレクトリ扱い → `index<outputExtension>` を補完）。`.` と `..` の両セグメントは拒否され、最終ガードとして `dir.output` 外に解決されるパスも拒否します。複数のソースが同一の出力パスに解決された場合は衝突エラーで停止します。
+
+先読みは `files/file-content.ts` のモジュールレベルキャッシュを温めるため、build の後段の `getContentFromFile`（`cache=true`）はディスク再読込を行いません。dev server は編集を反映するためリクエスト毎に `cache=false` を渡すので、先読みコストは起動時の1回のみ支払われます。上書きは `getAssetGroup` が返す `CompilableFile` に既に反映されているため、`compilableFileMap`（dev server）と `build()`（`file.outputPath` に書き出し）はどちらも追加変更なしで上書きを尊重します。
+
 ---
 
 ## API と拡張性

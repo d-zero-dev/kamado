@@ -22,11 +22,13 @@ export function createCustomCompiler<CustomCompileOptions, M extends MetaData>(
 		const files = userOptions?.files ?? result.defaultFiles;
 		const outputExtension = userOptions?.outputExtension ?? result.defaultOutputExtension;
 		const ignore = userOptions?.ignore;
+		const outputPathField = userOptions?.outputPathField ?? result.defaultOutputPathField;
 
 		return {
 			files,
 			ignore,
 			outputExtension,
+			outputPathField,
 			compiler: result.compile(userOptions),
 		};
 	};

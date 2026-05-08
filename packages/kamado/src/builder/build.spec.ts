@@ -137,3 +137,54 @@ describe('getAssetGroup with virtual file system', async () => {
 		});
 	}, 10_000);
 });
+
+describe("build with frontmatter 'path' override", async () => {
+	const config = await mergeConfig(
+		// @ts-ignore
+		{ pkg: { name: 'mock' } },
+	);
+
+	beforeEach(() => {
+		vol.fromJSON({
+			'/mock/input/dir/explicit.html':
+				'---\npath: /custom/landing.html\n---\n<p>Explicit</p>',
+			'/mock/input/dir/no-ext.html': '---\npath: /custom/no-ext\n---\n<p>NoExt</p>',
+			'/mock/input/dir/dir.html': '---\npath: /section/\n---\n<p>Section</p>',
+			'/mock/input/dir/plain.html': '<p>Plain</p>',
+		});
+	});
+
+	afterEach(() => {
+		vol.reset();
+	});
+
+	test('writes pages to overridden paths', async () => {
+		await build({
+			...config,
+			dir: {
+				...config.dir,
+				input: '/mock/input/dir',
+				output: '/mock/output/dir',
+			},
+			compilers: () => [
+				{
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					compiler: () => (file) => `compiled:${file.inputPath}`,
+				},
+			],
+			verbose: true,
+		});
+
+		const outputs = Object.fromEntries(
+			Object.entries(vol.toJSON()).filter(([key]) => key.startsWith('/mock/output')),
+		);
+		expect(outputs).toStrictEqual({
+			'/mock/output/dir/custom/landing.html': 'compiled:/mock/input/dir/explicit.html',
+			'/mock/output/dir/custom/no-ext.html': 'compiled:/mock/input/dir/no-ext.html',
+			'/mock/output/dir/section/index.html': 'compiled:/mock/input/dir/dir.html',
+			'/mock/output/dir/plain.html': 'compiled:/mock/input/dir/plain.html',
+		});
+	}, 10_000);
+});
