@@ -68,6 +68,58 @@ export default defineConfig({
 
 **Note**: To use Pug templates, install `@kamado-io/pug-compiler` and use `createCompileHooks` helper. See the [@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md) for integration examples.
 
+## Output Path Override (frontmatter routing)
+
+> Conceptually similar to `permalink` in 11ty / Jekyll / Hugo.
+
+This feature is **opt-in** and **disabled by default**. To enable it, pass an `outputPathField` to the compiler. The value is the name of the frontmatter (or JSON sidecar) field that should be interpreted as a URL-style output path. The same override applies in both `kamado build` and `kamado server` modes.
+
+```ts
+import { defineConfig } from 'kamado/config';
+import { createPageCompiler } from '@kamado-io/page-compiler';
+
+export default defineConfig({
+	compilers: (def) => [
+		def(createPageCompiler(), {
+			outputPathField: 'path', // pick any name you like, e.g. 'permalink'
+			layouts: { dir: './layouts' },
+		}),
+	],
+});
+```
+
+Pages can then declare an override:
+
+```html
+---
+path: /docs/getting-started/
+layout: doc
+---
+
+<h1>Getting Started</h1>
+```
+
+The override is interpreted relative to `dir.output` and accepts three forms:
+
+- **Explicit extension** — `/custom/foo.html` writes to `<output>/custom/foo.html`.
+- **Without extension** — `/custom/foo` appends the compiler's `outputExtension` and writes to `<output>/custom/foo.html`.
+- **Trailing slash** — `/section/` is treated as a directory and writes to `<output>/section/index.html`.
+
+Rules:
+
+- The value must start with `/`.
+- `.` and `..` segments are rejected (the resolved path must stay inside `dir.output`).
+- Non-string values (numbers, arrays, etc.) for the configured field are ignored — only string values trigger an override.
+- If two source files resolve to the same output path, the build aborts with a collision error pointing to both sources.
+- A same-name `.json` sidecar takes precedence over the YAML frontmatter — the field declared in JSON wins.
+- Quote the value when it contains characters with special meaning in YAML (e.g. `:`). For example, `path: '/foo:bar/'` instead of `path: /foo:bar/`.
+
+> **Note**: `compilableFileMap` is built once at dev-server startup. If you add a new page or change an override value, restart `kamado server` for the change to take effect.
+
+### Choosing a Field Name
+
+`outputPathField` is intentionally configurable so it cannot collide with a frontmatter key your project already uses for other purposes. Pick a name that doesn't conflict — common choices are `path`, `permalink`, `outputPath`, or a project-specific name. Without `outputPathField` set, the page compiler does **not** read frontmatter eagerly and **does not** treat any field as routing data.
+
 ## Transform Pipeline
 
 The page compiler uses a Transform Pipeline to process HTML content after compilation. Each transform is an object with a `name` and `transform` function that receives content and contextual information.
