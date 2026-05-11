@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.14](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.13...v2.0.0-alpha.14) (2026-05-11)
+
+### Features
+
+- **kamado:** add outputPathField for frontmatter-driven output overrides ([44278cf](https://github.com/d-zero-dev/kamado/commit/44278cf1a507bb5ef89b8a9be439096d72360cb6))
+
 # [2.0.0-alpha.13](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.12...v2.0.0-alpha.13) (2026-04-10)
 
 ### Bug Fixes
