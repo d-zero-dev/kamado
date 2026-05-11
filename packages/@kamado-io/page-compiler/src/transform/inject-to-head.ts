@@ -57,6 +57,7 @@ export interface InjectToHeadOptions extends InjectToHeadTransformOptions {
  * This is the core transform function without filter configuration.
  * Use this when you want to create custom Transform objects.
  * Can be used in both development and build contexts.
+ * @template M - Metadata (frontmatter) type for pages handled by this transform
  * @param options - Transform options
  * @returns Transform function (content, info) => Promise<string | ArrayBuffer>
  * @example Creating a custom Transform
@@ -121,6 +122,7 @@ export function createInjectToHeadTransform<M extends MetaData>(
  * Returns a Transform object with name and filter included, which can be used directly
  * or customized via spread syntax.
  * Can be used in both development (devServer.transforms) and build contexts (page compiler transforms).
+ * @template M - Metadata (frontmatter) type for pages handled by this transform
  * @param options - Configuration options including filters
  * @returns Transform object for use in devServer.transforms or page compiler transforms
  * @example Usage in devServer.transforms

@@ -12,6 +12,7 @@ export interface MinifierOptions {
 
 /**
  * Creates a transform for HTML minification
+ * @template M - Metadata (frontmatter) type for pages handled by this transform
  * @param options - Minifier options
  * @returns Transform object
  */

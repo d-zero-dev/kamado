@@ -10,6 +10,7 @@ import { imageSizes } from '../image.js';
 
 /**
  * Options for manipulateDOM
+ * @template M - Metadata (frontmatter) type passed through to the hook callback
  */
 export interface ManipulateDOMOptions<M extends MetaData> {
 	readonly hook?: (
@@ -23,6 +24,7 @@ export interface ManipulateDOMOptions<M extends MetaData> {
 
 /**
  * Creates a transform for DOM manipulation
+ * @template M - Metadata (frontmatter) type for pages handled by this transform
  * @param options - DOM manipulation options
  * @returns Transform object
  */

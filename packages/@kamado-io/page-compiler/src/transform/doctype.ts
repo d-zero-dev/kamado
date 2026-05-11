@@ -9,6 +9,7 @@ export interface DoctypeOptions {}
 
 /**
  * Creates a transform for adding DOCTYPE
+ * @template M - Metadata (frontmatter) type for pages handled by this transform
  * @returns Transform object
  */
 export function doctype<M extends MetaData>(): Transform<M> {

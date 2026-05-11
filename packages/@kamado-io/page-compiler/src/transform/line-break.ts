@@ -10,6 +10,7 @@ export interface LineBreakOptions {
 
 /**
  * Creates a transform for line break normalization
+ * @template M - Metadata (frontmatter) type for pages handled by this transform
  * @param options - Line break options
  * @returns Transform object
  */

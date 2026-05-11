@@ -68,6 +68,7 @@ export interface SSIShimOptions extends SSIShimTransformOptions {
  * Processes `<!--#include virtual="/path/to/file.html" -->` directives in HTML files
  * and replaces them with the content of the referenced files.
  * Can be used in both development and build contexts.
+ * @template M - Metadata (frontmatter) type for pages handled by this transform
  * @param options - Transform options
  * @param name - Transform name used for logging (default: 'ssiShim')
  * @returns Transform function (content, context) => Promise<string | ArrayBuffer>
@@ -181,6 +182,7 @@ export function createSSIShimTransform<M extends MetaData>(
  * Processes `<!--#include virtual="/path/to/file.html" -->` directives in HTML files
  * and replaces them with the content of the referenced files.
  * Can be used in both development (devServer.transforms) and build contexts (beforeSerialize hook).
+ * @template M - Metadata (frontmatter) type for pages handled by this transform
  * @param options - Configuration options including filters
  * @returns ResponseTransform object for use in devServer.transforms or with beforeSerialize
  * @example Usage in devServer.transforms

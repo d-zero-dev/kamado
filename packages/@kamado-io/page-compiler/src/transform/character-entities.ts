@@ -42,6 +42,7 @@ const charPattern = new RegExp(
 
 /**
  * Creates a transform for character entities conversion
+ * @template M - Metadata (frontmatter) type for pages handled by this transform
  * @returns Transform object
  */
 export function characterEntities<M extends MetaData>(): Transform<M> {
