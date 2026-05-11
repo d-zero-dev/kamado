@@ -79,4 +79,51 @@ describe('prettier', () => {
 
 		expect(typeof result).toBe('string');
 	});
+
+	test('should include source file path when Prettier parser fails', async () => {
+		const transform = prettier({
+			options: { parser: 'json' },
+		});
+		const info = createMockTransformInfo({
+			inputPath: '/test/input/broken.pug',
+		});
+
+		await expect(transform.transform('not-valid-json', info)).rejects.toThrow(
+			/^Prettier failed to format \/test\/input\/broken\.pug: \S/,
+		);
+	});
+
+	test('should fall back to outputPath when inputPath is missing', async () => {
+		const transform = prettier({
+			options: { parser: 'json' },
+		});
+		const info = createMockTransformInfo({
+			inputPath: undefined,
+			outputPath: '/test/output/broken.html',
+		});
+
+		await expect(transform.transform('not-valid-json', info)).rejects.toThrow(
+			/^Prettier failed to format \/test\/output\/broken\.html: \S/,
+		);
+	});
+
+	test('should preserve the original Prettier error as cause', async () => {
+		const transform = prettier({
+			options: { parser: 'json' },
+		});
+		const info = createMockTransformInfo({
+			inputPath: '/test/input/broken.pug',
+		});
+
+		const error = await transform
+			.transform('not-valid-json', info)
+			.then(() => null)
+			.catch((error_: unknown) => error_);
+
+		expect(error).toBeInstanceOf(Error);
+		const wrapped = error as Error;
+		expect(wrapped.cause).toBeInstanceOf(Error);
+		expect((wrapped.cause as Error).message.length).toBeGreaterThan(0);
+		expect(wrapped.message).toContain((wrapped.cause as Error).message);
+	});
 });

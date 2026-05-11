@@ -195,6 +195,7 @@ The package provides **6 transform factory functions** (5 included in default pi
        // ... other Prettier options
      }
      ```
+   - **Error handling**: If Prettier fails to format the input (for example, the parser chokes on malformed HTML), the original error is re-thrown wrapped in an `Error` whose message is prefixed with the source file path. The underlying Prettier error is preserved on `error.cause`, so handlers can still inspect `loc` and other Prettier-specific fields.
 
 5. **`minifier(options?)`** - Minify HTML
    - `options.options`: html-minifier-terser configuration object
