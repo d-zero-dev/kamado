@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.15](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.14...v2.0.0-alpha.15) (2026-05-12)
+
+### Bug Fixes
+
+- **page-compiler:** include source file path when Prettier formatting fails ([8e38f28](https://github.com/d-zero-dev/kamado/commit/8e38f2872b030a674548070ea5cad08b8adb9b6d))
+
+### Features
+
+- **page-compiler:** add formatOptions.parseError for prettier error policy ([41047c2](https://github.com/d-zero-dev/kamado/commit/41047c2eb7c841cf83e840e2b040ec5a0a8d6976))
+
 # [2.0.0-alpha.14](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.13...v2.0.0-alpha.14) (2026-05-11)
 
 ### Features
