@@ -1,6 +1,6 @@
 import type { GetNavTreeOptions } from './features/nav.js';
 import type { TitleListOptions } from './features/title-list.js';
-import type { CompileData, PageCompilerOptions } from './types.js';
+import type { CompileData, PageCompilerOptions, ParseErrorMode } from './types.js';
 import type { Transform, TransformContext } from 'kamado/config';
 import type { MetaData } from 'kamado/files';
 
@@ -160,9 +160,7 @@ export function createPageCompiler<M extends MetaData>() {
 					compile,
 				};
 
-				const defaultPageTransforms = createDefaultPageTransforms<M>({
-					parseError: options?.formatOptions?.parseError,
-				});
+				const defaultPageTransforms = createDefaultPageTransforms<M>();
 
 				// Use provided transforms or default
 				const transforms: Transform<M>[] =
@@ -170,10 +168,30 @@ export function createPageCompiler<M extends MetaData>() {
 						? options.transforms(defaultPageTransforms)
 						: (options?.transforms ?? defaultPageTransforms);
 
-				// Apply transforms sequentially
+				const parseErrorMode: ParseErrorMode =
+					options?.formatOptions?.parseError ?? 'silent';
+
+				// Apply transforms sequentially. Any transform failure is routed through
+				// the formatOptions.parseError policy: on silent/warning the failing
+				// transform is skipped and the previous step's output flows through.
 				let result: string | ArrayBuffer = html;
 				for (const transform of transforms) {
-					result = await transform.transform(result, transformContext);
+					try {
+						result = await transform.transform(result, transformContext);
+					} catch (error) {
+						const source = transformContext.inputPath ?? transformContext.outputPath;
+						const original = error instanceof Error ? error.message : String(error);
+						const message = `Transform '${transform.name}' failed on ${source}: ${original}`;
+
+						if (parseErrorMode === 'error') {
+							throw new Error(message, { cause: error });
+						}
+						if (parseErrorMode === 'warning') {
+							// eslint-disable-next-line no-console
+							console.warn(message);
+						}
+						// silent / warning: keep `result` as-is and continue
+					}
 				}
 
 				// Ensure result is string
@@ -190,8 +208,7 @@ export function createPageCompiler<M extends MetaData>() {
 
 // Re-export types
 export type * from './types.js';
-export type { DefaultPageTransformsOptions } from './page-transform.js';
-export type { PrettierOptions, PrettierParseErrorMode } from './transform/prettier.js';
+export type { PrettierOptions } from './transform/prettier.js';
 
 // Re-export page transforms
 export { createDefaultPageTransforms } from './page-transform.js';

@@ -55,8 +55,11 @@ export default defineConfig({
   - `'path'`: Sort by path using `pathComparator`
   - `(a: string, b: string) => number`: Custom comparator function
   - `null` (default): No sorting (preserve original order)
-- `formatOptions`: Options applied to the **default** format transforms. Only forwarded to transforms produced by `createDefaultPageTransforms`; if a custom `transforms` array is supplied, pass these settings to the relevant transform factories directly (e.g. `prettier({ parseError })`).
-  - `parseError`: Behavior when Prettier fails to parse the input. One of `'silent' | 'warning' | 'error'` (default: `'silent'`). See the [`prettier` transform](#transform-pipeline) section for details.
+- `formatOptions`: Pipeline-level error policy applied to **every** transform in the compiled chain (both built-in transforms like `prettier`/`minifier` and any custom ones from `transforms`).
+  - `parseError`: Behavior when a transform throws. One of:
+    - `'silent'` (default) — swallow the error, skip the failing transform, and pass the previous step's output to the next one
+    - `'warning'` — `console.warn` with `Transform '<name>' failed on <source>: <original>`, then skip the failing transform
+    - `'error'` — throw an `Error` with the same message prefix; the original error is preserved on `error.cause`
   - Example:
 
     ```typescript
@@ -207,11 +210,7 @@ The package provides **6 transform factory functions** (5 included in default pi
        // ... other Prettier options
      }
      ```
-   - `options.parseError`: Behavior when Prettier fails to parse the input (for example, when the HTML parser chokes on malformed markup). Defaults to `'silent'`.
-     - `'silent'` — swallow the error and emit the unformatted source as-is.
-     - `'warning'` — `console.warn` with a message prefixed by the source file path (`ctx.inputPath`, falling back to `ctx.outputPath`), then emit the unformatted source.
-     - `'error'` — throw an `Error` whose message is prefixed by the source file path. The underlying Prettier error is preserved on `error.cause`, so handlers can inspect `loc` and other Prettier-specific fields.
-   - **Top-level shortcut**: When using `createDefaultPageTransforms()`, pass `formatOptions.parseError` on `PageCompilerOptions` instead of constructing the transform yourself.
+   - **Errors**: This transform throws raw Prettier errors (typically `SyntaxError` for malformed input). Failures are handled at the pipeline level by `PageCompilerOptions.formatOptions.parseError` — see the [Options](#options) section.
 
 5. **`minifier(options?)`** - Minify HTML
    - `options.options`: html-minifier-terser configuration object
@@ -224,6 +223,7 @@ The package provides **6 transform factory functions** (5 included in default pi
        // ... other minifier options
      }
      ```
+   - **Errors**: This transform throws raw `html-minifier-terser` errors when the input cannot be parsed. Failures are handled at the pipeline level by `PageCompilerOptions.formatOptions.parseError` — see the [Options](#options) section.
 
 6. **`lineBreak(options?)`** - Normalize line breaks
    - `options.lineBreak`: Line break style

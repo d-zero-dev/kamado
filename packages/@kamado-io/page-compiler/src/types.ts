@@ -1,10 +1,19 @@
 import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { GetNavTreeOptions, NavNode } from './features/nav.js';
 import type { TitleListOptions } from './features/title-list.js';
-import type { PrettierParseErrorMode } from './transform/prettier.js';
 import type { PathListToTreeOptions } from '@d-zero/shared/path-list-to-tree';
 import type { Transform } from 'kamado/config';
 import type { CompilableFile, FileObject, MetaData } from 'kamado/files';
+
+/**
+ * Pipeline-level error policy applied when a transform throws during page
+ * compilation.
+ * - `'silent'` (default): swallow the error, skip the failing transform,
+ *   and pass the previous step's output to the next one
+ * - `'warning'`: `console.warn` with the transform name and source path, then skip
+ * - `'error'`: throw an `Error` prefixed with the transform name and source path
+ */
+export type ParseErrorMode = 'silent' | 'warning' | 'error';
 
 /**
  * Options for the page compiler
@@ -157,11 +166,11 @@ export interface PageCompilerOptions<M extends MetaData> {
 	 */
 	readonly navigationComparator?: PathListToTreeOptions['comparator'];
 	/**
-	 * Options applied to the default format transforms.
+	 * Pipeline-level format error policy.
 	 *
-	 * Only forwarded to the transforms produced by `createDefaultPageTransforms`.
-	 * If a custom `transforms` array is supplied, pass these settings to the
-	 * relevant transform factories directly (e.g. `prettier({ parseError })`).
+	 * Applied to **every** transform in the compiled pipeline, including the
+	 * default transforms (`prettier`, `minifier`, etc.) and any custom
+	 * transforms supplied via `transforms`.
 	 * @example
 	 * ```typescript
 	 * createPageCompiler()({
@@ -171,12 +180,10 @@ export interface PageCompilerOptions<M extends MetaData> {
 	 */
 	readonly formatOptions?: {
 		/**
-		 * Behavior when Prettier fails to parse the input.
-		 * - `'silent'` (default): swallow the error and emit the unformatted source
-		 * - `'warning'`: `console.warn` with the source path, then emit the unformatted source
-		 * - `'error'`: throw an `Error` prefixed with the source path
+		 * Behavior when ANY transform throws during the page pipeline.
+		 * See {@link ParseErrorMode}.
 		 */
-		readonly parseError?: PrettierParseErrorMode;
+		readonly parseError?: ParseErrorMode;
 	};
 }
 
