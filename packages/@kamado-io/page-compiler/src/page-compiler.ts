@@ -160,7 +160,9 @@ export function createPageCompiler<M extends MetaData>() {
 					compile,
 				};
 
-				const defaultPageTransforms = createDefaultPageTransforms<M>();
+				const defaultPageTransforms = createDefaultPageTransforms<M>({
+					parseError: options?.formatOptions?.parseError,
+				});
 
 				// Use provided transforms or default
 				const transforms: Transform<M>[] =
@@ -188,6 +190,8 @@ export function createPageCompiler<M extends MetaData>() {
 
 // Re-export types
 export type * from './types.js';
+export type { DefaultPageTransformsOptions } from './page-transform.js';
+export type { PrettierOptions, PrettierParseErrorMode } from './transform/prettier.js';
 
 // Re-export page transforms
 export { createDefaultPageTransforms } from './page-transform.js';

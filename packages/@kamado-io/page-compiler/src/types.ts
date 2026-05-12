@@ -1,6 +1,7 @@
 import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { GetNavTreeOptions, NavNode } from './features/nav.js';
 import type { TitleListOptions } from './features/title-list.js';
+import type { PrettierParseErrorMode } from './transform/prettier.js';
 import type { PathListToTreeOptions } from '@d-zero/shared/path-list-to-tree';
 import type { Transform } from 'kamado/config';
 import type { CompilableFile, FileObject, MetaData } from 'kamado/files';
@@ -155,6 +156,28 @@ export interface PageCompilerOptions<M extends MetaData> {
 	 * ```
 	 */
 	readonly navigationComparator?: PathListToTreeOptions['comparator'];
+	/**
+	 * Options applied to the default format transforms.
+	 *
+	 * Only forwarded to the transforms produced by `createDefaultPageTransforms`.
+	 * If a custom `transforms` array is supplied, pass these settings to the
+	 * relevant transform factories directly (e.g. `prettier({ parseError })`).
+	 * @example
+	 * ```typescript
+	 * createPageCompiler()({
+	 *   formatOptions: { parseError: 'warning' },
+	 * });
+	 * ```
+	 */
+	readonly formatOptions?: {
+		/**
+		 * Behavior when Prettier fails to parse the input.
+		 * - `'silent'` (default): swallow the error and emit the unformatted source
+		 * - `'warning'`: `console.warn` with the source path, then emit the unformatted source
+		 * - `'error'`: throw an `Error` prefixed with the source path
+		 */
+		readonly parseError?: PrettierParseErrorMode;
+	};
 }
 
 /**

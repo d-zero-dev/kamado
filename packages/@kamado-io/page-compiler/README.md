@@ -55,6 +55,18 @@ export default defineConfig({
   - `'path'`: Sort by path using `pathComparator`
   - `(a: string, b: string) => number`: Custom comparator function
   - `null` (default): No sorting (preserve original order)
+- `formatOptions`: Options applied to the **default** format transforms. Only forwarded to transforms produced by `createDefaultPageTransforms`; if a custom `transforms` array is supplied, pass these settings to the relevant transform factories directly (e.g. `prettier({ parseError })`).
+  - `parseError`: Behavior when Prettier fails to parse the input. One of `'silent' | 'warning' | 'error'` (default: `'silent'`). See the [`prettier` transform](#transform-pipeline) section for details.
+  - Example:
+
+    ```typescript
+    import { createPageCompiler } from '@kamado-io/page-compiler';
+
+    createPageCompiler()({
+    	formatOptions: { parseError: 'warning' },
+    });
+    ```
+
 - `compileHooks`: Compilation hooks for customizing compile process
   - Can be an object or a function `(options: PageCompilerOptions<M>) => CompileHooksObject<M> | Promise<CompileHooksObject<M>>` that returns an object (sync or async)
   - `main`: Hooks for main content compilation
@@ -195,7 +207,11 @@ The package provides **6 transform factory functions** (5 included in default pi
        // ... other Prettier options
      }
      ```
-   - **Error handling**: If Prettier fails to format the input (for example, the parser chokes on malformed HTML), the original error is re-thrown wrapped in an `Error` whose message is prefixed with the source file path. The underlying Prettier error is preserved on `error.cause`, so handlers can still inspect `loc` and other Prettier-specific fields.
+   - `options.parseError`: Behavior when Prettier fails to parse the input (for example, when the HTML parser chokes on malformed markup). Defaults to `'silent'`.
+     - `'silent'` — swallow the error and emit the unformatted source as-is.
+     - `'warning'` — `console.warn` with a message prefixed by the source file path (`ctx.inputPath`, falling back to `ctx.outputPath`), then emit the unformatted source.
+     - `'error'` — throw an `Error` whose message is prefixed by the source file path. The underlying Prettier error is preserved on `error.cause`, so handlers can inspect `loc` and other Prettier-specific fields.
+   - **Top-level shortcut**: When using `createDefaultPageTransforms()`, pass `formatOptions.parseError` on `PageCompilerOptions` instead of constructing the transform yourself.
 
 5. **`minifier(options?)`** - Minify HTML
    - `options.options`: html-minifier-terser configuration object
