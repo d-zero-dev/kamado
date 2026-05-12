@@ -125,7 +125,7 @@ Rules:
 - The value must start with `/`.
 - `.` and `..` segments are rejected (the resolved path must stay inside `dir.output`).
 - Non-string values (numbers, arrays, etc.) for the configured field are ignored — only string values trigger an override.
-- If two source files resolve to the same output path, the build aborts with a collision error pointing to both sources.
+- If two source files resolve to the same output path, the behavior is controlled by `outputPathConflict` (see below).
 - A same-name `.json` sidecar takes precedence over the YAML frontmatter — the field declared in JSON wins.
 - Quote the value when it contains characters with special meaning in YAML (e.g. `:`). For example, `path: '/foo:bar/'` instead of `path: /foo:bar/`.
 
@@ -134,6 +134,30 @@ Rules:
 ### Choosing a Field Name
 
 `outputPathField` is intentionally configurable so it cannot collide with a frontmatter key your project already uses for other purposes. Pick a name that doesn't conflict — common choices are `path`, `permalink`, `outputPath`, or a project-specific name. Without `outputPathField` set, the page compiler does **not** read frontmatter eagerly and **does not** treat any field as routing data.
+
+### Handling Output-Path Conflicts
+
+When two source files resolve to the same output path, `outputPathConflict` selects how the build reacts. The option lives on the compiler entry next to `outputPathField` and accepts three values:
+
+| Value       | Behavior                                                         |
+| ----------- | ---------------------------------------------------------------- |
+| `'error'`   | Abort the build with a collision error pointing to both sources. |
+| `'warning'` | Log a warning to `stderr` and keep one file. **Default.**        |
+| `'silent'`  | Keep one file with no log output.                                |
+
+```ts
+def(createPageCompiler(), {
+	outputPathField: 'path',
+	outputPathConflict: 'error', // abort the build on any collision
+});
+```
+
+When the policy is `'warning'` or `'silent'` and a winner must be picked:
+
+1. A file whose `outputPath` came from the frontmatter override **beats** one using the default computed path.
+2. Among ties (both override, or both default), the **first-seen** file wins.
+
+This means a routing override always takes precedence over an accidental default-path collision, regardless of the order in which the files are processed.
 
 ## Transform Pipeline
 
