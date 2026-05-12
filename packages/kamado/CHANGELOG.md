@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.16](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.15...v2.0.0-alpha.16) (2026-05-12)
+
+### Features
+
+- **kamado:** add outputPathConflict policy for output-path collisions ([e75dcbb](https://github.com/d-zero-dev/kamado/commit/e75dcbb6a5bc39e524811c9a0c49386043f40f3c))
+
 # [2.0.0-alpha.15](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.14...v2.0.0-alpha.15) (2026-05-12)
 
 **Note:** Version bump only for package kamado
