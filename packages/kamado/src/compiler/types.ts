@@ -105,7 +105,25 @@ export interface CustomCompilerMetadataOptions {
 	 * pre-read).
 	 */
 	readonly outputPathField?: string;
+	/**
+	 * Policy for handling two source files that resolve to the same output path.
+	 * - `'error'`: throw and abort the build.
+	 * - `'warning'`: log a warning and keep one file (default).
+	 * - `'silent'`: keep one file with no log output.
+	 *
+	 * When a winner must be picked (`'warning'` / `'silent'`), a file whose
+	 * `outputPath` came from the frontmatter override always beats one using
+	 * the default computed path; among ties the first-seen file wins.
+	 * Default: `'warning'`.
+	 */
+	readonly outputPathConflict?: OutputPathConflictPolicy;
 }
+
+/**
+ * Policy for handling output-path collisions.
+ * See {@link CustomCompilerMetadataOptions.outputPathConflict}.
+ */
+export type OutputPathConflictPolicy = 'silent' | 'warning' | 'error';
 
 /**
  * Compiler with metadata
@@ -130,6 +148,11 @@ export interface CustomCompilerWithMetadata<M extends MetaData> {
 	 * See {@link CustomCompilerMetadataOptions.outputPathField} for details.
 	 */
 	readonly outputPathField?: string;
+	/**
+	 * Policy for handling output-path collisions.
+	 * See {@link CustomCompilerMetadataOptions.outputPathConflict} for details.
+	 */
+	readonly outputPathConflict?: OutputPathConflictPolicy;
 	/**
 	 * Compiler function
 	 */

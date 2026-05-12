@@ -66,4 +66,30 @@ describe('createCustomCompiler', () => {
 		});
 		expect(entry.ignore).toBe('**/_*');
 	});
+
+	test('outputPathConflict is undefined when user omits it', () => {
+		const entry = createCustomCompiler(factoryWithoutDefaults)();
+		expect(entry.outputPathConflict).toBeUndefined();
+	});
+
+	test('user-provided outputPathConflict "silent" is propagated', () => {
+		const entry = createCustomCompiler(factoryWithoutDefaults)({
+			outputPathConflict: 'silent',
+		});
+		expect(entry.outputPathConflict).toBe('silent');
+	});
+
+	test('user-provided outputPathConflict "error" is propagated', () => {
+		const entry = createCustomCompiler(factoryWithoutDefaults)({
+			outputPathConflict: 'error',
+		});
+		expect(entry.outputPathConflict).toBe('error');
+	});
+
+	test('user-provided outputPathConflict "warning" is propagated', () => {
+		const entry = createCustomCompiler(factoryWithoutDefaults)({
+			outputPathConflict: 'warning',
+		});
+		expect(entry.outputPathConflict).toBe('warning');
+	});
 });
