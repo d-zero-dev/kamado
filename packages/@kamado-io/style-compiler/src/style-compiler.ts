@@ -25,6 +25,15 @@ export interface StyleCompilerOptions {
 	 * Can specify CreateBanner function or string
 	 */
 	readonly banner?: CreateBanner | string;
+	/**
+	 * Emit an inline source map (`/*# sourceMappingURL=data:... *\/` appended to the output).
+	 * Default: false.
+	 *
+	 * When enabled, the banner is prepended *before* PostCSS processing so that
+	 * the resulting source map line offsets stay correct. The banner is rewritten
+	 * to a `/*!` important comment so cssnano preserves it through minification.
+	 */
+	readonly sourcemap?: boolean;
 }
 
 /**
@@ -110,17 +119,31 @@ export function createStyleCompiler<M extends MetaData>() {
 
 				const css = await getContentFromFile(file, cache);
 
-				// Process CSS with PostCSS
-				const result = await postcss(plugins).process(css.content, {
-					from: file.inputPath,
-					to: undefined,
-				});
-
 				const banner =
 					typeof options?.banner === 'string'
 						? options.banner
 						: createBanner(options?.banner?.());
 
+				if (options?.sourcemap) {
+					// Rewrite leading `/*` → `/*!` so cssnano preserves the banner;
+					// including it in the PostCSS input keeps the inline source map
+					// line offsets correct.
+					const inputBanner = banner.replace(/^\/\*(?!!)/, '/*!');
+					const result = await postcss(plugins).process(
+						inputBanner + '\n' + css.content,
+						{
+							from: file.inputPath,
+							to: undefined,
+							map: { inline: true },
+						},
+					);
+					return result.css;
+				}
+
+				const result = await postcss(plugins).process(css.content, {
+					from: file.inputPath,
+					to: undefined,
+				});
 				return banner + '\n' + result.css;
 			};
 		},
