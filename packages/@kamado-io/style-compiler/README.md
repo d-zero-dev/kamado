@@ -33,6 +33,7 @@ export default defineConfig({
 - `outputExtension` (optional): Output file extension (default: `'.css'`)
 - `alias`: Map of path aliases (key is alias name, value is actual path)
 - `banner`: Banner configuration (can specify CreateBanner function or string)
+- `sourcemap`: Emit an inline source map (`/*# sourceMappingURL=data:... */` appended to the output). Default: `false`. When enabled, the banner is fed through PostCSS as a `/*!` important comment so cssnano preserves it and the source map line offsets stay correct.
 
 ## License
 
