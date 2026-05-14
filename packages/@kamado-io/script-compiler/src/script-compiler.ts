@@ -26,6 +26,11 @@ export interface ScriptCompilerOptions {
 	 * Can specify CreateBanner function or string
 	 */
 	readonly banner?: CreateBanner | string;
+	/**
+	 * Emit an inline source map (data URI appended as `//# sourceMappingURL=...`).
+	 * Default: false.
+	 */
+	readonly sourcemap?: boolean;
 }
 
 /**
@@ -70,6 +75,7 @@ export function createScriptCompiler<M extends MetaData>() {
 					outfile: tmpFilePath,
 					minify: options?.minifier,
 					charset: 'utf8',
+					sourcemap: options?.sourcemap ? 'inline' : false,
 					banner: {
 						js: banner,
 					},
