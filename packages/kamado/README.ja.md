@@ -191,6 +191,7 @@ def(createPageCompiler(), {
 - `outputExtension`（オプション）: 出力ファイルの拡張子（デフォルト: `'.css'`）
 - `alias`: パスエイリアスのマップ（PostCSSの`@import`で使用）
 - `banner`: バナー設定（CreateBanner関数または文字列を指定可能）
+- `sourcemap`: 出力末尾にインラインソースマップを付与する。デフォルト: `false`
 
 **例**: `.scss`ファイルを`.css`にコンパイルし、ソースファイルを無視する場合：
 
@@ -213,6 +214,7 @@ def(createStyleCompiler(), {
 - `alias`: パスエイリアスのマップ（esbuildのエイリアス）
 - `minifier`: ミニファイを有効にするか
 - `banner`: バナー設定（CreateBanner関数または文字列を指定可能）
+- `sourcemap`: 出力末尾にインラインソースマップを付与する。デフォルト: `false`
 
 **例**: TypeScriptファイルをJavaScriptにコンパイルする場合：
 
@@ -224,6 +226,26 @@ def(createScriptCompiler(), {
 	alias: {
 		'@': path.resolve(import.meta.dirname, '__assets', '_libs'),
 	},
+});
+```
+
+##### コマンドごとにオプションを切り替える
+
+コンパイラーのオプションは`kamado.config.ts`の読み込み時に評価されるため、`kamado server`と`kamado build`で値を変えたい場合（例: ソースマップを開発サーバー時だけ出力する）は、設定ファイル内でCLIコマンドを判定して分岐します：
+
+```ts
+const isServe = process.argv.includes('server');
+
+export default defineConfig({
+	compilers: (def) => [
+		def(createScriptCompiler(), {
+			minifier: !isServe,
+			sourcemap: isServe,
+		}),
+		def(createStyleCompiler(), {
+			sourcemap: isServe,
+		}),
+	],
 });
 ```
 
