@@ -191,7 +191,7 @@ def(createPageCompiler(), {
 - `outputExtension` (optional): Output file extension (default: `'.css'`)
 - `alias`: Path alias map (used in PostCSS `@import`)
 - `banner`: Banner configuration (can specify CreateBanner function or string)
-- `sourcemap`: Emit an inline source map appended to the output. Default: `false`.
+- `sourcemap`: Emit an inline source map appended to the output. Accepts `boolean | 'onServer'`. When set to `'onServer'`, the source map is emitted only while kamado runs in serve mode. Default: `false`.
 
 **Example**: To compile `.scss` files to `.css` while ignoring source files:
 
@@ -214,7 +214,7 @@ def(createStyleCompiler(), {
 - `alias`: Path alias map (esbuild alias)
 - `minifier`: Whether to enable minification
 - `banner`: Banner configuration (can specify CreateBanner function or string)
-- `sourcemap`: Emit an inline source map appended to the output. Default: `false`.
+- `sourcemap`: Emit an inline source map appended to the output. Accepts `boolean | 'onServer'`. When set to `'onServer'`, the source map is emitted only while kamado runs in serve mode. Default: `false`.
 
 **Example**: To compile TypeScript files to JavaScript:
 
@@ -229,21 +229,18 @@ def(createScriptCompiler(), {
 });
 ```
 
-##### Switching options per command
+##### Switching the source map per command
 
-Compiler options are resolved when `kamado.config.ts` loads, so to vary them between `kamado server` and `kamado build` (e.g. to emit source maps only when running the dev server), branch on the CLI command in the config itself:
+Pass `sourcemap: 'onServer'` to emit the inline source map only during `kamado server`:
 
 ```ts
-const isServe = process.argv.includes('server');
-
 export default defineConfig({
 	compilers: (def) => [
 		def(createScriptCompiler(), {
-			minifier: !isServe,
-			sourcemap: isServe,
+			sourcemap: 'onServer',
 		}),
 		def(createStyleCompiler(), {
-			sourcemap: isServe,
+			sourcemap: 'onServer',
 		}),
 	],
 });
