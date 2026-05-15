@@ -66,6 +66,8 @@ export function createScriptCompiler<M extends MetaData>() {
 			 */
 			const esbuild = await import('esbuild');
 
+			// `context.mode` is fixed for the lifetime of a command, so evaluate
+			// the sourcemap flag once here rather than per-file.
 			const enableSourcemap =
 				options?.sourcemap === 'onServer'
 					? context.mode === 'serve'
