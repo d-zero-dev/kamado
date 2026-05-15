@@ -27,13 +27,17 @@ export interface StyleCompilerOptions {
 	readonly banner?: CreateBanner | string;
 	/**
 	 * Emit an inline source map (`/*# sourceMappingURL=data:... *\/` appended to the output).
+	 *
+	 * - `true` / `false`: always emit / never emit.
+	 * - `'onServer'`: emit only when kamado runs in serve mode (`context.mode === 'serve'`).
+	 *
 	 * Default: false.
 	 *
 	 * When enabled, the banner is prepended *before* PostCSS processing so that
 	 * the resulting source map line offsets stay correct. The banner is rewritten
 	 * to a `/*!` important comment so cssnano preserves it through minification.
 	 */
-	readonly sourcemap?: boolean;
+	readonly sourcemap?: boolean | 'onServer';
 }
 
 /**
@@ -55,7 +59,12 @@ export function createStyleCompiler<M extends MetaData>() {
 	return createCustomCompiler<StyleCompilerOptions, M>(() => ({
 		defaultFiles: '**/*.css',
 		defaultOutputExtension: '.css',
-		compile: (options) => () => {
+		compile: (options) => (context) => {
+			const enableSourcemap =
+				options?.sourcemap === 'onServer'
+					? context.mode === 'serve'
+					: !!options?.sourcemap;
+
 			return async (file, _, __, cache) => {
 				// Configure plugins with alias resolver for postcss-import
 				const plugins: postcss.AcceptedPlugin[] = [
@@ -124,7 +133,7 @@ export function createStyleCompiler<M extends MetaData>() {
 						? options.banner
 						: createBanner(options?.banner?.());
 
-				if (options?.sourcemap) {
+				if (enableSourcemap) {
 					// Rewrite leading `/*` → `/*!` so cssnano preserves the banner;
 					// including it in the PostCSS input keeps the inline source map
 					// line offsets correct.
