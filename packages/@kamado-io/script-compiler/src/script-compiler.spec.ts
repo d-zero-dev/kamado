@@ -67,9 +67,14 @@ async function compile(
 const SOURCE_MAP_RE = /\/\/#\s*sourceMappingURL=data:application\/json;base64,/;
 
 describe('createScriptCompiler / sourcemap', () => {
-	test('omits source map by default', async () => {
+	test("defaults to 'onServer': omits source map in build mode", async () => {
 		const out = await compile('build', {});
 		expect(out).not.toMatch(SOURCE_MAP_RE);
+	});
+
+	test("defaults to 'onServer': emits source map in serve mode", async () => {
+		const out = await compile('serve', {});
+		expect(out).toMatch(SOURCE_MAP_RE);
 	});
 
 	test('emits inline source map when sourcemap is true', async () => {
