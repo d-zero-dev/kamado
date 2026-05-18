@@ -60,7 +60,7 @@ async function compile(
 	};
 	const entry = createScriptCompiler<MetaData>()(options);
 	const fn = await entry.compiler(makeContext(mode));
-	const out = await fn(file, () => '', undefined, false);
+	const out = await fn(file, () => Promise.resolve(''), undefined, false);
 	return typeof out === 'string' ? out : new TextDecoder().decode(out);
 }
 
