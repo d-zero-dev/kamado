@@ -31,7 +31,7 @@ export interface StyleCompilerOptions {
 	 * - `true` / `false`: always emit / never emit.
 	 * - `'onServer'`: emit only when kamado runs in serve mode (`context.mode === 'serve'`).
 	 *
-	 * Default: false.
+	 * Default: `'onServer'`.
 	 */
 	readonly sourcemap?: boolean | 'onServer';
 }
@@ -84,10 +84,9 @@ export function createStyleCompiler<M extends MetaData>() {
 		compile: (options) => (context) => {
 			// `context.mode` is fixed for the lifetime of a command, so evaluate
 			// the sourcemap flag once here rather than per-file.
+			const sourcemapOption = options?.sourcemap ?? 'onServer';
 			const enableSourcemap =
-				options?.sourcemap === 'onServer'
-					? context.mode === 'serve'
-					: !!options?.sourcemap;
+				sourcemapOption === 'onServer' ? context.mode === 'serve' : sourcemapOption;
 
 			return async (file, _, __, cache) => {
 				// Configure plugins with alias resolver for postcss-import
