@@ -191,6 +191,7 @@ def(createPageCompiler(), {
 - `outputExtension`（オプション）: 出力ファイルの拡張子（デフォルト: `'.css'`）
 - `alias`: パスエイリアスのマップ（PostCSSの`@import`で使用）
 - `banner`: バナー設定（CreateBanner関数または文字列を指定可能）
+- `sourcemap`: 出力末尾にインラインソースマップを付与する。`boolean | 'onServer'`を受け付ける。`'onServer'`を指定すると、kamadoがserveモードで動作している間のみソースマップを出力する。デフォルト: `'onServer'`
 
 **例**: `.scss`ファイルを`.css`にコンパイルし、ソースファイルを無視する場合：
 
@@ -213,6 +214,7 @@ def(createStyleCompiler(), {
 - `alias`: パスエイリアスのマップ（esbuildのエイリアス）
 - `minifier`: ミニファイを有効にするか
 - `banner`: バナー設定（CreateBanner関数または文字列を指定可能）
+- `sourcemap`: 出力末尾にインラインソースマップを付与する。`boolean | 'onServer'`を受け付ける。`'onServer'`を指定すると、kamadoがserveモードで動作している間のみソースマップを出力する。デフォルト: `'onServer'`
 
 **例**: TypeScriptファイルをJavaScriptにコンパイルする場合：
 
@@ -224,6 +226,23 @@ def(createScriptCompiler(), {
 	alias: {
 		'@': path.resolve(import.meta.dirname, '__assets', '_libs'),
 	},
+});
+```
+
+##### コマンドごとにソースマップを切り替える
+
+デフォルトは`'onServer'`で、`kamado server`の間のみインラインソースマップを出力し、`kamado build`では出力されません。常に出力したい場合は`true`、常に出力したくない場合は`false`を指定します：
+
+```ts
+export default defineConfig({
+	compilers: (def) => [
+		def(createScriptCompiler(), {
+			sourcemap: true, // 常に出力（build + serve）
+		}),
+		def(createStyleCompiler(), {
+			sourcemap: false, // 出力しない
+		}),
+	],
 });
 ```
 

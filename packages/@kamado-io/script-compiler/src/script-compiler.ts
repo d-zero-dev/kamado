@@ -26,6 +26,15 @@ export interface ScriptCompilerOptions {
 	 * Can specify CreateBanner function or string
 	 */
 	readonly banner?: CreateBanner | string;
+	/**
+	 * Emit an inline source map (data URI appended as `//# sourceMappingURL=...`).
+	 *
+	 * - `true` / `false`: always emit / never emit.
+	 * - `'onServer'`: emit only when kamado runs in serve mode (`context.mode === 'serve'`).
+	 *
+	 * Default: `'onServer'`.
+	 */
+	readonly sourcemap?: boolean | 'onServer';
 }
 
 /**
@@ -48,7 +57,7 @@ export function createScriptCompiler<M extends MetaData>() {
 	return createCustomCompiler<ScriptCompilerOptions, M>(() => ({
 		defaultFiles: '**/*.{js,ts,jsx,tsx,mjs,cjs}',
 		defaultOutputExtension: '.js',
-		compile: (options) => async () => {
+		compile: (options) => async (context) => {
 			/**
 			 * When loading kamado.config.ts via getConfig(cosmiconfig),
 			 * if that kamado.config.ts invokes this compiler,
@@ -56,6 +65,12 @@ export function createScriptCompiler<M extends MetaData>() {
 			 * using a static import for esbuild will cause a special runtime error.
 			 */
 			const esbuild = await import('esbuild');
+
+			// `context.mode` is fixed for the lifetime of a command, so evaluate
+			// the sourcemap flag once here rather than per-file.
+			const sourcemapOption = options?.sourcemap ?? 'onServer';
+			const enableSourcemap =
+				sourcemapOption === 'onServer' ? context.mode === 'serve' : sourcemapOption;
 
 			return async (file) => {
 				const banner =
@@ -70,6 +85,7 @@ export function createScriptCompiler<M extends MetaData>() {
 					outfile: tmpFilePath,
 					minify: options?.minifier,
 					charset: 'utf8',
+					sourcemap: enableSourcemap ? 'inline' : false,
 					banner: {
 						js: banner,
 					},

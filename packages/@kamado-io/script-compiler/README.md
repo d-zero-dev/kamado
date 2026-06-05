@@ -35,6 +35,7 @@ export default defineConfig({
 - `alias`: Map of path aliases (key is alias name, value is actual path)
 - `minifier`: Whether to enable minification
 - `banner`: Banner configuration (can specify CreateBanner function or string)
+- `sourcemap`: Emit an inline source map (data URI appended as `//# sourceMappingURL=...`). Accepts `boolean | 'onServer'`. When set to `'onServer'`, the source map is emitted only while kamado runs in serve mode (`context.mode === 'serve'`). Default: `'onServer'`. esbuild adjusts mappings to account for the banner automatically.
 
 ## License
 
