@@ -172,7 +172,8 @@ export function imageSizes(context: { elements: Element[] }, options?: ImageSize
 
 ```mermaid
 graph TD
-    A[CLI: build] --> B[config のロード & マージ]
+    A[CLI: build] --> A2[モジュールキャッシュのクリア<br>アセットグループ / ファイル内容 / グローバルデータ]
+    A2 --> B[config のロード & マージ]
     B --> B2[Context の作成 mode='build']
     B2 --> C[onBeforeBuild フックの実行]
     C --> D[コンパイラ関数マップの作成]
@@ -182,12 +183,17 @@ graph TD
     F --> G{出力拡張子に対応する<br>コンパイラが存在するか?}
     G -- Yes --> H[コンパイラで実行]
     G -- No --> I[生のコンテンツを読み込み]
-    H --> J[出力ファイルとして書き出し]
+    H --> J{skipUnchanged 有効 &<br>既存出力と内容が同一?}
     I --> J
-    J --> K[全ファイル完了]
+    J -- Yes --> J2[書き込みスキップ<br>mtime 保持]
+    J -- No --> J3[出力ファイルとして書き出し]
+    J2 --> K[全ファイル完了]
+    J3 --> K
     K --> L[onAfterBuild フックの実行]
     L --> M[ビルド完了を表示]
 ```
+
+`build()` は毎回クリーンな状態から開始します。最初にモジュールレベルのキャッシュ（アセットグループのメモ化、ファイル内容、グローバルデータ）をクリアするため、同一プロセスで連続してビルドしてもソースの編集が必ず反映されます。出力ディレクトリの作成はビルド内で重複排除されます。`skipUnchanged` ビルドオプション（`kamado build --skip-unchanged`）を有効にすると、内容が変わっていない出力は書き込まれません。その際はまずファイルサイズ（`stat`）を比較します。一致した場合のみ内容を比較し、同一なら既存ファイルの mtime を保持します。
 
 ### 2. 開発サーバー・フロー (`kamado server`)
 
@@ -243,7 +249,7 @@ graph TD
 
 複数のソースが同一の出力パスに解決された場合の挙動は、コンパイラエントリの `outputPathConflict` 設定で切り替えます。`'error'`（throw）、`'warning'`（デフォルト — `stderr` に警告を出して勝者を残す）、`'silent'`（ログなしで勝者を残す）の3値を取ります。勝者判定のルールは2段階で、まず **frontmatter による上書きを持つファイルがデフォルト計算パスのファイルに優先** し、同等の場合は **先勝ち** です。`getAssetGroup()` 内の `seen` Map で出力パスを追跡し、置換が起きても返却される `CompilableFile[]` の位置は最初に観測したファイルの位置を保持するため、処理順に依存しない結果になります。
 
-先読みは `files/file-content.ts` のモジュールレベルキャッシュを温めるため、build の後段の `getContentFromFile`（`cache=true`）はディスク再読込を行いません。dev server は編集を反映するためリクエスト毎に `cache=false` を渡すので、先読みコストは起動時の1回のみ支払われます。上書きは `getAssetGroup` が返す `CompilableFile` に既に反映されているため、`compilableFileMap`（dev server）と `build()`（`file.outputPath` に書き出し）はどちらも追加変更なしで上書きを尊重します。
+先読みは `files/file-content.ts` のモジュールレベルキャッシュを温めるため、build の後段の `getContentFromFile`（`cache=true`）はディスク再読込を行いません。さらに `getAssetGroup()` の結果自体も列挙の値入力をキーにメモ化される（毎ビルド開始時にクリア）ため、`build()` と `getGlobalData()` の両方から同じコンパイラエントリが列挙されても glob + frontmatter の走査は1回で済みます。dev server は編集を反映するためリクエスト毎に `cache=false` を渡すので、先読みコストは起動時の1回のみ支払われます。上書きは `getAssetGroup` が返す `CompilableFile` に既に反映されているため、`compilableFileMap`（dev server）と `build()`（`file.outputPath` に書き出し）はどちらも追加変更なしで上書きを尊重します。
 
 ---
 
@@ -367,7 +373,7 @@ export interface CustomCompileFunction {
 - `compilableFile`: コンパイル対象のファイル
 - `compile`: コンパイル中に他のファイルを再帰的にコンパイルできる関数（レイアウトやインクルードなど）
 - `log`: オプションのログ出力関数
-- `cache`: ファイルコンテンツをキャッシュするかどうか
+- `cache`: キャッシュ済みのファイル内容やコンパイル成果物（コンパイル済みテンプレート関数、プロセッサ等）を再利用してよいかどうか。dev server はファイル編集を必ず反映するためリクエストごとに `false` を渡し、`build()` は `undefined` のまま（各コンパイラはキャッシュ有効をデフォルトとする）
 
 ソースコードの読み込みやキャッシュの管理は`CompilableFile`クラス（`src/files/`）が隠蔽します。`compile`パラメータにより、コンパイラは依存ファイルを再帰的にコンパイルできます。
 
@@ -562,6 +568,39 @@ export interface ProxyRule {
 - **`redirect: 'manual'`**: ターゲットサーバーからのリダイレクトレスポンスを自動追従せず、そのまま保持する
 - **`duplex: 'half'`**: Node.jsの`fetch()`実装でストリーミングリクエストボディを有効にする
 - **レスポンス変換なし**: プロキシレスポンスはレスポンス変換パイプラインを通さず、そのまま返却される
+
+---
+
+## キャッシュ層
+
+Kamado はファイルごとの処理の繰り返しを避けるため、複数の独立したキャッシュを使います。ビルド・コンパイルパイプラインに手を入れるコントリビューターは、それぞれのスコープと無効化ルールを把握してください:
+
+| キャッシュ                     | 場所                                           | スコープ / 無効化                                                                                                                                                                                                                                   |
+| ------------------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ファイル内容                   | `src/files/file-content.ts`                    | モジュールレベルの `Map`。毎ビルド開始時にクリア（`clearFileContentCache`）。serve モードではリクエストごとにバイパス（`cache=false`）。                                                                                                            |
+| グローバルデータ               | `src/data/get-global-data.ts`                  | データファイル用のモジュールレベル `Map`。毎ビルド開始時にクリア（`clearGlobalDataCache`）。                                                                                                                                                        |
+| アセットグループのメモ化       | `src/data/get-asset-group.ts`                  | 列挙の値入力をキーとするモジュールレベル `Map`。`build()` と `getGlobalData()` による glob + frontmatter 走査の共有用。毎ビルド開始時にクリア（`clearAssetGroupCache`）。                                                                           |
+| コンパイル済みテンプレート関数 | `@kamado-io/pug-compiler`（`compile-pug.ts`）  | コンパイラインスタンスごと、テンプレートソースをキーとする上限付き LRU。コンパイルフックのファクトリ解決のたび（= build/serve コンテキストごと）に新しいインスタンスとキャッシュを生成。`cache=false` 時はスキップ。                                |
+| PostCSS プロセッサ / banner    | `@kamado-io/style-compiler`、`script-compiler` | コンテキストごとに遅延構築され全ファイルで再利用。`cache=false`（serve）ではコンパイルごとに再構築されるため、開発中の `postcss.config.js` の編集や日付ベースの banner の鮮度を維持。プロセッサ構築の失敗はキャッシュせず、次のコンパイルで再試行。 |
+
+これらのキャッシュに関連して、page compiler の `compileHooks` と `transforms` のファクトリは、ファイルごとではなく **build/serve コンテキストごとに1回**（コンパイラのコンテキストセットアップ時）解決されます。フックファクトリと transform インスタンスは、ビルド内の全ページ・並行コンパイル間で共有されます。
+
+`cache` フラグは `CustomCompileFunction`（第4引数）から page compiler の transpile 層を通ってコンパイルフックの `compiler` 関数（第4引数）まで伝播するため、テンプレートエンジン側のパッケージは serve モードのキャッシュ無効セマンティクスを尊重できます。
+
+---
+
+## ベンチマーク
+
+合成ビルドのベンチマークが `packages/kamado/benchmark/` にあります:
+
+```bash
+yarn bench                 # 1000ページ、3回計測、transforms 無効
+yarn bench --pages=500     # ページ数
+yarn bench --runs=5        # 計測回数（中央値を報告）
+yarn bench --full          # デフォルトの page transforms（jsdom/prettier/minifier）を有効化
+```
+
+フィクスチャサイト（include を持つ共有レイアウト1つ＋ N ページの Pug、少数の CSS/TS）を `packages/kamado/.bench/` に生成し、ビルド済み `dist` に対して `build()` の実時間を計測します — 事前に `yarn build` が必要です。ビルドパイプラインを変更する際の前後比較に使用してください。モジュールレベルのキャッシュは計測ごとにクリアされるため、毎回コールドビルドが計測されます。
 
 ---
 
