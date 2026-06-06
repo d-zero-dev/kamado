@@ -60,6 +60,24 @@ export function createPageCompiler<M extends MetaData>() {
 				...options?.globalData?.data,
 			};
 
+			// Resolve compileHooks (can be object or function) once per context,
+			// not per file — hook factories take only `options` and are file-independent
+			const compileHooks =
+				typeof options?.compileHooks === 'function'
+					? await options.compileHooks(options)
+					: options?.compileHooks;
+
+			// Resolve transforms once per context — they receive file info at
+			// transform time, not at creation time
+			const defaultPageTransforms = createDefaultPageTransforms<M>();
+			const transforms: Transform<M>[] =
+				typeof options?.transforms === 'function'
+					? options.transforms(defaultPageTransforms)
+					: (options?.transforms ?? defaultPageTransforms);
+
+			const parseErrorMode: ParseErrorMode =
+				options?.formatOptions?.parseError ?? 'silent';
+
 			return async (file, compile, log, cache) => {
 				log?.(c.blue('Building...'));
 				const pageContent = await getContentFromFile(file, cache);
@@ -97,16 +115,10 @@ export function createPageCompiler<M extends MetaData>() {
 					breadcrumbs,
 				};
 
-				// Resolve compileHooks (can be object or function)
-				const compileHooks =
-					typeof options?.compileHooks === 'function'
-						? await options.compileHooks(options)
-						: options?.compileHooks;
-
 				// Transpile main content
 				const mainContentHtml = await transpileMainContent(
 					{ content: pageMainContent, compileData, file },
-					{ compileHook: compileHooks?.main, log },
+					{ compileHook: compileHooks?.main, log, cache },
 				);
 
 				let html = mainContentHtml;
@@ -141,7 +153,7 @@ export function createPageCompiler<M extends MetaData>() {
 							layout,
 							file,
 						},
-						{ compileHook: compileHooks?.layout, log },
+						{ compileHook: compileHooks?.layout, log, cache },
 					);
 				}
 
@@ -159,17 +171,6 @@ export function createPageCompiler<M extends MetaData>() {
 					context, // Kamado Context (Config + mode)
 					compile,
 				};
-
-				const defaultPageTransforms = createDefaultPageTransforms<M>();
-
-				// Use provided transforms or default
-				const transforms: Transform<M>[] =
-					typeof options?.transforms === 'function'
-						? options.transforms(defaultPageTransforms)
-						: (options?.transforms ?? defaultPageTransforms);
-
-				const parseErrorMode: ParseErrorMode =
-					options?.formatOptions?.parseError ?? 'silent';
 
 				// Apply transforms sequentially. Any transform failure is routed through
 				// the formatOptions.parseError policy: on silent/warning the failing

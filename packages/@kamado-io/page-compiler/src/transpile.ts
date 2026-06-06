@@ -57,6 +57,12 @@ export interface TranspileOptions<M extends MetaData> {
 	 * @default false
 	 */
 	readonly useBeforeResultWhenNoCompiler?: boolean;
+	/**
+	 * Whether the compiler may reuse cached compilation artifacts
+	 * (e.g. compiled template functions). Passed through to the compiler.
+	 * @default true
+	 */
+	readonly cache?: boolean;
 }
 
 /**
@@ -80,6 +86,7 @@ export async function transpile<M extends MetaData>(
 		errorLogMessage,
 		errorMessage,
 		useBeforeResultWhenNoCompiler = false,
+		cache,
 	} = options ?? {};
 
 	if (!compileHook) {
@@ -100,7 +107,12 @@ export async function transpile<M extends MetaData>(
 			if (log && compileLogMessage && compileLogColor) {
 				log(compileLogColor(compileLogMessage));
 			}
-			result = await compileHook.compiler(processedContent, compileData, extension);
+			result = await compileHook.compiler(
+				processedContent,
+				compileData,
+				extension,
+				cache,
+			);
 		} else {
 			// Behavior depends on useBeforeResultWhenNoCompiler flag
 			result = useBeforeResultWhenNoCompiler ? processedContent : content;

@@ -22,6 +22,11 @@ export interface TranspileLayoutContext<M extends MetaData> {
 export interface TranspileLayoutOptions<M extends MetaData> {
 	readonly compileHook?: CompileHook<M>;
 	readonly log?: (message: string) => void;
+	/**
+	 * Whether the compiler may reuse cached compilation artifacts.
+	 * Passed through to the compile hook's compiler. Default: `true`
+	 */
+	readonly cache?: boolean;
 }
 
 /**
@@ -41,7 +46,7 @@ export async function transpileLayout<M extends MetaData>(
 	options?: TranspileLayoutOptions<M>,
 ): Promise<string> {
 	const { layoutContent, layoutCompileData, layoutExtension, layout, file } = context;
-	const { compileHook, log } = options ?? {};
+	const { compileHook, log, cache } = options ?? {};
 
 	return transpile(
 		{
@@ -52,6 +57,7 @@ export async function transpileLayout<M extends MetaData>(
 		{
 			compileHook,
 			log,
+			cache,
 			compileLogMessage: 'Compiling layout...',
 			compileLogColor: c.greenBright,
 			errorLogMessage: `Layout: ${layout.inputPath} (Content: ${file.inputPath})`,

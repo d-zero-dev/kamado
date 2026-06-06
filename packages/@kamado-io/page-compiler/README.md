@@ -49,6 +49,7 @@ export default defineConfig({
   - `(defaultTransforms: readonly Transform[]) => Transform[]` - Function that receives default transforms (5 transforms) and returns modified array
   - If omitted, uses `createDefaultPageTransforms()` (5 transforms: manipulateDOM, doctype, prettier, minifier, lineBreak). See [Transform Pipeline](#transform-pipeline) for details.
   - **Note**: Uses the same `Transform` interface as `devServer.transforms`, but applies only to HTML pages in both build and serve modes. The `filter` option is ignored here (use `devServer.transforms` for filtering).
+  - **Note**: When given as a function, it is resolved **once per build/serve context**, not per file. The returned transform instances are shared by all pages in that context (and may run concurrently), so they must not keep per-page mutable state.
 - `transformBreadcrumbItem`: Function to transform each breadcrumb item. Each item includes a `meta` property containing the source page's metadata, enabling metadata-based transformations (e.g., redirect URLs). `(item: BreadcrumbItem<M>) => BreadcrumbItem<M>`
 - `filterNavigationNode`: Function to filter navigation nodes. Return `true` to keep the node, `false` to remove it. `(node: NavNode<M>) => boolean`
 - `navigationComparator`: Sort comparator for the navigation path list. Can be overridden per-call via `nav({ comparator })` in templates.
@@ -72,14 +73,15 @@ export default defineConfig({
 
 - `compileHooks`: Compilation hooks for customizing compile process
   - Can be an object or a function `(options: PageCompilerOptions<M>) => CompileHooksObject<M> | Promise<CompileHooksObject<M>>` that returns an object (sync or async)
+  - **Note**: A function form is resolved **once per build/serve context**, not per file. Hook factories must be file-independent; the returned hooks are shared by all pages compiled in that context.
   - `main`: Hooks for main content compilation
     - `before`: Hook called before compilation (receives content and data, returns processed content)
     - `after`: Hook called after compilation (receives HTML and data, returns processed HTML)
-    - `compiler`: Custom compiler function `(content: string, data: CompileData<M>, extension: string) => Promise<string> | string`
+    - `compiler`: Custom compiler function `(content: string, data: CompileData<M>, extension: string, cache?: boolean) => Promise<string> | string`. The optional `cache` flag tells the compiler whether it may reuse cached compilation artifacts (e.g. compiled template functions) — it is `false` in serve mode so that template/include edits are always reflected
   - `layout`: Hooks for layout compilation
     - `before`: Hook called before compilation (receives content and data, returns processed content)
     - `after`: Hook called after compilation (receives HTML and data, returns processed HTML)
-    - `compiler`: Custom compiler function `(content: string, data: CompileData<M>, extension: string) => Promise<string> | string`
+    - `compiler`: Custom compiler function `(content: string, data: CompileData<M>, extension: string, cache?: boolean) => Promise<string> | string` (same `cache` semantics as `main.compiler`)
 
 **Note**: To use Pug templates, install `@kamado-io/pug-compiler` and use `createCompileHooks` helper. See the [@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md) for integration examples.
 

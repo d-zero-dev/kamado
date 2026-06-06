@@ -60,6 +60,11 @@ export interface PageCompilerOptions<M extends MetaData> {
 	/**
 	 * Array of transform functions to apply to compiled HTML, or a function that receives and returns transforms
 	 * If omitted, uses createDefaultPageTransforms()
+	 *
+	 * Note: when a function is given, it is resolved **once per build/serve
+	 * context**, not per file. The returned transform instances are shared by
+	 * all pages compiled in that context (and may run concurrently), so they
+	 * must not keep per-page mutable state.
 	 * @example
 	 * ```typescript
 	 * import { createDefaultPageTransforms } from '@kamado-io/page-compiler';
@@ -228,12 +233,15 @@ export type ContentHook<M extends MetaData> = (
  * @param content - Template content to compile
  * @param data - Compile data object containing page info, navigation, and breadcrumbs
  * @param extension - File extension of the source file (e.g., `.pug`, `.html`)
+ * @param cache - Whether the compiler may reuse cached compilation artifacts
+ *   (e.g. compiled template functions). `false` in serve mode. Default: `true`
  * @returns Compiled HTML string (sync or async)
  */
 export type CompilerFunction<M extends MetaData> = (
 	content: string,
 	data: CompileData<M>,
 	extension: string,
+	cache?: boolean,
 ) => Promise<string> | string;
 
 /**
@@ -282,6 +290,10 @@ export interface CompileHooksObject<M extends MetaData> {
 /**
  * Compilation hooks for customizing compile process
  * Can be an object or a function that returns an object (sync or async)
+ *
+ * Note: when a function is given, it is resolved **once per build/serve
+ * context**, not per file. Hook factories must be file-independent; the
+ * returned hooks are shared by all pages compiled in that context.
  * @template M - Custom metadata type extending MetaData
  */
 export type CompileHooks<M extends MetaData> =
