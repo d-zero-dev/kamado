@@ -26,8 +26,14 @@ export interface PugCompilerOptions extends PugOptions {
 
 /**
  * Compiler function type
+ * @param template - Pug template source
+ * @param data - Data object passed to the compiled template
+ * @param cache - Whether the compiled template function may be reused from
+ *   cache. `false` in serve mode so that include/extends changes are always
+ *   reflected. Default: `true`
  */
 export type CompilerFunction = (
 	template: string,
 	data: Record<string, unknown>,
+	cache?: boolean,
 ) => Promise<string>;

@@ -40,7 +40,9 @@ Creates a Pug compiler function.
   - `doctype` (string): Document type (default: `'html'`)
   - `pretty` (boolean): Whether to pretty-print HTML (default: `true`)
 
-Returns: `CompilerFunction` - A function that takes `(template: string, data: Record<string, unknown>)` and returns `Promise<string>`
+Returns: `CompilerFunction` - A function that takes `(template: string, data: Record<string, unknown>, cache?: boolean)` and returns `Promise<string>`
+
+**Template caching**: Compiled template functions are cached per compiler instance, keyed by the template source string and bounded by an LRU policy. Shared templates (e.g. layouts rendered for every page) are compiled once and rendered many times. Pass `cache = false` (done automatically by the dev server) to bypass the cache — `include`/`extends` files are then re-read on every compilation, so edits to them are always reflected.
 
 **Note**: This `CompilerFunction` type is specific to `pug-compiler` and differs from `page-compiler`'s `CompilerFunction` type. To use with `page-compiler`, use `createCompileHooks` which returns compatible compiler functions.
 
@@ -53,6 +55,8 @@ Creates compile hooks for `@kamado-io/page-compiler`.
 Returns: `() => CompileHooksObject` - A function that returns compile hooks object with `main` and `layout` compilers
 
 The returned compiler functions automatically check the file extension and only compile `.pug` files. Other file types are passed through unchanged.
+
+Each invocation of the returned factory creates a **fresh compiler instance with a fresh template cache**. The page compiler resolves the factory once per build/serve context, so the template cache's lifetime is bound to a single build — template or include edits between consecutive builds in the same process are always reflected.
 
 ## Integration with @kamado-io/page-compiler
 
@@ -73,7 +77,7 @@ import { createPageCompiler } from '@kamado-io/page-compiler';
 import { createCompileHooks } from '@kamado-io/pug-compiler';
 
 const hooks = createCompileHooks({
-	pathAlias: './src', // pug-compiler のオプション
+	pathAlias: './src', // pug-compiler option
 	doctype: 'html',
 	pretty: true,
 })();
@@ -105,7 +109,7 @@ import { createPageCompiler } from '@kamado-io/page-compiler';
 import { createCompileHooks } from '@kamado-io/pug-compiler';
 
 const hooksFactory = createCompileHooks({
-	pathAlias: './src', // pug-compiler のオプション
+	pathAlias: './src', // pug-compiler option
 	doctype: 'html',
 	pretty: true,
 });
@@ -134,7 +138,7 @@ export const config = {
 			globalData: { dir: './data' },
 			compileHooks: () => {
 				const hooks = createCompileHooks({
-					pathAlias: './src', // pug-compiler のオプション
+					pathAlias: './src', // pug-compiler option
 					doctype: 'html',
 					pretty: true,
 				});
@@ -144,6 +148,8 @@ export const config = {
 	],
 };
 ```
+
+**Note**: A `compileHooks` function is resolved **once per build/serve context**, not per file. Values read inside the function (environment variables, etc.) are therefore evaluated once when the build or the dev server initializes the compiler — per-file dynamic behavior is not possible.
 
 ### Pattern 4: Using `createCompileHooks` Helper (Most Concise)
 
@@ -171,7 +177,7 @@ export const config = {
 - Use `createCompileHooks` (Pattern 4) when you want the simplest setup with the same compiler for both main content and layouts
 - Use Pattern 1 when you need to customize `main` and `layout` hooks individually (e.g., different `before`/`after` hooks)
 - Use Pattern 2 when you need a function form and want to define the hooks factory outside the config
-- Use Pattern 3 when you need to create the hooks factory dynamically inside the function (e.g., based on environment variables or other runtime values)
+- Use Pattern 3 when you need to create the hooks factory dynamically inside the function (e.g., based on environment variables). Note that the function is resolved once per build/serve context, not per file
 
 ## Troubleshooting
 

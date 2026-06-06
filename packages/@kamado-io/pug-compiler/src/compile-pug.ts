@@ -4,9 +4,21 @@ import type { Options as PugOptions } from 'pug';
 import pug from 'pug';
 
 /**
+ * Maximum number of compiled template functions kept per compiler instance.
+ * Shared layouts stay hot via LRU refresh; unique page templates churn
+ * through without growing memory unboundedly on large sites.
+ */
+const TEMPLATE_CACHE_LIMIT = 256;
+
+/**
  * Creates a Pug compiler function
+ *
+ * Compiled template functions are cached per compiler instance, keyed by the
+ * template source string, so shared templates (e.g. layouts) are compiled
+ * once and rendered many times. Pass `cache = false` (serve mode) to bypass
+ * the cache — includes/extends are then re-read on every compilation.
  * @param options - Pug compiler options
- * @returns Compiler function that takes template and data
+ * @returns Compiler function that takes template, data, and a cache flag
  * @example
  * ```typescript
  * const compiler = compilePug({
@@ -25,9 +37,32 @@ export function compilePug(options: PugCompilerOptions = {}): CompilerFunction {
 		...options,
 	};
 
-	return (template: string, data: Record<string, unknown>): Promise<string> => {
+	const templateCache = new Map<string, pug.compileTemplate>();
+
+	return (
+		template: string,
+		data: Record<string, unknown>,
+		cache = true,
+	): Promise<string> => {
 		try {
-			const compiler = pug.compile(template, pugOptions);
+			let compiler = cache ? templateCache.get(template) : undefined;
+			if (compiler) {
+				// Refresh LRU position so frequently used templates (layouts) stay hot
+				templateCache.delete(template);
+				templateCache.set(template, compiler);
+			} else {
+				compiler = pug.compile(template, pugOptions);
+				if (cache) {
+					if (templateCache.size >= TEMPLATE_CACHE_LIMIT) {
+						// Evict the least recently used entry (first key in insertion order)
+						const oldestKey = templateCache.keys().next().value;
+						if (oldestKey !== undefined) {
+							templateCache.delete(oldestKey);
+						}
+					}
+					templateCache.set(template, compiler);
+				}
+			}
 			return Promise.resolve(compiler(data));
 		} catch (error) {
 			return Promise.reject(
