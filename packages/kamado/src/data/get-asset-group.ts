@@ -26,8 +26,23 @@ export interface GetAssetGroupOptions {
 	readonly glob?: string;
 }
 
+const assetGroupCache = new Map<string, Promise<CompilableFile[]>>();
+
+/**
+ * Clears the asset group memoization cache.
+ * Called at the start of each build so every build re-enumerates files.
+ */
+export function clearAssetGroupCache(): void {
+	assetGroupCache.clear();
+}
+
 /**
  * Gets asset files for the specified compiler entry.
+ *
+ * Results are memoized by the value-inputs of the enumeration until
+ * {@link clearAssetGroupCache} is called (done at the start of each build),
+ * so the same compiler entry enumerated by both `build()` and
+ * `getGlobalData()` shares a single glob + frontmatter pass.
  *
  * When `compilerEntry.outputPathField` is set, each matched file's frontmatter
  * (and same-name JSON sidecar) is read eagerly. If the named field holds a
@@ -48,6 +63,39 @@ export interface GetAssetGroupOptions {
  * @template M - Metadata type carried by the compiler entry.
  */
 export async function getAssetGroup<M extends MetaData>(
+	context: GetAssetGroupContext<M>,
+	options?: GetAssetGroupOptions,
+): Promise<CompilableFile[]> {
+	const { inputDir, outputDir, compilerEntry } = context;
+
+	// Memoize by the value-inputs of the enumeration. The same compiler entry
+	// is enumerated both by build() and by getGlobalData() (page list); the
+	// second call reuses the same glob + frontmatter pass.
+	const cacheKey = [
+		inputDir,
+		outputDir,
+		compilerEntry.files,
+		compilerEntry.ignore ?? '',
+		compilerEntry.outputExtension,
+		compilerEntry.outputPathField ?? '',
+		compilerEntry.outputPathConflict ?? '',
+		options?.glob ?? '',
+	].join('\0');
+	const cached = assetGroupCache.get(cacheKey);
+	if (cached) {
+		return cached;
+	}
+	const promise = enumerateAssetGroup(context, options);
+	assetGroupCache.set(cacheKey, promise);
+	return promise;
+}
+
+/**
+ * Performs the actual glob + frontmatter enumeration for {@link getAssetGroup}.
+ * @param context - Required context (inputDir, outputDir, compilerEntry).
+ * @param options - Optional filtering options (glob).
+ */
+async function enumerateAssetGroup<M extends MetaData>(
 	context: GetAssetGroupContext<M>,
 	options?: GetAssetGroupOptions,
 ): Promise<CompilableFile[]> {

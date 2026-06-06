@@ -3,7 +3,7 @@ import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { clearFileContentCache } from '../files/file-content.js';
 
-import { getAssetGroup } from './get-asset-group.js';
+import { clearAssetGroupCache, getAssetGroup } from './get-asset-group.js';
 
 vi.mock('fast-glob', async () => {
 	const actual = await vi.importActual('fast-glob');
@@ -30,6 +30,7 @@ vi.mock('node:fs/promises', () => {
 
 describe('getAssetGroup with virtual file system', () => {
 	beforeEach(() => {
+		clearAssetGroupCache();
 		vol.fromJSON({
 			'/mock/input/dir/index.html': '<html><body>Index</body></html>',
 			'/mock/input/dir/about.html': '<html><body>About</body></html>',
@@ -126,11 +127,13 @@ describe('getAssetGroup with virtual file system', () => {
 describe("getAssetGroup with frontmatter 'path' override", () => {
 	beforeEach(() => {
 		clearFileContentCache();
+		clearAssetGroupCache();
 	});
 
 	afterEach(() => {
 		vol.reset();
 		clearFileContentCache();
+		clearAssetGroupCache();
 	});
 
 	test('honors `path` with explicit extension', async () => {
