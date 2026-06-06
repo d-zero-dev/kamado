@@ -47,51 +47,63 @@ export function createStyleCompiler<M extends MetaData>() {
 		defaultFiles: '**/*.css',
 		defaultOutputExtension: '.css',
 		compile: (options) => () => {
-			return async (file, _, __, cache) => {
-				// Configure plugins with alias resolver for postcss-import
-				const plugins: postcss.AcceptedPlugin[] = [
-					postcssImport({
-						// Add postcss-import plugin with alias resolver
-						resolve:
-							// Create alias resolver for postcss-import
-							(id: string, basedir: string) => {
-								// Check if the import starts with an alias
-								for (const [alias, aliasPath] of Object.entries(options?.alias ?? {})) {
-									// Arias must be followed by a slash
-									if (id.startsWith(alias + '/')) {
-										const resolvedPath = id.replace(alias, aliasPath);
-										return [path.resolve(basedir, resolvedPath)];
-									}
+			// Configure plugins once per context — plugin instances and the
+			// loaded PostCSS config are file-independent
+			const basePlugins: postcss.AcceptedPlugin[] = [
+				postcssImport({
+					// Add postcss-import plugin with alias resolver
+					resolve:
+						// Create alias resolver for postcss-import
+						(id: string, basedir: string) => {
+							// Check if the import starts with an alias
+							for (const [alias, aliasPath] of Object.entries(options?.alias ?? {})) {
+								// Arias must be followed by a slash
+								if (id.startsWith(alias + '/')) {
+									const resolvedPath = id.replace(alias, aliasPath);
+									return [path.resolve(basedir, resolvedPath)];
 								}
-								// For non-alias imports, fallback to default postcss-import resolution
-								return [id];
+							}
+							// For non-alias imports, fallback to default postcss-import resolution
+							return [id];
+						},
+				}),
+				cssnano({
+					preset: [
+						'default',
+						{
+							// Preserve !important comments (license, copyright, etc.)
+							discardComments: {
+								removeAll: false,
+								removeAllButFirst: false,
 							},
-					}),
-					cssnano({
-						preset: [
-							'default',
-							{
-								// Preserve !important comments (license, copyright, etc.)
-								discardComments: {
-									removeAll: false,
-									removeAllButFirst: false,
-								},
-								// Custom comment removal that preserves ! comments
-								cssDeclarationSorter: false,
-							},
-						],
-					}),
-				];
+							// Custom comment removal that preserves ! comments
+							cssDeclarationSorter: false,
+						},
+					],
+				}),
+			];
 
+			const createProcessor = async () => {
 				// Try to load PostCSS config from project root
 				let config;
 				try {
 					config = await postcssLoadConfig();
-				} catch {
-					// Fallback to default config if no config found
+				} catch (error) {
+					// Fallback to default config if no config found.
+					// A missing config is expected; anything else (e.g. a syntax
+					// error in postcss.config.js) is surfaced so plugin loss is
+					// not silent.
+					if (
+						error instanceof Error &&
+						!error.message.includes('No PostCSS Config found')
+					) {
+						// eslint-disable-next-line no-console
+						console.warn(`Failed to load PostCSS config: ${error.message}`);
+					}
 					config = { plugins: [] };
 				}
 
+				const plugins = [...basePlugins];
 				// Add other plugins from config (excluding postcss-import if it exists)
 				if (config.plugins) {
 					for (const plugin of config.plugins) {
@@ -107,19 +119,41 @@ export function createStyleCompiler<M extends MetaData>() {
 						plugins.push(plugin);
 					}
 				}
+				return postcss(plugins);
+			};
+
+			const resolveBanner = () =>
+				typeof options?.banner === 'string'
+					? options.banner
+					: createBanner(options?.banner?.());
+
+			// Lazily build the processor and banner once and reuse them across
+			// files. A failed processor build is NOT cached, so the next file
+			// retries instead of replaying the same rejection forever.
+			let processorPromise: Promise<postcss.Processor> | undefined;
+			let cachedBanner: string | undefined;
+
+			return async (file, _, __, cache) => {
+				// cache === false (serve mode): rebuild per compilation so that
+				// postcss.config.js edits are picked up without a restart
+				const processor =
+					cache === false
+						? await createProcessor()
+						: await (processorPromise ??= createProcessor().catch((error) => {
+								processorPromise = undefined;
+								throw error;
+							}));
 
 				const css = await getContentFromFile(file, cache);
 
 				// Process CSS with PostCSS
-				const result = await postcss(plugins).process(css.content, {
+				const result = await processor.process(css.content, {
 					from: file.inputPath,
 					to: undefined,
 				});
 
 				const banner =
-					typeof options?.banner === 'string'
-						? options.banner
-						: createBanner(options?.banner?.());
+					cache === false ? resolveBanner() : (cachedBanner ??= resolveBanner());
 
 				return banner + '\n' + result.css;
 			};
