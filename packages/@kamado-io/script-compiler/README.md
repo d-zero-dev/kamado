@@ -36,6 +36,10 @@ export default defineConfig({
 - `minifier`: Whether to enable minification
 - `banner`: Banner configuration (can specify CreateBanner function or string)
 
+## Bundling Behavior
+
+Each entry file is bundled in memory with esbuild (no temporary files are written) and the resulting JavaScript bundle is returned as the output. When esbuild emits additional output files alongside the bundle — for example a CSS file extracted from a `import './style.css'` statement — only the JavaScript bundle matching the output path is used; the extra outputs are ignored with a console warning.
+
 ## License
 
 MIT

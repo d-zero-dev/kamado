@@ -1,8 +1,6 @@
 import type { CreateBanner } from 'kamado/compiler/banner';
 import type { MetaData } from 'kamado/files';
 
-import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
 import { createCustomCompiler } from 'kamado/compiler';
@@ -57,24 +55,49 @@ export function createScriptCompiler<M extends MetaData>() {
 			 */
 			const esbuild = await import('esbuild');
 
-			return async (file) => {
+			const resolveBanner = () =>
+				typeof options?.banner === 'string'
+					? options.banner
+					: createBanner(options?.banner?.());
+			// Banner is file-independent; build once per context. Serve mode
+			// (cache === false) recomputes so date-based banners stay fresh
+			let cachedBanner: string | undefined;
+
+			return async (file, _, __, cache) => {
 				const banner =
-					typeof options?.banner === 'string'
-						? options.banner
-						: createBanner(options?.banner?.());
-				const tmpFilePath = path.join(os.tmpdir(), file.outputPath);
-				await esbuild.build({
+					cache === false ? resolveBanner() : (cachedBanner ??= resolveBanner());
+				// write: false keeps the bundle in memory — no tmp-file round-trip
+				const result = await esbuild.build({
 					entryPoints: [file.inputPath],
 					bundle: true,
 					alias: options?.alias,
-					outfile: tmpFilePath,
+					outfile: file.outputPath,
+					write: false,
 					minify: options?.minifier,
 					charset: 'utf8',
 					banner: {
 						js: banner,
 					},
 				});
-				return await fs.readFile(tmpFilePath, 'utf8');
+				// outputFiles order is not guaranteed (e.g. extracted CSS or
+				// sourcemaps come alongside the bundle) — select by output path
+				const expectedPath = path.resolve(file.outputPath);
+				const outputFile = result.outputFiles.find(
+					(output) => path.resolve(output.path) === expectedPath,
+				);
+				if (!outputFile) {
+					throw new Error(`esbuild produced no output for ${file.inputPath}`);
+				}
+				for (const output of result.outputFiles) {
+					if (output === outputFile) {
+						continue;
+					}
+					// eslint-disable-next-line no-console
+					console.warn(
+						`Ignoring additional esbuild output '${output.path}' for ${file.inputPath}`,
+					);
+				}
+				return outputFile.text;
 			};
 		},
 	}));
