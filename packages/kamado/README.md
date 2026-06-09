@@ -193,6 +193,7 @@ def(createPageCompiler(), {
 - `outputExtension` (optional): Output file extension (default: `'.css'`)
 - `alias`: Path alias map (used in PostCSS `@import`)
 - `banner`: Banner configuration (can specify CreateBanner function or string)
+- `sourcemap`: Emit an inline source map appended to the output. Accepts `boolean | 'onServer'`. When set to `'onServer'`, the source map is emitted only while kamado runs in serve mode. Default: `'onServer'`.
 
 **Example**: To compile `.scss` files to `.css` while ignoring source files:
 
@@ -215,6 +216,7 @@ def(createStyleCompiler(), {
 - `alias`: Path alias map (esbuild alias)
 - `minifier`: Whether to enable minification
 - `banner`: Banner configuration (can specify CreateBanner function or string)
+- `sourcemap`: Emit an inline source map appended to the output. Accepts `boolean | 'onServer'`. When set to `'onServer'`, the source map is emitted only while kamado runs in serve mode. Default: `'onServer'`.
 
 **Example**: To compile TypeScript files to JavaScript:
 
@@ -226,6 +228,23 @@ def(createScriptCompiler(), {
 	alias: {
 		'@': path.resolve(import.meta.dirname, '__assets', '_libs'),
 	},
+});
+```
+
+##### Switching the source map per command
+
+The default is `'onServer'`, so the inline source map is emitted only during `kamado server` and omitted in `kamado build`. Pass `true` to always emit, or `false` to always omit:
+
+```ts
+export default defineConfig({
+	compilers: (def) => [
+		def(createScriptCompiler(), {
+			sourcemap: true, // always emit (build + serve)
+		}),
+		def(createStyleCompiler(), {
+			sourcemap: false, // never emit
+		}),
+	],
 });
 ```
 
