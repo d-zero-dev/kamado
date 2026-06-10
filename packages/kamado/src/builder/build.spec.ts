@@ -284,6 +284,40 @@ describe('consecutive builds in the same process', async () => {
 		vol.reset();
 	});
 
+	test('reflects files added between builds on the next build', async () => {
+		vol.fromJSON({
+			'/mock/input/dir/index.html': '<p>A</p>',
+		});
+		const buildConfig = {
+			...config,
+			dir: {
+				...config.dir,
+				input: '/mock/input/dir',
+				output: '/mock/output/dir',
+			},
+			compilers: () => [
+				{
+					files: '**/*.html',
+					outputExtension: '.html',
+					compiler: () => () => 'page content',
+				},
+			],
+			verbose: true,
+		};
+
+		await build(buildConfig);
+		expect(vol.toJSON()['/mock/output/dir/added.html']).toBeUndefined();
+
+		// Add a new source file, then build again in the same process. The
+		// asset-group memoization must not survive into the second build —
+		// removing clearAssetGroupCache() from clearBuildCaches() fails here
+		vol.fromJSON({
+			'/mock/input/dir/added.html': '<p>B</p>',
+		});
+		await build(buildConfig);
+		expect(vol.toJSON()['/mock/output/dir/added.html']).toBe('page content');
+	}, 10_000);
+
 	test('reflects source file edits on the next build', async () => {
 		vol.fromJSON({
 			'/mock/input/dir/index.html': '<p>ORIGINAL</p>',
