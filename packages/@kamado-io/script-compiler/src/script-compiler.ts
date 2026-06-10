@@ -1,10 +1,14 @@
+import type { SourcemapOption } from 'kamado/compiler';
 import type { CreateBanner } from 'kamado/compiler/banner';
 import type { MetaData } from 'kamado/files';
 
 import path from 'node:path';
 
-import { createCustomCompiler } from 'kamado/compiler';
-import { createBanner } from 'kamado/compiler/banner';
+import {
+	createBannerResolver,
+	createCustomCompiler,
+	resolveSourcemapFlag,
+} from 'kamado/compiler';
 
 /**
  * Options for the script compiler
@@ -32,7 +36,7 @@ export interface ScriptCompilerOptions {
 	 *
 	 * Default: `'onServer'`.
 	 */
-	readonly sourcemap?: boolean | 'onServer';
+	readonly sourcemap?: SourcemapOption;
 }
 
 /**
@@ -64,23 +68,11 @@ export function createScriptCompiler<M extends MetaData>() {
 			 */
 			const esbuild = await import('esbuild');
 
-			const resolveBanner = () =>
-				typeof options?.banner === 'string'
-					? options.banner
-					: createBanner(options?.banner?.());
-			// Banner is file-independent; build once per context. Serve mode
-			// (cache === false) recomputes so date-based banners stay fresh
-			let cachedBanner: string | undefined;
-
-			// `context.mode` is fixed for the lifetime of a command, so evaluate
-			// the sourcemap flag once here rather than per-file.
-			const sourcemapOption = options?.sourcemap ?? 'onServer';
-			const enableSourcemap =
-				sourcemapOption === 'onServer' ? context.mode === 'serve' : sourcemapOption;
+			const resolveBanner = createBannerResolver(options?.banner);
+			const enableSourcemap = resolveSourcemapFlag(options?.sourcemap, context.mode);
 
 			return async (file, _, __, cache) => {
-				const banner =
-					cache === false ? resolveBanner() : (cachedBanner ??= resolveBanner());
+				const banner = resolveBanner(cache);
 				// write: false keeps the bundle in memory — no tmp-file round-trip
 				const result = await esbuild.build({
 					entryPoints: [file.inputPath],
