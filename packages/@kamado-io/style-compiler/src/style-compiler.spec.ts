@@ -110,7 +110,9 @@ async function compile(
 	setMockFile(file.inputPath, css);
 	const fn = await createCompileFn(options, mode);
 	const out = await fn(file, () => Promise.resolve(''), undefined, false);
-	return typeof out === 'string' ? out : new TextDecoder().decode(out);
+	// The style compiler always returns a string; assert instead of branching
+	expect(typeof out).toBe('string');
+	return out as string;
 }
 
 describe('style-compiler', () => {
