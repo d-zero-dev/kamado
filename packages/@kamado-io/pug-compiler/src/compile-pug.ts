@@ -47,7 +47,11 @@ export function compilePug(options: PugCompilerOptions = {}): CompilerFunction {
 		try {
 			let compiler = cache ? templateCache.get(template) : undefined;
 			if (compiler) {
-				// Refresh LRU position so frequently used templates (layouts) stay hot
+				// Refresh LRU position so frequently used templates (layouts) stay
+				// hot. Plain FIFO would NOT suffice here: once unique page templates
+				// exceed the cache limit, a shared layout inserted early would be
+				// evicted every TEMPLATE_CACHE_LIMIT pages and recompiled — exactly
+				// the cost this cache exists to avoid
 				templateCache.delete(template);
 				templateCache.set(template, compiler);
 			} else {
