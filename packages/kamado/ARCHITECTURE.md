@@ -585,7 +585,9 @@ Kamado uses several independent caches to avoid repeating per-file work. Contrib
 
 Related to these caches, `compileHooks` and `transforms` factories on the page compiler are resolved **once per build/serve context** (in the compiler's context setup), not per file. Hook factories and transform instances are therefore shared across all pages of a build and across concurrent compilations.
 
-The `cache` flag travels from `CustomCompileFunction` (4th parameter) through the page compiler's transpile layer into the compile hooks' `compiler` function (4th parameter), so template-engine packages can honor serve mode's no-cache semantics.
+The `cache` flag travels from `CustomCompileFunction` (4th parameter) through the page compiler's transpile layer into the compile hooks' `compiler` function (4th parameter), so template-engine packages can honor serve mode's no-cache semantics. `build()` leaves the flag `undefined`, which means caching is **enabled** — compilers must treat `undefined` the same as `true` and test for serve mode with `cache === false`, never with a truthiness check.
+
+**Design note — two serve-mode signals.** Compilers currently receive "is this serve mode?" through two channels: the per-call `cache` flag (`false` in serve) and the context-level `context.mode` (used by, e.g., the `sourcemap: 'onServer'` option via `resolveSourcemapFlag`). Today the two always agree, but they are evaluated at different times (per compilation vs. per context). If a new mode or a "cache in serve" option is ever introduced, consolidate both into a single compile-context object instead of keeping the signals in sync manually.
 
 ---
 

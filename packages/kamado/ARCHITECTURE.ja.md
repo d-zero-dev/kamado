@@ -585,7 +585,9 @@ Kamado はファイルごとの処理の繰り返しを避けるため、複数�
 
 これらのキャッシュに関連して、page compiler の `compileHooks` と `transforms` のファクトリは、ファイルごとではなく **build/serve コンテキストごとに1回**（コンパイラのコンテキストセットアップ時）解決されます。フックファクトリと transform インスタンスは、ビルド内の全ページ・並行コンパイル間で共有されます。
 
-`cache` フラグは `CustomCompileFunction`（第4引数）から page compiler の transpile 層を通ってコンパイルフックの `compiler` 関数（第4引数）まで伝播するため、テンプレートエンジン側のパッケージは serve モードのキャッシュ無効セマンティクスを尊重できます。
+`cache` フラグは `CustomCompileFunction`（第4引数）から page compiler の transpile 層を通ってコンパイルフックの `compiler` 関数（第4引数）まで伝播するため、テンプレートエンジン側のパッケージは serve モードのキャッシュ無効セマンティクスを尊重できます。`build()` はフラグを `undefined` のまま渡し、これは「キャッシュ**有効**」を意味します。コンパイラ実装は `undefined` を `true` と同義に扱い、serve モードの判定は必ず `cache === false` で行ってください（`if (cache)` のような真偽値判定は不可）。
+
+**設計ノート — serve モードの2つのシグナル。** 現在コンパイラは「serve モードかどうか」を2つの経路で受け取ります。呼び出しごとの `cache` フラグ（serve では `false`）と、コンテキストレベルの `context.mode`（例: `sourcemap: 'onServer'` オプションが `resolveSourcemapFlag` 経由で参照）です。現状この2つは常に一致しますが、評価タイミングが異なります（コンパイルごと vs コンテキストごと）。将来新しいモードや「serve でもキャッシュする」オプションを導入する場合は、両シグナルを手動で同期させ続けるのではなく、単一のコンパイルコンテキストオブジェクトに統合してください。
 
 ---
 
