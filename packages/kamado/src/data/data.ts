@@ -1,3 +1,4 @@
+export { clearBuildCaches } from './clear-build-caches.js';
 export { getAssetGroup, clearAssetGroupCache } from './get-asset-group.js';
 export { getGlobalData, clearGlobalDataCache } from './get-global-data.js';
 export type { GlobalData } from './types.js';

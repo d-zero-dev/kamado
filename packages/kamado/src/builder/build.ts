@@ -11,9 +11,8 @@ import { createCompileFunctions } from '../compiler/compile-functions.js';
 import { createCompiler } from '../compiler/create-compiler.js';
 import { createCompileFunctionMap } from '../compiler/function-map.js';
 import { mergeConfig } from '../config/merge-config.js';
-import { clearAssetGroupCache, getAssetGroup } from '../data/get-asset-group.js';
-import { clearGlobalDataCache } from '../data/get-global-data.js';
-import { clearFileContentCache } from '../files/file-content.js';
+import { clearBuildCaches } from '../data/clear-build-caches.js';
+import { getAssetGroup } from '../data/get-asset-group.js';
 import { filePathColorizer } from '../stdout/color.js';
 
 /**
@@ -55,9 +54,7 @@ export async function build<M extends MetaData>(
 	// Each build starts from a clean slate: re-enumerate files and re-read
 	// file contents and global data so that source edits between consecutive
 	// builds in the same process are always reflected
-	clearAssetGroupCache();
-	clearFileContentCache();
-	clearGlobalDataCache();
+	clearBuildCaches();
 
 	const config = await mergeConfig(buildConfig, buildConfig.rootDir);
 
@@ -117,15 +114,20 @@ export async function build<M extends MetaData>(
 			return async () => {
 				const content = await compile(file, log);
 
-				const buffer =
+				// Allocated lazily: the size precheck needs only the byte length,
+				// and fs.writeFile accepts strings directly
+				const toWritable = () =>
 					typeof content === 'string' ? Buffer.from(content) : new Uint8Array(content);
 
 				if (buildConfig.skipUnchanged) {
-					// Cheap size check first; read the file only when sizes match
+					// Cheap size check first (no allocation); read the file only
+					// when sizes match
+					const byteLength =
+						typeof content === 'string' ? Buffer.byteLength(content) : content.byteLength;
 					const stat = await fs.stat(file.outputPath).catch(() => null);
-					if (stat && stat.size === buffer.byteLength) {
+					if (stat && stat.size === byteLength) {
 						const existing = await fs.readFile(file.outputPath).catch(() => null);
-						if (existing && existing.equals(buffer)) {
+						if (existing && existing.equals(toWritable())) {
 							log(`${CHECK_MARK} Unchanged`);
 							return;
 						}
@@ -139,7 +141,10 @@ export async function build<M extends MetaData>(
 					ensuredDirs.add(outputDir);
 				}
 
-				await fs.writeFile(file.outputPath, buffer);
+				await fs.writeFile(
+					file.outputPath,
+					typeof content === 'string' ? content : new Uint8Array(content),
+				);
 
 				log(`${CHECK_MARK} Compiled!`);
 			};

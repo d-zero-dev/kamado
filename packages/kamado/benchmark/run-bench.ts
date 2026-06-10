@@ -25,14 +25,15 @@ import { createStyleCompiler } from '@kamado-io/style-compiler';
 import { generateFixtures } from './generate-fixtures.ts';
 
 import { build } from 'kamado/build';
-import { clearGlobalDataCache } from 'kamado/data';
-import { clearFileContentCache } from 'kamado/files';
+import { clearBuildCaches } from 'kamado/data';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BENCH_DIR = path.resolve(__dirname, '..', '.bench');
 
 /**
- *
+ * Reads a positive integer CLI argument; non-numeric or non-positive values
+ * fall back so the benchmark never runs with 0 pages or 0 runs (which would
+ * silently report meaningless numbers like Infinity pages/s)
  * @param name
  * @param fallback
  */
@@ -42,7 +43,7 @@ function readArg(name: string, fallback: number): number {
 		return fallback;
 	}
 	const value = Number.parseInt(raw.split('=')[1] ?? '', 10);
-	return Number.isNaN(value) ? fallback : value;
+	return Number.isNaN(value) || value < 1 ? fallback : value;
 }
 
 const pageCount = readArg('pages', 1000);
@@ -55,8 +56,7 @@ const durations: number[] = [];
 
 for (let run = 0; run < runCount; run++) {
 	// Reset module-level caches so each run measures a cold build
-	clearFileContentCache();
-	clearGlobalDataCache();
+	clearBuildCaches();
 
 	const start = performance.now();
 	await build({

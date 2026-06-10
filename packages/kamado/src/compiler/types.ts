@@ -9,7 +9,10 @@ export interface CompileFunction {
 	/**
 	 * @param file - File to compile (CompilableFile or file seed with inputPath and outputExtension)
 	 * @param log - Log output function (optional)
-	 * @param cache - Whether to cache the file content (default: true)
+	 * @param cache - Whether caches may be used (default: true). `build()` leaves
+	 *   this `undefined`, which means caching is ENABLED — treat `undefined` the
+	 *   same as `true` and test for serve mode with `cache === false`, never with
+	 *   a truthiness check like `if (cache)`
 	 * @returns Compilation result (string or ArrayBuffer)
 	 */
 	(
@@ -23,6 +26,13 @@ export interface CompileFunction {
 		cache?: boolean,
 	): Promise<string | ArrayBuffer>;
 }
+
+/**
+ * Inline source map emission policy shared by asset compilers
+ * - `true` / `false`: always emit / never emit
+ * - `'onServer'`: emit only when kamado runs in serve mode
+ */
+export type SourcemapOption = boolean | 'onServer';
 
 /**
  * Compiler context with compile function map
@@ -44,7 +54,10 @@ export interface CustomCompileFunction {
 	 * @param compilableFile - File to compile
 	 * @param compile - Recursive compiler function to compile other files during compilation
 	 * @param log - Log output function (optional)
-	 * @param cache - Whether to cache the file content (default: true)
+	 * @param cache - Whether caches may be used (default: true). `build()` leaves
+	 *   this `undefined`, which means caching is ENABLED — treat `undefined` the
+	 *   same as `true` and test for serve mode with `cache === false`, never with
+	 *   a truthiness check like `if (cache)`
 	 * @returns Compilation result (string or ArrayBuffer)
 	 */
 	(
