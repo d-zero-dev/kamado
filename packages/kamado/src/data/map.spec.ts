@@ -5,6 +5,7 @@ import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { clearFileContentCache } from '../files/file-content.js';
 
+import { clearAssetGroupCache } from './get-asset-group.js';
 import { getCompilableFileMap } from './map.js';
 
 vi.mock('fast-glob', async () => {
@@ -33,11 +34,13 @@ vi.mock('node:fs/promises', () => {
 describe('getCompilableFileMap', () => {
 	beforeEach(() => {
 		clearFileContentCache();
+		clearAssetGroupCache();
 	});
 
 	afterEach(() => {
 		vol.reset();
 		clearFileContentCache();
+		clearAssetGroupCache();
 	});
 
 	test('keys map by default outputPath when no override', async () => {

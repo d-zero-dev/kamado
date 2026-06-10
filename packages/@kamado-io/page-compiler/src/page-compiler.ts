@@ -1,6 +1,6 @@
 import type { GetNavTreeOptions } from './features/nav.js';
 import type { TitleListOptions } from './features/title-list.js';
-import type { CompileData, PageCompilerOptions } from './types.js';
+import type { CompileData, PageCompilerOptions, ParseErrorMode } from './types.js';
 import type { Transform, TransformContext } from 'kamado/config';
 import type { MetaData } from 'kamado/files';
 
@@ -60,6 +60,24 @@ export function createPageCompiler<M extends MetaData>() {
 				...options?.globalData?.data,
 			};
 
+			// Resolve compileHooks (can be object or function) once per context,
+			// not per file — hook factories take only `options` and are file-independent
+			const compileHooks =
+				typeof options?.compileHooks === 'function'
+					? await options.compileHooks(options)
+					: options?.compileHooks;
+
+			// Resolve transforms once per context — they receive file info at
+			// transform time, not at creation time
+			const defaultPageTransforms = createDefaultPageTransforms<M>();
+			const transforms: Transform<M>[] =
+				typeof options?.transforms === 'function'
+					? options.transforms(defaultPageTransforms)
+					: (options?.transforms ?? defaultPageTransforms);
+
+			const parseErrorMode: ParseErrorMode =
+				options?.formatOptions?.parseError ?? 'silent';
+
 			return async (file, compile, log, cache) => {
 				log?.(c.blue('Building...'));
 				const pageContent = await getContentFromFile(file, cache);
@@ -97,16 +115,10 @@ export function createPageCompiler<M extends MetaData>() {
 					breadcrumbs,
 				};
 
-				// Resolve compileHooks (can be object or function)
-				const compileHooks =
-					typeof options?.compileHooks === 'function'
-						? await options.compileHooks(options)
-						: options?.compileHooks;
-
 				// Transpile main content
 				const mainContentHtml = await transpileMainContent(
 					{ content: pageMainContent, compileData, file },
-					{ compileHook: compileHooks?.main, log },
+					{ compileHook: compileHooks?.main, log, cache },
 				);
 
 				let html = mainContentHtml;
@@ -141,7 +153,7 @@ export function createPageCompiler<M extends MetaData>() {
 							layout,
 							file,
 						},
-						{ compileHook: compileHooks?.layout, log },
+						{ compileHook: compileHooks?.layout, log, cache },
 					);
 				}
 
@@ -160,20 +172,27 @@ export function createPageCompiler<M extends MetaData>() {
 					compile,
 				};
 
-				const defaultPageTransforms = createDefaultPageTransforms<M>({
-					parseError: options?.formatOptions?.parseError,
-				});
-
-				// Use provided transforms or default
-				const transforms: Transform<M>[] =
-					typeof options?.transforms === 'function'
-						? options.transforms(defaultPageTransforms)
-						: (options?.transforms ?? defaultPageTransforms);
-
-				// Apply transforms sequentially
+				// Apply transforms sequentially. Any transform failure is routed through
+				// the formatOptions.parseError policy: on silent/warning the failing
+				// transform is skipped and the previous step's output flows through.
 				let result: string | ArrayBuffer = html;
 				for (const transform of transforms) {
-					result = await transform.transform(result, transformContext);
+					try {
+						result = await transform.transform(result, transformContext);
+					} catch (error) {
+						const source = transformContext.inputPath ?? transformContext.outputPath;
+						const original = error instanceof Error ? error.message : String(error);
+						const message = `Transform '${transform.name}' failed on ${source}: ${original}`;
+
+						if (parseErrorMode === 'error') {
+							throw new Error(message, { cause: error });
+						}
+						if (parseErrorMode === 'warning') {
+							// eslint-disable-next-line no-console
+							console.warn(message);
+						}
+						// silent / warning: keep `result` as-is and continue
+					}
 				}
 
 				// Ensure result is string
@@ -190,8 +209,7 @@ export function createPageCompiler<M extends MetaData>() {
 
 // Re-export types
 export type * from './types.js';
-export type { DefaultPageTransformsOptions } from './page-transform.js';
-export type { PrettierOptions, PrettierParseErrorMode } from './transform/prettier.js';
+export type { PrettierOptions } from './transform/prettier.js';
 
 // Re-export page transforms
 export { createDefaultPageTransforms } from './page-transform.js';

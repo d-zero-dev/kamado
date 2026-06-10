@@ -168,6 +168,8 @@ export default defineConfig({
 - `compileHooks`: コンパイルプロセスをカスタマイズするコンパイルフック（Pugテンプレートを使用する場合は必須）
 - `transforms`: コンパイル済みHTMLに適用する変換関数の配列。省略時は`createDefaultPageTransforms()`を使用。Transform Pipeline APIの詳細は[@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md)を参照してください
 
+**注意**: `compileHooks`や`transforms`を関数として指定した場合、ファイルごとではなく**build/serveコンテキストごとに1回だけ**解決されます。解決されたフックやtransformインスタンスは全ページで共有され（並行コンパイルされる場合もあります）、ファイルに依存しない・ページごとの可変状態を持たない実装である必要があります。
+
 **注意**: `page-compiler`は汎用コンテナコンパイラであり、デフォルトではPugテンプレートをコンパイルしません。Pugテンプレートを使用するには、`@kamado-io/pug-compiler`をインストールし、`compileHooks`を設定してください。詳細は[@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md)を参照してください。
 
 **例**: `.pug`ファイルを`.html`にコンパイルする場合：
@@ -550,6 +552,12 @@ kamado server
 | `--config <path>` | `-c`   | 設定ファイルのパスを指定。未指定の場合、`kamado.config.js`、`kamado.config.ts`などを自動探索 |
 | `--verbose`       |        | 詳細なログ出力を有効化                                                                       |
 
+`build`コマンドのみで利用可能なオプション：
+
+| オプション         | 短縮形 | 説明                                                                                                                       |
+| ------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `--skip-unchanged` |        | 内容が変わっていない出力ファイルの書き込みをスキップ。既存ファイルのmtimeが保持されるため、mtimeベースの差分デプロイに有効 |
+
 #### 使用例
 
 ```bash
@@ -559,6 +567,9 @@ kamado server -c ./dev.config.js
 
 # ビルド時に詳細ログを出力
 kamado build --verbose
+
+# 内容が変わっていない出力の書き込みをスキップ
+kamado build --skip-unchanged
 ```
 
 ### 型安全性とジェネリクス

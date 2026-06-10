@@ -9,7 +9,10 @@ export interface CompileFunction {
 	/**
 	 * @param file - File to compile (CompilableFile or file seed with inputPath and outputExtension)
 	 * @param log - Log output function (optional)
-	 * @param cache - Whether to cache the file content (default: true)
+	 * @param cache - Whether caches may be used (default: true). `build()` leaves
+	 *   this `undefined`, which means caching is ENABLED — treat `undefined` the
+	 *   same as `true` and test for serve mode with `cache === false`, never with
+	 *   a truthiness check like `if (cache)`
 	 * @returns Compilation result (string or ArrayBuffer)
 	 */
 	(
@@ -23,6 +26,13 @@ export interface CompileFunction {
 		cache?: boolean,
 	): Promise<string | ArrayBuffer>;
 }
+
+/**
+ * Inline source map emission policy shared by asset compilers
+ * - `true` / `false`: always emit / never emit
+ * - `'onServer'`: emit only when kamado runs in serve mode
+ */
+export type SourcemapOption = boolean | 'onServer';
 
 /**
  * Compiler context with compile function map
@@ -44,7 +54,10 @@ export interface CustomCompileFunction {
 	 * @param compilableFile - File to compile
 	 * @param compile - Recursive compiler function to compile other files during compilation
 	 * @param log - Log output function (optional)
-	 * @param cache - Whether to cache the file content (default: true)
+	 * @param cache - Whether caches may be used (default: true). `build()` leaves
+	 *   this `undefined`, which means caching is ENABLED — treat `undefined` the
+	 *   same as `true` and test for serve mode with `cache === false`, never with
+	 *   a truthiness check like `if (cache)`
 	 * @returns Compilation result (string or ArrayBuffer)
 	 */
 	(
@@ -105,7 +118,25 @@ export interface CustomCompilerMetadataOptions {
 	 * pre-read).
 	 */
 	readonly outputPathField?: string;
+	/**
+	 * Policy for handling two source files that resolve to the same output path.
+	 * - `'error'`: throw and abort the build.
+	 * - `'warning'`: log a warning and keep one file (default).
+	 * - `'silent'`: keep one file with no log output.
+	 *
+	 * When a winner must be picked (`'warning'` / `'silent'`), a file whose
+	 * `outputPath` came from the frontmatter override always beats one using
+	 * the default computed path; among ties the first-seen file wins.
+	 * Default: `'warning'`.
+	 */
+	readonly outputPathConflict?: OutputPathConflictPolicy;
 }
+
+/**
+ * Policy for handling output-path collisions.
+ * See {@link CustomCompilerMetadataOptions.outputPathConflict}.
+ */
+export type OutputPathConflictPolicy = 'silent' | 'warning' | 'error';
 
 /**
  * Compiler with metadata
@@ -130,6 +161,11 @@ export interface CustomCompilerWithMetadata<M extends MetaData> {
 	 * See {@link CustomCompilerMetadataOptions.outputPathField} for details.
 	 */
 	readonly outputPathField?: string;
+	/**
+	 * Policy for handling output-path collisions.
+	 * See {@link CustomCompilerMetadataOptions.outputPathConflict} for details.
+	 */
+	readonly outputPathConflict?: OutputPathConflictPolicy;
 	/**
 	 * Compiler function
 	 */

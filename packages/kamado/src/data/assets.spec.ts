@@ -3,7 +3,7 @@ import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { clearFileContentCache } from '../files/file-content.js';
 
-import { getAssetGroup } from './get-asset-group.js';
+import { clearAssetGroupCache, getAssetGroup } from './get-asset-group.js';
 
 vi.mock('fast-glob', async () => {
 	const actual = await vi.importActual('fast-glob');
@@ -30,6 +30,7 @@ vi.mock('node:fs/promises', () => {
 
 describe('getAssetGroup with virtual file system', () => {
 	beforeEach(() => {
+		clearAssetGroupCache();
 		vol.fromJSON({
 			'/mock/input/dir/index.html': '<html><body>Index</body></html>',
 			'/mock/input/dir/about.html': '<html><body>About</body></html>',
@@ -126,11 +127,13 @@ describe('getAssetGroup with virtual file system', () => {
 describe("getAssetGroup with frontmatter 'path' override", () => {
 	beforeEach(() => {
 		clearFileContentCache();
+		clearAssetGroupCache();
 	});
 
 	afterEach(() => {
 		vol.reset();
 		clearFileContentCache();
+		clearAssetGroupCache();
 	});
 
 	test('honors `path` with explicit extension', async () => {
@@ -286,7 +289,7 @@ describe("getAssetGroup with frontmatter 'path' override", () => {
 		expect(result[0]?.fileSlug).toBe('some');
 	});
 
-	test('throws when two files resolve to the same output path', async () => {
+	test('"error" throws when two override files resolve to the same output path', async () => {
 		vol.fromJSON({
 			'/mock/input/dir/a.html': '---\npath: /shared.html\n---\n<p>A</p>',
 			'/mock/input/dir/b.html': '---\npath: /shared.html\n---\n<p>B</p>',
@@ -300,10 +303,378 @@ describe("getAssetGroup with frontmatter 'path' override", () => {
 					files: '**/*.html',
 					outputExtension: '.html',
 					outputPathField: 'path',
+					outputPathConflict: 'error',
 					compiler: () => () => '',
 				},
 			}),
 		).rejects.toThrow(/Output path collision/);
+	});
+
+	test('"error" message includes a hint on how to switch policies', async () => {
+		vol.fromJSON({
+			'/mock/input/dir/a.html': '---\npath: /shared.html\n---\n<p>A</p>',
+			'/mock/input/dir/b.html': '---\npath: /shared.html\n---\n<p>B</p>',
+		});
+
+		await expect(
+			getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					outputPathConflict: 'error',
+					compiler: () => () => '',
+				},
+			}),
+		).rejects.toThrow(/outputPathConflict/);
+	});
+
+	test('"error" throws on non-override conflicts (same name, different extensions)', async () => {
+		vol.fromJSON({
+			'/mock/input/dir/page.html': '<p>html</p>',
+			'/mock/input/dir/page.pug': 'p pug',
+		});
+
+		await expect(
+			getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.{html,pug}',
+					outputExtension: '.html',
+					outputPathConflict: 'error',
+					compiler: () => () => '',
+				},
+			}),
+		).rejects.toThrow(/Output path collision/);
+	});
+
+	test('default policy ("warning") between two overrides: first-seen wins, warns once', async () => {
+		vol.fromJSON({
+			'/mock/input/dir/a.html': '---\npath: /shared.html\n---\n<p>A</p>',
+			'/mock/input/dir/b.html': '---\npath: /shared.html\n---\n<p>B</p>',
+		});
+
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		try {
+			const result = await getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					compiler: () => () => '',
+				},
+			});
+
+			expect(result).toHaveLength(1);
+			expect(result[0]?.inputPath).toBe('/mock/input/dir/a.html');
+			expect(warn).toHaveBeenCalledTimes(1);
+			expect(warn).toHaveBeenCalledWith(expect.stringMatching(/Output path collision/));
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test('"warning" on non-override conflict: first-seen wins, no override required', async () => {
+		vol.fromJSON({
+			'/mock/input/dir/page.html': '<p>html-version</p>',
+			'/mock/input/dir/page.pug': 'p pug-version',
+		});
+
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		try {
+			const result = await getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.{html,pug}',
+					outputExtension: '.html',
+					outputPathConflict: 'warning',
+					compiler: () => () => '',
+				},
+			});
+
+			expect(result).toHaveLength(1);
+			expect(result[0]?.inputPath).toBe('/mock/input/dir/page.html');
+			expect(warn).toHaveBeenCalledTimes(1);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test('"silent" suppresses the warning but still drops the loser', async () => {
+		vol.fromJSON({
+			'/mock/input/dir/a.html': '---\npath: /shared.html\n---\n<p>A</p>',
+			'/mock/input/dir/b.html': '---\npath: /shared.html\n---\n<p>B</p>',
+		});
+
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		try {
+			const result = await getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					outputPathConflict: 'silent',
+					compiler: () => () => '',
+				},
+			});
+
+			expect(result).toHaveLength(1);
+			expect(result[0]?.inputPath).toBe('/mock/input/dir/a.html');
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test('override beats default when the default is seen first (override replaces previous)', async () => {
+		// memfs preserves insertion order, so `shared.html` (no override) is visited before
+		// `with-override.html`. The override file is the second arrival yet must win.
+		vol.fromJSON({
+			'/mock/input/dir/shared.html': '<p>plain</p>',
+			'/mock/input/dir/with-override.html':
+				'---\npath: /shared.html\n---\n<p>override</p>',
+		});
+
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		try {
+			const result = await getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					outputPathConflict: 'silent',
+					compiler: () => () => '',
+				},
+			});
+
+			expect(result).toHaveLength(1);
+			expect(result[0]?.inputPath).toBe('/mock/input/dir/with-override.html');
+			expect(result[0]?.outputPath).toBe('/mock/output/dir/shared.html');
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test('override beats default when the override is seen first (default discarded)', async () => {
+		// Insert the override file first so it is processed before the default.
+		// The default-path file must be discarded, confirming the rule is order-independent.
+		vol.fromJSON({
+			'/mock/input/dir/with-override.html':
+				'---\npath: /shared.html\n---\n<p>override</p>',
+			'/mock/input/dir/shared.html': '<p>plain</p>',
+		});
+
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		try {
+			const result = await getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					outputPathConflict: 'silent',
+					compiler: () => () => '',
+				},
+			});
+
+			expect(result).toHaveLength(1);
+			expect(result[0]?.inputPath).toBe('/mock/input/dir/with-override.html');
+			expect(result[0]?.outputPath).toBe('/mock/output/dir/shared.html');
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test('three-way conflict: first override wins, default and second override are dropped', async () => {
+		// Processing order (memfs insertion order):
+		//   1. collide.html         — default path → stored
+		//   2. first-override.html  — override beats default → replaces #1
+		//   3. second-override.html — override + first-wins among ties → dropped
+		vol.fromJSON({
+			'/mock/input/dir/collide.html': '<p>plain default</p>',
+			'/mock/input/dir/first-override.html':
+				'---\npath: /collide.html\n---\n<p>first override</p>',
+			'/mock/input/dir/second-override.html':
+				'---\npath: /collide.html\n---\n<p>second override</p>',
+		});
+
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		try {
+			const result = await getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					outputPathConflict: 'silent',
+					compiler: () => () => '',
+				},
+			});
+
+			expect(result).toHaveLength(1);
+			expect(result[0]?.inputPath).toBe('/mock/input/dir/first-override.html');
+			expect(result[0]?.outputPath).toBe('/mock/output/dir/collide.html');
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test('frontmatter parse errors still throw under "silent" policy', async () => {
+		// Conflict policy must not swallow parse failures — they are a separate failure mode.
+		vol.fromJSON({
+			'/mock/input/dir/source.html': '<p>X</p>',
+			'/mock/input/dir/source.json': '{ this is not json',
+		});
+
+		await expect(
+			getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					outputPathConflict: 'silent',
+					compiler: () => () => '',
+				},
+			}),
+		).rejects.toThrow(/Failed to read frontmatter from \/mock\/input\/dir\/source\.html/);
+	});
+
+	test('"warning" emits one warning per collision (N-way conflict)', async () => {
+		// 3 override files sharing the same output path → 2 conflicts → 2 warnings.
+		vol.fromJSON({
+			'/mock/input/dir/a.html': '---\npath: /shared.html\n---\n<p>A</p>',
+			'/mock/input/dir/b.html': '---\npath: /shared.html\n---\n<p>B</p>',
+			'/mock/input/dir/c.html': '---\npath: /shared.html\n---\n<p>C</p>',
+		});
+
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		try {
+			const result = await getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					outputPathConflict: 'warning',
+					compiler: () => () => '',
+				},
+			});
+
+			expect(result).toHaveLength(1);
+			expect(result[0]?.inputPath).toBe('/mock/input/dir/a.html');
+			expect(warn).toHaveBeenCalledTimes(2);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test('non-string `path` is treated as fromOverride=false in conflict context', async () => {
+		// `with-override.html` has a valid override → fromOverride=true, outputPath=/shared.html.
+		// `shared.html` has a non-string `path: 42` → ignored, fromOverride=false, default
+		// outputPath=/shared.html. They collide on /shared.html; since only one side carries
+		// a real override, the override file must win regardless of glob order.
+		vol.fromJSON({
+			'/mock/input/dir/with-override.html':
+				'---\npath: /shared.html\n---\n<p>override</p>',
+			'/mock/input/dir/shared.html': '---\npath: 42\n---\n<p>non-string</p>',
+		});
+
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		try {
+			const result = await getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					outputPathConflict: 'silent',
+					compiler: () => () => '',
+				},
+			});
+
+			expect(result).toHaveLength(1);
+			expect(result[0]?.inputPath).toBe('/mock/input/dir/with-override.html');
+			expect(result[0]?.outputPath).toBe('/mock/output/dir/shared.html');
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test('"error" throws on the first collision without processing later files', async () => {
+		// File 3 has malformed frontmatter that would throw a parse error if reached.
+		// If 'error' policy correctly aborts on the first collision (between files 1 and 2),
+		// file 3 is never read and the thrown error references the first pair, not the parse error.
+		vol.fromJSON({
+			'/mock/input/dir/a.html': '---\npath: /shared.html\n---\n<p>A</p>',
+			'/mock/input/dir/b.html': '---\npath: /shared.html\n---\n<p>B</p>',
+			'/mock/input/dir/c.html': '<p>C</p>',
+			'/mock/input/dir/c.json': '{ this is not json',
+		});
+
+		await expect(
+			getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					outputPathConflict: 'error',
+					compiler: () => () => '',
+				},
+			}),
+		).rejects.toThrow(
+			/Output path collision.+'\/mock\/input\/dir\/a\.html' and '\/mock\/input\/dir\/b\.html'/,
+		);
+	});
+
+	test('"silent" emits no console output at all (warn, log, and error are untouched)', async () => {
+		vol.fromJSON({
+			'/mock/input/dir/a.html': '---\npath: /shared.html\n---\n<p>A</p>',
+			'/mock/input/dir/b.html': '---\npath: /shared.html\n---\n<p>B</p>',
+		});
+
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			await getAssetGroup({
+				inputDir: '/mock/input/dir',
+				outputDir: '/mock/output/dir',
+				compilerEntry: {
+					files: '**/*.html',
+					outputExtension: '.html',
+					outputPathField: 'path',
+					outputPathConflict: 'silent',
+					compiler: () => () => '',
+				},
+			});
+
+			expect(warn).not.toHaveBeenCalled();
+			expect(log).not.toHaveBeenCalled();
+			expect(error).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+			log.mockRestore();
+			error.mockRestore();
+		}
 	});
 
 	test('rejects an invalid `path` with a helpful message', async () => {

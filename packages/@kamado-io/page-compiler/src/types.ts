@@ -1,10 +1,19 @@
 import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { GetNavTreeOptions, NavNode } from './features/nav.js';
 import type { TitleListOptions } from './features/title-list.js';
-import type { PrettierParseErrorMode } from './transform/prettier.js';
 import type { PathListToTreeOptions } from '@d-zero/shared/path-list-to-tree';
 import type { Transform } from 'kamado/config';
 import type { CompilableFile, FileObject, MetaData } from 'kamado/files';
+
+/**
+ * Pipeline-level error policy applied when a transform throws during page
+ * compilation.
+ * - `'silent'` (default): swallow the error, skip the failing transform,
+ *   and pass the previous step's output to the next one
+ * - `'warning'`: `console.warn` with the transform name and source path, then skip
+ * - `'error'`: throw an `Error` prefixed with the transform name and source path
+ */
+export type ParseErrorMode = 'silent' | 'warning' | 'error';
 
 /**
  * Options for the page compiler
@@ -51,6 +60,11 @@ export interface PageCompilerOptions<M extends MetaData> {
 	/**
 	 * Array of transform functions to apply to compiled HTML, or a function that receives and returns transforms
 	 * If omitted, uses createDefaultPageTransforms()
+	 *
+	 * Note: when a function is given, it is resolved **once per build/serve
+	 * context**, not per file. The returned transform instances are shared by
+	 * all pages compiled in that context (and may run concurrently), so they
+	 * must not keep per-page mutable state.
 	 * @example
 	 * ```typescript
 	 * import { createDefaultPageTransforms } from '@kamado-io/page-compiler';
@@ -157,11 +171,11 @@ export interface PageCompilerOptions<M extends MetaData> {
 	 */
 	readonly navigationComparator?: PathListToTreeOptions['comparator'];
 	/**
-	 * Options applied to the default format transforms.
+	 * Pipeline-level format error policy.
 	 *
-	 * Only forwarded to the transforms produced by `createDefaultPageTransforms`.
-	 * If a custom `transforms` array is supplied, pass these settings to the
-	 * relevant transform factories directly (e.g. `prettier({ parseError })`).
+	 * Applied to **every** transform in the compiled pipeline, including the
+	 * default transforms (`prettier`, `minifier`, etc.) and any custom
+	 * transforms supplied via `transforms`.
 	 * @example
 	 * ```typescript
 	 * createPageCompiler()({
@@ -171,12 +185,10 @@ export interface PageCompilerOptions<M extends MetaData> {
 	 */
 	readonly formatOptions?: {
 		/**
-		 * Behavior when Prettier fails to parse the input.
-		 * - `'silent'` (default): swallow the error and emit the unformatted source
-		 * - `'warning'`: `console.warn` with the source path, then emit the unformatted source
-		 * - `'error'`: throw an `Error` prefixed with the source path
+		 * Behavior when ANY transform throws during the page pipeline.
+		 * See {@link ParseErrorMode}.
 		 */
-		readonly parseError?: PrettierParseErrorMode;
+		readonly parseError?: ParseErrorMode;
 	};
 }
 
@@ -221,12 +233,15 @@ export type ContentHook<M extends MetaData> = (
  * @param content - Template content to compile
  * @param data - Compile data object containing page info, navigation, and breadcrumbs
  * @param extension - File extension of the source file (e.g., `.pug`, `.html`)
+ * @param cache - Whether the compiler may reuse cached compilation artifacts
+ *   (e.g. compiled template functions). `false` in serve mode. Default: `true`
  * @returns Compiled HTML string (sync or async)
  */
 export type CompilerFunction<M extends MetaData> = (
 	content: string,
 	data: CompileData<M>,
 	extension: string,
+	cache?: boolean,
 ) => Promise<string> | string;
 
 /**
@@ -275,6 +290,10 @@ export interface CompileHooksObject<M extends MetaData> {
 /**
  * Compilation hooks for customizing compile process
  * Can be an object or a function that returns an object (sync or async)
+ *
+ * Note: when a function is given, it is resolved **once per build/serve
+ * context**, not per file. Hook factories must be file-independent; the
+ * returned hooks are shared by all pages compiled in that context.
  * @template M - Custom metadata type extending MetaData
  */
 export type CompileHooks<M extends MetaData> =

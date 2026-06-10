@@ -1,10 +1,15 @@
+import type { SourcemapOption } from 'kamado/compiler';
 import type { MetaData } from 'kamado/files';
 
 import path from 'node:path';
 
 import cssnano from 'cssnano';
-import { createCustomCompiler } from 'kamado/compiler';
-import { createBanner, type CreateBanner } from 'kamado/compiler/banner';
+import {
+	createBannerResolver,
+	createCustomCompiler,
+	resolveSourcemapFlag,
+} from 'kamado/compiler';
+import { type CreateBanner } from 'kamado/compiler/banner';
 import { getContentFromFile } from 'kamado/files';
 import postcss from 'postcss';
 import postcssImport from 'postcss-import';
@@ -33,7 +38,7 @@ export interface StyleCompilerOptions {
 	 *
 	 * Default: `'onServer'`.
 	 */
-	readonly sourcemap?: boolean | 'onServer';
+	readonly sourcemap?: SourcemapOption;
 }
 
 /**
@@ -82,57 +87,65 @@ export function createStyleCompiler<M extends MetaData>() {
 		defaultFiles: '**/*.css',
 		defaultOutputExtension: '.css',
 		compile: (options) => (context) => {
-			// `context.mode` is fixed for the lifetime of a command, so evaluate
-			// the sourcemap flag once here rather than per-file.
-			const sourcemapOption = options?.sourcemap ?? 'onServer';
-			const enableSourcemap =
-				sourcemapOption === 'onServer' ? context.mode === 'serve' : sourcemapOption;
+			const enableSourcemap = resolveSourcemapFlag(options?.sourcemap, context.mode);
 
-			return async (file, _, __, cache) => {
-				// Configure plugins with alias resolver for postcss-import
-				const plugins: postcss.AcceptedPlugin[] = [
-					postcssImport({
-						// Add postcss-import plugin with alias resolver
-						resolve:
-							// Create alias resolver for postcss-import
-							(id: string, basedir: string) => {
-								// Check if the import starts with an alias
-								for (const [alias, aliasPath] of Object.entries(options?.alias ?? {})) {
-									// Arias must be followed by a slash
-									if (id.startsWith(alias + '/')) {
-										const resolvedPath = id.replace(alias, aliasPath);
-										return [path.resolve(basedir, resolvedPath)];
-									}
+			// Configure plugins once per context — plugin instances and the
+			// loaded PostCSS config are file-independent
+			const basePlugins: postcss.AcceptedPlugin[] = [
+				postcssImport({
+					// Add postcss-import plugin with alias resolver
+					resolve:
+						// Create alias resolver for postcss-import
+						(id: string, basedir: string) => {
+							// Check if the import starts with an alias
+							for (const [alias, aliasPath] of Object.entries(options?.alias ?? {})) {
+								// Arias must be followed by a slash
+								if (id.startsWith(alias + '/')) {
+									const resolvedPath = id.replace(alias, aliasPath);
+									return [path.resolve(basedir, resolvedPath)];
 								}
-								// For non-alias imports, fallback to default postcss-import resolution
-								return [id];
+							}
+							// For non-alias imports, fallback to default postcss-import resolution
+							return [id];
+						},
+				}),
+				cssnano({
+					preset: [
+						'default',
+						{
+							// Preserve !important comments (license, copyright, etc.)
+							discardComments: {
+								removeAll: false,
+								removeAllButFirst: false,
 							},
-					}),
-					cssnano({
-						preset: [
-							'default',
-							{
-								// Preserve !important comments (license, copyright, etc.)
-								discardComments: {
-									removeAll: false,
-									removeAllButFirst: false,
-								},
-								// Custom comment removal that preserves ! comments
-								cssDeclarationSorter: false,
-							},
-						],
-					}),
-				];
+							// Custom comment removal that preserves ! comments
+							cssDeclarationSorter: false,
+						},
+					],
+				}),
+			];
 
+			const createProcessor = async () => {
 				// Try to load PostCSS config from project root
 				let config;
 				try {
 					config = await postcssLoadConfig();
-				} catch {
-					// Fallback to default config if no config found
+				} catch (error) {
+					// Fallback to default config if no config found.
+					// A missing config is expected; anything else (e.g. a syntax
+					// error in postcss.config.js) is surfaced so plugin loss is
+					// not silent.
+					if (
+						error instanceof Error &&
+						!error.message.includes('No PostCSS Config found')
+					) {
+						// eslint-disable-next-line no-console
+						console.warn(`Failed to load PostCSS config: ${error.message}`);
+					}
 					config = { plugins: [] };
 				}
 
+				const plugins = [...basePlugins];
 				// Add other plugins from config (excluding postcss-import if it exists)
 				if (config.plugins) {
 					for (const plugin of config.plugins) {
@@ -148,21 +161,37 @@ export function createStyleCompiler<M extends MetaData>() {
 						plugins.push(plugin);
 					}
 				}
+				return postcss(plugins);
+			};
+
+			// Normalize to a `/*! ... */` important comment so that:
+			// 1) cssnano preserves it through minification (the `!` flag),
+			// 2) it can be safely prepended to the PostCSS input — which
+			//    keeps inline source map line offsets correct and ensures
+			//    the output is identical regardless of the sourcemap flag.
+			const resolveBanner = createBannerResolver(options?.banner, normalizeBanner);
+
+			// Lazily build the processor once and reuse it across files. A failed
+			// processor build is NOT cached, so the next file retries instead of
+			// replaying the same rejection forever.
+			let processorPromise: Promise<postcss.Processor> | undefined;
+
+			return async (file, _, __, cache) => {
+				// cache === false (serve mode): rebuild per compilation so that
+				// postcss.config.js edits are picked up without a restart
+				const processor =
+					cache === false
+						? await createProcessor()
+						: await (processorPromise ??= createProcessor().catch((error) => {
+								processorPromise = undefined;
+								throw error;
+							}));
 
 				const css = await getContentFromFile(file, cache);
 
-				const rawBanner =
-					typeof options?.banner === 'string'
-						? options.banner
-						: createBanner(options?.banner?.());
-				// Normalize to a `/*! ... */` important comment so that:
-				// 1) cssnano preserves it through minification (the `!` flag),
-				// 2) it can be safely prepended to the PostCSS input — which
-				//    keeps inline source map line offsets correct and ensures
-				//    the output is identical regardless of the sourcemap flag.
-				const banner = normalizeBanner(rawBanner);
+				const banner = resolveBanner(cache);
 
-				const result = await postcss(plugins).process(banner + '\n' + css.content, {
+				const result = await processor.process(banner + '\n' + css.content, {
 					from: file.inputPath,
 					to: undefined,
 					...(enableSourcemap ? { map: { inline: true } } : {}),

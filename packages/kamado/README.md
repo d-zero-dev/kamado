@@ -168,6 +168,8 @@ The order of entries in the returned array determines the processing order.
 - `compileHooks`: Compilation hooks for customizing compile process (required for Pug templates)
 - `transforms`: Array of transform functions to apply to compiled HTML. If omitted, uses `createDefaultPageTransforms()`. See [@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md) for details on the Transform Pipeline API.
 
+**Note**: When `compileHooks` or `transforms` is given as a function, it is resolved **once per build/serve context**, not per file. The resolved hooks and transform instances are shared by all pages (which may compile concurrently), so they must be file-independent and must not keep per-page mutable state.
+
 **Note**: `page-compiler` is a generic container compiler and does not compile Pug templates by default. To use Pug templates, install `@kamado-io/pug-compiler` and configure `compileHooks`. See [@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md) for details.
 
 **Example**: To compile `.pug` files to `.html`:
@@ -550,6 +552,12 @@ The following options are available for all commands:
 | `--config <path>` | `-c`  | Path to a specific config file. If not specified, Kamado searches for `kamado.config.js`, `kamado.config.ts`, etc. |
 | `--verbose`       |       | Enable verbose logging                                                                                             |
 
+The following options are available for the `build` command only:
+
+| Option             | Short | Description                                                                                                                               |
+| ------------------ | ----- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `--skip-unchanged` |       | Skip writing output files whose content is unchanged. The existing file's mtime is preserved, which helps mtime-based deployment diffing. |
+
 #### Examples
 
 ```bash
@@ -559,6 +567,9 @@ kamado server -c ./dev.config.js
 
 # Enable verbose logging during build
 kamado build --verbose
+
+# Skip rewriting outputs whose content has not changed
+kamado build --skip-unchanged
 ```
 
 ### Type Safety & Generics

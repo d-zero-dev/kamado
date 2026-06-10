@@ -172,7 +172,8 @@ The flow for compiling all files at once and exporting them as static files.
 
 ```mermaid
 graph TD
-    A[CLI: build] --> B[Load & Merge config]
+    A[CLI: build] --> A2[Clear module caches<br>asset group / file content / global data]
+    A2 --> B[Load & Merge config]
     B --> B2[Create Context with mode='build']
     B2 --> C[Execute onBeforeBuild hook]
     C --> D[Create compiler function map]
@@ -182,12 +183,17 @@ graph TD
     F --> G{Compiler exists for<br>output extension?}
     G -- Yes --> H[Execute compiler]
     G -- No --> I[Read raw content]
-    H --> J[Write to output file]
+    H --> J{skipUnchanged enabled &<br>existing output identical?}
     I --> J
-    J --> K[All files completed]
+    J -- Yes --> J2[Skip write<br>preserve mtime]
+    J -- No --> J3[Write to output file]
+    J2 --> K[All files completed]
+    J3 --> K
     K --> L[Execute onAfterBuild hook]
     L --> M[Display Build Completed]
 ```
+
+Every `build()` invocation starts from a clean slate: the module-level caches (asset group memoization, file contents, global data) are cleared first, so source edits between consecutive builds in the same process are always reflected. Output directories are created lazily and deduplicated within a build, and with the `skipUnchanged` build option (`kamado build --skip-unchanged`) an output whose content is unchanged is not rewritten — the file size is compared first (via `stat`), then the content, and the existing file's mtime is preserved on a match.
 
 ### 2. Dev Server Flow (`kamado server`)
 
@@ -239,9 +245,11 @@ Compiler entries may opt in to frontmatter-driven output-path overrides by setti
 
 When the field is configured, `getAssetGroup()` reads each matched file's frontmatter (and JSON sidecar) before returning. If the resolved value is a non-empty string, the file's `outputPath`, `url`, `filePathStem`, and `fileSlug` are recomputed from that override via `resolveMetaPath()` (`packages/kamado/src/path/resolve-meta-path.ts`). Non-string values (numbers, arrays, objects, null) are ignored.
 
-Three forms are accepted: `/foo/bar.html` (used as-is), `/foo/bar` (compiler's `outputExtension` is appended), and `/foo/bar/` (treated as a directory; `index<outputExtension>` is appended). Both `.` and `..` segments are rejected, and a final guard rejects any path that resolves outside `dir.output`. Two source files resolving to the same output path raise a collision error.
+Three forms are accepted: `/foo/bar.html` (used as-is), `/foo/bar` (compiler's `outputExtension` is appended), and `/foo/bar/` (treated as a directory; `index<outputExtension>` is appended). Both `.` and `..` segments are rejected, and a final guard rejects any path that resolves outside `dir.output`.
 
-The eager read warms the module-level cache in `files/file-content.ts`, so the build's later `getContentFromFile` call (with `cache=true`) does not re-read from disk. The dev server's per-request compile passes `cache=false` to pick up edits, so the eager read is paid only once at startup. Because the override is reflected in the `CompilableFile` returned by `getAssetGroup`, both `compilableFileMap` (dev server) and `build()` (which writes to `file.outputPath`) honor the override with no further changes.
+When two source files resolve to the same output path, the compiler entry's `outputPathConflict` setting decides the reaction: `'error'` (throw), `'warning'` (default — log to `stderr` and pick a winner), or `'silent'` (pick a winner with no log). Winner selection rules: a file whose `outputPath` came from the frontmatter override beats one using the default computed path; among ties the first-seen file wins. The map of seen output paths is built in `getAssetGroup()` and replacement is order-independent because the surviving entry's position in the Map (and therefore in the returned `CompilableFile[]`) is the first-seen position.
+
+The eager read warms the module-level cache in `files/file-content.ts`, so the build's later `getContentFromFile` call (with `cache=true`) does not re-read from disk. In addition, `getAssetGroup()` results themselves are memoized by the enumeration's value-inputs (cleared at the start of every build), so the same compiler entry enumerated by both `build()` and `getGlobalData()` pays the glob + frontmatter pass only once. The dev server's per-request compile passes `cache=false` to pick up edits, so the eager read is paid only once at startup. Because the override is reflected in the `CompilableFile` returned by `getAssetGroup`, both `compilableFileMap` (dev server) and `build()` (which writes to `file.outputPath`) honor the override with no further changes.
 
 ---
 
@@ -365,7 +373,7 @@ The `CustomCompiler` receives a `Context<M>` object (which includes `mode: 'serv
 - `compilableFile`: The file to compile
 - `compile`: A recursive compile function that can compile other files during compilation (e.g., layouts, includes)
 - `log`: Optional logging function
-- `cache`: Whether to cache file content
+- `cache`: Whether cached file contents and compiled artifacts (e.g. compiled template functions, processors) may be reused. The dev server passes `false` on every request so that file edits are always reflected; `build()` leaves it `undefined` (compilers default to caching)
 
 The `CompilableFile` class (`src/files/`) handles file reading and cache management behind the scenes. The `compile` parameter enables compilers to recursively compile dependencies.
 
@@ -560,6 +568,41 @@ Proxy routes are registered conditionally — only when `context.devServer.proxy
 - **`redirect: 'manual'`**: Preserves redirect responses from the target server instead of following them automatically
 - **`duplex: 'half'`**: Enables streaming request bodies in Node.js `fetch()` implementation
 - **No response transforms**: Proxy responses are returned as-is without passing through the Response Transform pipeline
+
+---
+
+## Caching Layers
+
+Kamado uses several independent caches to avoid repeating per-file work. Contributors touching the build or compile pipeline should know their scopes and invalidation rules:
+
+| Cache                       | Location                                       | Scope / Invalidation                                                                                                                                                                                                                                                   |
+| --------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| File contents               | `src/files/file-content.ts`                    | Module-level `Map`. Cleared at the start of every `build()` (`clearFileContentCache`). Bypassed per request in serve mode (`cache=false`).                                                                                                                             |
+| Global data                 | `src/data/get-global-data.ts`                  | Module-level `Map` for data files. Cleared at the start of every `build()` (`clearGlobalDataCache`).                                                                                                                                                                   |
+| Asset group memoization     | `src/data/get-asset-group.ts`                  | Module-level `Map` keyed by the enumeration's value-inputs. Lets `build()` and `getGlobalData()` share one glob + frontmatter pass. Cleared at the start of every `build()` (`clearAssetGroupCache`).                                                                  |
+| Compiled template functions | `@kamado-io/pug-compiler` (`compile-pug.ts`)   | Per compiler instance, keyed by template source, bounded LRU. A fresh instance (and cache) is created each time the compile hooks factory is resolved — i.e. once per build/serve context. Skipped when `cache=false`.                                                 |
+| PostCSS processor / banner  | `@kamado-io/style-compiler`, `script-compiler` | Lazily built once per context and reused across files. Rebuilt per compilation when `cache=false` (serve), so `postcss.config.js` edits and date-based banners stay fresh during development. A failed processor build is not cached, so the next compilation retries. |
+
+Related to these caches, `compileHooks` and `transforms` factories on the page compiler are resolved **once per build/serve context** (in the compiler's context setup), not per file. Hook factories and transform instances are therefore shared across all pages of a build and across concurrent compilations.
+
+The `cache` flag travels from `CustomCompileFunction` (4th parameter) through the page compiler's transpile layer into the compile hooks' `compiler` function (4th parameter), so template-engine packages can honor serve mode's no-cache semantics. `build()` leaves the flag `undefined`, which means caching is **enabled** — compilers must treat `undefined` the same as `true` and test for serve mode with `cache === false`, never with a truthiness check.
+
+**Design note — two serve-mode signals.** Compilers currently receive "is this serve mode?" through two channels: the per-call `cache` flag (`false` in serve) and the context-level `context.mode` (used by, e.g., the `sourcemap: 'onServer'` option via `resolveSourcemapFlag`). Today the two always agree, but they are evaluated at different times (per compilation vs. per context). If a new mode or a "cache in serve" option is ever introduced, consolidate both into a single compile-context object instead of keeping the signals in sync manually.
+
+---
+
+## Benchmarking
+
+A synthetic-build benchmark lives in `packages/kamado/benchmark/`:
+
+```bash
+yarn bench                 # 1000 pages, 3 runs, transforms disabled
+yarn bench --pages=500     # page count
+yarn bench --runs=5        # number of runs (median is reported)
+yarn bench --full          # enable the default page transforms (jsdom/prettier/minifier)
+```
+
+It generates a fixture site (N Pug pages sharing one layout with an include, plus a few CSS/TS files) under `packages/kamado/.bench/` and measures `build()` wall-clock time against the built `dist` output — run `yarn build` first. Use it to compare before/after numbers when changing the build pipeline; module-level caches are cleared between runs so every run measures a cold build.
 
 ---
 

@@ -1,12 +1,14 @@
+import type { SourcemapOption } from 'kamado/compiler';
 import type { CreateBanner } from 'kamado/compiler/banner';
 import type { MetaData } from 'kamado/files';
 
-import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
-import { createCustomCompiler } from 'kamado/compiler';
-import { createBanner } from 'kamado/compiler/banner';
+import {
+	createBannerResolver,
+	createCustomCompiler,
+	resolveSourcemapFlag,
+} from 'kamado/compiler';
 
 /**
  * Options for the script compiler
@@ -34,7 +36,7 @@ export interface ScriptCompilerOptions {
 	 *
 	 * Default: `'onServer'`.
 	 */
-	readonly sourcemap?: boolean | 'onServer';
+	readonly sourcemap?: SourcemapOption;
 }
 
 /**
@@ -66,23 +68,18 @@ export function createScriptCompiler<M extends MetaData>() {
 			 */
 			const esbuild = await import('esbuild');
 
-			// `context.mode` is fixed for the lifetime of a command, so evaluate
-			// the sourcemap flag once here rather than per-file.
-			const sourcemapOption = options?.sourcemap ?? 'onServer';
-			const enableSourcemap =
-				sourcemapOption === 'onServer' ? context.mode === 'serve' : sourcemapOption;
+			const resolveBanner = createBannerResolver(options?.banner);
+			const enableSourcemap = resolveSourcemapFlag(options?.sourcemap, context.mode);
 
-			return async (file) => {
-				const banner =
-					typeof options?.banner === 'string'
-						? options.banner
-						: createBanner(options?.banner?.());
-				const tmpFilePath = path.join(os.tmpdir(), file.outputPath);
-				await esbuild.build({
+			return async (file, _, __, cache) => {
+				const banner = resolveBanner(cache);
+				// write: false keeps the bundle in memory — no tmp-file round-trip
+				const result = await esbuild.build({
 					entryPoints: [file.inputPath],
 					bundle: true,
 					alias: options?.alias,
-					outfile: tmpFilePath,
+					outfile: file.outputPath,
+					write: false,
 					minify: options?.minifier,
 					charset: 'utf8',
 					sourcemap: enableSourcemap ? 'inline' : false,
@@ -90,7 +87,25 @@ export function createScriptCompiler<M extends MetaData>() {
 						js: banner,
 					},
 				});
-				return await fs.readFile(tmpFilePath, 'utf8');
+				// outputFiles order is not guaranteed (e.g. extracted CSS or
+				// sourcemaps come alongside the bundle) — select by output path
+				const expectedPath = path.resolve(file.outputPath);
+				const outputFile = result.outputFiles.find(
+					(output) => path.resolve(output.path) === expectedPath,
+				);
+				if (!outputFile) {
+					throw new Error(`esbuild produced no output for ${file.inputPath}`);
+				}
+				for (const output of result.outputFiles) {
+					if (output === outputFile) {
+						continue;
+					}
+					// eslint-disable-next-line no-console
+					console.warn(
+						`Ignoring additional esbuild output '${output.path}' for ${file.inputPath}`,
+					);
+				}
+				return outputFile.text;
 			};
 		},
 	}));

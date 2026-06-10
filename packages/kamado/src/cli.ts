@@ -29,6 +29,10 @@ const cli = parseCli({
 			desc: 'Build static files',
 			flags: {
 				...commonFlags,
+				skipUnchanged: {
+					type: 'boolean' as const,
+					desc: 'Skip writing output files whose content is unchanged',
+				},
 			},
 		},
 		server: {
@@ -60,6 +64,7 @@ switch (cli.command) {
 			...config,
 			targetGlob: pathResolver(cli.args),
 			verbose: cli.flags.verbose,
+			skipUnchanged: cli.flags.skipUnchanged,
 		});
 		break;
 	}

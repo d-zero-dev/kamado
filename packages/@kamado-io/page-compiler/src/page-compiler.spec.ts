@@ -105,6 +105,96 @@ describe('page compiler', async () => {
 		expect(result).toBe('<p>Hello, world!</p>\n');
 	});
 
+	test('passes the cache flag through to main and layout compile hooks', async () => {
+		clearMockFileContents();
+		const page: CompilableFile = {
+			inputPath: '/path/to/page.pug',
+			outputPath: '/path/to/page.html',
+			fileSlug: 'page',
+			filePathStem: '/path/to/page',
+			url: '/path/to/page',
+			extension: '.pug',
+			date: new Date(),
+		};
+		setMockFileContent('/path/to/page.pug', {
+			metaData: { layout: 'default' },
+			content: 'p main',
+			raw: 'p main',
+		});
+		setMockFileContent('/layouts/default.pug', {
+			metaData: {},
+			content: 'p layout',
+			raw: 'p layout',
+		});
+
+		const compilerSpy = vi.fn((content: string) => content);
+		const pageC = createPageCompiler()({
+			layouts: {
+				files: {
+					default: { inputPath: '/layouts/default.pug' },
+				},
+			},
+			compileHooks: {
+				main: { compiler: compilerSpy },
+				layout: { compiler: compilerSpy },
+			},
+			transforms: [],
+		});
+		const fn = await pageC.compiler(config);
+
+		// Serve mode: cache=false must reach both compilers as the 4th argument
+		await fn(page, () => '', undefined, false);
+		expect(compilerSpy).toHaveBeenCalledTimes(2);
+		expect(compilerSpy.mock.calls[0]?.[3]).toBe(false); // main content
+		expect(compilerSpy.mock.calls[1]?.[3]).toBe(false); // layout
+
+		// Build mode: cache is left undefined (compilers default to caching)
+		compilerSpy.mockClear();
+		await fn(page, () => '');
+		expect(compilerSpy).toHaveBeenCalledTimes(2);
+		expect(compilerSpy.mock.calls[0]?.[3]).toBeUndefined(); // main content
+		expect(compilerSpy.mock.calls[1]?.[3]).toBeUndefined(); // layout
+	});
+
+	test('resolves a compileHooks factory once per context, not per file', async () => {
+		clearMockFileContents();
+		const pageA: CompilableFile = {
+			inputPath: '/path/to/a.html',
+			outputPath: '/path/to/a.html',
+			fileSlug: 'a',
+			filePathStem: '/path/to/a',
+			url: '/path/to/a',
+			extension: '.html',
+			date: new Date(),
+		};
+		const pageB: CompilableFile = { ...pageA, inputPath: '/path/to/b.html' };
+		setMockFileContent('/path/to/a.html', {
+			metaData: {},
+			content: '<p>A</p>',
+			raw: '<p>A</p>',
+		});
+		setMockFileContent('/path/to/b.html', {
+			metaData: {},
+			content: '<p>B</p>',
+			raw: '<p>B</p>',
+		});
+
+		const hooksFactory = vi.fn(() => ({
+			main: { compiler: (content: string) => content },
+		}));
+		const pageC = createPageCompiler()({
+			compileHooks: hooksFactory,
+			transforms: [],
+		});
+		const fn = await pageC.compiler(config);
+
+		await fn(pageA, () => '');
+		await fn(pageB, () => '');
+
+		// The factory is file-independent and must be resolved exactly once
+		expect(hooksFactory).toHaveBeenCalledTimes(1);
+	});
+
 	test('should pass through pug file without compiler', async () => {
 		clearMockFileContents();
 		const content = 'p Hello, world!';

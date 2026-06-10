@@ -26,23 +26,76 @@ export interface GetAssetGroupOptions {
 	readonly glob?: string;
 }
 
+const assetGroupCache = new Map<string, Promise<CompilableFile[]>>();
+
+/**
+ * Clears the asset group memoization cache.
+ * Called at the start of each build so every build re-enumerates files.
+ */
+export function clearAssetGroupCache(): void {
+	assetGroupCache.clear();
+}
+
 /**
  * Gets asset files for the specified compiler entry.
+ *
+ * Results are memoized by the value-inputs of the enumeration until
+ * {@link clearAssetGroupCache} is called (done at the start of each build),
+ * so the same compiler entry enumerated by both `build()` and
+ * `getGlobalData()` shares a single glob + frontmatter pass.
  *
  * When `compilerEntry.outputPathField` is set, each matched file's frontmatter
  * (and same-name JSON sidecar) is read eagerly. If the named field holds a
  * non-empty string, the file's `outputPath`, `url`, `filePathStem`, and
  * `fileSlug` are recomputed from that override via {@link resolveMetaPath}.
- * Two source files resolving to the same `outputPath` raise a collision error.
+ *
+ * When two source files resolve to the same `outputPath`, the behavior is
+ * controlled by `compilerEntry.outputPathConflict` (default: `'warning'`).
+ * For `'warning'` and `'silent'`, a file with a frontmatter-override path
+ * beats one using the default path; otherwise the first-seen file wins.
  * @param context - Required context (inputDir, outputDir, compilerEntry).
  * @param options - Optional filtering options (glob).
- * @returns The list of matched files as `CompilableFile` objects, in the order
- *   returned by the underlying glob.
- * @throws {Error} on output-path collision, on invalid override path, or when
- *   frontmatter parsing fails for a matched file.
+ * @returns The list of matched files as `CompilableFile` objects. Order follows
+ *   the underlying glob; on a non-`'error'` conflict the loser is dropped and
+ *   the winner remains at the first-seen position.
+ * @throws {Error} on output-path collision when policy is `'error'`, on invalid
+ *   override path, or when frontmatter parsing fails for a matched file.
  * @template M - Metadata type carried by the compiler entry.
  */
 export async function getAssetGroup<M extends MetaData>(
+	context: GetAssetGroupContext<M>,
+	options?: GetAssetGroupOptions,
+): Promise<CompilableFile[]> {
+	const { inputDir, outputDir, compilerEntry } = context;
+
+	// Memoize by the value-inputs of the enumeration. The same compiler entry
+	// is enumerated both by build() and by getGlobalData() (page list); the
+	// second call reuses the same glob + frontmatter pass.
+	const cacheKey = [
+		inputDir,
+		outputDir,
+		compilerEntry.files,
+		compilerEntry.ignore ?? '',
+		compilerEntry.outputExtension,
+		compilerEntry.outputPathField ?? '',
+		compilerEntry.outputPathConflict ?? '',
+		options?.glob ?? '',
+	].join('\0');
+	const cached = assetGroupCache.get(cacheKey);
+	if (cached) {
+		return cached;
+	}
+	const promise = enumerateAssetGroup(context, options);
+	assetGroupCache.set(cacheKey, promise);
+	return promise;
+}
+
+/**
+ * Performs the actual glob + frontmatter enumeration for {@link getAssetGroup}.
+ * @param context - Required context (inputDir, outputDir, compilerEntry).
+ * @param options - Optional filtering options (glob).
+ */
+async function enumerateAssetGroup<M extends MetaData>(
 	context: GetAssetGroupContext<M>,
 	options?: GetAssetGroupOptions,
 ): Promise<CompilableFile[]> {
@@ -66,8 +119,11 @@ export async function getAssetGroup<M extends MetaData>(
 		filePaths = filePaths.filter((filePath) => isMatch(filePath));
 	}
 
-	const results: CompilableFile[] = [];
-	const seen = new Map<string, string>();
+	const conflictPolicy = compilerEntry.outputPathConflict ?? 'warning';
+	const seen = new Map<
+		string,
+		{ filePath: string; file: CompilableFile; fromOverride: boolean }
+	>();
 
 	for (const filePath of filePaths) {
 		let file = getFile(filePath, {
@@ -76,6 +132,7 @@ export async function getAssetGroup<M extends MetaData>(
 			outputExtension: compilerEntry.outputExtension,
 		});
 
+		let fromOverride = false;
 		const overrideField = compilerEntry.outputPathField;
 		if (overrideField) {
 			let metaData: Record<string, unknown>;
@@ -93,6 +150,7 @@ export async function getAssetGroup<M extends MetaData>(
 						outputDir,
 						outputExtension: compilerEntry.outputExtension,
 					});
+					fromOverride = true;
 				} catch (error) {
 					throw new Error(
 						`Invalid frontmatter '${overrideField}' in ${filePath}: ${(error as Error).message}`,
@@ -101,18 +159,28 @@ export async function getAssetGroup<M extends MetaData>(
 			}
 		}
 
-		const previousInput = seen.get(file.outputPath);
-		if (previousInput) {
-			throw new Error(
-				`Output path collision: '${file.outputPath}' is produced by both '${previousInput}' and '${filePath}'`,
-			);
+		const previous = seen.get(file.outputPath);
+		if (previous) {
+			const message =
+				`Output path collision: '${file.outputPath}' is produced by both '${previous.filePath}' and '${filePath}'` +
+				` (set \`outputPathConflict: 'warning' | 'silent'\` on the compiler entry to keep one file instead of throwing)`;
+			if (conflictPolicy === 'error') {
+				throw new Error(message);
+			}
+			if (conflictPolicy === 'warning') {
+				console.warn(message);
+			}
+			// Frontmatter override beats default; otherwise first-seen wins.
+			const newWins = fromOverride && !previous.fromOverride;
+			if (newWins) {
+				seen.set(file.outputPath, { filePath, file, fromOverride });
+			}
+			continue;
 		}
-		seen.set(file.outputPath, filePath);
-
-		results.push(file);
+		seen.set(file.outputPath, { filePath, file, fromOverride });
 	}
 
-	return results;
+	return [...seen.values()].map((entry) => entry.file);
 }
 
 /**

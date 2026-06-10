@@ -37,6 +37,10 @@ export default defineConfig({
 - `banner`: Banner configuration (can specify CreateBanner function or string)
 - `sourcemap`: Emit an inline source map (data URI appended as `//# sourceMappingURL=...`). Accepts `boolean | 'onServer'`. When set to `'onServer'`, the source map is emitted only while kamado runs in serve mode (`context.mode === 'serve'`). Default: `'onServer'`. esbuild adjusts mappings to account for the banner automatically.
 
+## Bundling Behavior
+
+Each entry file is bundled in memory with esbuild (no temporary files are written) and the resulting JavaScript bundle is returned as the output. When esbuild emits additional output files alongside the bundle — for example a CSS file extracted from a `import './style.css'` statement — only the JavaScript bundle matching the output path is used; the extra outputs are ignored with a console warning.
+
 ## License
 
 MIT

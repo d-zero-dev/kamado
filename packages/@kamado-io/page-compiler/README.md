@@ -49,14 +49,18 @@ export default defineConfig({
   - `(defaultTransforms: readonly Transform[]) => Transform[]` - Function that receives default transforms (5 transforms) and returns modified array
   - If omitted, uses `createDefaultPageTransforms()` (5 transforms: manipulateDOM, doctype, prettier, minifier, lineBreak). See [Transform Pipeline](#transform-pipeline) for details.
   - **Note**: Uses the same `Transform` interface as `devServer.transforms`, but applies only to HTML pages in both build and serve modes. The `filter` option is ignored here (use `devServer.transforms` for filtering).
+  - **Note**: When given as a function, it is resolved **once per build/serve context**, not per file. The returned transform instances are shared by all pages in that context (and may run concurrently), so they must not keep per-page mutable state.
 - `transformBreadcrumbItem`: Function to transform each breadcrumb item. Each item includes a `meta` property containing the source page's metadata, enabling metadata-based transformations (e.g., redirect URLs). `(item: BreadcrumbItem<M>) => BreadcrumbItem<M>`
 - `filterNavigationNode`: Function to filter navigation nodes. Return `true` to keep the node, `false` to remove it. `(node: NavNode<M>) => boolean`
 - `navigationComparator`: Sort comparator for the navigation path list. Can be overridden per-call via `nav({ comparator })` in templates.
   - `'path'`: Sort by path using `pathComparator`
   - `(a: string, b: string) => number`: Custom comparator function
   - `null` (default): No sorting (preserve original order)
-- `formatOptions`: Options applied to the **default** format transforms. Only forwarded to transforms produced by `createDefaultPageTransforms`; if a custom `transforms` array is supplied, pass these settings to the relevant transform factories directly (e.g. `prettier({ parseError })`).
-  - `parseError`: Behavior when Prettier fails to parse the input. One of `'silent' | 'warning' | 'error'` (default: `'silent'`). See the [`prettier` transform](#transform-pipeline) section for details.
+- `formatOptions`: Pipeline-level error policy applied to **every** transform in the compiled chain (both built-in transforms like `prettier`/`minifier` and any custom ones from `transforms`).
+  - `parseError`: Behavior when a transform throws. One of:
+    - `'silent'` (default) — swallow the error, skip the failing transform, and pass the previous step's output to the next one
+    - `'warning'` — `console.warn` with `Transform '<name>' failed on <source>: <original>`, then skip the failing transform
+    - `'error'` — throw an `Error` with the same message prefix; the original error is preserved on `error.cause`
   - Example:
 
     ```typescript
@@ -69,14 +73,15 @@ export default defineConfig({
 
 - `compileHooks`: Compilation hooks for customizing compile process
   - Can be an object or a function `(options: PageCompilerOptions<M>) => CompileHooksObject<M> | Promise<CompileHooksObject<M>>` that returns an object (sync or async)
+  - **Note**: A function form is resolved **once per build/serve context**, not per file. Hook factories must be file-independent; the returned hooks are shared by all pages compiled in that context.
   - `main`: Hooks for main content compilation
     - `before`: Hook called before compilation (receives content and data, returns processed content)
     - `after`: Hook called after compilation (receives HTML and data, returns processed HTML)
-    - `compiler`: Custom compiler function `(content: string, data: CompileData<M>, extension: string) => Promise<string> | string`
+    - `compiler`: Custom compiler function `(content: string, data: CompileData<M>, extension: string, cache?: boolean) => Promise<string> | string`. The optional `cache` flag tells the compiler whether it may reuse cached compilation artifacts (e.g. compiled template functions) — it is `false` in serve mode so that template/include edits are always reflected
   - `layout`: Hooks for layout compilation
     - `before`: Hook called before compilation (receives content and data, returns processed content)
     - `after`: Hook called after compilation (receives HTML and data, returns processed HTML)
-    - `compiler`: Custom compiler function `(content: string, data: CompileData<M>, extension: string) => Promise<string> | string`
+    - `compiler`: Custom compiler function `(content: string, data: CompileData<M>, extension: string, cache?: boolean) => Promise<string> | string` (same `cache` semantics as `main.compiler`)
 
 **Note**: To use Pug templates, install `@kamado-io/pug-compiler` and use `createCompileHooks` helper. See the [@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md) for integration examples.
 
@@ -122,7 +127,7 @@ Rules:
 - The value must start with `/`.
 - `.` and `..` segments are rejected (the resolved path must stay inside `dir.output`).
 - Non-string values (numbers, arrays, etc.) for the configured field are ignored — only string values trigger an override.
-- If two source files resolve to the same output path, the build aborts with a collision error pointing to both sources.
+- If two source files resolve to the same output path, the behavior is controlled by `outputPathConflict` (see below).
 - A same-name `.json` sidecar takes precedence over the YAML frontmatter — the field declared in JSON wins.
 - Quote the value when it contains characters with special meaning in YAML (e.g. `:`). For example, `path: '/foo:bar/'` instead of `path: /foo:bar/`.
 
@@ -131,6 +136,30 @@ Rules:
 ### Choosing a Field Name
 
 `outputPathField` is intentionally configurable so it cannot collide with a frontmatter key your project already uses for other purposes. Pick a name that doesn't conflict — common choices are `path`, `permalink`, `outputPath`, or a project-specific name. Without `outputPathField` set, the page compiler does **not** read frontmatter eagerly and **does not** treat any field as routing data.
+
+### Handling Output-Path Conflicts
+
+When two source files resolve to the same output path, `outputPathConflict` selects how the build reacts. The option lives on the compiler entry next to `outputPathField` and accepts three values:
+
+| Value       | Behavior                                                         |
+| ----------- | ---------------------------------------------------------------- |
+| `'error'`   | Abort the build with a collision error pointing to both sources. |
+| `'warning'` | Log a warning to `stderr` and keep one file. **Default.**        |
+| `'silent'`  | Keep one file with no log output.                                |
+
+```ts
+def(createPageCompiler(), {
+	outputPathField: 'path',
+	outputPathConflict: 'error', // abort the build on any collision
+});
+```
+
+When the policy is `'warning'` or `'silent'` and a winner must be picked:
+
+1. A file whose `outputPath` came from the frontmatter override **beats** one using the default computed path.
+2. Among ties (both override, or both default), the **first-seen** file wins.
+
+This means a routing override always takes precedence over an accidental default-path collision, regardless of the order in which the files are processed.
 
 ## Transform Pipeline
 
@@ -207,11 +236,7 @@ The package provides **6 transform factory functions** (5 included in default pi
        // ... other Prettier options
      }
      ```
-   - `options.parseError`: Behavior when Prettier fails to parse the input (for example, when the HTML parser chokes on malformed markup). Defaults to `'silent'`.
-     - `'silent'` — swallow the error and emit the unformatted source as-is.
-     - `'warning'` — `console.warn` with a message prefixed by the source file path (`ctx.inputPath`, falling back to `ctx.outputPath`), then emit the unformatted source.
-     - `'error'` — throw an `Error` whose message is prefixed by the source file path. The underlying Prettier error is preserved on `error.cause`, so handlers can inspect `loc` and other Prettier-specific fields.
-   - **Top-level shortcut**: When using `createDefaultPageTransforms()`, pass `formatOptions.parseError` on `PageCompilerOptions` instead of constructing the transform yourself.
+   - **Errors**: This transform throws raw Prettier errors (typically `SyntaxError` for malformed input). Failures are handled at the pipeline level by `PageCompilerOptions.formatOptions.parseError` — see the [Options](#options) section.
 
 5. **`minifier(options?)`** - Minify HTML
    - `options.options`: html-minifier-terser configuration object
@@ -224,6 +249,7 @@ The package provides **6 transform factory functions** (5 included in default pi
        // ... other minifier options
      }
      ```
+   - **Errors**: This transform throws raw `html-minifier-terser` errors when the input cannot be parsed. Failures are handled at the pipeline level by `PageCompilerOptions.formatOptions.parseError` — see the [Options](#options) section.
 
 6. **`lineBreak(options?)`** - Normalize line breaks
    - `options.lineBreak`: Line break style

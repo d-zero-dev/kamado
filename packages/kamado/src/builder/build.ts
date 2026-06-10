@@ -11,6 +11,7 @@ import { createCompileFunctions } from '../compiler/compile-functions.js';
 import { createCompiler } from '../compiler/create-compiler.js';
 import { createCompileFunctionMap } from '../compiler/function-map.js';
 import { mergeConfig } from '../config/merge-config.js';
+import { clearBuildCaches } from '../data/clear-build-caches.js';
 import { getAssetGroup } from '../data/get-asset-group.js';
 import { filePathColorizer } from '../stdout/color.js';
 
@@ -30,6 +31,14 @@ interface BuildConfig {
 	 * Whether to enable verbose logging
 	 */
 	readonly verbose?: boolean;
+	/**
+	 * Whether to skip writing output files whose content is unchanged.
+	 * Compares the new content against the existing output file; when equal,
+	 * the write is skipped and the existing file's mtime is preserved
+	 * (useful for mtime-based deployment diffing).
+	 * @default false
+	 */
+	readonly skipUnchanged?: boolean;
 }
 
 /**
@@ -42,6 +51,11 @@ interface BuildConfig {
 export async function build<M extends MetaData>(
 	buildConfig: UserConfig<M> & BuildConfig,
 ) {
+	// Each build starts from a clean slate: re-enumerate files and re-read
+	// file contents and global data so that source edits between consecutive
+	// builds in the same process are always reflected
+	clearBuildCaches();
+
 	const config = await mergeConfig(buildConfig, buildConfig.rootDir);
 
 	// Create execution context
@@ -86,6 +100,11 @@ export async function build<M extends MetaData>(
 
 	const CHECK_MARK = c.green('✔');
 
+	// Tracks directories already ensured in this build to avoid redundant mkdir
+	// calls. mkdir with recursive:true is idempotent, so a rare duplicate from
+	// concurrent tasks is harmless.
+	const ensuredDirs = new Set<string>();
+
 	await deal<CompilableFile>(
 		allFiles,
 		(file, log, _, setLineHeader) => {
@@ -95,11 +114,37 @@ export async function build<M extends MetaData>(
 			return async () => {
 				const content = await compile(file, log);
 
-				log(c.yellow('Writing...'));
-				await fs.mkdir(path.dirname(file.outputPath), { recursive: true });
+				// Allocated lazily: the size precheck needs only the byte length,
+				// and fs.writeFile accepts strings directly
+				const toWritable = () =>
+					typeof content === 'string' ? Buffer.from(content) : new Uint8Array(content);
 
-				const buffer = typeof content === 'string' ? content : new Uint8Array(content);
-				await fs.writeFile(file.outputPath, buffer);
+				if (buildConfig.skipUnchanged) {
+					// Cheap size check first (no allocation); read the file only
+					// when sizes match
+					const byteLength =
+						typeof content === 'string' ? Buffer.byteLength(content) : content.byteLength;
+					const stat = await fs.stat(file.outputPath).catch(() => null);
+					if (stat && stat.size === byteLength) {
+						const existing = await fs.readFile(file.outputPath).catch(() => null);
+						if (existing && existing.equals(toWritable())) {
+							log(`${CHECK_MARK} Unchanged`);
+							return;
+						}
+					}
+				}
+
+				log(c.yellow('Writing...'));
+				const outputDir = path.dirname(file.outputPath);
+				if (!ensuredDirs.has(outputDir)) {
+					await fs.mkdir(outputDir, { recursive: true });
+					ensuredDirs.add(outputDir);
+				}
+
+				await fs.writeFile(
+					file.outputPath,
+					typeof content === 'string' ? content : new Uint8Array(content),
+				);
 
 				log(`${CHECK_MARK} Compiled!`);
 			};

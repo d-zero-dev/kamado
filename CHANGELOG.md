@@ -3,6 +3,26 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.16](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.15...v2.0.0-alpha.16) (2026-05-12)
+
+- refactor(page-compiler)!: route all transform failures through formatOptions.parseError ([4b1d189](https://github.com/d-zero-dev/kamado/commit/4b1d1897c4db2daadba7a4555f916f6682eed48c))
+
+### Features
+
+- **kamado:** add outputPathConflict policy for output-path collisions ([e75dcbb](https://github.com/d-zero-dev/kamado/commit/e75dcbb6a5bc39e524811c9a0c49386043f40f3c))
+
+### BREAKING CHANGES
+
+- `PrettierOptions.parseError` and the `PrettierParseErrorMode`
+  type are removed. The `DefaultPageTransformsOptions` interface is removed and
+  `createDefaultPageTransforms()` no longer takes an argument. The unified type
+  is now `ParseErrorMode` exported from the package entry. Error message format
+  changed to `Transform '<name>' failed on <source>: <original>`.
+
+Tests cover prettier, minifier, and custom-transform failure under each of the
+three modes, plus pipeline continuation (a second failure after the first is
+still logged) and the `inputPath` -> `outputPath` fallback in the message.
+
 # [2.0.0-alpha.15](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.14...v2.0.0-alpha.15) (2026-05-12)
 
 ### Bug Fixes

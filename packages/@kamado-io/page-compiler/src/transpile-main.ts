@@ -20,6 +20,11 @@ export interface TranspileMainContext<M extends MetaData> {
 export interface TranspileMainOptions<M extends MetaData> {
 	readonly compileHook?: CompileHook<M>;
 	readonly log?: (message: string) => void;
+	/**
+	 * Whether the compiler may reuse cached compilation artifacts.
+	 * Passed through to the compile hook's compiler. Default: `true`
+	 */
+	readonly cache?: boolean;
 }
 
 /**
@@ -39,7 +44,7 @@ export async function transpileMainContent<M extends MetaData>(
 	options?: TranspileMainOptions<M>,
 ): Promise<string> {
 	const { content, compileData, file } = context;
-	const { compileHook, log } = options ?? {};
+	const { compileHook, log, cache } = options ?? {};
 
 	return transpile(
 		{
@@ -50,6 +55,7 @@ export async function transpileMainContent<M extends MetaData>(
 		{
 			compileHook,
 			log,
+			cache,
 			compileLogMessage: 'Compiling main content...',
 			compileLogColor: c.yellowBright,
 			errorLogMessage: file.inputPath,

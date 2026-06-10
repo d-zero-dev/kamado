@@ -11,7 +11,11 @@ export interface MinifierOptions {
 }
 
 /**
- * Creates a transform for HTML minification
+ * Creates a transform for HTML minification.
+ *
+ * Throws when `html-minifier-terser` fails to parse the input. The page
+ * compiler routes such failures through the `formatOptions.parseError`
+ * policy on `PageCompilerOptions`.
  * @template M - Metadata (frontmatter) type for pages handled by this transform
  * @param options - Minifier options
  * @returns Transform object

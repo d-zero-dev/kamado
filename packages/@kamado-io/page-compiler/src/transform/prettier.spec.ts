@@ -1,6 +1,6 @@
 import type { Context, TransformContext } from 'kamado/config';
 
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { describe, expect, test } from 'vitest';
 
 import { prettier } from './prettier.js';
 
@@ -80,134 +80,12 @@ describe('prettier', () => {
 		expect(typeof result).toBe('string');
 	});
 
-	describe('parseError mode', () => {
-		let warnSpy: ReturnType<typeof vi.spyOn>;
-
-		beforeEach(() => {
-			warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+	test('should throw raw Prettier error so the page compiler can apply formatOptions.parseError', async () => {
+		const transform = prettier({
+			options: { parser: 'json' },
 		});
+		const info = createMockTransformInfo();
 
-		afterEach(() => {
-			warnSpy.mockRestore();
-		});
-
-		test('should default to silent: return original content and not warn', async () => {
-			const transform = prettier({
-				options: { parser: 'json' },
-			});
-			const info = createMockTransformInfo({
-				inputPath: '/test/input/broken.pug',
-			});
-
-			const result = await transform.transform('not-valid-json', info);
-
-			expect(result).toBe('not-valid-json');
-			expect(warnSpy).not.toHaveBeenCalled();
-		});
-
-		test("'silent' should return original content and not warn", async () => {
-			const transform = prettier({
-				options: { parser: 'json' },
-				parseError: 'silent',
-			});
-			const info = createMockTransformInfo({
-				inputPath: '/test/input/broken.pug',
-			});
-
-			const result = await transform.transform('not-valid-json', info);
-
-			expect(result).toBe('not-valid-json');
-			expect(warnSpy).not.toHaveBeenCalled();
-		});
-
-		test("'warning' should console.warn with source path and return original content", async () => {
-			const transform = prettier({
-				options: { parser: 'json' },
-				parseError: 'warning',
-			});
-			const info = createMockTransformInfo({
-				inputPath: '/test/input/broken.pug',
-			});
-
-			const result = await transform.transform('not-valid-json', info);
-
-			expect(result).toBe('not-valid-json');
-			expect(warnSpy).toHaveBeenCalledTimes(1);
-			const calledWith = warnSpy.mock.calls[0]?.[0] as string;
-			expect(calledWith).toMatch(
-				/^Prettier failed to format \/test\/input\/broken\.pug: \S/,
-			);
-		});
-
-		test("'warning' should fall back to outputPath when inputPath is missing", async () => {
-			const transform = prettier({
-				options: { parser: 'json' },
-				parseError: 'warning',
-			});
-			const info = createMockTransformInfo({
-				inputPath: undefined,
-				outputPath: '/test/output/broken.html',
-			});
-
-			const result = await transform.transform('not-valid-json', info);
-
-			expect(result).toBe('not-valid-json');
-			expect(warnSpy).toHaveBeenCalledTimes(1);
-			const calledWith = warnSpy.mock.calls[0]?.[0] as string;
-			expect(calledWith).toMatch(
-				/^Prettier failed to format \/test\/output\/broken\.html: \S/,
-			);
-		});
-
-		test("'error' should include source file path when Prettier parser fails", async () => {
-			const transform = prettier({
-				options: { parser: 'json' },
-				parseError: 'error',
-			});
-			const info = createMockTransformInfo({
-				inputPath: '/test/input/broken.pug',
-			});
-
-			await expect(transform.transform('not-valid-json', info)).rejects.toThrow(
-				/^Prettier failed to format \/test\/input\/broken\.pug: \S/,
-			);
-			expect(warnSpy).not.toHaveBeenCalled();
-		});
-
-		test("'error' should fall back to outputPath when inputPath is missing", async () => {
-			const transform = prettier({
-				options: { parser: 'json' },
-				parseError: 'error',
-			});
-			const info = createMockTransformInfo({
-				inputPath: undefined,
-				outputPath: '/test/output/broken.html',
-			});
-
-			await expect(transform.transform('not-valid-json', info)).rejects.toThrow(
-				/^Prettier failed to format \/test\/output\/broken\.html: \S/,
-			);
-		});
-
-		test("'error' should preserve the original Prettier error as cause", async () => {
-			const transform = prettier({
-				options: { parser: 'json' },
-				parseError: 'error',
-			});
-			const info = createMockTransformInfo({
-				inputPath: '/test/input/broken.pug',
-			});
-
-			const error = await transform
-				.transform('not-valid-json', info)
-				.then(() => null)
-				.catch((error_: unknown) => error_);
-
-			expect(error).toBeInstanceOf(Error);
-			const wrapped = error as Error;
-			expect(wrapped.cause).toBeInstanceOf(Error);
-			expect((wrapped.cause as Error).message.length).toBeGreaterThan(0);
-			expect(wrapped.message).toContain((wrapped.cause as Error).message);
-		});
+		await expect(transform.transform('not-valid-json', info)).rejects.toThrow();
 	});
 });

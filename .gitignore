@@ -21,3 +21,6 @@ yarn-error.log
 # build outputs
 packages/**/dist/
 packages/**/tsconfig.build.tsbuildinfo
+
+# benchmark fixtures
+packages/**/.bench/
