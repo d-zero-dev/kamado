@@ -164,7 +164,9 @@ async function compile(
 	const entry = createScriptCompiler<MetaData>()(options);
 	const fn = await entry.compiler(makeContext(mode));
 	const out = await fn(file, () => Promise.resolve(''), undefined, false);
-	return typeof out === 'string' ? out : new TextDecoder().decode(out);
+	// The script compiler always returns a string; assert instead of branching
+	expect(typeof out).toBe('string');
+	return out as string;
 }
 
 const SOURCE_MAP_RE = /\/\/#\s*sourceMappingURL=data:application\/json;base64,/;
