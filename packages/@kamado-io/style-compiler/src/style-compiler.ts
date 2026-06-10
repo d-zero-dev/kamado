@@ -1,10 +1,15 @@
+import type { SourcemapOption } from 'kamado/compiler';
 import type { MetaData } from 'kamado/files';
 
 import path from 'node:path';
 
 import cssnano from 'cssnano';
-import { createCustomCompiler } from 'kamado/compiler';
-import { createBanner, type CreateBanner } from 'kamado/compiler/banner';
+import {
+	createBannerResolver,
+	createCustomCompiler,
+	resolveSourcemapFlag,
+} from 'kamado/compiler';
+import { type CreateBanner } from 'kamado/compiler/banner';
 import { getContentFromFile } from 'kamado/files';
 import postcss from 'postcss';
 import postcssImport from 'postcss-import';
@@ -33,7 +38,7 @@ export interface StyleCompilerOptions {
 	 *
 	 * Default: `'onServer'`.
 	 */
-	readonly sourcemap?: boolean | 'onServer';
+	readonly sourcemap?: SourcemapOption;
 }
 
 /**
@@ -82,11 +87,7 @@ export function createStyleCompiler<M extends MetaData>() {
 		defaultFiles: '**/*.css',
 		defaultOutputExtension: '.css',
 		compile: (options) => (context) => {
-			// `context.mode` is fixed for the lifetime of a command, so evaluate
-			// the sourcemap flag once here rather than per-file.
-			const sourcemapOption = options?.sourcemap ?? 'onServer';
-			const enableSourcemap =
-				sourcemapOption === 'onServer' ? context.mode === 'serve' : sourcemapOption;
+			const enableSourcemap = resolveSourcemapFlag(options?.sourcemap, context.mode);
 
 			// Configure plugins once per context — plugin instances and the
 			// loaded PostCSS config are file-independent
@@ -163,24 +164,17 @@ export function createStyleCompiler<M extends MetaData>() {
 				return postcss(plugins);
 			};
 
-			const resolveBanner = () => {
-				const rawBanner =
-					typeof options?.banner === 'string'
-						? options.banner
-						: createBanner(options?.banner?.());
-				// Normalize to a `/*! ... */` important comment so that:
-				// 1) cssnano preserves it through minification (the `!` flag),
-				// 2) it can be safely prepended to the PostCSS input — which
-				//    keeps inline source map line offsets correct and ensures
-				//    the output is identical regardless of the sourcemap flag.
-				return normalizeBanner(rawBanner);
-			};
+			// Normalize to a `/*! ... */` important comment so that:
+			// 1) cssnano preserves it through minification (the `!` flag),
+			// 2) it can be safely prepended to the PostCSS input — which
+			//    keeps inline source map line offsets correct and ensures
+			//    the output is identical regardless of the sourcemap flag.
+			const resolveBanner = createBannerResolver(options?.banner, normalizeBanner);
 
-			// Lazily build the processor and banner once and reuse them across
-			// files. A failed processor build is NOT cached, so the next file
-			// retries instead of replaying the same rejection forever.
+			// Lazily build the processor once and reuse it across files. A failed
+			// processor build is NOT cached, so the next file retries instead of
+			// replaying the same rejection forever.
 			let processorPromise: Promise<postcss.Processor> | undefined;
-			let cachedBanner: string | undefined;
 
 			return async (file, _, __, cache) => {
 				// cache === false (serve mode): rebuild per compilation so that
@@ -195,8 +189,7 @@ export function createStyleCompiler<M extends MetaData>() {
 
 				const css = await getContentFromFile(file, cache);
 
-				const banner =
-					cache === false ? resolveBanner() : (cachedBanner ??= resolveBanner());
+				const banner = resolveBanner(cache);
 
 				const result = await processor.process(banner + '\n' + css.content, {
 					from: file.inputPath,

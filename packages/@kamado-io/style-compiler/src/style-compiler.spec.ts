@@ -42,139 +42,7 @@ beforeEach(() => {
 });
 
 /**
- * Helper to create a minimal CompilableFile for tests
- * @param inputPath
- */
-function createFile(inputPath: string): CompilableFile {
-	return {
-		inputPath,
-		outputPath: inputPath,
-		fileSlug: 'style',
-		filePathStem: '/style',
-		url: '/style.css',
-		extension: '.css',
-		date: new Date(),
-	};
-}
-
-/**
- * Helper to create the innermost compile function (build mode)
- * @param options
- */
-async function createCompileFn(options?: StyleCompilerOptions) {
-	const entry = createStyleCompiler()(options);
-	// @ts-ignore -- only context.mode is read by the style compiler
-	return await entry.compiler({ mode: 'build' });
-}
-
-describe('style-compiler', () => {
-	test('compiles CSS with cssnano and preserves the banner', async () => {
-		mockFileContents.set('/in/style.css', {
-			metaData: {},
-			content: 'body { background-color: #ffffff; }',
-			raw: 'body { background-color: #ffffff; }',
-		});
-		const compile = await createCompileFn({ banner: '/* BANNER */' });
-
-		const result = await compile(createFile('/in/style.css'), () => '');
-
-		expect(result).toBe('/*! BANNER */body{background-color:#fff}');
-	});
-
-	test('loads the PostCSS config only once across files when cache is enabled', async () => {
-		mockFileContents.set('/in/a.css', {
-			metaData: {},
-			content: 'a { color: #ff0000; }',
-			raw: 'a { color: #ff0000; }',
-		});
-		mockFileContents.set('/in/b.css', {
-			metaData: {},
-			content: 'b { color: #00ff00; }',
-			raw: 'b { color: #00ff00; }',
-		});
-		const compile = await createCompileFn({ banner: '/* B */' });
-
-		await compile(createFile('/in/a.css'), () => '');
-		await compile(createFile('/in/b.css'), () => '');
-
-		expect(mockedLoadConfig).toHaveBeenCalledTimes(1);
-	});
-
-	test('reloads the PostCSS config per compilation when cache is disabled (serve mode)', async () => {
-		mockFileContents.set('/in/a.css', {
-			metaData: {},
-			content: 'a { color: #ff0000; }',
-			raw: 'a { color: #ff0000; }',
-		});
-		const compile = await createCompileFn({ banner: '/* B */' });
-
-		await compile(createFile('/in/a.css'), () => '', undefined, false);
-		await compile(createFile('/in/a.css'), () => '', undefined, false);
-
-		expect(mockedLoadConfig).toHaveBeenCalledTimes(2);
-	});
-
-	test('retries processor creation after a failure instead of caching the rejection', async () => {
-		mockFileContents.set('/in/a.css', {
-			metaData: {},
-			content: 'a { color: #ff0000; }',
-			raw: 'a { color: #ff0000; }',
-		});
-		// First load yields an invalid plugin so postcss() throws during
-		// processor creation; second load succeeds
-		// @ts-ignore -- intentionally invalid plugin shape
-		mockedLoadConfig.mockResolvedValueOnce({ plugins: ['not-a-plugin'] });
-		const compile = await createCompileFn({ banner: '/* B */' });
-
-		await expect(compile(createFile('/in/a.css'), () => '')).rejects.toThrow();
-
-		// The rejected processor must not be cached: the next file succeeds
-		const result = await compile(createFile('/in/a.css'), () => '');
-		expect(result).toBe('/*! B */a{color:red}');
-	});
-
-	test('warns when the PostCSS config fails to load for a reason other than not existing', async () => {
-		mockFileContents.set('/in/a.css', {
-			metaData: {},
-			content: 'a { color: #ff0000; }',
-			raw: 'a { color: #ff0000; }',
-		});
-		mockedLoadConfig.mockRejectedValueOnce(
-			new Error('Unexpected token in postcss.config.js'),
-		);
-		const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		const compile = await createCompileFn({ banner: '/* B */' });
-
-		// Falls back to the default plugins and still compiles
-		const result = await compile(createFile('/in/a.css'), () => '');
-		expect(result).toBe('/*! B */a{color:red}');
-		expect(warnSpy).toHaveBeenCalledWith(
-			'Failed to load PostCSS config: Unexpected token in postcss.config.js',
-		);
-		warnSpy.mockRestore();
-	});
-
-	test('does not warn when no PostCSS config exists', async () => {
-		mockFileContents.set('/in/a.css', {
-			metaData: {},
-			content: 'a { color: #ff0000; }',
-			raw: 'a { color: #ff0000; }',
-		});
-		mockedLoadConfig.mockRejectedValueOnce(
-			new Error('No PostCSS Config found in: /project'),
-		);
-		const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		const compile = await createCompileFn({ banner: '/* B */' });
-
-		const result = await compile(createFile('/in/a.css'), () => '');
-		expect(result).toBe('/*! B */a{color:red}');
-		expect(warnSpy).not.toHaveBeenCalled();
-		warnSpy.mockRestore();
-	});
-});
-
-/**
- * Helper to set mock file content for sourcemap/banner tests
+ * Registers mock CSS content for a source path
  * @param inputPath
  * @param css
  */
@@ -183,7 +51,7 @@ function setMockFile(inputPath: string, css: string) {
 }
 
 /**
- *
+ * Creates a minimal execution context for the given mode
  * @param mode
  */
 function makeContext(mode: 'serve' | 'build'): Context<MetaData> {
@@ -197,7 +65,7 @@ function makeContext(mode: 'serve' | 'build'): Context<MetaData> {
 }
 
 /**
- *
+ * Creates a minimal CompilableFile for tests
  * @param inputPath
  */
 function makeFile(inputPath = '/test/src/style.css'): CompilableFile {
@@ -212,27 +80,118 @@ function makeFile(inputPath = '/test/src/style.css'): CompilableFile {
 	};
 }
 
-const SOURCE_MAP_RE = /\/\*#\s*sourceMappingURL=data:application\/json;base64,/;
+/**
+ * Creates the innermost compile function for the given mode
+ * @param options
+ * @param mode
+ */
+async function createCompileFn(
+	options?: StyleCompilerOptions,
+	mode: 'serve' | 'build' = 'build',
+) {
+	const entry = createStyleCompiler<MetaData>()(options);
+	return await entry.compiler(makeContext(mode));
+}
 
 /**
- *
+ * One-shot helper: registers a CSS file, compiles it in the given mode with
+ * cache=false, and returns the output as a string
  * @param mode
  * @param options
  * @param css
  */
 async function compile(
 	mode: 'serve' | 'build',
-	options: Parameters<ReturnType<typeof createStyleCompiler<MetaData>>>[0],
+	options: StyleCompilerOptions,
 	css = '.a{color:red}',
 ) {
 	mockFileContents.clear();
 	const file = makeFile();
 	setMockFile(file.inputPath, css);
-	const entry = createStyleCompiler<MetaData>()(options);
-	const fn = await entry.compiler(makeContext(mode));
+	const fn = await createCompileFn(options, mode);
 	const out = await fn(file, () => Promise.resolve(''), undefined, false);
 	return typeof out === 'string' ? out : new TextDecoder().decode(out);
 }
+
+describe('style-compiler', () => {
+	test('compiles CSS with cssnano and preserves the banner', async () => {
+		setMockFile('/in/style.css', 'body { background-color: #ffffff; }');
+		const compileFn = await createCompileFn({ banner: '/* BANNER */' });
+
+		const result = await compileFn(makeFile('/in/style.css'), () => '');
+
+		expect(result).toBe('/*! BANNER */body{background-color:#fff}');
+	});
+
+	test('loads the PostCSS config only once across files when cache is enabled', async () => {
+		setMockFile('/in/a.css', 'a { color: #ff0000; }');
+		setMockFile('/in/b.css', 'b { color: #00ff00; }');
+		const compileFn = await createCompileFn({ banner: '/* B */' });
+
+		await compileFn(makeFile('/in/a.css'), () => '');
+		await compileFn(makeFile('/in/b.css'), () => '');
+
+		expect(mockedLoadConfig).toHaveBeenCalledTimes(1);
+	});
+
+	test('reloads the PostCSS config per compilation when cache is disabled (serve mode)', async () => {
+		setMockFile('/in/a.css', 'a { color: #ff0000; }');
+		const compileFn = await createCompileFn({ banner: '/* B */' });
+
+		await compileFn(makeFile('/in/a.css'), () => '', undefined, false);
+		await compileFn(makeFile('/in/a.css'), () => '', undefined, false);
+
+		expect(mockedLoadConfig).toHaveBeenCalledTimes(2);
+	});
+
+	test('retries processor creation after a failure instead of caching the rejection', async () => {
+		setMockFile('/in/a.css', 'a { color: #ff0000; }');
+		// First load yields an invalid plugin so postcss() throws during
+		// processor creation; second load succeeds
+		// @ts-ignore -- intentionally invalid plugin shape
+		mockedLoadConfig.mockResolvedValueOnce({ plugins: ['not-a-plugin'] });
+		const compileFn = await createCompileFn({ banner: '/* B */' });
+
+		await expect(compileFn(makeFile('/in/a.css'), () => '')).rejects.toThrow();
+
+		// The rejected processor must not be cached: the next file succeeds
+		const result = await compileFn(makeFile('/in/a.css'), () => '');
+		expect(result).toBe('/*! B */a{color:red}');
+	});
+
+	test('warns when the PostCSS config fails to load for a reason other than not existing', async () => {
+		setMockFile('/in/a.css', 'a { color: #ff0000; }');
+		mockedLoadConfig.mockRejectedValueOnce(
+			new Error('Unexpected token in postcss.config.js'),
+		);
+		const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const compileFn = await createCompileFn({ banner: '/* B */' });
+
+		// Falls back to the default plugins and still compiles
+		const result = await compileFn(makeFile('/in/a.css'), () => '');
+		expect(result).toBe('/*! B */a{color:red}');
+		expect(warnSpy).toHaveBeenCalledWith(
+			'Failed to load PostCSS config: Unexpected token in postcss.config.js',
+		);
+		warnSpy.mockRestore();
+	});
+
+	test('does not warn when no PostCSS config exists', async () => {
+		setMockFile('/in/a.css', 'a { color: #ff0000; }');
+		mockedLoadConfig.mockRejectedValueOnce(
+			new Error('No PostCSS Config found in: /project'),
+		);
+		const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const compileFn = await createCompileFn({ banner: '/* B */' });
+
+		const result = await compileFn(makeFile('/in/a.css'), () => '');
+		expect(result).toBe('/*! B */a{color:red}');
+		expect(warnSpy).not.toHaveBeenCalled();
+		warnSpy.mockRestore();
+	});
+});
+
+const SOURCE_MAP_RE = /\/\*#\s*sourceMappingURL=data:application\/json;base64,/;
 
 describe('createStyleCompiler / sourcemap', () => {
 	test("defaults to 'onServer': omits source map in build mode", async () => {
