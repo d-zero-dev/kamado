@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import { hashContent } from '../compiler/cache-digest.js';
@@ -51,12 +52,44 @@ export interface BuildManifest {
 }
 
 /**
- * Resolves the manifest location for a project root.
+ * Derives a stable, filesystem-safe namespace for a project root, so two
+ * unrelated projects never share a cache under the OS temp directory. The
+ * hash guarantees uniqueness; the basename prefix keeps it human-readable.
  * @param rootDir - Project root directory
+ */
+function cacheNamespace(rootDir: string): string {
+	const absolute = path.resolve(rootDir);
+	const base = (path.basename(absolute) || 'root').replaceAll(/[^\w.-]/g, '_');
+	return `${base}-${hashContent(absolute).slice(0, 16)}`;
+}
+
+/**
+ * Resolves the directory that holds the incremental-build cache.
+ *
+ * By default the cache lives outside the project tree, under the OS temp
+ * directory namespaced by the project root, so nothing needs to be added to
+ * `.gitignore`. Pass `cacheDir` (e.g. for CI cache restore, or to keep the
+ * cache in-tree) to override; a relative `cacheDir` is resolved against the
+ * project root.
+ * @param rootDir - Project root directory
+ * @param cacheDir - Optional explicit cache directory (absolute or relative to rootDir)
+ * @returns Absolute path of the cache directory
+ */
+export function getCacheDir(rootDir: string, cacheDir?: string): string {
+	if (cacheDir) {
+		return path.resolve(rootDir, cacheDir);
+	}
+	return path.join(os.tmpdir(), 'kamado', cacheNamespace(rootDir));
+}
+
+/**
+ * Resolves the manifest file location for a project root.
+ * @param rootDir - Project root directory
+ * @param cacheDir - Optional explicit cache directory (see {@link getCacheDir})
  * @returns Path of the manifest file
  */
-export function getBuildManifestPath(rootDir: string): string {
-	return path.join(rootDir, '.kamado', 'cache', 'build-manifest.json');
+export function getBuildManifestPath(rootDir: string, cacheDir?: string): string {
+	return path.join(getCacheDir(rootDir, cacheDir), 'build-manifest.json');
 }
 
 /**
@@ -89,14 +122,18 @@ function isValidEntry(value: unknown): value is BuildManifestEntry {
 /**
  * Loads the manifest for a project root.
  * @param rootDir - Project root directory
+ * @param cacheDir - Optional explicit cache directory (see {@link getCacheDir})
  * @returns The manifest, or `null` when missing, unreadable, corrupt, or of
  *   a different version — all of which simply mean "full rebuild". Any
  *   malformed entry invalidates the whole manifest rather than risking a
  *   throw or a bad skip mid-build.
  */
-export async function loadBuildManifest(rootDir: string): Promise<BuildManifest | null> {
+export async function loadBuildManifest(
+	rootDir: string,
+	cacheDir?: string,
+): Promise<BuildManifest | null> {
 	try {
-		const raw = await fs.readFile(getBuildManifestPath(rootDir), 'utf8');
+		const raw = await fs.readFile(getBuildManifestPath(rootDir, cacheDir), 'utf8');
 		const parsed = JSON.parse(raw) as BuildManifest;
 		if (
 			parsed?.version !== BUILD_MANIFEST_VERSION ||
@@ -120,12 +157,14 @@ export async function loadBuildManifest(rootDir: string): Promise<BuildManifest 
  * Writes the manifest for a project root.
  * @param rootDir - Project root directory
  * @param manifest - Manifest to persist
+ * @param cacheDir - Optional explicit cache directory (see {@link getCacheDir})
  */
 export async function saveBuildManifest(
 	rootDir: string,
 	manifest: BuildManifest,
+	cacheDir?: string,
 ): Promise<void> {
-	const manifestPath = getBuildManifestPath(rootDir);
+	const manifestPath = getBuildManifestPath(rootDir, cacheDir);
 	await fs.mkdir(path.dirname(manifestPath), { recursive: true });
 	await fs.writeFile(manifestPath, JSON.stringify(manifest));
 }

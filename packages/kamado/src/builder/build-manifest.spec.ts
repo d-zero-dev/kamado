@@ -1,3 +1,6 @@
+import os from 'node:os';
+import path from 'node:path';
+
 import { vol, fs as memfs } from 'memfs';
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 
@@ -8,6 +11,7 @@ import {
 	MISSING_FILE_HASH,
 	createFileHasher,
 	getBuildManifestPath,
+	getCacheDir,
 	loadBuildManifest,
 	saveBuildManifest,
 } from './build-manifest.js';
@@ -25,6 +29,32 @@ beforeEach(() => {
 afterEach(() => {
 	vol.reset();
 	clearFileContentCache();
+});
+
+describe('getCacheDir', () => {
+	test('defaults to a project-specific folder under the OS temp directory', () => {
+		const dir = getCacheDir('/project');
+		expect(dir.startsWith(path.join(os.tmpdir(), 'kamado'))).toBe(true);
+		// Not inside the project tree
+		expect(dir.startsWith('/project')).toBe(false);
+	});
+
+	test('namespaces different project roots into different cache dirs', () => {
+		expect(getCacheDir('/project-a')).not.toBe(getCacheDir('/project-b'));
+		// Stable for the same root
+		expect(getCacheDir('/project-a')).toBe(getCacheDir('/project-a'));
+	});
+
+	test('uses an explicit cacheDir, resolving a relative path against the root', () => {
+		expect(getCacheDir('/project', '/abs/cache')).toBe('/abs/cache');
+		expect(getCacheDir('/project', '.cache')).toBe(path.join('/project', '.cache'));
+	});
+
+	test('getBuildManifestPath places the manifest inside the resolved cache dir', () => {
+		expect(getBuildManifestPath('/project', '/abs/cache')).toBe(
+			path.join('/abs/cache', 'build-manifest.json'),
+		);
+	});
 });
 
 describe('build manifest persistence', () => {

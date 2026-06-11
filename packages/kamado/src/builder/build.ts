@@ -52,14 +52,30 @@ interface BuildConfig {
 	/**
 	 * Whether to skip compiling outputs whose recorded inputs are unchanged.
 	 * Each build records a verifying trace per output (input file hash, every
-	 * dependency's hash, and the compiler's environment digest) in
-	 * `.kamado/cache/build-manifest.json`; the next incremental build skips
-	 * the entire compilation when all of them still match and the output file
-	 * is present. Compilers must read files through kamado's file APIs or
-	 * report extra inputs via `trackDependency()` — the bundled compilers do.
+	 * dependency's hash, and the compiler's environment digest) in the cache
+	 * directory (by default under the OS temp directory — see `cacheDir`); the
+	 * next incremental build skips the entire compilation when all of them
+	 * still match and the output file is present. Compilers must read files
+	 * through kamado's file APIs or report extra inputs via `trackDependency()`
+	 * — the bundled compilers do.
 	 * @default false
 	 */
 	readonly incremental?: boolean;
+	/**
+	 * Ignore any existing cache and rebuild everything this run, then refresh
+	 * the cache. Use instead of deleting the cache directory by hand. Has no
+	 * effect unless `incremental` is enabled.
+	 * @default false
+	 */
+	readonly force?: boolean;
+	/**
+	 * Directory for the incremental-build cache. Defaults to a project-specific
+	 * folder under the OS temp directory, so the cache lives outside the
+	 * project tree and needs no `.gitignore` entry. Set this to keep the cache
+	 * in-tree or to point at a path you restore in CI. A relative path is
+	 * resolved against the project root.
+	 */
+	readonly cacheDir?: string;
 	/**
 	 * Path to the kamado config file. When set with `incremental`, the config
 	 * file's content hash joins the environment digest, so config edits
@@ -111,7 +127,11 @@ export async function build<M extends MetaData>(
 	// environment digest per output extension, and a per-build file hasher
 	const incremental = buildConfig.incremental
 		? {
-				previous: await loadBuildManifest(context.dir.root),
+				// `force` ignores the existing cache (full rebuild) but still
+				// refreshes it below — a manual-deletion-free clean build
+				previous: buildConfig.force
+					? null
+					: await loadBuildManifest(context.dir.root, buildConfig.cacheDir),
 				next: {} as Record<string, BuildManifestEntry>,
 				envByExt: new Map<string, string>(),
 				hashFile: createFileHasher(),
@@ -292,10 +312,14 @@ export async function build<M extends MetaData>(
 		const entries = buildConfig.targetGlob
 			? { ...incremental.previous?.entries, ...incremental.next }
 			: incremental.next;
-		await saveBuildManifest(context.dir.root, {
-			version: BUILD_MANIFEST_VERSION,
-			entries,
-		});
+		await saveBuildManifest(
+			context.dir.root,
+			{
+				version: BUILD_MANIFEST_VERSION,
+				entries,
+			},
+			buildConfig.cacheDir,
+		);
 	}
 
 	if (context.onAfterBuild && buildConfig.verbose) {

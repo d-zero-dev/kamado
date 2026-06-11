@@ -615,6 +615,30 @@ describe('incremental builds', async () => {
 		expect(compileSpy).toHaveBeenCalledTimes(2);
 	}, 10_000);
 
+	test('force ignores the existing cache and recompiles, then refreshes it', async () => {
+		vol.fromJSON({
+			'/mock/input/dir/index.html': '<p>A</p>',
+		});
+		const compileSpy = readingCompileSpy();
+
+		// @ts-ignore
+		await build(makeBuildConfig(compileSpy));
+		// @ts-ignore
+		await build(makeBuildConfig(compileSpy));
+		// Second build was cached
+		expect(compileSpy).toHaveBeenCalledTimes(1);
+
+		// force rebuilds despite unchanged inputs
+		// @ts-ignore
+		await build({ ...makeBuildConfig(compileSpy), force: true });
+		expect(compileSpy).toHaveBeenCalledTimes(2);
+
+		// The cache is refreshed, so a normal incremental build skips again
+		// @ts-ignore
+		await build(makeBuildConfig(compileSpy));
+		expect(compileSpy).toHaveBeenCalledTimes(2);
+	}, 10_000);
+
 	test('writes the manifest under dir.root', async () => {
 		vol.fromJSON({
 			'/mock/input/dir/index.html': '<p>A</p>',

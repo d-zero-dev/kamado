@@ -97,12 +97,15 @@ describe.skipIf(!existsSync(cliPath))('kamado build --incremental', () => {
 	let incConfigPath: string;
 	let incInputFile: string;
 	let incOutputFile: string;
+	// In-tree cache dir for the deterministic, auto-cleaned flag-based tests
+	let incCacheDir: string;
 
 	beforeAll(async () => {
 		incDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kamado-cli-incremental-'));
 		incConfigPath = path.join(incDir, 'kamado.config.mjs');
 		incInputFile = path.join(incDir, 'input', 'index.html');
 		incOutputFile = path.join(incDir, 'output', 'index.html');
+		incCacheDir = path.join(incDir, '.cache');
 
 		await fs.writeFile(
 			path.join(incDir, 'package.json'),
@@ -145,25 +148,28 @@ describe.skipIf(!existsSync(cliPath))('kamado build --incremental', () => {
 		await fs.rm(incDir, { recursive: true, force: true });
 	});
 
-	test('a second --incremental build leaves unchanged outputs untouched', async () => {
-		await execFileAsync(
+	/**
+	 * Runs the built CLI build command in the fixture directory
+	 * @param args - extra CLI args (the config flag is appended)
+	 * @param cwd - working directory to run from
+	 */
+	async function runBuild(args: readonly string[], cwd = incDir) {
+		return await execFileAsync(
 			process.execPath,
-			[cliPath, 'build', '--incremental', '-c', incConfigPath],
-			{
-				cwd: incDir,
-			},
+			[cliPath, 'build', ...args, '-c', incConfigPath],
+			{ cwd },
 		);
+	}
+
+	test('a second --incremental build leaves unchanged outputs untouched', async () => {
+		await runBuild(['--incremental', '--cache-dir', incCacheDir]);
 		expect(await fs.readFile(incOutputFile, 'utf8')).toBe('page:<p>v1</p>');
+		// The manifest lands in the chosen cache directory
+		expect(existsSync(path.join(incCacheDir, 'build-manifest.json'))).toBe(true);
 		const firstStat = await fs.stat(incOutputFile);
 
 		await sleep(50);
-		await execFileAsync(
-			process.execPath,
-			[cliPath, 'build', '--incremental', '-c', incConfigPath],
-			{
-				cwd: incDir,
-			},
-		);
+		await runBuild(['--incremental', '--cache-dir', incCacheDir]);
 
 		const secondStat = await fs.stat(incOutputFile);
 		expect(secondStat.mtimeMs).toBe(firstStat.mtimeMs);
@@ -172,44 +178,51 @@ describe.skipIf(!existsSync(cliPath))('kamado build --incremental', () => {
 	test('an edited source is rebuilt by the next --incremental build', async () => {
 		await fs.writeFile(incInputFile, '<p>v2</p>');
 
-		await execFileAsync(
-			process.execPath,
-			[cliPath, 'build', '--incremental', '-c', incConfigPath],
-			{
-				cwd: incDir,
-			},
-		);
+		await runBuild(['--incremental', '--cache-dir', incCacheDir]);
 
 		expect(await fs.readFile(incOutputFile, 'utf8')).toBe('page:<p>v2</p>');
 	}, 30_000);
 
-	test('writes the manifest under the config directory, not the invoking cwd', async () => {
-		// Run from a cwd that is NOT the config directory; the manifest must
-		// follow the config file so a later run from the project resolves it
+	test('--force ignores the cache and rebuilds even when nothing changed', async () => {
+		// Seed a fully-cached state
+		await runBuild(['--incremental', '--cache-dir', incCacheDir]);
+		const firstStat = await fs.stat(incOutputFile);
+
+		await sleep(50);
+		// --force rebuilds despite no input change (output is rewritten)
+		await runBuild(['--incremental', '--force', '--cache-dir', incCacheDir]);
+
+		const secondStat = await fs.stat(incOutputFile);
+		expect(secondStat.mtimeMs).toBeGreaterThan(firstStat.mtimeMs);
+	}, 30_000);
+
+	test('by default the cache lives outside the project tree and is keyed by config dir', async () => {
+		// Resolve where the default cache goes so the test can clean it up
+		const { getCacheDir } = (await import(
+			pathToFileURL(path.resolve(__dirname, '..', 'dist', 'builder', 'build-manifest.js'))
+				.href
+		)) as { getCacheDir: (rootDir: string) => string };
+		const defaultCacheDir = getCacheDir(incDir);
+		await fs.rm(defaultCacheDir, { recursive: true, force: true });
+
 		const otherCwd = await fs.mkdtemp(path.join(os.tmpdir(), 'kamado-cli-cwd-'));
 		try {
-			await execFileAsync(
-				process.execPath,
-				[cliPath, 'build', '--incremental', '-c', incConfigPath],
-				{ cwd: otherCwd },
-			);
+			// No --cache-dir: the cache must NOT appear in the project tree
+			await runBuild(['--incremental'], otherCwd);
+			expect(existsSync(path.join(incDir, '.kamado'))).toBe(false);
+			expect(existsSync(path.join(otherCwd, '.kamado'))).toBe(false);
+			expect(existsSync(path.join(defaultCacheDir, 'build-manifest.json'))).toBe(true);
 
-			const manifestInConfigDir = path.join(
-				incDir,
-				'.kamado',
-				'cache',
-				'build-manifest.json',
-			);
-			const manifestInCwd = path.join(
-				otherCwd,
-				'.kamado',
-				'cache',
-				'build-manifest.json',
-			);
-			expect(existsSync(manifestInConfigDir)).toBe(true);
-			expect(existsSync(manifestInCwd)).toBe(false);
+			// The cache is keyed by the config directory, not the cwd, so a
+			// second run from a different cwd reuses it (output untouched)
+			const firstStat = await fs.stat(incOutputFile);
+			await sleep(50);
+			await runBuild(['--incremental'], incDir);
+			const secondStat = await fs.stat(incOutputFile);
+			expect(secondStat.mtimeMs).toBe(firstStat.mtimeMs);
 		} finally {
 			await fs.rm(otherCwd, { recursive: true, force: true });
+			await fs.rm(defaultCacheDir, { recursive: true, force: true });
 		}
 	}, 30_000);
 });

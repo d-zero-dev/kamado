@@ -197,7 +197,9 @@ Every `build()` invocation starts from a clean slate: the module-level caches (a
 
 #### Incremental builds (`--incremental`)
 
-With `kamado build --incremental`, each output gets a **verifying trace** persisted in `.kamado/cache/build-manifest.json` (`src/builder/build-manifest.ts`): the input path, the SHA-256 of every file the compilation read, an environment digest, and the output's byte length. On the next incremental build, a file whose environment digest, input path, every dependency hash, and output size all still match is skipped entirely — the compiler never runs (`Cached`). Any mismatch falls through to a normal compile, which records a fresh trace, so a change that alters the dependency set itself is picked up on that rebuild (the classic verifying-trace property).
+With `kamado build --incremental`, each output gets a **verifying trace** persisted in a `build-manifest.json` (`src/builder/build-manifest.ts`): the input path, the SHA-256 of every file the compilation read, an environment digest, and the output's byte length. On the next incremental build, a file whose environment digest, input path, every dependency hash, and output size all still match is skipped entirely — the compiler never runs (`Cached`). Any mismatch falls through to a normal compile, which records a fresh trace, so a change that alters the dependency set itself is picked up on that rebuild (the classic verifying-trace property).
+
+The manifest lives **outside the project tree by default** — under `<os.tmpdir()>/kamado/<basename>-<hash>/`, namespaced by the resolved project root (`getCacheDir` in `build-manifest.ts`) so unrelated projects never collide and nothing needs `.gitignore`. `--cache-dir` overrides the location (relative paths resolve against the project root; the CLI resolves its `--cache-dir` against the cwd first), e.g. to keep the cache in-tree or to restore it in CI. `--force` ignores the existing manifest for the read (full rebuild) while still rewriting it, so a clean build needs no manual deletion.
 
 Dependency discovery has two layers:
 
@@ -206,7 +208,7 @@ Dependency discovery has two layers:
 
 The **environment digest** covers context-level inputs that affect every file of a compiler: each compile function may expose a `cacheDigest()` property (the page compiler digests global data, the page list, and the page asset files — with the build-timestamp `date` stripped from every file and functions omitted via `stableSerialize()`, which now also serializes `Map`/`Set`/`RegExp` contents rather than collapsing them to `{}`; the style/script compilers digest their options, resolved banner, and bundled toolchain versions — `esbuild.version`, `postcss`/`cssnano`), and `build()` mixes in the config file's content hash when the CLI provides the config path. Cross-page dependencies (nav, breadcrumbs) flow through the page list, so a frontmatter change surfaced by `config.pageList` rebuilds every page, while a body-only edit rebuilds just that page.
 
-Safety boundaries: entries with no recorded dependencies are never skipped (a custom compiler reading the filesystem directly gives nothing to verify against); a manifest with a different `BUILD_MANIFEST_VERSION` or unparsable content is ignored, which simply means a full rebuild; behavior changes hidden inside user functions outside the config file require deleting `.kamado/cache/` (documented in the README).
+Safety boundaries: entries with no recorded dependencies are never skipped (a custom compiler reading the filesystem directly gives nothing to verify against); a manifest with a different `BUILD_MANIFEST_VERSION` or unparsable content is ignored, which simply means a full rebuild; behavior changes hidden inside user functions outside the config file require a `--force` run (documented in the README).
 
 ### 2. Dev Server Flow (`kamado server`)
 

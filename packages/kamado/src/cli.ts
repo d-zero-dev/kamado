@@ -35,7 +35,15 @@ const cli = parseCli({
 				},
 				incremental: {
 					type: 'boolean' as const,
-					desc: 'Skip compiling outputs whose recorded inputs are unchanged (uses .kamado/cache/build-manifest.json)',
+					desc: 'Skip compiling outputs whose recorded inputs are unchanged (cache defaults to a folder under the OS temp directory)',
+				},
+				force: {
+					type: 'boolean' as const,
+					desc: 'With --incremental, ignore the existing cache and rebuild everything, then refresh it',
+				},
+				cacheDir: {
+					type: 'string' as const,
+					desc: 'Directory for the incremental-build cache (default: a project-specific folder under the OS temp directory)',
 				},
 			},
 		},
@@ -78,6 +86,12 @@ switch (cli.command) {
 			verbose: cli.flags.verbose,
 			skipUnchanged: cli.flags.skipUnchanged,
 			incremental: cli.flags.incremental,
+			force: cli.flags.force,
+			// Resolve --cache-dir against the invoking cwd (like --config), so a
+			// relative path means what the user typed at the prompt
+			cacheDir: cli.flags.cacheDir
+				? path.resolve(process.cwd(), cli.flags.cacheDir)
+				: undefined,
 			configFilePath,
 		});
 		break;
