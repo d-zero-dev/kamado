@@ -591,7 +591,7 @@ kamado build --incremental
 注意点：
 
 - JavaScript関数の中だけで起きる変更（カスタムtransform・compile hooks・関数を返すJSグローバルデータファイル）はダイジェストから見えません。設定ファイル自体の編集はハッシュされるため検出されます。設定ファイル外でそうしたコードを変更した場合は、`.kamado/cache/`を削除するか一度`--incremental`なしでビルドしてください（同梱の esbuild/postcss/cssnano のアップグレードはダイジェストに自動で織り込まれます。一方 esbuild が参照する `tsconfig.json` は追跡されないため、設定隣接コードと同様に編集後はキャッシュを削除してください）
-- カスタムコンパイラはkamadoのファイルAPI（`getContentFromFile` / `getFileContent`）でファイルを読むか、`kamado/files`の`trackDependency()`で追加の入力を報告する必要があります（同梱コンパイラは対応済み）。依存が1つも記録されていないコンパイラはスキップされません
+- カスタムコンパイラはkamadoのファイルAPI（`getContentFromFile` / `getFileContent`）でファイルを読むか、`kamado/files`の`trackDependency(path)`で追加の入力を報告する必要があります（同梱コンパイラは対応済み）。依存が1つも記録されていないコンパイラはスキップされません。ファイル以外のコンテキストレベルの入力（解決済みオプション・ツールチェーンのバージョン等）は、返す compile 関数に `cacheDigest()` プロパティを設定してください（例: `kamado/compiler` の `createCacheDigest` を使い `fn.cacheDigest = () => createCacheDigest({ options, version })`）。これが変わるとそのコンパイラの全出力が再ビルドされます。compile 関数をラップする場合は `cacheDigest` をラッパーへコピーしないと失われます
 - 出力の鮮度はバイト長のみで検証し、内容比較はしません。ビルド外で同サイズに改変された出力は検出されません。ビルド後に出力が触られる可能性がある場合は`--incremental`と`--skip-unchanged`を併用してください
 - スキップされたページは前回書き込まれた出力をバイト単位でそのまま保持します。テンプレートが埋め込んだ時刻依存の内容も前回のままです
 - ビルド実行中にソースファイルを編集することはサポートしません（依存ファイルがコンパイル後にハッシュされ、古い内容と食い違う可能性があります）
