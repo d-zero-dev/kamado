@@ -970,13 +970,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@d-zero/dealer@npm:1.7.2":
-  version: 1.7.2
-  resolution: "@d-zero/dealer@npm:1.7.2"
+"@d-zero/dealer@npm:1.9.0":
+  version: 1.9.0
+  resolution: "@d-zero/dealer@npm:1.9.0"
   dependencies:
-    "@d-zero/shared": "npm:0.21.1"
+    "@d-zero/shared": "npm:0.22.0"
     ansi-colors: "npm:4.1.3"
-  checksum: 10c0/4e66629ddde5901b4e63b8ab296a3be4343f6b0305c048f1514b763a02dedea52147f923378813f2f23811f517d3410f4f70a4306a7da9b2e54a3e6a3e0dfc48
+  checksum: 10c0/70418ef52bd13280a9a03347776bdd27d046ea5249fff7fcef008e95cbca4f3167a8b9ea851ab174571f2885ee2e01dcc858c1bf7d633618be2d51ff793c8b0c
   languageName: node
   linkType: hard
 
@@ -1041,6 +1041,21 @@ __metadata:
     micromatch: "npm:4.0.8"
     sanitize-filename: "npm:1.6.3"
   checksum: 10c0/6535b99fcf39efc348425d02c812f49b18d9359af9a24606b810d1cd428f7c687826d93e87650d3dd38d1f15160fad45f490849c0a5ef7d616634b3ee704466d
+  languageName: node
+  linkType: hard
+
+"@d-zero/shared@npm:0.22.0":
+  version: 0.22.0
+  resolution: "@d-zero/shared@npm:0.22.0"
+  dependencies:
+    "@holiday-jp/holiday_jp": "npm:2.5.1"
+    await-event-emitter: "npm:2.0.2"
+    dayjs: "npm:1.11.19"
+    escape-string-regexp: "npm:5.0.0"
+    front-matter: "npm:4.0.2"
+    micromatch: "npm:4.0.8"
+    sanitize-filename: "npm:1.6.3"
+  checksum: 10c0/972f65da6a18e56e2dec20c9697b2b77ccd6d9a14786abba4d6b6a385f17dee6bd44284cb109556332c70c25e910ed288931964ab853305c098ff9872e9f02d0
   languageName: node
   linkType: hard
 
@@ -8733,7 +8748,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "kamado@workspace:packages/kamado"
   dependencies:
-    "@d-zero/dealer": "npm:1.7.2"
+    "@d-zero/dealer": "npm:1.9.0"
     "@d-zero/roar": "npm:2.0.1"
     "@d-zero/shared": "npm:0.21.1"
     "@hono/node-server": "npm:1.19.11"
