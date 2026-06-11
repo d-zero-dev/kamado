@@ -66,6 +66,14 @@ export interface CustomCompileFunction {
 		log?: (message: string) => void,
 		cache?: boolean,
 	): Promise<string | ArrayBuffer> | string | ArrayBuffer;
+	/**
+	 * Optional digest of the compiler's context-level inputs (resolved
+	 * options, global data, package version — anything that affects every
+	 * output of this compiler). Incremental builds recompile all of the
+	 * compiler's files when the digest changes. Compilers that omit it rely
+	 * solely on per-file dependency hashes.
+	 */
+	cacheDigest?: () => string | Promise<string>;
 }
 
 /**

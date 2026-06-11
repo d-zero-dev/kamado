@@ -6,7 +6,7 @@ import { parseCli } from '@d-zero/roar';
 import c from 'ansi-colors';
 
 import { build } from './builder/build.js';
-import { getConfig } from './config/get-config.js';
+import { getConfigWithPath } from './config/get-config.js';
 import { pathResolver } from './path/resolver.js';
 import { start } from './server/app.js';
 
@@ -33,6 +33,10 @@ const cli = parseCli({
 					type: 'boolean' as const,
 					desc: 'Skip writing output files whose content is unchanged',
 				},
+				incremental: {
+					type: 'boolean' as const,
+					desc: 'Skip compiling outputs whose recorded inputs are unchanged (uses .kamado/cache/build-manifest.json)',
+				},
 			},
 		},
 		server: {
@@ -52,11 +56,13 @@ const cli = parseCli({
 const configPath = cli.flags.config
 	? path.resolve(process.cwd(), cli.flags.config)
 	: undefined;
-const config = await getConfig(configPath).catch((error: Error) => {
-	// eslint-disable-next-line no-console
-	console.error(c.bold.red(error.message));
-	process.exit(1);
-});
+const { config, filepath: configFilePath } = await getConfigWithPath(configPath).catch(
+	(error: Error) => {
+		// eslint-disable-next-line no-console
+		console.error(c.bold.red(error.message));
+		process.exit(1);
+	},
+);
 
 switch (cli.command) {
 	case 'build': {
@@ -65,6 +71,8 @@ switch (cli.command) {
 			targetGlob: pathResolver(cli.args),
 			verbose: cli.flags.verbose,
 			skipUnchanged: cli.flags.skipUnchanged,
+			incremental: cli.flags.incremental,
+			configFilePath,
 		});
 		break;
 	}

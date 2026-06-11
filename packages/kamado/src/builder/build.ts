@@ -7,13 +7,23 @@ import path from 'node:path';
 import { deal } from '@d-zero/dealer';
 import c from 'ansi-colors';
 
+import { hashContent } from '../compiler/cache-digest.js';
 import { createCompileFunctions } from '../compiler/compile-functions.js';
 import { createCompiler } from '../compiler/create-compiler.js';
 import { createCompileFunctionMap } from '../compiler/function-map.js';
 import { mergeConfig } from '../config/merge-config.js';
 import { clearBuildCaches } from '../data/clear-build-caches.js';
 import { getAssetGroup } from '../data/get-asset-group.js';
+import { collectDependencies } from '../files/dependency-tracker.js';
 import { filePathColorizer } from '../stdout/color.js';
+
+import {
+	BUILD_MANIFEST_VERSION,
+	createFileHasher,
+	loadBuildManifest,
+	saveBuildManifest,
+	type BuildManifestEntry,
+} from './build-manifest.js';
 
 /**
  * Build configuration options
@@ -39,6 +49,23 @@ interface BuildConfig {
 	 * @default false
 	 */
 	readonly skipUnchanged?: boolean;
+	/**
+	 * Whether to skip compiling outputs whose recorded inputs are unchanged.
+	 * Each build records a verifying trace per output (input file hash, every
+	 * dependency's hash, and the compiler's environment digest) in
+	 * `.kamado/cache/build-manifest.json`; the next incremental build skips
+	 * the entire compilation when all of them still match and the output file
+	 * is present. Compilers must read files through kamado's file APIs or
+	 * report extra inputs via `trackDependency()` — the bundled compilers do.
+	 * @default false
+	 */
+	readonly incremental?: boolean;
+	/**
+	 * Path to the kamado config file. When set with `incremental`, the config
+	 * file's content hash joins the environment digest, so config edits
+	 * invalidate the whole cache. The CLI passes this automatically.
+	 */
+	readonly configFilePath?: string;
 }
 
 /**
@@ -80,6 +107,30 @@ export async function build<M extends MetaData>(
 	const compileFunctionMap = await createCompileFunctionMap(context);
 	const compile = createCompiler({ ...context, compileFunctionMap });
 
+	// Incremental build state: the previous manifest's verifying traces, the
+	// environment digest per output extension, and a per-build file hasher
+	const incremental = buildConfig.incremental
+		? {
+				previous: await loadBuildManifest(context.dir.root),
+				next: {} as Record<string, BuildManifestEntry>,
+				envByExt: new Map<string, string>(),
+				hashFile: createFileHasher(),
+			}
+		: undefined;
+	if (incremental) {
+		const configContent = buildConfig.configFilePath
+			? await fs.readFile(buildConfig.configFilePath, 'utf8').catch(() => '')
+			: '';
+		const configHash = hashContent(configContent);
+		for (const [extension, compileFunction] of compileFunctionMap) {
+			const digest = await compileFunction.cacheDigest?.();
+			incremental.envByExt.set(extension, hashContent(`${digest ?? ''}\0${configHash}`));
+		}
+	}
+	// Files without a compiler are raw copies: their output depends only on
+	// the input bytes, never on config or compiler options
+	const RAW_ENV = 'raw';
+
 	const compilers = createCompileFunctions(context);
 
 	const fileArrays = await Promise.all(
@@ -112,22 +163,83 @@ export async function build<M extends MetaData>(
 			setLineHeader(`${c.cyan('%braille%')} ${cPath} `);
 
 			return async () => {
-				const content = await compile(file, log);
+				const env = incremental
+					? (incremental.envByExt.get(path.extname(file.outputPath)) ?? RAW_ENV)
+					: '';
+
+				if (incremental) {
+					// Verifying trace: skip the whole compilation when the previous
+					// entry's environment, input, every dependency hash, and the
+					// output file still match. Entries without recorded dependencies
+					// never skip — a compiler that bypasses kamado's file APIs gives
+					// us nothing to verify against.
+					const entry = incremental.previous?.entries[file.outputPath];
+					if (
+						entry &&
+						entry.env === env &&
+						entry.inputPath === file.inputPath &&
+						Object.keys(entry.deps).length > 0
+					) {
+						const stat = await fs.stat(file.outputPath).catch(() => null);
+						if (stat && stat.size === entry.outputSize) {
+							let fresh = true;
+							for (const [dep, recorded] of Object.entries(entry.deps)) {
+								if ((await incremental.hashFile(dep)) !== recorded) {
+									fresh = false;
+									break;
+								}
+							}
+							if (fresh) {
+								incremental.next[file.outputPath] = entry;
+								log(`${CHECK_MARK} Cached`);
+								return;
+							}
+						}
+					}
+				}
+
+				let content: string | ArrayBuffer;
+				let dependencies: Set<string> | undefined;
+				if (incremental) {
+					({ result: content, dependencies } = await collectDependencies(() =>
+						compile(file, log),
+					));
+				} else {
+					content = await compile(file, log);
+				}
 
 				// Allocated lazily: the size precheck needs only the byte length,
 				// and fs.writeFile accepts strings directly
 				const toWritable = () =>
 					typeof content === 'string' ? Buffer.from(content) : new Uint8Array(content);
 
+				const byteLength =
+					typeof content === 'string' ? Buffer.byteLength(content) : content.byteLength;
+
+				const recordEntry = async () => {
+					if (!incremental || !dependencies) {
+						return;
+					}
+					const deps: Record<string, string> = {};
+					for (const dep of [...dependencies].toSorted()) {
+						deps[dep] = await incremental.hashFile(dep);
+					}
+					incremental.next[file.outputPath] = {
+						inputPath: file.inputPath,
+						deps,
+						env,
+						outputSize: byteLength,
+					};
+				};
+
 				if (buildConfig.skipUnchanged) {
 					// Cheap size check first (no allocation); read the file only
 					// when sizes match
-					const byteLength =
-						typeof content === 'string' ? Buffer.byteLength(content) : content.byteLength;
 					const stat = await fs.stat(file.outputPath).catch(() => null);
 					if (stat && stat.size === byteLength) {
 						const existing = await fs.readFile(file.outputPath).catch(() => null);
 						if (existing && existing.equals(toWritable())) {
+							await recordEntry();
 							log(`${CHECK_MARK} Unchanged`);
 							return;
 						}
@@ -146,6 +258,7 @@ export async function build<M extends MetaData>(
 					typeof content === 'string' ? content : new Uint8Array(content),
 				);
 
+				await recordEntry();
 				log(`${CHECK_MARK} Compiled!`);
 			};
 		},
@@ -157,6 +270,19 @@ export async function build<M extends MetaData>(
 			verbose: buildConfig.verbose,
 		},
 	);
+
+	if (incremental) {
+		// A partial build (targetGlob) revalidates only the targeted files, so
+		// carry the other entries over; a full build replaces the manifest, which
+		// also prunes entries for deleted sources
+		const entries = buildConfig.targetGlob
+			? { ...incremental.previous?.entries, ...incremental.next }
+			: incremental.next;
+		await saveBuildManifest(context.dir.root, {
+			version: BUILD_MANIFEST_VERSION,
+			entries,
+		});
+	}
 
 	if (context.onAfterBuild && buildConfig.verbose) {
 		// eslint-disable-next-line no-console

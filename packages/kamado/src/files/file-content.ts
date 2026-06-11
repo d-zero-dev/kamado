@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
 
+import { trackDependency } from './dependency-tracker.js';
+
 const fileContentCache = new Map<string, string>();
 
 /**
@@ -9,6 +11,10 @@ const fileContentCache = new Map<string, string>();
  * @returns File content as string
  */
 export async function getFileContent(filePath: string, cache = true): Promise<string> {
+	// Even a cache hit is a read for dependency-tracking purposes: the
+	// compilation's output depends on this file regardless of where the
+	// bytes came from
+	trackDependency(filePath);
 	if (cache && fileContentCache.has(filePath)) {
 		return fileContentCache.get(filePath)!;
 	}

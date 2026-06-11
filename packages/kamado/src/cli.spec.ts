@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
@@ -89,5 +89,97 @@ describe.skipIf(!existsSync(cliPath))('kamado build CLI', () => {
 		const secondStat = await fs.stat(outputFile);
 		const secondMtime = secondStat.mtimeMs;
 		expect(secondMtime).toBeGreaterThan(firstMtime);
+	}, 30_000);
+});
+
+describe.skipIf(!existsSync(cliPath))('kamado build --incremental', () => {
+	let incDir: string;
+	let incConfigPath: string;
+	let incInputFile: string;
+	let incOutputFile: string;
+
+	beforeAll(async () => {
+		incDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kamado-cli-incremental-'));
+		incConfigPath = path.join(incDir, 'kamado.config.mjs');
+		incInputFile = path.join(incDir, 'input', 'index.html');
+		incOutputFile = path.join(incDir, 'output', 'index.html');
+
+		await fs.writeFile(
+			path.join(incDir, 'package.json'),
+			JSON.stringify({
+				name: 'cli-incremental-fixture',
+				version: '0.0.0',
+				type: 'module',
+			}),
+		);
+		// The compiler reads the source through kamado's file APIs so the
+		// dependency tracker records the input file. The CLI process loads this
+		// config, so importing the same dist module yields the same instances
+		const filesModuleUrl = pathToFileURL(
+			path.resolve(__dirname, '..', 'dist', 'files', 'files.js'),
+		).href;
+		await fs.writeFile(
+			incConfigPath,
+			[
+				`import { getContentFromFile } from '${filesModuleUrl}';`,
+				'',
+				'export default {',
+				"\tdir: { input: './input', output: './output' },",
+				'\tcompilers: () => [',
+				'\t\t{',
+				"\t\t\tfiles: '**/*.html',",
+				"\t\t\toutputExtension: '.html',",
+				'\t\t\tcompiler: () => async (file) =>',
+				"\t\t\t\t'page:' + (await getContentFromFile(file)).content,",
+				'\t\t},',
+				'\t],',
+				'};',
+				'',
+			].join('\n'),
+		);
+		await fs.mkdir(path.join(incDir, 'input'), { recursive: true });
+		await fs.writeFile(incInputFile, '<p>v1</p>');
+	});
+
+	afterAll(async () => {
+		await fs.rm(incDir, { recursive: true, force: true });
+	});
+
+	test('a second --incremental build leaves unchanged outputs untouched', async () => {
+		await execFileAsync(
+			process.execPath,
+			[cliPath, 'build', '--incremental', '-c', incConfigPath],
+			{
+				cwd: incDir,
+			},
+		);
+		expect(await fs.readFile(incOutputFile, 'utf8')).toBe('page:<p>v1</p>');
+		const firstStat = await fs.stat(incOutputFile);
+
+		await sleep(50);
+		await execFileAsync(
+			process.execPath,
+			[cliPath, 'build', '--incremental', '-c', incConfigPath],
+			{
+				cwd: incDir,
+			},
+		);
+
+		const secondStat = await fs.stat(incOutputFile);
+		expect(secondStat.mtimeMs).toBe(firstStat.mtimeMs);
+	}, 30_000);
+
+	test('an edited source is rebuilt by the next --incremental build', async () => {
+		await fs.writeFile(incInputFile, '<p>v2</p>');
+
+		await execFileAsync(
+			process.execPath,
+			[cliPath, 'build', '--incremental', '-c', incConfigPath],
+			{
+				cwd: incDir,
+			},
+		);
+
+		expect(await fs.readFile(incOutputFile, 'utf8')).toBe('page:<p>v2</p>');
 	}, 30_000);
 });
