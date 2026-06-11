@@ -122,10 +122,13 @@ export function createScriptCompiler<M extends MetaData>() {
 			// Context-level inputs for the incremental-build manifest: when any
 			// of these change, every script must be rebuilt (functions in options
 			// are omitted from the digest — banner is captured as its resolved
-			// string instead)
+			// string instead). esbuild's version is included so a bundler upgrade
+			// that changes output invalidates the cache even when no source or
+			// option changed.
 			compileFunction.cacheDigest = () =>
 				createCacheDigest({
 					compiler: '@kamado-io/script-compiler',
+					esbuildVersion: esbuild.version,
 					options,
 					banner: resolveBanner(),
 					enableSourcemap,

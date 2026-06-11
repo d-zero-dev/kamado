@@ -211,20 +211,26 @@ export function createPageCompiler<M extends MetaData>() {
 			};
 
 			// Context-level inputs for the incremental-build manifest. Every page
-			// reads other pages through pageList (nav, breadcrumbs, titleList), so
-			// any pageList change — a page added or removed, a URL renamed, or
-			// frontmatter surfaced by config.pageList — rebuilds every page.
-			// CompilableFile.date is the build timestamp, not an input, so it is
-			// excluded. Functions (compileHooks, transform closures) are omitted
-			// by the serializer; changes to them are covered by the config file
-			// hash that build() mixes in
+			// reads other pages through pageList (nav, breadcrumbs, titleList) and
+			// may iterate pageAssetFiles (e.g. a sitemap template), so a change to
+			// either — a page added or removed, a URL renamed, or frontmatter
+			// surfaced by config.pageList — rebuilds every page. pageAssetFiles is
+			// included (not dropped) so additions/removals are caught even when
+			// config.pageList filters them out of pageList. CompilableFile.date is
+			// the per-build timestamp from getFile(), not an input, so it is
+			// stripped from every file to keep the digest stable across builds.
+			// Functions (compileHooks, transform closures, filters.date) are
+			// omitted by the serializer; changes to them are covered by the config
+			// file hash that build() mixes in.
+			const stripDate = <T extends { date?: Date }>(file: T) => ({
+				...file,
+				date: undefined,
+			});
 			compileFunction.cacheDigest = () =>
 				createCacheDigest({
 					compiler: '@kamado-io/page-compiler',
-					pageList: globalData.pageList?.map((page) => ({
-						...page,
-						date: undefined,
-					})),
+					pageList: globalData.pageList?.map(stripDate),
+					pageAssetFiles: globalData.pageAssetFiles?.map(stripDate),
 					globalData: {
 						...globalData,
 						pageList: undefined,

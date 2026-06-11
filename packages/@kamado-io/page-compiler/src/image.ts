@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { Cache } from '@d-zero/shared/cache';
 import { imageSize } from 'image-size';
+import { trackDependency } from 'kamado/files';
 
 /**
  * Options for automatic image size addition
@@ -77,6 +78,11 @@ export async function imageSizes(elements: Element[], options?: ImageSizesOption
 		}
 
 		const filePath = path.join(rootDir ?? '', ...src.split('/'));
+		// The emitted width/height depend on this image file's bytes, but it is
+		// read here outside kamado's file APIs — report it so incremental builds
+		// invalidate the page when the image is replaced (tracked even when the
+		// file is currently missing, so adding it later also invalidates)
+		trackDependency(filePath);
 		const stats = await fs.stat(filePath).catch(() => null);
 
 		if (!stats) {
