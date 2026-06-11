@@ -182,4 +182,34 @@ describe.skipIf(!existsSync(cliPath))('kamado build --incremental', () => {
 
 		expect(await fs.readFile(incOutputFile, 'utf8')).toBe('page:<p>v2</p>');
 	}, 30_000);
+
+	test('writes the manifest under the config directory, not the invoking cwd', async () => {
+		// Run from a cwd that is NOT the config directory; the manifest must
+		// follow the config file so a later run from the project resolves it
+		const otherCwd = await fs.mkdtemp(path.join(os.tmpdir(), 'kamado-cli-cwd-'));
+		try {
+			await execFileAsync(
+				process.execPath,
+				[cliPath, 'build', '--incremental', '-c', incConfigPath],
+				{ cwd: otherCwd },
+			);
+
+			const manifestInConfigDir = path.join(
+				incDir,
+				'.kamado',
+				'cache',
+				'build-manifest.json',
+			);
+			const manifestInCwd = path.join(
+				otherCwd,
+				'.kamado',
+				'cache',
+				'build-manifest.json',
+			);
+			expect(existsSync(manifestInConfigDir)).toBe(true);
+			expect(existsSync(manifestInCwd)).toBe(false);
+		} finally {
+			await fs.rm(otherCwd, { recursive: true, force: true });
+		}
+	}, 30_000);
 });

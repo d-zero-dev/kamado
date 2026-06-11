@@ -578,13 +578,15 @@ kamado build --incremental
 
 #### How `--incremental` works
 
-Each build records a verifying trace per output file: the content hash of every file the compilation read (the page itself, its sidecar JSON, the layout, pug includes, CSS `@import`s, bundled script imports) plus an environment digest (global data, the page list, compiler options, and the config file's content). The next `--incremental` build skips the whole compilation — not just the write — for any output whose traces all still match and whose output file is still present. Everything is content-hash based, so it works without relying on file modification times, and across machines as long as `.kamado/cache/` is preserved.
+Each build records a verifying trace per output file: the content hash of every file the compilation read (the page itself, its sidecar JSON, the layout, pug includes, CSS `@import`s, the postcss config, referenced image files, bundled script imports) plus an environment digest (global data, the page list and page asset files, compiler options, the bundled toolchain versions, and the config file's content). The next `--incremental` build skips the whole compilation — not just the write — for any output whose traces all still match and whose output file is still present. Everything is content-hash based, so it works without relying on file modification times, and across machines as long as `.kamado/cache/` is preserved.
 
 Caveats:
 
-- Changes that live only inside JavaScript functions (custom transforms, compile hooks, JS global-data files returning functions) are invisible to the digest unless they come from an edit to the config file itself, which is hashed. After changing such code outside the config file — or after upgrading kamado or compiler packages — delete `.kamado/cache/` or run once without `--incremental`.
+- Changes that live only inside JavaScript functions (custom transforms, compile hooks, JS global-data files returning functions) are invisible to the digest unless they come from an edit to the config file itself, which is hashed. After changing such code outside the config file, delete `.kamado/cache/` or run once without `--incremental`. (Upgrades of the bundled esbuild/postcss/cssnano are folded into the digest automatically; a `tsconfig.json` consumed by esbuild is **not** tracked — treat it like config-adjacent code and clear the cache after editing it.)
 - Custom compilers must read files through kamado's file APIs (`getContentFromFile` / `getFileContent`) or report extra inputs via `trackDependency()` from `kamado/files`; the bundled compilers already do. A compiler with no recorded dependencies is never skipped.
+- Output freshness is verified by byte length only, not content. An output modified out of band to the same size is not detected — pair `--incremental` with `--skip-unchanged` if outputs may be touched after the build.
 - A skipped page keeps its previously written output byte-for-byte, including anything time-dependent a template may have embedded.
+- Editing source files _while_ a build is running is unsupported (a dependency may be hashed after the compile read an older version).
 
 ### Type Safety & Generics
 

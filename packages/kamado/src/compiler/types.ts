@@ -68,10 +68,17 @@ export interface CustomCompileFunction {
 	): Promise<string | ArrayBuffer> | string | ArrayBuffer;
 	/**
 	 * Optional digest of the compiler's context-level inputs (resolved
-	 * options, global data, package version — anything that affects every
-	 * output of this compiler). Incremental builds recompile all of the
-	 * compiler's files when the digest changes. Compilers that omit it rely
-	 * solely on per-file dependency hashes.
+	 * options, global data, toolchain version — anything that affects every
+	 * output of this compiler but is not a per-file dependency). Incremental
+	 * builds recompile all of the compiler's files when the digest changes.
+	 * Compilers that omit it rely solely on per-file dependency hashes.
+	 *
+	 * NOTE: this is a property on the compile function itself, so if you WRAP a
+	 * compile function (e.g. to add logging or timing) you must copy
+	 * `cacheDigest` onto the wrapper — otherwise the digest is silently lost
+	 * and the incremental cache can serve stale output after a context-level
+	 * change. Prefer wrapping the factory's options/context handling over the
+	 * returned function when you can.
 	 */
 	cacheDigest?: () => string | Promise<string>;
 }

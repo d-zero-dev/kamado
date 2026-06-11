@@ -170,26 +170,32 @@ export async function build<M extends MetaData>(
 				if (incremental) {
 					// Verifying trace: skip the whole compilation when the previous
 					// entry's environment, input, every dependency hash, and the
-					// output file still match. Entries without recorded dependencies
-					// never skip — a compiler that bypasses kamado's file APIs gives
-					// us nothing to verify against.
+					// output file still match.
 					const entry = incremental.previous?.entries[file.outputPath];
 					if (
 						entry &&
 						entry.env === env &&
 						entry.inputPath === file.inputPath &&
+						// Entries without recorded dependencies never skip — a
+						// compiler that bypasses kamado's file APIs gives us nothing
+						// to verify against.
 						Object.keys(entry.deps).length > 0
 					) {
+						// Output verification is size-only (no content compare): an
+						// externally-modified output of the same byte length is NOT
+						// detected here. Pair --incremental with --skip-unchanged when
+						// outputs may be touched out of band.
 						const stat = await fs.stat(file.outputPath).catch(() => null);
 						if (stat && stat.size === entry.outputSize) {
-							let fresh = true;
-							for (const [dep, recorded] of Object.entries(entry.deps)) {
-								if ((await incremental.hashFile(dep)) !== recorded) {
-									fresh = false;
-									break;
-								}
-							}
-							if (fresh) {
+							// Hash every dependency in parallel; the memoized hasher
+							// dedupes shared layouts/partials across files
+							const matches = await Promise.all(
+								Object.entries(entry.deps).map(
+									async ([dep, recorded]) =>
+										(await incremental.hashFile(dep)) === recorded,
+								),
+							);
+							if (matches.every(Boolean)) {
 								incremental.next[file.outputPath] = entry;
 								log(`${CHECK_MARK} Cached`);
 								return;
@@ -201,6 +207,11 @@ export async function build<M extends MetaData>(
 				let content: string | ArrayBuffer;
 				let dependencies: Set<string> | undefined;
 				if (incremental) {
+					// Dependencies are hashed from disk after the compile finishes,
+					// not at the instant each was read, so editing a source file
+					// mid-build is unsupported (the recorded hash may describe newer
+					// content than the output embeds). A normal end-to-end build does
+					// not race itself; the dev server never takes this path.
 					({ result: content, dependencies } = await collectDependencies(() =>
 						compile(file, log),
 					));
@@ -220,13 +231,16 @@ export async function build<M extends MetaData>(
 					if (!incremental || !dependencies) {
 						return;
 					}
-					const deps: Record<string, string> = {};
-					for (const dep of [...dependencies].toSorted()) {
-						deps[dep] = await incremental.hashFile(dep);
-					}
+					// Hash all dependencies in parallel, then build the record with
+					// keys in sorted order so the persisted manifest is byte-stable
+					const hashed = await Promise.all(
+						[...dependencies]
+							.toSorted()
+							.map(async (dep) => [dep, await incremental.hashFile(dep)] as const),
+					);
 					incremental.next[file.outputPath] = {
 						inputPath: file.inputPath,
-						deps,
+						deps: Object.fromEntries(hashed),
 						env,
 						outputSize: byteLength,
 					};

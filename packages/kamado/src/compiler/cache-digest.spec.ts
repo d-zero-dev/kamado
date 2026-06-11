@@ -42,6 +42,45 @@ describe('stableSerialize', () => {
 			'{"list":[{"y":[2,3],"z":1}]}',
 		);
 	});
+
+	test('serializes Map contents instead of collapsing to {}', () => {
+		const a = stableSerialize(
+			new Map([
+				['home', '/'],
+				['about', '/about/'],
+			]),
+		);
+		// Different entries must produce a different serialization
+		const b = stableSerialize(new Map([['home', '/changed']]));
+		expect(a).not.toBe(b);
+		expect(a).not.toBe('{}');
+		// Entry insertion order does not matter
+		expect(
+			stableSerialize(
+				new Map([
+					['about', '/about/'],
+					['home', '/'],
+				]),
+			),
+		).toBe(a);
+	});
+
+	test('serializes Set contents and distinguishes it from a Map', () => {
+		const set = stableSerialize(new Set(['a', 'b']));
+		expect(set).not.toBe('{}');
+		expect(stableSerialize(new Set(['b', 'a']))).toBe(set);
+		expect(stableSerialize(new Set(['a', 'c']))).not.toBe(set);
+		// A Map and a Set with the same elements must not collide
+		expect(stableSerialize(new Map([['a', 'b']]))).not.toBe(
+			stableSerialize(new Set(['a', 'b'])),
+		);
+	});
+
+	test('serializes RegExp by source and flags', () => {
+		expect(stableSerialize(/foo/gi)).toBe('"RegExp(foo/gi)"');
+		expect(stableSerialize(/foo/g)).not.toBe(stableSerialize(/foo/gi));
+		expect(stableSerialize(/foo/)).not.toBe(stableSerialize(/bar/));
+	});
 });
 
 describe('hashContent / createCacheDigest', () => {

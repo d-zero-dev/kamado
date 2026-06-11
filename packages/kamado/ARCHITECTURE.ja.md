@@ -202,9 +202,9 @@ graph TD
 依存の発見は2層構造です。
 
 - **コアの読み取り追跡** — `build()` は各コンパイルを `collectDependencies()`（`src/files/dependency-tracker.ts`、`AsyncLocalStorage` スコープ）でラップします。スコープ内の `getFileContent()` 呼び出しがパスを記録するため、ページ本体・sidecar JSON（存在しない sidecar の探索も含む — 後から作成すると無効化されます）・レイアウトファイルが自動的にカバーされます。スコープ外ではトラッカーは no-op のため、開発サーバーにコストはかかりません。
-- **コンパイラによる報告** — kamado のファイル API の外で解決されるものは `trackDependency()` で明示的に報告されます。pug の include/extends（コンパイル済みテンプレートの `dependencies` リスト）、esbuild の `metafile.inputs`、postcss の `dependency` メッセージ（`@import`）です。
+- **コンパイラによる報告** — kamado のファイル API の外で解決されるものは `trackDependency()` で明示的に報告されます。pug の include/extends（コンパイル済みテンプレートの `dependencies` リスト）、esbuild の `metafile.inputs`、postcss の `dependency` メッセージ（`@import`）と解決済みの `postcss.config.js`、デフォルトの `imageSizes` transform が読む画像ファイルです。
 
-**環境ダイジェスト**は、そのコンパイラの全ファイルに影響するコンテキストレベルの入力をカバーします。各 compile 関数はオプションの `cacheDigest()` プロパティを公開できます（page-compiler はグローバルデータとページリストをダイジェスト化 — ビルド時刻である `date` は除外し、関数は `stableSerialize()` が省略します。style/script コンパイラはオプションと解決済みバナーをダイジェスト化します）。さらに CLI が設定パスを渡す場合、`build()` が設定ファイルの内容ハッシュを合成します。ページ間の依存（nav・パンくず）はページリストを経由するため、`config.pageList` に現れる frontmatter の変更は全ページを再ビルドし、本文だけの編集はそのページだけを再ビルドします。
+**環境ダイジェスト**は、そのコンパイラの全ファイルに影響するコンテキストレベルの入力をカバーします。各 compile 関数はオプションの `cacheDigest()` プロパティを公開できます（page-compiler はグローバルデータ・ページリスト・ページアセット一覧をダイジェスト化 — 各ファイルからビルド時刻の `date` を除去し、関数は `stableSerialize()` が省略します。`stableSerialize()` は `Map`/`Set`/`RegExp` の中身も `{}` に潰さずシリアライズします。style/script コンパイラはオプション・解決済みバナーに加え、同梱ツールチェーンのバージョン — `esbuild.version`、`postcss`/`cssnano` — をダイジェスト化します）。さらに CLI が設定パスを渡す場合、`build()` が設定ファイルの内容ハッシュを合成します。ページ間の依存（nav・パンくず）はページリストを経由するため、`config.pageList` に現れる frontmatter の変更は全ページを再ビルドし、本文だけの編集はそのページだけを再ビルドします。
 
 安全側の境界は次のとおりです。依存が1つも記録されていないエントリはスキップされません（ファイルシステムを直接読むカスタムコンパイラには検証対象がないため）。`BUILD_MANIFEST_VERSION` が異なる、またはパースできないマニフェストは無視され、単にフルビルドになります。設定ファイル外のユーザー関数内に隠れた振る舞いの変更は `.kamado/cache/` の削除が必要です（README に記載）。
 

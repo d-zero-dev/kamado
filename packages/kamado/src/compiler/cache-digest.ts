@@ -71,6 +71,28 @@ function serialize(value: unknown, seen: WeakSet<object>): string {
 		if (Array.isArray(object)) {
 			return '[' + object.map((item) => serialize(item, seen)).join(',') + ']';
 		}
+		// Built-ins whose meaningful state lives outside own-enumerable
+		// properties would otherwise serialize as '{}', hiding every change to
+		// their contents from the digest. Tag each so a Map and a Set with the
+		// same elements cannot collide.
+		if (object instanceof RegExp) {
+			return `"RegExp(${object.source}/${object.flags})"`;
+		}
+		if (object instanceof URL) {
+			return JSON.stringify(`URL(${object.href})`);
+		}
+		if (object instanceof Map) {
+			// Sort by serialized key so entry insertion order does not affect the
+			// digest; values keep their structure
+			const entries = [...object.entries()]
+				.map(([key, val]) => [serialize(key, seen), serialize(val, seen)] as const)
+				.toSorted((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+			return 'Map(' + entries.map(([k, v]) => `${k}:${v}`).join(',') + ')';
+		}
+		if (object instanceof Set) {
+			const items = [...object].map((item) => serialize(item, seen)).toSorted();
+			return 'Set(' + items.join(',') + ')';
+		}
 		const record = object as Record<string, unknown>;
 		const parts: string[] = [];
 		for (const key of Object.keys(record).toSorted()) {

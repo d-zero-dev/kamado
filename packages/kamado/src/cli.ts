@@ -68,6 +68,12 @@ switch (cli.command) {
 	case 'build': {
 		await build({
 			...config,
+			// Anchor the build (and the incremental manifest under
+			// .kamado/cache/) to the config file's directory, not the invoking
+			// cwd; build() re-merges config and would otherwise fall back to
+			// process.cwd() for dir.root. Falls back to cwd when no config file
+			// was found (cosmiconfig searched from cwd anyway).
+			rootDir: configFilePath ? path.dirname(configFilePath) : undefined,
 			targetGlob: pathResolver(cli.args),
 			verbose: cli.flags.verbose,
 			skipUnchanged: cli.flags.skipUnchanged,

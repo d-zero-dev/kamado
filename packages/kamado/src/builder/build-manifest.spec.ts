@@ -65,6 +65,49 @@ describe('build manifest persistence', () => {
 		await saveBuildManifest('/project', manifest);
 		expect(await loadBuildManifest('/project')).toStrictEqual(manifest);
 	});
+
+	test('returns null when a version-matching entry is missing deps', async () => {
+		// A malformed entry must invalidate the whole manifest (full rebuild)
+		// rather than throw on Object.keys(entry.deps) inside the build
+		vol.fromJSON({
+			[getBuildManifestPath('/project')]: JSON.stringify({
+				version: BUILD_MANIFEST_VERSION,
+				entries: {
+					'/out/a.html': { inputPath: '/in/a.html', env: 'raw', outputSize: 5 },
+				},
+			}),
+		});
+		expect(await loadBuildManifest('/project')).toBeNull();
+	});
+
+	test('returns null when an entry has a non-string dep hash', async () => {
+		vol.fromJSON({
+			[getBuildManifestPath('/project')]: JSON.stringify({
+				version: BUILD_MANIFEST_VERSION,
+				entries: {
+					'/out/a.html': {
+						inputPath: '/in/a.html',
+						deps: { '/in/a.html': 123 },
+						env: 'raw',
+						outputSize: 5,
+					},
+				},
+			}),
+		});
+		expect(await loadBuildManifest('/project')).toBeNull();
+	});
+
+	test('returns null when an entry is missing inputPath or outputSize', async () => {
+		vol.fromJSON({
+			[getBuildManifestPath('/project')]: JSON.stringify({
+				version: BUILD_MANIFEST_VERSION,
+				entries: {
+					'/out/a.html': { deps: { '/in/a.html': 'a'.repeat(64) }, env: 'raw' },
+				},
+			}),
+		});
+		expect(await loadBuildManifest('/project')).toBeNull();
+	});
 });
 
 describe('createFileHasher', () => {
