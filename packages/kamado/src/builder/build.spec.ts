@@ -639,7 +639,7 @@ describe('incremental builds', async () => {
 		expect(compileSpy).toHaveBeenCalledTimes(2);
 	}, 10_000);
 
-	test('writes the manifest under dir.root', async () => {
+	test('writes the manifest to the cache path resolved from dir.root', async () => {
 		vol.fromJSON({
 			'/mock/input/dir/index.html': '<p>A</p>',
 		});
@@ -648,8 +648,9 @@ describe('incremental builds', async () => {
 		// @ts-ignore
 		await build(makeBuildConfig(compileSpy));
 
-		// build() re-merges the config without rootDir, so dir.root falls back
-		// to process.cwd(), which beforeAll sets to '/'
+		// The manifest lives outside the project tree by default (under the OS
+		// temp dir, namespaced by dir.root). build() re-merges the config
+		// without rootDir, so dir.root falls back to process.cwd() ('/' here).
 		const manifestRaw = vol.toJSON()[getBuildManifestPath('/')];
 		expect(typeof manifestRaw).toBe('string');
 		const manifest = JSON.parse(manifestRaw as string);
@@ -657,5 +658,27 @@ describe('incremental builds', async () => {
 		expect(manifest.entries['/mock/output/dir/index.html'].inputPath).toBe(
 			'/mock/input/dir/index.html',
 		);
+	}, 10_000);
+
+	test('force with a target glob keeps cache entries for non-targeted files', async () => {
+		vol.fromJSON({
+			'/mock/input/dir/a.html': '<p>A</p>',
+			'/mock/input/dir/b.html': '<p>B</p>',
+		});
+		const compileSpy = readingCompileSpy();
+
+		// Full build records both entries
+		// @ts-ignore
+		await build(makeBuildConfig(compileSpy));
+
+		// Forced partial rebuild of only a.html must NOT drop b.html's entry
+		// @ts-ignore
+		await build({ ...makeBuildConfig(compileSpy), force: true, targetGlob: '**/a.html' });
+
+		const manifest = JSON.parse(vol.toJSON()[getBuildManifestPath('/')] as string);
+		expect(Object.keys(manifest.entries).toSorted()).toStrictEqual([
+			'/mock/output/dir/a.html',
+			'/mock/output/dir/b.html',
+		]);
 	}, 10_000);
 });

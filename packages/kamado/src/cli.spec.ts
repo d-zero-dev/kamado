@@ -196,6 +196,14 @@ describe.skipIf(!existsSync(cliPath))('kamado build --incremental', () => {
 		expect(secondStat.mtimeMs).toBeGreaterThan(firstStat.mtimeMs);
 	}, 30_000);
 
+	test('a relative --cache-dir is resolved against the invoking cwd', async () => {
+		// Run from incDir with a relative cache dir; it must land under the cwd
+		await runBuild(['--incremental', '--cache-dir', './rel-cache'], incDir);
+
+		expect(existsSync(path.join(incDir, 'rel-cache', 'build-manifest.json'))).toBe(true);
+		await fs.rm(path.join(incDir, 'rel-cache'), { recursive: true, force: true });
+	}, 30_000);
+
 	test('by default the cache lives outside the project tree and is keyed by config dir', async () => {
 		// Resolve where the default cache goes so the test can clean it up
 		const { getCacheDir } = (await import(

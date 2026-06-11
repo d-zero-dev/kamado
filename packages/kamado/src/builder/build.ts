@@ -125,13 +125,19 @@ export async function build<M extends MetaData>(
 
 	// Incremental build state: the previous manifest's verifying traces, the
 	// environment digest per output extension, and a per-build file hasher
+	const previousManifest = buildConfig.incremental
+		? await loadBuildManifest(context.dir.root, buildConfig.cacheDir)
+		: null;
 	const incremental = buildConfig.incremental
 		? {
-				// `force` ignores the existing cache (full rebuild) but still
-				// refreshes it below — a manual-deletion-free clean build
-				previous: buildConfig.force
-					? null
-					: await loadBuildManifest(context.dir.root, buildConfig.cacheDir),
+				// `force` ignores the existing cache for the SKIP decision (full
+				// rebuild), but the original manifest is still carried over for the
+				// targetGlob merge below — so forcing a partial rebuild never wipes
+				// the cache of files outside the target glob.
+				previous: buildConfig.force ? null : previousManifest,
+				// Used only to preserve entries for non-targeted files on a partial
+				// (targetGlob) build; never consulted for skip decisions.
+				carryOver: previousManifest,
 				next: {} as Record<string, BuildManifestEntry>,
 				envByExt: new Map<string, string>(),
 				hashFile: createFileHasher(),
@@ -307,10 +313,11 @@ export async function build<M extends MetaData>(
 
 	if (incremental) {
 		// A partial build (targetGlob) revalidates only the targeted files, so
-		// carry the other entries over; a full build replaces the manifest, which
-		// also prunes entries for deleted sources
+		// carry the other entries over (from carryOver, which is populated even
+		// under --force); a full build replaces the manifest, which also prunes
+		// entries for deleted sources
 		const entries = buildConfig.targetGlob
-			? { ...incremental.previous?.entries, ...incremental.next }
+			? { ...incremental.carryOver?.entries, ...incremental.next }
 			: incremental.next;
 		await saveBuildManifest(
 			context.dir.root,
