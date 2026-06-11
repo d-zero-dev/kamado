@@ -22,7 +22,7 @@ kamado — オンデマンド静的サイトジェネレータ。Lerna + Yarn Wo
 - `yarn dev` — `lerna run dev`
 - `yarn test` — Vitest でテスト（test-timeout 60000）
 - `yarn lint` — eslint / prettier / textlint / cspell を直列実行
-- `yarn bench` — ビルドベンチマーク（`--pages=N` / `--runs=N` / `--full`。要事前 `yarn build`。詳細は `packages/kamado/ARCHITECTURE.md` 参照）
+- `yarn bench` — ビルドベンチマーク（`--pages=N` / `--runs=N` / `--full` / `--incremental`。要事前 `yarn build`。詳細は `packages/kamado/ARCHITECTURE.md` 参照）
 - `yarn release` / `yarn release:alpha` 等 — `lerna version`（push なし）。リリース手順は `/release` コマンド参照
 
 ### コマンド制約
