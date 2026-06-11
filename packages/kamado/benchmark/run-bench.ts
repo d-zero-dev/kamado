@@ -7,11 +7,16 @@
  * `yarn build` before benchmarking.
  *
  * Usage:
- *   yarn bench [--pages=1000] [--runs=3] [--full]
+ *   yarn bench [--pages=1000] [--runs=3] [--full] [--incremental]
  *
  * --full enables the default page transforms (jsdom/prettier/minifier), which
  * dominate CPU time. By default transforms are disabled to isolate the
  * compile/IO pipeline.
+ *
+ * --incremental measures no-change rebuilds: one unmeasured cold build writes
+ * the manifest, then each measured run verifies and skips every file (the
+ * in-process caches are still cleared per run, so this matches a fresh CLI
+ * process reusing the on-disk manifest).
  */
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -49,13 +54,17 @@ function readArg(name: string, fallback: number): number {
 const pageCount = readArg('pages', 1000);
 const runCount = readArg('runs', 3);
 const useFullTransforms = process.argv.includes('--full');
+const useIncremental = process.argv.includes('--incremental');
 
 const fixtures = await generateFixtures(BENCH_DIR, pageCount);
 
 const durations: number[] = [];
 
-for (let run = 0; run < runCount; run++) {
+const totalRuns = useIncremental ? runCount + 1 : runCount;
+for (let run = 0; run < totalRuns; run++) {
 	// Reset module-level caches so each run measures a cold build
+	// (with --incremental, only the on-disk manifest carries over — exactly
+	// what a fresh CLI process would see)
 	clearBuildCaches();
 
 	const start = performance.now();
@@ -67,6 +76,7 @@ for (let run = 0; run < runCount; run++) {
 			input: fixtures.inputDir,
 			output: fixtures.outputDir,
 		},
+		incremental: useIncremental,
 		compilers: (def) => [
 			def(createPageCompiler(), {
 				files: '**/*.pug',
@@ -82,7 +92,11 @@ for (let run = 0; run < runCount; run++) {
 		],
 	});
 	const duration = performance.now() - start;
-	durations.push(duration);
+	// The first --incremental run is the unmeasured cold build that seeds
+	// the manifest
+	if (!useIncremental || run > 0) {
+		durations.push(duration);
+	}
 }
 
 durations.sort((a, b) => a - b);
@@ -97,7 +111,7 @@ const slowest = durations.at(-1) ?? 0;
 console.log('');
 console.log('=== kamado build benchmark ===');
 console.log(
-	`pages: ${pageCount}, runs: ${runCount}, transforms: ${useFullTransforms ? 'default' : 'none'}`,
+	`pages: ${pageCount}, runs: ${runCount}, transforms: ${useFullTransforms ? 'default' : 'none'}${useIncremental ? ', incremental rebuild (no changes)' : ''}`,
 );
 console.log(
 	`median:  ${(median / 1000).toFixed(2)}s (${(pageCount / (median / 1000)).toFixed(1)} pages/s)`,
