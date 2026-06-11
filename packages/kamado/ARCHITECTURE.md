@@ -195,6 +195,19 @@ graph TD
 
 Every `build()` invocation starts from a clean slate: the module-level caches (asset group memoization, file contents, global data) are cleared first, so source edits between consecutive builds in the same process are always reflected. Output directories are created lazily and deduplicated within a build, and with the `skipUnchanged` build option (`kamado build --skip-unchanged`) an output whose content is unchanged is not rewritten — the file size is compared first (via `stat`), then the content, and the existing file's mtime is preserved on a match.
 
+#### Incremental builds (`--incremental`)
+
+With `kamado build --incremental`, each output gets a **verifying trace** persisted in `.kamado/cache/build-manifest.json` (`src/builder/build-manifest.ts`): the input path, the SHA-256 of every file the compilation read, an environment digest, and the output's byte length. On the next incremental build, a file whose environment digest, input path, every dependency hash, and output size all still match is skipped entirely — the compiler never runs (`Cached`). Any mismatch falls through to a normal compile, which records a fresh trace, so a change that alters the dependency set itself is picked up on that rebuild (the classic verifying-trace property).
+
+Dependency discovery has two layers:
+
+- **Core read tracking** — `build()` wraps each compilation in `collectDependencies()` (`src/files/dependency-tracker.ts`, an `AsyncLocalStorage` scope). Every `getFileContent()` call inside that scope records its path, which automatically covers the page source, its sidecar JSON (including a probe of a _missing_ sidecar — creating it later invalidates the entry), and the layout file. Outside a collection scope the tracker is a no-op, so the dev server pays nothing.
+- **Compiler-reported inputs** — resolution that happens outside kamado's file APIs is reported explicitly via `trackDependency()`: pug includes/extends (from the compiled template's `dependencies` list), esbuild's `metafile.inputs`, and postcss `dependency` messages (`@import`s).
+
+The **environment digest** covers context-level inputs that affect every file of a compiler: each compile function may expose a `cacheDigest()` property (the page compiler digests global data and the page list — with the build-timestamp `date` excluded and functions omitted via `stableSerialize()`; the style/script compilers digest their options and resolved banner), and `build()` mixes in the config file's content hash when the CLI provides the config path. Cross-page dependencies (nav, breadcrumbs) flow through the page list, so a frontmatter change surfaced by `config.pageList` rebuilds every page, while a body-only edit rebuilds just that page.
+
+Safety boundaries: entries with no recorded dependencies are never skipped (a custom compiler reading the filesystem directly gives nothing to verify against); a manifest with a different `BUILD_MANIFEST_VERSION` or unparsable content is ignored, which simply means a full rebuild; behavior changes hidden inside user functions outside the config file require deleting `.kamado/cache/` (documented in the README).
+
 ### 2. Dev Server Flow (`kamado server`)
 
 The flow for on-demand compilation during local development.
@@ -600,9 +613,12 @@ yarn bench                 # 1000 pages, 3 runs, transforms disabled
 yarn bench --pages=500     # page count
 yarn bench --runs=5        # number of runs (median is reported)
 yarn bench --full          # enable the default page transforms (jsdom/prettier/minifier)
+yarn bench --incremental   # measure no-change incremental rebuilds (one unmeasured cold build seeds the manifest)
 ```
 
-It generates a fixture site (N Pug pages sharing one layout with an include, plus a few CSS/TS files) under `packages/kamado/.bench/` and measures `build()` wall-clock time against the built `dist` output — run `yarn build` first. Use it to compare before/after numbers when changing the build pipeline; module-level caches are cleared between runs so every run measures a cold build.
+It generates a fixture site (N Pug pages sharing one layout with an include, plus a few CSS/TS files) under `packages/kamado/.bench/` and measures `build()` wall-clock time against the built `dist` output — run `yarn build` first. Use it to compare before/after numbers when changing the build pipeline; module-level caches are cleared between runs so every run measures a cold build (with `--incremental`, only the on-disk manifest carries over, matching what a fresh CLI process would see).
+
+Reference numbers (13-inch MacBook Pro, M1): with `--full --pages=1000`, a cold build takes ~10 s and a no-change incremental rebuild ~0.24 s (≈40×).
 
 ---
 
