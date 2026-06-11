@@ -133,4 +133,19 @@ describe('createFileHasher', () => {
 		const hashFile = createFileHasher();
 		expect(await hashFile('/nowhere.txt')).toBe(MISSING_FILE_HASH);
 	});
+
+	test('hashes raw bytes so byte-distinct binary files do not collide', async () => {
+		// Two different invalid UTF-8 byte sequences both decode to the
+		// replacement character under utf8, so a string-based hash would
+		// collide; the byte-based hasher must keep them distinct
+		await memfs.promises.mkdir('/bin', { recursive: true });
+		await memfs.promises.writeFile('/bin/a', Buffer.from([0xc3, 0x28]));
+		await memfs.promises.writeFile('/bin/b', Buffer.from([0xc4, 0x28]));
+		const hashFile = createFileHasher();
+
+		const hashA = await hashFile('/bin/a');
+		const hashB = await hashFile('/bin/b');
+		expect(hashA).not.toBe(hashB);
+		expect(hashA).not.toBe(MISSING_FILE_HASH);
+	});
 });

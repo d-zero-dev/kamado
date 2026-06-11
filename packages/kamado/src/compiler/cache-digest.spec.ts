@@ -63,6 +63,16 @@ describe('stableSerialize', () => {
 				]),
 			),
 		).toBe(a);
+		// Lock the exact format so an accidental change (which would invalidate
+		// every existing manifest) is caught
+		expect(
+			stableSerialize(
+				new Map<string, number>([
+					['b', 2],
+					['a', 1],
+				]),
+			),
+		).toBe('Map("a":1,"b":2)');
 	});
 
 	test('serializes Set contents and distinguishes it from a Map', () => {
@@ -74,6 +84,8 @@ describe('stableSerialize', () => {
 		expect(stableSerialize(new Map([['a', 'b']]))).not.toBe(
 			stableSerialize(new Set(['a', 'b'])),
 		);
+		// Lock the exact format
+		expect(stableSerialize(new Set(['b', 'a']))).toBe('Set("a","b")');
 	});
 
 	test('serializes RegExp by source and flags', () => {
