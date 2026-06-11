@@ -1,4 +1,4 @@
-import type { SourcemapOption } from 'kamado/compiler';
+import type { CustomCompileFunction, SourcemapOption } from 'kamado/compiler';
 import type { MetaData } from 'kamado/files';
 
 import path from 'node:path';
@@ -6,11 +6,12 @@ import path from 'node:path';
 import cssnano from 'cssnano';
 import {
 	createBannerResolver,
+	createCacheDigest,
 	createCustomCompiler,
 	resolveSourcemapFlag,
 } from 'kamado/compiler';
 import { type CreateBanner } from 'kamado/compiler/banner';
-import { getContentFromFile } from 'kamado/files';
+import { getContentFromFile, trackDependency } from 'kamado/files';
 import postcss from 'postcss';
 import postcssImport from 'postcss-import';
 // eslint-disable-next-line import-x/default
@@ -176,7 +177,7 @@ export function createStyleCompiler<M extends MetaData>() {
 			// replaying the same rejection forever.
 			let processorPromise: Promise<postcss.Processor> | undefined;
 
-			return async (file, _, __, cache) => {
+			const compileFunction: CustomCompileFunction = async (file, _, __, cache) => {
 				// cache === false (serve mode): rebuild per compilation so that
 				// postcss.config.js edits are picked up without a restart
 				const processor =
@@ -196,8 +197,34 @@ export function createStyleCompiler<M extends MetaData>() {
 					to: undefined,
 					...(enableSourcemap ? { map: { inline: true } } : {}),
 				});
+
+				// postcss-import inlines files outside kamado's file APIs, so
+				// report them for the incremental-build manifest. Plugins emit
+				// `dependency` messages for each inlined file
+				for (const message of result.messages) {
+					if (message.type === 'dependency' && typeof message.file === 'string') {
+						trackDependency(message.file);
+					}
+				}
+
 				return result.css;
 			};
+
+			// Context-level inputs for the incremental-build manifest: when any
+			// of these change, every stylesheet must be rebuilt (functions in
+			// options are omitted from the digest — banner is captured as its
+			// resolved string instead). The loaded postcss.config.js itself is
+			// covered by the config-file-adjacent caveat documented for
+			// incremental builds
+			compileFunction.cacheDigest = () =>
+				createCacheDigest({
+					compiler: '@kamado-io/style-compiler',
+					options,
+					banner: resolveBanner(),
+					enableSourcemap,
+				});
+
+			return compileFunction;
 		},
 	}));
 }
