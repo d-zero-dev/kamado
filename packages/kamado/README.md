@@ -580,6 +580,14 @@ kamado build --incremental
 
 Each build records a verifying trace per output file: the content hash of every file the compilation read (the page itself, its sidecar JSON, the layout, pug includes, CSS `@import`s, the postcss config, referenced image files, bundled script imports) plus an environment digest (global data, the page list and page asset files, compiler options, the bundled toolchain versions, and the config file's content). The next `--incremental` build skips the whole compilation — not just the write — for any output whose traces all still match and whose output file is still present. Everything is content-hash based, so it works without relying on file modification times, and across machines as long as `.kamado/cache/` is preserved.
 
+##### Cache location and `.gitignore`
+
+The manifest is written to `.kamado/cache/build-manifest.json` under the directory of your config file (or the current working directory when no config file is found). It is a build cache that can be regenerated at any time:
+
+- **Recommended:** add `.kamado/` to your project's `.gitignore`. A stale or partial manifest never produces a wrong build — it only forces a full rebuild — so there is no need to commit it.
+- **CI:** to keep `--incremental` fast across CI runs, restore `.kamado/cache/` from your CI cache (keyed however you like) instead of committing it. Because the trace is content-hash based, a cache restored on a different machine or runner is still valid.
+- **To force a clean build:** delete `.kamado/cache/` (or run without `--incremental`).
+
 Caveats:
 
 - Changes that live only inside JavaScript functions (custom transforms, compile hooks, JS global-data files returning functions) are invisible to the digest unless they come from an edit to the config file itself, which is hashed. After changing such code outside the config file, delete `.kamado/cache/` or run once without `--incremental`. (Upgrades of the bundled esbuild/postcss/cssnano are folded into the digest automatically; a `tsconfig.json` consumed by esbuild is **not** tracked — treat it like config-adjacent code and clear the cache after editing it.)

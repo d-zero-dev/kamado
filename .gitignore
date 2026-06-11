@@ -24,3 +24,6 @@ packages/**/tsconfig.build.tsbuildinfo
 
 # benchmark fixtures
 packages/**/.bench/
+
+# incremental build cache (regenerated on demand; see packages/kamado/README.md)
+.kamado/
