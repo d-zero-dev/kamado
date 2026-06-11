@@ -1,5 +1,8 @@
 import type { Context, TransformContext } from 'kamado/config';
 
+import path from 'node:path';
+
+import { collectDependencies } from 'kamado/files';
 import { describe, expect, test, vi } from 'vitest';
 
 import { manipulateDOM } from './manipulate-dom.js';
@@ -68,6 +71,22 @@ describe('manipulateDOM', () => {
 		const result = await transform.transform(content, info);
 
 		expect(result).toBe(content);
+	});
+
+	test('imageSizes reports referenced image files as dependencies (tracked even when missing)', async () => {
+		// Guards the incremental-build fix: the default imageSizes transform
+		// reads image files outside kamado's file APIs, so it must report each
+		// one via trackDependency or replacing an image leaves pages stale.
+		// A missing image is still tracked (so adding it later invalidates).
+		const transform = manipulateDOM(); // imageSizes enabled by default
+		const info = createMockTransformInfo();
+
+		const { dependencies } = await collectDependencies(() =>
+			transform.transform('<html><body><img src="img/hero.png"></body></html>', info),
+		);
+
+		const expected = path.join(path.resolve(info.outputDir), 'img', 'hero.png');
+		expect([...dependencies]).toContain(expected);
 	});
 
 	test('should apply custom manipulateDOM hook', async () => {
