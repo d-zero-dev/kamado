@@ -1,6 +1,7 @@
 import type { CompilerFunction, PugCompilerOptions } from './types.js';
 import type { Options as PugOptions } from 'pug';
 
+import { trackDependency } from 'kamado/files';
 import pug from 'pug';
 
 /**
@@ -66,6 +67,13 @@ export function compilePug(options: PugCompilerOptions = {}): CompilerFunction {
 					}
 					templateCache.set(template, compiler);
 				}
+			}
+			// Pug resolves include/extends itself, outside kamado's file APIs, so
+			// report them for the incremental-build manifest. The compiled function
+			// carries its dependency list, so cache hits report the same files
+			const dependencies = (compiler as { dependencies?: string[] }).dependencies;
+			for (const dependency of dependencies ?? []) {
+				trackDependency(dependency);
 			}
 			return Promise.resolve(compiler(data));
 		} catch (error) {

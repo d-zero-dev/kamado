@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import { createPageCompiler } from '@kamado-io/page-compiler';
 import { build } from 'kamado/build';
@@ -75,13 +76,16 @@ afterAll(async () => {
 
 /**
  * Runs build() against the fixture site
+ * @param options
+ * @param options.incremental
  */
-async function buildFixture() {
+async function buildFixture(options?: { incremental?: boolean }) {
 	await build({
 		// @ts-expect-error -- pkg is accepted by mergeConfig to skip package.json lookup
 		pkg: { name: 'pipeline-fixture', version: '0.0.0' },
 		rootDir: tmpDir,
 		dir: { input: inputDir, output: outputDir },
+		incremental: options?.incremental,
 		compilers: (def) => [
 			def(createPageCompiler(), {
 				files: '**/*.pug',
@@ -143,5 +147,69 @@ describe('build pipeline (kamado core → page-compiler → pug-compiler)', () =
 		} finally {
 			await fs.writeFile(partialPath, original);
 		}
+	});
+});
+
+describe('incremental build pipeline', () => {
+	test('a fully unchanged incremental rebuild rewrites nothing', async () => {
+		await buildFixture({ incremental: true });
+		const before = await fs.stat(path.join(outputDir, 'page-a.html'));
+
+		await sleep(20);
+		await buildFixture({ incremental: true });
+
+		const after = await fs.stat(path.join(outputDir, 'page-a.html'));
+		expect(after.mtimeMs).toBe(before.mtimeMs);
+	});
+
+	test('editing one page rebuilds that page and leaves the others untouched', async () => {
+		await buildFixture({ incremental: true });
+		const untouchedBefore = await fs.stat(path.join(outputDir, 'page-a.html'));
+
+		await sleep(20);
+		await fs.writeFile(
+			path.join(inputDir, 'page-b.pug'),
+			['---', 'layout: default.pug', 'title: Page B', '---', 'p Hello B edited', ''].join(
+				'\n',
+			),
+		);
+		await buildFixture({ incremental: true });
+
+		const edited = await fs.readFile(path.join(outputDir, 'page-b.html'), 'utf8');
+		expect(edited).toContain('<p>Hello B edited</p>');
+		const untouchedAfter = await fs.stat(path.join(outputDir, 'page-a.html'));
+		expect(untouchedAfter.mtimeMs).toBe(untouchedBefore.mtimeMs);
+	});
+
+	test('editing an included pug partial rebuilds every page', async () => {
+		// Proves the pug include is part of each page's verifying trace —
+		// pug resolves includes itself, outside kamado's file APIs
+		await buildFixture({ incremental: true });
+
+		await fs.writeFile(
+			path.join(tmpDir, 'partials', 'header.pug'),
+			['mixin header(t)', '\theader', '\t\th1= t', '\t\tp Partial v2', ''].join('\n'),
+		);
+		await buildFixture({ incremental: true });
+
+		for (const name of ['a', 'c']) {
+			const html = await fs.readFile(path.join(outputDir, `page-${name}.html`), 'utf8');
+			expect(html).toContain('<p>Partial v2</p>');
+		}
+	});
+
+	test('editing the layout rebuilds every page', async () => {
+		await buildFixture({ incremental: true });
+
+		const layoutPath = path.join(layoutsDir, 'default.pug');
+		const layout = await fs.readFile(layoutPath, 'utf8');
+		await fs.writeFile(
+			layoutPath,
+			layout.replace('main !{content}', 'main.v2 !{content}'),
+		);
+		await buildFixture({ incremental: true });
+
+		const html = await fs.readFile(path.join(outputDir, 'page-c.html'), 'utf8');
+		expect(html).toContain('<main class="v2">');
 	});
 });
