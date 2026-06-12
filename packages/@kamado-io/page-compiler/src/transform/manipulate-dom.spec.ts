@@ -209,6 +209,91 @@ describe('manipulateDOM', () => {
 		expect(seen.href).toBeNull();
 	});
 
+	test('hook ctx.getHref rejects javascript: URLs (XSS guard through the hook surface)', async () => {
+		const seen: { href?: string | null } = {};
+		const transform = manipulateDOM({
+			hook: (_elements, window, ctx) => {
+				const a = window.document.querySelector('a');
+				seen.href = a ? ctx.getHref(a) : null;
+			},
+			imageSizes: false,
+		});
+		const info = createMockTransformInfo();
+
+		await transform.transform(
+			'<html><body><a href="javascript:alert(1)">x</a></body></html>',
+			info,
+		);
+
+		expect(seen.href).toBeNull();
+	});
+
+	test('hook ctx.getHref rejects data: URLs', async () => {
+		const seen: { href?: string | null } = {};
+		const transform = manipulateDOM({
+			hook: (_elements, window, ctx) => {
+				const a = window.document.querySelector('a');
+				seen.href = a ? ctx.getHref(a) : null;
+			},
+			imageSizes: false,
+		});
+		const info = createMockTransformInfo();
+
+		await transform.transform(
+			'<html><body><a href="data:text/html,<script>alert(1)</script>">x</a></body></html>',
+			info,
+		);
+
+		expect(seen.href).toBeNull();
+	});
+
+	test('hook ctx.getHref strips basic-auth credentials from the resolved URL', async () => {
+		const seen: { href?: string | null } = {};
+		const transform = manipulateDOM({
+			hook: (_elements, window, ctx) => {
+				const a = window.document.querySelector('a');
+				seen.href = a ? ctx.getHref(a) : null;
+			},
+			imageSizes: false,
+		});
+		// baseURL with userinfo — must NOT leak into the resolved href.
+		const info = createMockTransformInfo({
+			context: {
+				mode: 'build',
+				dir: {
+					root: '/test',
+					input: '/test/input',
+					output: '/test/output',
+					public: '/test/public',
+				},
+				devServer: { host: 'localhost', port: 3000 },
+				pkg: { production: { baseURL: 'https://user:pass@staging.example.com' } },
+			} as Context,
+		});
+
+		await transform.transform('<html><body><a href="/foo">x</a></body></html>', info);
+
+		expect(seen.href).toBe('https://staging.example.com/foo');
+		expect(seen.href).not.toContain('user');
+		expect(seen.href).not.toContain('pass');
+	});
+
+	test('hook ctx.getHref returns null for an empty href attribute', async () => {
+		const seen: { href?: string | null } = {};
+		const transform = manipulateDOM({
+			hook: (_elements, window, ctx) => {
+				const a = window.document.querySelector('a');
+				seen.href = a ? ctx.getHref(a) : null;
+			},
+			imageSizes: false,
+		});
+		const info = createMockTransformInfo();
+
+		await transform.transform('<html><body><a href="">x</a></body></html>', info);
+
+		expect(seen.href).toBeNull();
+	});
+
 	test('hook ctx.getHref leaves absolute href intact (ignores base)', async () => {
 		const seen: { href?: string | null } = {};
 		const transform = manipulateDOM({
