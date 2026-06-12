@@ -51,6 +51,18 @@ describe('domSerialize > fragment classification', () => {
 		expect(out).toContain('<body>x</body>');
 		expect(out).not.toContain('<div>');
 	});
+
+	test('leading comment terminated with --!> is recognized and stripped', async () => {
+		// HTML5 tolerates `--!>` as an alternate comment terminator. The fragment
+		// regex must strip such a leading comment before classifying the rest.
+		const out = await domSerialize(
+			'<!-- copyright --!><html><body><p>x</p></body></html>',
+			{ hook: vi.fn() },
+		);
+		expect(out).toContain('<html>');
+		expect(out).toContain('<body>');
+		expect(out).not.toContain('<div>');
+	});
 });
 
 describe('domSerialize > fragment branch (C3)', () => {
@@ -187,5 +199,38 @@ describe('resolveHref', () => {
 		expect(resolveHref(a, new URL('https://example.com/sub/'))).toBe(
 			'https://example.com/foo',
 		);
+	});
+
+	test('rejects javascript: URLs (XSS guard)', () => {
+		const a = makeAnchor('javascript:alert(1)');
+		expect(resolveHref(a, 'https://example.com')).toBeNull();
+	});
+
+	test('rejects data: URLs', () => {
+		const a = makeAnchor('data:text/html,<script>alert(1)</script>');
+		expect(resolveHref(a, 'https://example.com')).toBeNull();
+	});
+
+	test('rejects vbscript: URLs', () => {
+		const a = makeAnchor('vbscript:msgbox(1)');
+		expect(resolveHref(a, 'https://example.com')).toBeNull();
+	});
+
+	test('rejects file: URLs', () => {
+		const a = makeAnchor('file:///etc/passwd');
+		expect(resolveHref(a, 'https://example.com')).toBeNull();
+	});
+
+	test('strips basic-auth credentials from the resolved URL', () => {
+		const a = makeAnchor('/foo');
+		expect(resolveHref(a, 'https://user:pass@example.com')).toBe(
+			'https://example.com/foo',
+		);
+	});
+
+	test('strips credentials from an absolute href as well', () => {
+		const a = makeAnchor('https://attacker:secret@evil.example/x');
+		// Returned value must not contain the credentials.
+		expect(resolveHref(a)).toBe('https://evil.example/x');
 	});
 });

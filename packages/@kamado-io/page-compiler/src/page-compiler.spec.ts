@@ -195,6 +195,34 @@ describe('page compiler', async () => {
 		expect(hooksFactory).toHaveBeenCalledTimes(1);
 	});
 
+	test('pug source without a registered compiler round-trips as text (undefined behavior, pinned)', async () => {
+		// A .pug file reaching domSerialize without a pug compiler in
+		// compileHooks is a misconfiguration — there is no contract for what
+		// should happen. Under jsdom the previous serializer returned '' (text
+		// nodes were lost because .children is element-only); under linkedom
+		// the new tmpContainer.innerHTML serializer preserves the raw source.
+		// This test pins the new symptom so future migrations can't silently
+		// flip it back without an explicit decision.
+		clearMockFileContents();
+		const content = 'p Hello, world!';
+		const page: CompilableFile = {
+			inputPath: '/path/to/page.pug',
+			outputPath: '/path/to/page.html',
+			fileSlug: 'page',
+			filePathStem: '/path/to/page',
+			url: '/path/to/page',
+			extension: '.pug',
+			date: new Date(),
+		};
+		setMockFileContent('/path/to/page.pug', {
+			metaData: {},
+			content,
+			raw: content,
+		});
+		const result = await compilePage(page, {});
+		expect(result).toBe('p Hello, world!\n');
+	});
+
 	test('should compile a page made with pug using compileHooks', async () => {
 		clearMockFileContents();
 		const { compilePug } = await import('@kamado-io/pug-compiler');
