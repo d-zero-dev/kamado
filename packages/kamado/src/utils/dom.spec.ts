@@ -113,6 +113,32 @@ describe('domSerialize > full-document branch', () => {
 		expect(out.match(/<head>/g)).toHaveLength(1);
 		expect(out).toContain('<title>t</title>');
 	});
+
+	test('auto-inserted <head> is the first child of <html> (positional check)', async () => {
+		// Re-parse the serialized output and confirm that the auto-head ended
+		// up before <body>. The earlier 'contains <head>' assertion would pass
+		// even if linkedom appended <head> after <body>.
+		const out = await domSerialize('<html><body>x</body></html>', { hook: vi.fn() });
+		const { document } = parseHTML(out);
+		const html = document.documentElement;
+		expect(html?.firstElementChild?.tagName?.toLowerCase()).toBe('head');
+	});
+
+	test('auto-head logic does not duplicate <head> even if it appears after <body>', async () => {
+		// Edge case: parsed input has <head> in a non-canonical position.
+		// The children walk in getDOM must still detect it (any position, not
+		// just first) and skip the insertion.
+		const out = await domSerialize(
+			'<html><body>x</body><head><title>late</title></head></html>',
+			{ hook: vi.fn() },
+		);
+		const { document } = parseHTML(out);
+		const heads = [...(document.documentElement?.children ?? [])].filter(
+			(c) => (c.tagName ?? '').toLowerCase() === 'head',
+		);
+		expect(heads).toHaveLength(1);
+		expect(out).toContain('<title>late</title>');
+	});
 });
 
 describe('domSerialize > hook contract', () => {
@@ -232,5 +258,18 @@ describe('resolveHref', () => {
 		const a = makeAnchor('https://attacker:secret@evil.example/x');
 		// Returned value must not contain the credentials.
 		expect(resolveHref(a)).toBe('https://evil.example/x');
+	});
+
+	test('passes mailto: URLs through (intentional, not in REJECTED_SCHEMES)', () => {
+		// mailto:/tel: are common in HTML and should not be flagged as
+		// dangerous; pin the current allow-list shape so a future contributor
+		// doesn't blanket-block opaque schemes without an explicit decision.
+		const a = makeAnchor('mailto:foo@example.com');
+		expect(resolveHref(a)).toBe('mailto:foo@example.com');
+	});
+
+	test('passes tel: URLs through', () => {
+		const a = makeAnchor('tel:+81-3-1234-5678');
+		expect(resolveHref(a)).toBe('tel:+81-3-1234-5678');
 	});
 });
