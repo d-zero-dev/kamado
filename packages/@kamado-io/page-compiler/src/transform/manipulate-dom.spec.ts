@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { collectDependencies } from 'kamado/files';
+import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { manipulateDOM } from './manipulate-dom.js';
@@ -214,31 +215,57 @@ describe('manipulateDOM > imageSizes', () => {
 			info,
 		);
 
-		const tags = [...result.matchAll(/<img[^>]*>/g)].map((m) => m[0]);
-		const target = tags.find((t) => t.includes('class="target"')) ?? '';
-		const other = tags.find((t) => t.includes('class="other"')) ?? '';
-		expect(target).toContain('width="100"');
-		expect(target).toContain('height="50"');
-		expect(other).not.toMatch(/width=/);
-		expect(other).not.toMatch(/height=/);
+		// Parse the result back through linkedom and assert via DOM rather than
+		// regex on the serialized string — this guards against quoting and
+		// attribute-order shifts that could otherwise let assertions pass vacuously.
+		const { document } = parseHTML(result);
+		const target = document.querySelector('img.target');
+		const other = document.querySelector('img.other');
+		expect(target?.getAttribute('width')).toBe('100');
+		expect(target?.getAttribute('height')).toBe('50');
+		expect(other?.getAttribute('width')).toBeNull();
+		expect(other?.getAttribute('height')).toBeNull();
 	});
 
 	test('skips http(s)/protocol-relative/data URLs and unsupported extensions', async () => {
-		// No file needs to exist — these src values must all be skipped before fs access.
+		// No local file is created. If the URL/extension guards work, the loop
+		// short-circuits BEFORE trackDependency for every src. If a guard
+		// regresses, the broken src reaches trackDependency and shows up in
+		// the captured dependency set — distinguishing a real guard skip from
+		// a downstream fs.stat null.
 		const transform = manipulateDOM();
 		const info = createMockTransformInfo({ outputDir: tmpDir });
 
+		// Each src is crafted so that REMOVING the corresponding URL guard would
+		// let it reach the extension check, satisfy it, and pollute the dependency
+		// set — making this test a genuine regression alarm rather than a vacuous
+		// pass dependent on fs.stat returning null.
 		const html =
 			'<html><body>' +
+			// https:/// ends with .png — only the http(s) guard keeps it out
 			'<img src="https://example.com/x.png">' +
+			// // (protocol-relative) ends with .png — only the // guard keeps it out
 			'<img src="//cdn.example.com/x.png">' +
-			'<img src="data://image/png">' +
+			// data: URL whose payload terminates in .svg — only the data: guard
+			// keeps it from polluting the dependency set
+			'<img src="data:image/svg+xml;utf8,inline.svg">' +
+			// unsupported extension — only the ext check keeps it out
 			'<img src="local.txt">' +
 			'</body></html>';
 
-		const result = await transform.transform(html, info);
+		const { dependencies, result } = await collectDependencies(() =>
+			transform.transform(html, info),
+		);
 
-		expect(result).not.toMatch(/<img[^>]*width=/);
-		expect(result).not.toMatch(/<img[^>]*height=/);
+		expect([...dependencies]).toEqual([]);
+		// Belt-and-braces: also assert no width/height was emitted via a DOM
+		// parse so the assertions can't pass vacuously on missing tags.
+		const serialized =
+			typeof result === 'string' ? result : new TextDecoder().decode(result);
+		const { document } = parseHTML(serialized);
+		for (const img of document.querySelectorAll('img')) {
+			expect(img.getAttribute('width')).toBeNull();
+			expect(img.getAttribute('height')).toBeNull();
+		}
 	});
 });
