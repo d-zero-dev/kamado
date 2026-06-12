@@ -47,6 +47,7 @@
 		"yaml": "2.8.3"
 	},
 	"devDependencies": {
+		"@types/node": "24.13.0",
 		"@types/picomatch": "4.0.2"
 	}
 }
