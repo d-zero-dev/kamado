@@ -1,6 +1,20 @@
+import { parseHTML } from 'linkedom';
 import { describe, expect, test, vi } from 'vitest';
 
-import { domSerialize } from './dom.js';
+import { domSerialize, resolveHref } from './dom.js';
+
+/**
+ * Builds a detached <a> element with the given href attribute (or none if null).
+ * @param href - href attribute value, or null to omit the attribute entirely
+ */
+function makeAnchor(href: string | null) {
+	const { document } = parseHTML('<html><body></body></html>');
+	const a = document.createElement('a');
+	if (href !== null) {
+		a.setAttribute('href', href);
+	}
+	return a;
+}
 
 describe('domSerialize > fragment classification', () => {
 	test('full <html> document is treated as a full document, not a fragment', async () => {
@@ -122,5 +136,56 @@ describe('domSerialize > hook contract', () => {
 			},
 		});
 		expect(out).toContain('async-applied="true"');
+	});
+});
+
+describe('resolveHref', () => {
+	test('absolute href is returned unchanged (ignores base)', () => {
+		const a = makeAnchor('https://example.com/x?q=1');
+		expect(resolveHref(a, 'https://other.example')).toBe('https://example.com/x?q=1');
+	});
+
+	test('relative href is resolved against the base URL', () => {
+		const a = makeAnchor('/foo/bar');
+		expect(resolveHref(a, 'https://example.com')).toBe('https://example.com/foo/bar');
+	});
+
+	test('relative href against a base with a path resolves like the URL spec', () => {
+		const a = makeAnchor('sibling');
+		expect(resolveHref(a, 'https://example.com/parent/child')).toBe(
+			'https://example.com/parent/sibling',
+		);
+	});
+
+	test('protocol-relative href takes the base scheme', () => {
+		const a = makeAnchor('//cdn.example.com/x');
+		expect(resolveHref(a, 'https://example.com')).toBe('https://cdn.example.com/x');
+	});
+
+	test('missing href attribute returns null', () => {
+		const a = makeAnchor(null);
+		expect(resolveHref(a, 'https://example.com')).toBeNull();
+	});
+
+	test('empty href returns null', () => {
+		const a = makeAnchor('');
+		expect(resolveHref(a, 'https://example.com')).toBeNull();
+	});
+
+	test('relative href with no base returns null', () => {
+		const a = makeAnchor('/foo');
+		expect(resolveHref(a)).toBeNull();
+	});
+
+	test('malformed URL returns null instead of throwing', () => {
+		const a = makeAnchor('http://[invalid');
+		expect(resolveHref(a)).toBeNull();
+	});
+
+	test('accepts a URL object as base', () => {
+		const a = makeAnchor('/foo');
+		expect(resolveHref(a, new URL('https://example.com/sub/'))).toBe(
+			'https://example.com/foo',
+		);
 	});
 });

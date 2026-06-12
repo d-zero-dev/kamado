@@ -124,6 +124,110 @@ describe('manipulateDOM', () => {
 		expect(result).toContain('injected');
 	});
 
+	test('hook ctx.getHref resolves <a href> against pkg.production.baseURL in build mode', async () => {
+		const seen: { href?: string | null; baseURL?: string } = {};
+		const transform = manipulateDOM({
+			hook: (_elements, window, ctx) => {
+				const a = window.document.querySelector('a');
+				seen.href = a ? ctx.getHref(a) : null;
+				seen.baseURL = ctx.baseURL;
+			},
+			imageSizes: false,
+		});
+		// default createMockTransformInfo() has isServe:false +
+		// pkg.production.baseURL = 'https://example.com'
+		const info = createMockTransformInfo();
+
+		await transform.transform(
+			'<html><body><a href="/path/to/page">x</a></body></html>',
+			info,
+		);
+
+		expect(seen.baseURL).toBe('https://example.com');
+		expect(seen.href).toBe('https://example.com/path/to/page');
+	});
+
+	test('hook ctx.getHref uses devServer URL in serve mode', async () => {
+		const seen: { href?: string | null; baseURL?: string } = {};
+		const transform = manipulateDOM({
+			hook: (_elements, window, ctx) => {
+				const a = window.document.querySelector('a');
+				seen.href = a ? ctx.getHref(a) : null;
+				seen.baseURL = ctx.baseURL;
+			},
+			imageSizes: false,
+		});
+		const info = createMockTransformInfo({
+			isServe: true,
+			context: {
+				mode: 'serve',
+				dir: {
+					root: '/test',
+					input: '/test/input',
+					output: '/test/output',
+					public: '/test/public',
+				},
+				devServer: { host: 'localhost', port: 4242 },
+				pkg: {},
+			} as Context,
+		});
+
+		await transform.transform('<html><body><a href="/foo">x</a></body></html>', info);
+
+		expect(seen.baseURL).toBe('http://localhost:4242');
+		expect(seen.href).toBe('http://localhost:4242/foo');
+	});
+
+	test('hook ctx.getHref returns null when no base is configured and href is relative', async () => {
+		const seen: { href?: string | null; baseURL?: string } = {};
+		const transform = manipulateDOM({
+			hook: (_elements, window, ctx) => {
+				const a = window.document.querySelector('a');
+				seen.href = a ? ctx.getHref(a) : null;
+				seen.baseURL = ctx.baseURL;
+			},
+			imageSizes: false,
+		});
+		const info = createMockTransformInfo({
+			context: {
+				mode: 'build',
+				dir: {
+					root: '/test',
+					input: '/test/input',
+					output: '/test/output',
+					public: '/test/public',
+				},
+				devServer: { host: 'localhost', port: 3000 },
+				// no pkg.production.baseURL and no pkg.production.host
+				pkg: {},
+			} as Context,
+		});
+
+		await transform.transform('<html><body><a href="/foo">x</a></body></html>', info);
+
+		expect(seen.baseURL).toBeUndefined();
+		expect(seen.href).toBeNull();
+	});
+
+	test('hook ctx.getHref leaves absolute href intact (ignores base)', async () => {
+		const seen: { href?: string | null } = {};
+		const transform = manipulateDOM({
+			hook: (_elements, window, ctx) => {
+				const a = window.document.querySelector('a');
+				seen.href = a ? ctx.getHref(a) : null;
+			},
+			imageSizes: false,
+		});
+		const info = createMockTransformInfo();
+
+		await transform.transform(
+			'<html><body><a href="https://elsewhere.test/abs">x</a></body></html>',
+			info,
+		);
+
+		expect(seen.href).toBe('https://elsewhere.test/abs');
+	});
+
 	test('should receive correct TransformContext in hook', async () => {
 		let receivedContext: TransformContext | undefined;
 

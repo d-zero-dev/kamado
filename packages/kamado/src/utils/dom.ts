@@ -47,6 +47,32 @@ export async function domSerialize(html: string, options: DomSerializeOptions) {
 }
 
 /**
+ * Resolves an element's `href` attribute against a base URL.
+ *
+ * linkedom does not populate `window.location` or `Document.baseURI`, so
+ * reading `<a>.href` directly returns the raw attribute value instead of an
+ * absolute URL. This helper plugs that gap for DOM-manipulation hooks: pass
+ * the element and the base URL the consumer wants relative paths resolved
+ * against, and get back an absolute URL string or null.
+ * @param el   - DOM element (typically `<a>` / `<link>` / `<area>` / `<base>`)
+ * @param base - base URL used to absolutize relative href values
+ * @returns absolute URL string, or null when the attribute is missing/empty,
+ *          the value cannot be parsed, or the value is relative AND base is
+ *          missing.
+ */
+export function resolveHref(el: DomElement, base?: string | URL): string | null {
+	const raw = el.getAttribute('href');
+	if (!raw) {
+		return null;
+	}
+	try {
+		return new URL(raw, base).href;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Parses HTML string with linkedom and returns DOM elements
  * @param html - HTML content to parse
  * @returns Object containing parsed elements, document, window, fragment flag, and a serializer
