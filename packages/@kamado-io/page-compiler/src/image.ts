@@ -1,3 +1,5 @@
+import type { DomElement } from 'kamado/utils/dom';
+
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -46,7 +48,10 @@ async function sizeOf(filePath: string): Promise<ImageSize> {
  * @param elements - Array of elements to process
  * @param options - Optional options (rootDir, selector, ext)
  */
-export async function imageSizes(elements: Element[], options?: ImageSizesOptions) {
+export async function imageSizes(
+	elements: readonly DomElement[],
+	options?: ImageSizesOptions,
+) {
 	const {
 		rootDir,
 		selector,

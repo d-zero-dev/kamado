@@ -1,6 +1,7 @@
 import type { ImageSizesOptions } from '../image.js';
 import type { Transform, TransformContext } from 'kamado/config';
 import type { MetaData } from 'kamado/files';
+import type { DomElement, DomWindow } from 'kamado/utils/dom';
 
 import path from 'node:path';
 
@@ -14,11 +15,10 @@ import { imageSizes } from '../image.js';
  */
 export interface ManipulateDOMOptions<M extends MetaData> {
 	readonly hook?: (
-		elements: readonly Element[],
-		window: Window,
+		elements: readonly DomElement[],
+		window: DomWindow,
 		context: TransformContext<M>,
 	) => Promise<void> | void;
-	readonly host?: string;
 	readonly imageSizes?: ImageSizesOptions | boolean;
 }
 
@@ -44,16 +44,6 @@ export function manipulateDOM<M extends MetaData>(
 				content = decoder.decode(content);
 			}
 
-			const isServe = ctx.isServe;
-			const host =
-				options?.host ??
-				(isServe
-					? `http://${ctx.context.devServer.host}:${ctx.context.devServer.port}`
-					: (ctx.context.pkg.production?.baseURL ??
-						(ctx.context.pkg.production?.host
-							? `http://${ctx.context.pkg.production.host}`
-							: undefined)));
-
 			return await domSerialize(content, {
 				hook: async (elements, window) => {
 					// Apply custom hook if provided
@@ -70,7 +60,6 @@ export function manipulateDOM<M extends MetaData>(
 						});
 					}
 				},
-				url: host,
 			});
 		},
 	};

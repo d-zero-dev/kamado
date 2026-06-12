@@ -296,7 +296,6 @@ describe('page compiler', async () => {
 		});
 		expect(result).toBe(`<!DOCTYPE html>
 <html>
-  <head></head>
   <body>
     <main>
       <p>Hello, world!</p>
