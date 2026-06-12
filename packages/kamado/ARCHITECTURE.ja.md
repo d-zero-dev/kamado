@@ -614,7 +614,7 @@ Kamado はファイルごとの処理の繰り返しを避けるため、複数�
 yarn bench                 # 1000ページ、3回計測、transforms 無効
 yarn bench --pages=500     # ページ数
 yarn bench --runs=5        # 計測回数（中央値を報告）
-yarn bench --full          # デフォルトの page transforms（jsdom/prettier/minifier）を有効化
+yarn bench --full          # デフォルトの page transforms（linkedom/prettier/minifier）を有効化
 yarn bench --incremental   # 変更なしインクリメンタル再ビルドを計測（計測対象外のコールドビルド1回でマニフェストを準備）
 ```
 

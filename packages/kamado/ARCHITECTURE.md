@@ -614,7 +614,7 @@ A synthetic-build benchmark lives in `packages/kamado/benchmark/`:
 yarn bench                 # 1000 pages, 3 runs, transforms disabled
 yarn bench --pages=500     # page count
 yarn bench --runs=5        # number of runs (median is reported)
-yarn bench --full          # enable the default page transforms (jsdom/prettier/minifier)
+yarn bench --full          # enable the default page transforms (linkedom/prettier/minifier)
 yarn bench --incremental   # measure no-change incremental rebuilds (one unmeasured cold build seeds the manifest)
 ```
 

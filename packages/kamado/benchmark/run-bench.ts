@@ -9,7 +9,7 @@
  * Usage:
  *   yarn bench [--pages=1000] [--runs=3] [--full] [--incremental]
  *
- * --full enables the default page transforms (jsdom/prettier/minifier), which
+ * --full enables the default page transforms (linkedom/prettier/minifier), which
  * dominate CPU time. By default transforms are disabled to isolate the
  * compile/IO pipeline.
  *
