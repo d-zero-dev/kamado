@@ -1,4 +1,19 @@
-import { JSDOM } from 'jsdom';
+import { parseHTML } from 'linkedom';
+
+/**
+ * Window-like object returned by linkedom's parseHTML
+ */
+export type DomWindow = ReturnType<typeof parseHTML>;
+
+/**
+ * Document held by a DomWindow
+ */
+export type DomDocument = DomWindow['document'];
+
+/**
+ * Element type used across the DOM serializer (derived from linkedom's API)
+ */
+export type DomElement = NonNullable<ReturnType<DomDocument['querySelector']>>;
 
 /**
  * Options for DOM serialization
@@ -7,17 +22,13 @@ export interface DomSerializeOptions {
 	/**
 	 * Hook function to manipulate DOM elements before serialization
 	 */
-	readonly hook: (elements: Element[], window: Window) => Promise<void> | void;
-	/**
-	 * URL for JSDOM (optional)
-	 */
-	readonly url?: string;
+	readonly hook: (elements: DomElement[], window: DomWindow) => Promise<void> | void;
 }
 
 /**
  * Serializes HTML with DOM manipulation hook
  * @param html - HTML content to serialize
- * @param options - Serialization options (hook, url)
+ * @param options - Serialization options (hook)
  * @returns Serialized HTML string
  * @example
  * ```typescript
@@ -25,55 +36,50 @@ export interface DomSerializeOptions {
  *   hook: async (elements, window) => {
  *     // Manipulate DOM elements
  *   },
- *   url: 'https://example.com',
  * });
  * ```
  */
 export async function domSerialize(html: string, options: DomSerializeOptions) {
-	const { hook, url } = options;
-	const dom = getDOM(html, url);
+	const { hook } = options;
+	const dom = getDOM(html);
 	await hook(dom.elements, dom.window);
 	const serialized = dom.elements.map((node) => node.outerHTML).join('');
 	return serialized;
 }
 
 /**
- * Parses HTML string into a JSDOM instance and returns DOM elements
+ * Parses HTML string with linkedom and returns DOM elements
  * @param html - HTML content to parse
- * @param url - URL for JSDOM context (optional)
  * @returns Object containing parsed elements, document, window, and whether the input is a fragment
  */
-function getDOM(
-	html: string,
-	url?: string,
-): {
-	elements: Element[];
-	document: Document;
-	window: Window;
+function getDOM(html: string): {
+	elements: DomElement[];
+	document: DomDocument;
+	window: DomWindow;
 	isFragment: boolean;
 } {
 	const isFragment = !/^<html(?:\s|>)|^<!doctype\s/i.test(html.trim());
 
 	if (isFragment) {
-		const window = new JSDOM('', url ? { url } : {}).window;
-		const document = window.document;
+		const window = parseHTML('<!doctype html><html><head></head><body></body></html>');
+		const { document } = window;
 		const tmpContainer = document.createElement('div');
 		tmpContainer.insertAdjacentHTML('beforeend', html);
 
 		return {
-			elements: [...tmpContainer.children],
+			elements: [...tmpContainer.children] as DomElement[],
 			document,
-			window: window as unknown as Window,
+			window,
 			isFragment: true,
 		};
 	}
 
-	const dom = new JSDOM(html, url ? { url } : {});
+	const window = parseHTML(html);
 
 	return {
-		elements: [dom.window.document.documentElement],
-		document: dom.window.document,
-		window: dom.window as unknown as Window,
+		elements: [window.document.documentElement],
+		document: window.document,
+		window,
 		isFragment: false,
 	};
 }
