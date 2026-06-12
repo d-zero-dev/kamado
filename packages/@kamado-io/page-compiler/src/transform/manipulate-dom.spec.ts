@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { Cache } from '@d-zero/shared/cache';
 import { collectDependencies } from 'kamado/files';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -464,6 +465,11 @@ describe('manipulateDOM > imageSizes', () => {
 
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kamado-imagesizes-'));
+		// The on-disk imageSizes cache key is `srcPath:size`, not the file
+		// path — without clearing it, a fresh test using the same filename and
+		// happening to produce a same-byte-length SVG can pick up another
+		// run's width/height. Clear up-front so each test starts from cold.
+		await new Cache('@d-zero/builder/image-sizes').clear();
 	});
 
 	afterEach(async () => {
@@ -651,5 +657,43 @@ describe('manipulateDOM > imageSizes', () => {
 		const img = document.querySelector('img');
 		expect(img?.getAttribute('width')).toBe('200');
 		expect(img?.getAttribute('height')).toBe('100');
+	});
+
+	test('cache-busted src values for the same file share the cache entry', async () => {
+		// Cache key is `srcPath:size`. Two cache-buster query strings on the
+		// same file produce the same cache key — the second access must hit
+		// the cache and return the FIRST access's measurements, even if the
+		// file bytes were rewritten in between (as long as the byte length
+		// stays identical, since `size` is part of the key).
+		const file = path.join(tmpDir, 'cb.svg');
+		// Write the original SVG (100x50)
+		await fs.writeFile(
+			file,
+			`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"></svg>`,
+		);
+		const transform = manipulateDOM();
+		const info = createMockTransformInfo({ outputDir: tmpDir });
+
+		await transform.transform('<html><body><img src="cb.svg?v=a"></body></html>', info);
+
+		// Rewrite the file with the SAME byte length but different parsed sizes
+		// — so the stat-size cache key still matches, but the actual bytes
+		// would yield 100x99 if the cache were bypassed.
+		await fs.writeFile(
+			file,
+			`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="99"></svg>`,
+		);
+
+		const result = await transform.transform(
+			'<html><body><img src="cb.svg?v=b"></body></html>',
+			info,
+		);
+
+		const { document } = parseHTML(typeof result === 'string' ? result : '');
+		const img = document.querySelector('img');
+		// If cache key were the raw src ("cb.svg?v=a" vs "cb.svg?v=b"), the
+		// second access would be a fresh parse and read height="99". With the
+		// srcPath-based key, the cached 50 is reused.
+		expect(img?.getAttribute('height')).toBe('50');
 	});
 });
