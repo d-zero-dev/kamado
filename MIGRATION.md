@@ -2,8 +2,6 @@
 
 Mechanical recipe for upgrading a kamado v1 project to v2. Each section is a self-contained transformation; apply top-to-bottom. Before/after blocks are exhaustive — no prose between them. AI agents: skip sections whose Before pattern does not appear in the target project.
 
-Status: v2 is currently in alpha (`2.0.0-alpha.x`). Pin to the exact version in `package.json`; do not use `^`.
-
 ---
 
 ## 0. Prerequisites
@@ -20,18 +18,18 @@ File: `package.json`
 
 ```diff
 - "kamado": "^1.3.0",
-+ "kamado": "2.0.0-alpha.17",
++ "kamado": "^2.0.0",
 - "@kamado-io/page-compiler": "^1.x",
-+ "@kamado-io/page-compiler": "2.0.0-alpha.17",
++ "@kamado-io/page-compiler": "^2.0.0",
 - "@kamado-io/script-compiler": "^1.x",
-+ "@kamado-io/script-compiler": "2.0.0-alpha.17",
++ "@kamado-io/script-compiler": "^2.0.0",
 - "@kamado-io/style-compiler": "^1.x",
-+ "@kamado-io/style-compiler": "2.0.0-alpha.17",
++ "@kamado-io/style-compiler": "^2.0.0",
 - "@kamado-io/pug-compiler": "^1.x",
-+ "@kamado-io/pug-compiler": "2.0.0-alpha.17",
++ "@kamado-io/pug-compiler": "^2.0.0",
 ```
 
-Replace `2.0.0-alpha.17` with the actual latest tag (`npm view kamado dist-tags`). Run `yarn install` after editing.
+Run the project's install command (`yarn install` / `npm install` / `pnpm install`).
 
 ---
 
@@ -303,7 +301,7 @@ Apply these one-for-one. Search regex shown.
 
 ---
 
-## 11. Prettier error policy moved to pipeline-level (alpha.16)
+## 11. Prettier error policy moved to pipeline-level
 
 **Why**: a per-transform `parseError` option meant configuring "what happens when prettier throws" separately from "what happens when minifier / a custom transform throws". The pipeline-level `formatOptions.parseError` applies the same policy to every transform uniformly, and the new error message format (`Transform '<name>' failed on <source>: <original>`) carries the failing transform's name so a single policy can still tell errors apart.
 
