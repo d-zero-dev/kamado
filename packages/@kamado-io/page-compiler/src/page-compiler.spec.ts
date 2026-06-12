@@ -213,8 +213,9 @@ describe('page compiler', async () => {
 			raw: content,
 		});
 		const result = await compilePage(page, {});
-		// Pug syntax is not valid HTML, so domSerialize returns empty string
-		expect(result).toBe('');
+		// Pug syntax is not HTML, so the DOM parser treats it as a text fragment
+		// and the serializer round-trips it as text (post-pug trailing newline included).
+		expect(result).toBe('p Hello, world!\n');
 	});
 
 	test('should compile a page made with pug using compileHooks', async () => {
@@ -296,6 +297,7 @@ describe('page compiler', async () => {
 		});
 		expect(result).toBe(`<!DOCTYPE html>
 <html>
+  <head></head>
   <body>
     <main>
       <p>Hello, world!</p>

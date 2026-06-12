@@ -43,25 +43,28 @@ export async function domSerialize(html: string, options: DomSerializeOptions) {
 	const { hook } = options;
 	const dom = getDOM(html);
 	await hook(dom.elements, dom.window);
-	const serialized = dom.elements.map((node) => node.outerHTML).join('');
-	return serialized;
+	return dom.serialize();
 }
 
 /**
  * Parses HTML string with linkedom and returns DOM elements
  * @param html - HTML content to parse
- * @returns Object containing parsed elements, document, window, and whether the input is a fragment
+ * @returns Object containing parsed elements, document, window, fragment flag, and a serializer
  */
 function getDOM(html: string): {
 	elements: DomElement[];
 	document: DomDocument;
 	window: DomWindow;
 	isFragment: boolean;
+	serialize: () => string;
 } {
-	const isFragment = !/^<html(?:\s|>)|^<!doctype\s/i.test(html.trim());
+	// Strip leading HTML comments and whitespace before fragment detection,
+	// so a `<!-- license -->` banner doesn't misclassify a full document as a fragment.
+	const stripped = html.trim().replace(/^(?:<!--[\s\S]*?-->\s*)*/, '');
+	const isFragment = !/^<html(?:\s|>)|^<!doctype\s/i.test(stripped);
 
 	if (isFragment) {
-		const window = parseHTML('<!doctype html><html><head></head><body></body></html>');
+		const window = parseHTML('<html></html>');
 		const { document } = window;
 		const tmpContainer = document.createElement('div');
 		tmpContainer.insertAdjacentHTML('beforeend', html);
@@ -71,15 +74,30 @@ function getDOM(html: string): {
 			document,
 			window,
 			isFragment: true,
+			// innerHTML preserves text and comment nodes that .children would drop
+			serialize: () => tmpContainer.innerHTML,
 		};
 	}
 
 	const window = parseHTML(html);
+	const { document } = window;
+	const root = document.documentElement as DomElement | null;
+
+	// linkedom does not auto-create <head> for head-less pages; downstream
+	// regex-based transforms (e.g. inject-to-head) need </head> to anchor on.
+	if (root && !document.head) {
+		const head = document.createElement('head');
+		root.insertBefore(head, root.firstChild);
+	}
 
 	return {
-		elements: [window.document.documentElement],
-		document: window.document,
+		elements: root ? [root] : [],
+		document,
 		window,
 		isFragment: false,
+		// linkedom returns null documentElement for inputs lacking <html>
+		// (e.g. a bare "<!doctype html>"); fall back to an empty string
+		// instead of crashing on `.outerHTML`.
+		serialize: () => root?.outerHTML ?? '',
 	};
 }
