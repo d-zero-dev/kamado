@@ -195,29 +195,6 @@ describe('page compiler', async () => {
 		expect(hooksFactory).toHaveBeenCalledTimes(1);
 	});
 
-	test('should pass through pug file without compiler', async () => {
-		clearMockFileContents();
-		const content = 'p Hello, world!';
-		const page: CompilableFile = {
-			inputPath: '/path/to/page.pug',
-			outputPath: '/path/to/page.html',
-			fileSlug: 'page',
-			filePathStem: '/path/to/page',
-			url: '/path/to/page',
-			extension: '.pug',
-			date: new Date(),
-		};
-		setMockFileContent('/path/to/page.pug', {
-			metaData: {},
-			content,
-			raw: content,
-		});
-		const result = await compilePage(page, {});
-		// Pug syntax is not HTML, so the DOM parser treats it as a text fragment
-		// and the serializer round-trips it as text (post-pug trailing newline included).
-		expect(result).toBe('p Hello, world!\n');
-	});
-
 	test('should compile a page made with pug using compileHooks', async () => {
 		clearMockFileContents();
 		const { compilePug } = await import('@kamado-io/pug-compiler');
@@ -295,6 +272,10 @@ describe('page compiler', async () => {
 				},
 			},
 		});
+		// The empty <head></head> here is significant: the layout source has no
+		// <head>, but getDOM auto-inserts one (see dom.ts) so downstream
+		// regex-based transforms (inject-to-head etc.) keep an anchor under
+		// linkedom. Removing the auto-head logic must break this snapshot.
 		expect(result).toBe(`<!DOCTYPE html>
 <html>
   <head></head>

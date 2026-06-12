@@ -182,8 +182,10 @@ describe('manipulateDOM > imageSizes', () => {
 			info,
 		);
 
-		expect(result).toContain('width="160"');
-		expect(result).toContain('height="90"');
+		const { document } = parseHTML(typeof result === 'string' ? result : '');
+		const img = document.querySelector('img');
+		expect(img?.getAttribute('width')).toBe('160');
+		expect(img?.getAttribute('height')).toBe('90');
 	});
 
 	test('adds width/height to <picture> > <source>', async () => {
@@ -196,13 +198,13 @@ describe('manipulateDOM > imageSizes', () => {
 			info,
 		);
 
-		// Attribute order varies between DOM implementations — check both tag and attrs.
-		const sourceTag = result.match(/<source[^>]*>/)?.[0] ?? '';
-		expect(sourceTag).toContain('width="320"');
-		expect(sourceTag).toContain('height="180"');
-		const imgTag = result.match(/<img[^>]*>/)?.[0] ?? '';
-		expect(imgTag).toContain('width="320"');
-		expect(imgTag).toContain('height="180"');
+		const { document } = parseHTML(typeof result === 'string' ? result : '');
+		const source = document.querySelector('source');
+		const img = document.querySelector('img');
+		expect(source?.getAttribute('width')).toBe('320');
+		expect(source?.getAttribute('height')).toBe('180');
+		expect(img?.getAttribute('width')).toBe('320');
+		expect(img?.getAttribute('height')).toBe('180');
 	});
 
 	test('skips elements not matching the selector option', async () => {
