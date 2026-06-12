@@ -106,9 +106,11 @@ function getDOM(html: string): {
 	isFragment: boolean;
 	serialize: () => string;
 } {
-	// Strip leading HTML comments and whitespace before fragment detection,
-	// so a `<!-- license -->` banner doesn't misclassify a full document as a fragment.
-	const stripped = html.trim().replace(/^(?:<!--[\s\S]*?-->\s*)*/, '');
+	// Strip leading HTML comments and whitespace before fragment detection so
+	// a `<!-- license -->` banner doesn't misclassify a full document as a
+	// fragment. Both the standard `-->` terminator and the HTML5-tolerated
+	// `--!>` variant are accepted.
+	const stripped = html.trim().replace(/^(?:<!--[\s\S]*?(?:-->|--!>)\s*)*/, '');
 	const isFragment = !/^<html(?:\s|>)|^<!doctype\s/i.test(stripped);
 
 	if (isFragment) {
@@ -133,9 +135,19 @@ function getDOM(html: string): {
 
 	// linkedom does not auto-create <head> for head-less pages; downstream
 	// regex-based transforms (e.g. inject-to-head) need </head> to anchor on.
-	if (root && !document.head) {
-		const head = document.createElement('head');
-		root.insertBefore(head, root.firstChild);
+	// Walk the children explicitly instead of reading `document.head` — that
+	// getter has been observed to materialize a <head> as a side effect on
+	// first access in some linkedom versions, which would make the explicit
+	// insertion dead code that silently breaks if the getter ever stops doing
+	// that.
+	if (root) {
+		const hasHead = [...root.children].some(
+			(child) => (child.tagName ?? '').toLowerCase() === 'head',
+		);
+		if (!hasHead) {
+			const head = document.createElement('head');
+			root.insertBefore(head, root.firstChild);
+		}
 	}
 
 	return {
