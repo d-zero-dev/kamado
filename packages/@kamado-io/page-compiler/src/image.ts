@@ -78,7 +78,9 @@ export async function imageSizes(
 			continue;
 		}
 
-		const src = img.getAttribute('src');
+		// Trim before guarding so a stray leading space (common in CMS-authored
+		// content like ' https://cdn/x.png') cannot bypass the protocol checks.
+		const src = img.getAttribute('src')?.trim();
 
 		// Strip query string and hash before extension/protocol checks so that
 		// a cache-busted src like "hero.png?v=abc" still resolves.
@@ -118,7 +120,12 @@ export async function imageSizes(
 
 		const size = stats.size;
 
-		const cacheKey = `${src}:${size}`;
+		// Cache by the on-disk identifier (path + size), not the raw src — two
+		// cache-busted src values like 'hero.png?v=1' and 'hero.png?v=2' point
+		// at the same file and should share the cache entry. Hashing on raw
+		// src would force a fresh image-size parse on every cache-buster
+		// rotation.
+		const cacheKey = `${srcPath}:${size}`;
 
 		const cached = await cache.load(cacheKey);
 
