@@ -200,23 +200,28 @@ interface TransformContext<M extends MetaData> {
 The package provides **6 transform factory functions** (5 included in default pipeline):
 
 1. **`manipulateDOM(options?)`** - DOM manipulation (includes imageSizes integration)
-   - `options.hook`: Custom DOM manipulation function
+   - `options.hook`: Custom DOM manipulation function. The third argument is `ManipulateDOMHookContext<M>`, an extension of `TransformContext<M>` with two extra fields that compensate for linkedom not populating `window.location` / `Document.baseURI`:
+     - `baseURL: string | undefined` — resolved automatically: dev-server URL in serve mode, `pkg.production.baseURL` (or `https://${pkg.production.host}` as a fallback) in build mode, `undefined` otherwise.
+     - `getHref(el): string | null` — resolves the element's `href` attribute against `baseURL` and returns an absolute URL. Returns `null` for missing/empty `href`, unparsable values, relative values when no base is configured, and dangerous schemes (`javascript:` / `data:` / `vbscript:` / `file:`). Basic-auth credentials in the base URL are scrubbed from the result.
+
      ```typescript
      (
-       elements: readonly Element[],
-       window: Window,
-       context: TransformContext<M>
+       elements: readonly DomElement[],
+       window: DomWindow,
+       context: ManipulateDOMHookContext<M>,
      ) => Promise<void> | void
      ```
+
+     - `DomElement` / `DomWindow` are linkedom-derived types re-exported from `kamado/utils/dom`; they do **not** implement layout APIs (`getBoundingClientRect`, `getComputedStyle`) or absolute-URL reflection (`<a>.href` returns the raw attribute, not the resolved URL — use `ctx.getHref(a)` instead).
+
    - `options.imageSizes`: Enable/configure automatic image size detection (default: `true`)
      - `boolean` - `true` to enable with defaults, `false` to disable
      - `ImageSizesOptions` object with properties:
-       - `rootDir?: string` - Root directory for resolving image paths (defaults to `outputDir` from context)
-       - `selector?: string` - CSS selector to filter target images (default: no filter, all `img` and `picture > source` elements are processed)
-       - `ext?: readonly string[]` - Image extensions to process (default: `['png', 'jpg', 'jpeg', 'webp', 'avif', 'svg']`)
+       - `rootDir?: string` - Root directory for resolving image paths (defaults to `outputDir` from context). Paths that escape `rootDir` via `..` segments are rejected.
+       - `selector?: string` - CSS selector applied to `<img>` elements only. `<picture> > <source>` elements are always processed regardless of this option so picture-driven sources stay sized even when an img-shaped selector is given. Default: no filter.
+       - `ext?: readonly string[]` - Image extensions to process (default: `['png', 'jpg', 'jpeg', 'webp', 'avif', 'svg']`). Query strings and fragments (e.g. `?v=abc`, `#frag`) are stripped before the extension check, so a cache-busted `src` still resolves.
      - Note: Width and height attributes are always set/overwritten, even if they already exist
      - Note: Uses kamado's `domSerialize` utility which preserves fragments as fragments and full documents as full documents
-   - `options.host`: URL for DOM resolution context (defaults to `http://{devServer.host}:{devServer.port}` in serve mode, or production `baseURL`/`host` in build mode)
 
 2. **`characterEntities()`** - Convert characters to HTML entities
    - Converts non-ASCII characters (code points ≥ 127) to their HTML entity equivalents (e.g., `©` → `&copy;`)
@@ -712,6 +717,37 @@ manipulateDOM({
 	},
 });
 ```
+
+#### Example: Resolving Anchor URLs with `ctx.getHref`
+
+`linkedom` (the DOM library used by `manipulateDOM`) does not populate `window.location` or `Document.baseURI`, so reading `<a>.href` returns the raw attribute value, not an absolute URL. Use `ctx.getHref(el)` for absolute-URL resolution against the build/serve base URL.
+
+```ts
+import { manipulateDOM } from '@kamado-io/page-compiler';
+
+manipulateDOM({
+	hook: (_elements, window, ctx) => {
+		// ctx.baseURL — dev-server URL in serve mode, pkg.production.baseURL in
+		// build mode, undefined when neither is configured.
+		// ctx.getHref(a) — absolute URL or null.
+		for (const a of window.document.querySelectorAll('a')) {
+			const abs = ctx.getHref(a);
+			if (abs && !abs.startsWith(ctx.baseURL ?? '')) {
+				a.setAttribute('rel', 'noopener noreferrer');
+				a.setAttribute('target', '_blank');
+			}
+		}
+	},
+});
+```
+
+`ctx.getHref` returns `null` for:
+
+- missing or empty `href` attribute
+- unparsable URLs (malformed input, relative `href` when `ctx.baseURL` is `undefined`)
+- dangerous schemes (`javascript:`, `data:`, `vbscript:`, `file:`) — so the helper is safe to interpolate into rendered HTML
+
+Basic-auth credentials in `ctx.baseURL` (e.g. a `https://user:pass@staging.example.com` preview URL) are stripped from the returned string.
 
 #### Example: Using createSSIShim in Custom Transform
 

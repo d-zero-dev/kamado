@@ -8,20 +8,25 @@ import { imageSize } from 'image-size';
 import { trackDependency } from 'kamado/files';
 
 /**
- * Options for automatic image size addition
+ * Options for {@link imageSizes}.
  */
 export interface ImageSizesOptions {
 	/**
-	 * Root directory for image files
+	 * Root directory for resolving image paths. Paths that escape this
+	 * directory via `..` segments are rejected before any filesystem access.
 	 */
 	readonly rootDir?: string;
 	/**
-	 * Selector for target image elements (only applies to <img>; <picture> > <source>
-	 * is always processed so picture-driven sources stay sized regardless of selector).
+	 * CSS selector applied to `<img>` elements only. `<picture> > <source>`
+	 * elements are always processed regardless of this option so
+	 * picture-driven sources stay sized even when an img-shaped selector is
+	 * given. Default: no filter.
 	 */
 	readonly selector?: string;
 	/**
-	 * List of image extensions to target
+	 * List of image extensions to target. Query strings and fragments are
+	 * stripped from `src` before the extension check, so a cache-busted
+	 * `src` (e.g. `hero.png?v=abc`) still resolves.
 	 * @default ['png', 'jpg', 'jpeg', 'webp', 'avif', 'svg']
 	 */
 	readonly ext?: readonly string[];
@@ -45,9 +50,16 @@ async function sizeOf(filePath: string): Promise<ImageSize> {
 }
 
 /**
- * Automatically adds width/height attributes to image elements
- * @param elements - Array of elements to process
- * @param options - Optional options (rootDir, selector, ext)
+ * Adds `width`/`height` attributes to `<img>` and `<picture> > <source>`
+ * elements based on the on-disk image referenced by their `src`. Skips
+ * external (`http(s)://`, `//`), data, and unsupported-extension URLs;
+ * rejects paths that escape `rootDir`. Reports every read file via
+ * `trackDependency` (including missing ones) so incremental builds invalidate
+ * the page when the image is added/replaced.
+ * @param elements - Top-level DOM elements to scan for image descendants.
+ * @param options - Optional behavior toggles (see {@link ImageSizesOptions}).
+ * @returns A promise that resolves once every matched image has been measured
+ *   and updated (or skipped).
  */
 export async function imageSizes(
 	elements: readonly DomElement[],
