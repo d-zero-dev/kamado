@@ -16,7 +16,8 @@ export interface ImageSizesOptions {
 	 */
 	readonly rootDir?: string;
 	/**
-	 * Selector for target image elements
+	 * Selector for target image elements (only applies to <img>; <picture> > <source>
+	 * is always processed so picture-driven sources stay sized regardless of selector).
 	 */
 	readonly selector?: string;
 	/**
@@ -60,29 +61,41 @@ export async function imageSizes(
 	} = options ?? {};
 	const cache = new Cache<ImageSize>('@d-zero/builder/image-sizes');
 
-	const images = elements.flatMap((el) => [
-		...el.querySelectorAll('img, picture > source'),
-	]);
+	// linkedom's querySelectorAll returns a real Array, so flatMap flattens
+	// it directly without an intermediate spread copy. The lib.dom-shaped
+	// NodeListOf<Element> declared by TS doesn't satisfy DomElement[]
+	// structurally, so cast through unknown.
+	const images = elements.flatMap(
+		(el) =>
+			el.querySelectorAll('img, picture > source') as unknown as readonly DomElement[],
+	);
 
 	for (const img of images) {
-		if (selector && !img.matches(selector)) {
+		// selector is documented as targeting <img>; <source> elements never match
+		// an img-shaped selector, so skip the filter for them to keep the picture
+		// fallback wired up regardless of selector.
+		if (selector && img.matches('img') && !img.matches(selector)) {
 			continue;
 		}
 
 		const src = img.getAttribute('src');
 
+		// Strip query string and hash before extension/protocol checks so that
+		// a cache-busted src like "hero.png?v=abc" still resolves.
+		const srcPath = src?.split('?')[0]?.split('#')[0] ?? '';
+
 		if (
 			!src ||
-			src.startsWith('data://') ||
+			src.startsWith('data:') ||
 			src.startsWith('http://') ||
 			src.startsWith('https://') ||
 			src.startsWith('//') ||
-			!ext.some((e) => src.endsWith(`.${e}`))
+			!ext.some((e) => srcPath.endsWith(`.${e}`))
 		) {
 			continue;
 		}
 
-		const filePath = path.join(rootDir ?? '', ...src.split('/'));
+		const filePath = path.join(rootDir ?? '', ...srcPath.split('/'));
 		// The emitted width/height depend on this image file's bytes, but it is
 		// read here outside kamado's file APIs — report it so incremental builds
 		// invalidate the page when the image is replaced (tracked even when the
