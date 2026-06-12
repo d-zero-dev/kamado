@@ -1,9 +1,11 @@
 import type { Context, TransformContext } from 'kamado/config';
 
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import { collectDependencies } from 'kamado/files';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { manipulateDOM } from './manipulate-dom.js';
 
@@ -143,16 +145,100 @@ describe('manipulateDOM', () => {
 		expect(receivedContext?.path).toBe('page.html');
 		expect(receivedContext?.isServe).toBe(true);
 	});
+});
 
-	test('should use custom host option', async () => {
-		const transform = manipulateDOM({
-			host: 'https://custom.example.com',
-			imageSizes: false,
-		});
-		const info = createMockTransformInfo();
+describe('manipulateDOM > imageSizes', () => {
+	let tmpDir: string;
 
-		const result = await transform.transform('<html><body>test</body></html>', info);
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kamado-imagesizes-'));
+	});
 
-		expect(typeof result).toBe('string');
+	afterEach(async () => {
+		await fs.rm(tmpDir, { recursive: true, force: true });
+	});
+
+	/**
+	 *
+	 * @param filename
+	 * @param width
+	 * @param height
+	 */
+	async function writeSvg(filename: string, width: number, height: number) {
+		await fs.writeFile(
+			path.join(tmpDir, filename),
+			`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"></svg>`,
+		);
+	}
+
+	test('adds width/height to <img> with a local src', async () => {
+		await writeSvg('hero-img.svg', 160, 90);
+		const transform = manipulateDOM();
+		const info = createMockTransformInfo({ outputDir: tmpDir });
+
+		const result = await transform.transform(
+			'<html><body><img src="hero-img.svg"></body></html>',
+			info,
+		);
+
+		expect(result).toContain('width="160"');
+		expect(result).toContain('height="90"');
+	});
+
+	test('adds width/height to <picture> > <source>', async () => {
+		await writeSvg('hero-source.svg', 320, 180);
+		const transform = manipulateDOM();
+		const info = createMockTransformInfo({ outputDir: tmpDir });
+
+		const result = await transform.transform(
+			'<html><body><picture><source src="hero-source.svg"><img src="hero-source.svg"></picture></body></html>',
+			info,
+		);
+
+		// Attribute order varies between DOM implementations — check both tag and attrs.
+		const sourceTag = result.match(/<source[^>]*>/)?.[0] ?? '';
+		expect(sourceTag).toContain('width="320"');
+		expect(sourceTag).toContain('height="180"');
+		const imgTag = result.match(/<img[^>]*>/)?.[0] ?? '';
+		expect(imgTag).toContain('width="320"');
+		expect(imgTag).toContain('height="180"');
+	});
+
+	test('skips elements not matching the selector option', async () => {
+		await writeSvg('hero-selector.svg', 100, 50);
+		const transform = manipulateDOM({ imageSizes: { selector: 'img.target' } });
+		const info = createMockTransformInfo({ outputDir: tmpDir });
+
+		const result = await transform.transform(
+			'<html><body><img class="other" src="hero-selector.svg"><img class="target" src="hero-selector.svg"></body></html>',
+			info,
+		);
+
+		const tags = [...result.matchAll(/<img[^>]*>/g)].map((m) => m[0]);
+		const target = tags.find((t) => t.includes('class="target"')) ?? '';
+		const other = tags.find((t) => t.includes('class="other"')) ?? '';
+		expect(target).toContain('width="100"');
+		expect(target).toContain('height="50"');
+		expect(other).not.toMatch(/width=/);
+		expect(other).not.toMatch(/height=/);
+	});
+
+	test('skips http(s)/protocol-relative/data URLs and unsupported extensions', async () => {
+		// No file needs to exist — these src values must all be skipped before fs access.
+		const transform = manipulateDOM();
+		const info = createMockTransformInfo({ outputDir: tmpDir });
+
+		const html =
+			'<html><body>' +
+			'<img src="https://example.com/x.png">' +
+			'<img src="//cdn.example.com/x.png">' +
+			'<img src="data://image/png">' +
+			'<img src="local.txt">' +
+			'</body></html>';
+
+		const result = await transform.transform(html, info);
+
+		expect(result).not.toMatch(/<img[^>]*width=/);
+		expect(result).not.toMatch(/<img[^>]*height=/);
 	});
 });
