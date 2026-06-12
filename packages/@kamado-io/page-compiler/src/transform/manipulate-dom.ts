@@ -52,25 +52,50 @@ export interface ManipulateDOMOptions<M extends MetaData> {
 }
 
 /**
- * Resolves the base URL the hook will see, mirroring the jsdom-era behavior
- * of the removed `url`/`host` options: serve mode uses the dev server's
- * URL, build mode uses `pkg.production.baseURL` (falling back to `host`).
+ * Resolves the base URL the hook will see. Returns `undefined` instead of a
+ * malformed URL so `resolveHref`'s null-fallback path is the only failure
+ * mode hook authors have to handle.
+ *
+ * Serve mode → `http://<devServer.host>:<devServer.port>` if both are present.
+ * Build mode → `pkg.production.baseURL` if it parses, else
+ *              `https://<pkg.production.host>` (defaults to HTTPS so canonical
+ *              links don't trigger mixed-content / SEO regressions),
+ *              else `undefined`.
+ *
+ * Whitespace is trimmed; empty strings are treated as missing.
  * @param ctx - the transform context for the current compilation
  */
 function resolveBaseURL<M extends MetaData>(
 	ctx: TransformContext<M>,
 ): string | undefined {
+	let candidate: string | undefined;
 	if (ctx.isServe) {
-		return `http://${ctx.context.devServer.host}:${ctx.context.devServer.port}`;
+		const dev = ctx.context.devServer;
+		if (dev?.host && dev.port != null) {
+			candidate = `http://${dev.host}:${dev.port}`;
+		}
+	} else {
+		const production = ctx.context.pkg.production;
+		const baseURL = production?.baseURL?.trim();
+		const host = production?.host?.trim();
+		candidate = baseURL || (host ? `https://${host}` : undefined);
 	}
-	const { baseURL, host } = ctx.context.pkg.production ?? {};
-	if (baseURL) {
-		return baseURL;
+	if (!candidate) {
+		return undefined;
 	}
-	if (host) {
-		return `http://${host}`;
+	try {
+		const url = new URL(candidate);
+		// new URL('https://example.com').href is 'https://example.com/' — drop
+		// that synthetic trailing slash when the user gave a bare origin so
+		// the returned baseURL keeps the user-supplied shape. URL resolution
+		// (`new URL('/foo', baseURL)`) works the same with or without it.
+		if (url.pathname === '/' && !url.search && !url.hash) {
+			return url.origin;
+		}
+		return url.href;
+	} catch {
+		return undefined;
 	}
-	return undefined;
 }
 
 /**
