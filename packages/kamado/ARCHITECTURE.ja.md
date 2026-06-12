@@ -606,6 +606,22 @@ Kamado はファイルごとの処理の繰り返しを避けるため、複数�
 
 ---
 
+## DOM ライブラリ（linkedom）
+
+デフォルトの page transforms は HTML のパースと再シリアライズに [linkedom](https://github.com/WebReflection/linkedom) を使用しています。linkedom は **意図的に HTML5 仕様を完全には満たさない** 設計で、いくつかのパーサ便宜と引き換えに jsdom 比で CPU が約 3〜4 倍速、RSS が約 50% 減になります。挙動差分のうち下流の transform に影響するものは `packages/kamado/src/utils/dom.ts` 内で補正しています。
+
+| linkedom の挙動                                                               | 影響                                                                                  | 補正箇所                                                                                                                                                            |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `parseHTML('<html><body>...</body></html>')` は空の `<head>` を自動補完しない | `inject-to-head` は `</head>` をアンカーにしているため、`<head>` がないと静かに no-op | `getDOM` 内で `document.head` が無ければ生成                                                                                                                        |
+| `parseHTML('<!doctype html>')` は `document.documentElement === null` を返す  | `documentElement.outerHTML` がスロー                                                  | `getDOM` で null ガードして空文字を返す                                                                                                                             |
+| `Document.prototype.baseURI` と `Window.location` が実体を持たない            | hook が `a.href` で絶対URL解決を期待すると相対値が返る                                | `manipulateDOM` の `host`/`url` を廃止。host が必要な hook は `ctx`（例: `ctx.context.pkg.production?.baseURL`）から取得し、`new URL(rel, base)` で明示的に解決する |
+| `element.children` はテキスト/コメントを含まない                              | テキストやコメントのみのフラグメントが `''` でシリアライズされる                      | `getDOM` のフラグメント分岐は `tmpContainer.innerHTML` 経由で出力                                                                                                   |
+| `setAttribute` が既存属性の前に挿入する（jsdom と順序が異なる）               | 属性順を文字列で固定したスナップショットが壊れる                                      | テストは結果を linkedom で再パースして DOM クエリで検証                                                                                                             |
+
+linkedom のバージョンを上げる場合はテストを必ず回し直してください — `packages/kamado/src/utils/dom.spec.ts` と `packages/@kamado-io/page-compiler/src/transform/manipulate-dom.spec.ts` がこれらの挙動の第一線の防御です。
+
+---
+
 ## ベンチマーク
 
 合成ビルドのベンチマークが `packages/kamado/benchmark/` にあります:
