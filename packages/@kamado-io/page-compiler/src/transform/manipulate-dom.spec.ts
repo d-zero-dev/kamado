@@ -265,6 +265,115 @@ describe('manipulateDOM', () => {
 	});
 });
 
+/**
+ * Captures `ctx.baseURL` as resolved by `manipulateDOM` for the given
+ * TransformContext override. Useful for pinning the resolveBaseURL ladder
+ * (empty-string, invalid URL, https fallback, missing devServer) without
+ * threading boilerplate through every test.
+ * @param ctxOverride
+ */
+async function getBaseURL(
+	ctxOverride: Partial<TransformContext>,
+): Promise<string | undefined> {
+	let seen: string | undefined;
+	const transform = manipulateDOM({
+		hook: (_elements, _window, ctx) => {
+			seen = ctx.baseURL;
+		},
+		imageSizes: false,
+	});
+	const info = createMockTransformInfo(ctxOverride);
+	await transform.transform('<html><body>x</body></html>', info);
+	return seen;
+}
+
+describe('manipulateDOM > ctx.baseURL resolution', () => {
+	const buildCtx = (production: Record<string, unknown> | undefined) =>
+		({
+			context: {
+				mode: 'build',
+				dir: {
+					root: '/test',
+					input: '/test/input',
+					output: '/test/output',
+					public: '/test/public',
+				},
+				devServer: { host: 'localhost', port: 3000 },
+				pkg: production === undefined ? {} : { production },
+			} as Context,
+		}) satisfies Partial<TransformContext>;
+
+	test('empty baseURL is treated as missing', async () => {
+		expect(await getBaseURL(buildCtx({ baseURL: '' }))).toBeUndefined();
+	});
+
+	test('whitespace-only baseURL is treated as missing', async () => {
+		expect(await getBaseURL(buildCtx({ baseURL: '   ' }))).toBeUndefined();
+	});
+
+	test('baseURL without a scheme is rejected (returns undefined)', async () => {
+		// `new URL('example.com')` throws — the parser refuses scheme-less inputs.
+		expect(await getBaseURL(buildCtx({ baseURL: 'example.com' }))).toBeUndefined();
+	});
+
+	test('baseURL with surrounding whitespace is trimmed and accepted', async () => {
+		expect(await getBaseURL(buildCtx({ baseURL: '  https://example.com  ' }))).toBe(
+			'https://example.com',
+		);
+	});
+
+	test('host-only fallback resolves to https:// (HTTPS-by-default)', async () => {
+		// Documents the http→https default introduced when ctx.getHref started
+		// emitting user-visible URLs; an http:// fallback would be a mixed-
+		// content / SEO regression.
+		expect(await getBaseURL(buildCtx({ host: 'example.com' }))).toBe(
+			'https://example.com',
+		);
+	});
+
+	test('empty host is treated as missing (no https:// emitted)', async () => {
+		expect(await getBaseURL(buildCtx({ host: '' }))).toBeUndefined();
+	});
+
+	test('serve mode with missing devServer returns undefined (no TypeError)', async () => {
+		// Pre-fix, resolveBaseURL dereferenced ctx.context.devServer.host
+		// unconditionally and threw on partial contexts. This test pins the
+		// optional-chained fallback.
+		const ctx = {
+			isServe: true,
+			context: {
+				mode: 'serve',
+				dir: {
+					root: '/test',
+					input: '/test/input',
+					output: '/test/output',
+					public: '/test/public',
+				},
+				pkg: {},
+			} as Context,
+		} satisfies Partial<TransformContext>;
+		expect(await getBaseURL(ctx)).toBeUndefined();
+	});
+
+	test('serve mode with devServer missing port returns undefined', async () => {
+		const ctx = {
+			isServe: true,
+			context: {
+				mode: 'serve',
+				dir: {
+					root: '/test',
+					input: '/test/input',
+					output: '/test/output',
+					public: '/test/public',
+				},
+				devServer: { host: 'localhost' } as { host: string; port: number },
+				pkg: {},
+			} as Context,
+		} satisfies Partial<TransformContext>;
+		expect(await getBaseURL(ctx)).toBeUndefined();
+	});
+});
+
 describe('manipulateDOM > imageSizes', () => {
 	let tmpDir: string;
 
