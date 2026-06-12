@@ -76,20 +76,33 @@ describe('manipulateDOM', () => {
 		expect(result).toBe(content);
 	});
 
-	test('imageSizes reports referenced image files as dependencies (tracked even when missing)', async () => {
-		// Guards the incremental-build fix: the default imageSizes transform
-		// reads image files outside kamado's file APIs, so it must report each
-		// one via trackDependency or replacing an image leaves pages stale.
-		// A missing image is still tracked (so adding it later invalidates).
-		const transform = manipulateDOM(); // imageSizes enabled by default
+	test('imageSizes reports referenced image files as dependencies even when fs.stat fails', async () => {
+		// Guards two contracts at once:
+		//  - incremental-build fix: imageSizes reads image files outside kamado's
+		//    file APIs, so it must report each one via trackDependency or
+		//    replacing an image leaves pages stale.
+		//  - fs.stat failure path (.catch(() => null)): a missing file (ENOENT)
+		//    or a permission-denied file (EACCES) is still tracked, but no
+		//    width/height is emitted. Both error kinds hit the same null branch,
+		//    so the missing-file case stands in for permission-denied as well.
+		const transform = manipulateDOM();
 		const info = createMockTransformInfo();
 
-		const { dependencies } = await collectDependencies(() =>
+		const { dependencies, result } = await collectDependencies(() =>
 			transform.transform('<html><body><img src="img/hero.png"></body></html>', info),
 		);
 
 		const expected = path.join(path.resolve(info.outputDir), 'img', 'hero.png');
 		expect([...dependencies]).toContain(expected);
+
+		// width/height must NOT be emitted when stat failed — parse the result
+		// back through the DOM so attribute-order changes can't mask the bug.
+		const serialized =
+			typeof result === 'string' ? result : new TextDecoder().decode(result);
+		const { document } = parseHTML(serialized);
+		const img = document.querySelector('img');
+		expect(img?.getAttribute('width')).toBeNull();
+		expect(img?.getAttribute('height')).toBeNull();
 	});
 
 	test('should apply custom manipulateDOM hook', async () => {
