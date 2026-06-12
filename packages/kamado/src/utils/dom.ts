@@ -60,16 +60,38 @@ export async function domSerialize(html: string, options: DomSerializeOptions) {
  *          the value cannot be parsed, or the value is relative AND base is
  *          missing.
  */
+/**
+ * Schemes resolveHref refuses to emit so the helper is safe-by-default for
+ * HTML output. Hook authors that genuinely want to handle them can read the
+ * attribute directly and call `new URL(...)` themselves.
+ */
+const REJECTED_SCHEMES = new Set(['javascript:', 'data:', 'vbscript:', 'file:']);
+
+/**
+ *
+ * @param el
+ * @param base
+ */
 export function resolveHref(el: DomElement, base?: string | URL): string | null {
 	const raw = el.getAttribute('href');
 	if (!raw) {
 		return null;
 	}
+	let url: URL;
 	try {
-		return new URL(raw, base).href;
+		url = new URL(raw, base);
 	} catch {
 		return null;
 	}
+	if (REJECTED_SCHEMES.has(url.protocol)) {
+		return null;
+	}
+	// Strip basic-auth credentials so a misconfigured base URL with userinfo
+	// (e.g. 'https://user:pass@staging.example.com') can't leak the password
+	// into rendered HTML, sitemaps, or build-cache artifacts.
+	url.username = '';
+	url.password = '';
+	return url.href;
 }
 
 /**
