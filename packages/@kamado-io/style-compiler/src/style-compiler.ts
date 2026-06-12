@@ -1,20 +1,42 @@
-import type { SourcemapOption } from 'kamado/compiler';
+import type { CustomCompileFunction, SourcemapOption } from 'kamado/compiler';
 import type { MetaData } from 'kamado/files';
 
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import cssnano from 'cssnano';
 import {
 	createBannerResolver,
+	createCacheDigest,
 	createCustomCompiler,
 	resolveSourcemapFlag,
 } from 'kamado/compiler';
 import { type CreateBanner } from 'kamado/compiler/banner';
-import { getContentFromFile } from 'kamado/files';
+import { getContentFromFile, trackDependency } from 'kamado/files';
 import postcss from 'postcss';
 import postcssImport from 'postcss-import';
 // eslint-disable-next-line import-x/default
 import postcssLoadConfig from 'postcss-load-config';
+
+const require = createRequire(import.meta.url);
+
+/**
+ * Versions of the PostCSS toolchain, folded into the cache digest so a
+ * dependency upgrade that changes CSS output (notably cssnano minification)
+ * invalidates the incremental cache. cssnano exposes no runtime version, so
+ * its package.json is read once at module load; failures fall back to '' so
+ * the digest is merely less precise, never throwing.
+ */
+const TOOLCHAIN_VERSIONS = {
+	postcss: postcss([]).version,
+	cssnano: ((): string => {
+		try {
+			return (require('cssnano/package.json') as { version: string }).version;
+		} catch {
+			return '';
+		}
+	})(),
+};
 
 /**
  * Options for the style compiler
@@ -125,11 +147,20 @@ export function createStyleCompiler<M extends MetaData>() {
 				}),
 			];
 
-			const createProcessor = async () => {
+			const createProcessor = async (): Promise<{
+				processor: postcss.Processor;
+				configFile: string | undefined;
+			}> => {
 				// Try to load PostCSS config from project root
 				let config;
+				let configFile: string | undefined;
 				try {
-					config = await postcssLoadConfig();
+					const loaded = await postcssLoadConfig();
+					config = loaded;
+					// The resolved config file shapes every output but is loaded
+					// outside kamado's file APIs; surface its path so the compile
+					// function can report it as a per-file dependency
+					configFile = loaded.file;
 				} catch (error) {
 					// Fallback to default config if no config found.
 					// A missing config is expected; anything else (e.g. a syntax
@@ -161,7 +192,7 @@ export function createStyleCompiler<M extends MetaData>() {
 						plugins.push(plugin);
 					}
 				}
-				return postcss(plugins);
+				return { processor: postcss(plugins), configFile };
 			};
 
 			// Normalize to a `/*! ... */` important comment so that:
@@ -174,18 +205,28 @@ export function createStyleCompiler<M extends MetaData>() {
 			// Lazily build the processor once and reuse it across files. A failed
 			// processor build is NOT cached, so the next file retries instead of
 			// replaying the same rejection forever.
-			let processorPromise: Promise<postcss.Processor> | undefined;
+			let processorPromise:
+				| Promise<{ processor: postcss.Processor; configFile: string | undefined }>
+				| undefined;
 
-			return async (file, _, __, cache) => {
+			const compileFunction: CustomCompileFunction = async (file, _, __, cache) => {
 				// cache === false (serve mode): rebuild per compilation so that
 				// postcss.config.js edits are picked up without a restart
-				const processor =
+				const { processor, configFile } =
 					cache === false
 						? await createProcessor()
 						: await (processorPromise ??= createProcessor().catch((error) => {
 								processorPromise = undefined;
 								throw error;
 							}));
+
+				// Report the resolved postcss config as a dependency of THIS file's
+				// output. The processor is built once and shared, so tracking must
+				// happen here in each file's collection scope, not inside the lazy
+				// createProcessor (which only runs in the first file's scope).
+				if (configFile) {
+					trackDependency(configFile);
+				}
 
 				const css = await getContentFromFile(file, cache);
 
@@ -196,8 +237,36 @@ export function createStyleCompiler<M extends MetaData>() {
 					to: undefined,
 					...(enableSourcemap ? { map: { inline: true } } : {}),
 				});
+
+				// postcss-import inlines files outside kamado's file APIs, so
+				// report them for the incremental-build manifest. Plugins emit
+				// `dependency` messages for each inlined file
+				for (const message of result.messages) {
+					if (message.type === 'dependency' && typeof message.file === 'string') {
+						trackDependency(message.file);
+					}
+				}
+
 				return result.css;
 			};
+
+			// Context-level inputs for the incremental-build manifest: when any
+			// of these change, every stylesheet must be rebuilt (functions in
+			// options are omitted from the digest — banner is captured as its
+			// resolved string instead). The toolchain versions are folded in so a
+			// postcss/cssnano upgrade that changes output invalidates the cache;
+			// the loaded postcss.config.js is now tracked per file as a
+			// dependency (see the compile function above).
+			compileFunction.cacheDigest = () =>
+				createCacheDigest({
+					compiler: '@kamado-io/style-compiler',
+					toolchainVersions: TOOLCHAIN_VERSIONS,
+					options,
+					banner: resolveBanner(),
+					enableSourcemap,
+				});
+
+			return compileFunction;
 		},
 	}));
 }

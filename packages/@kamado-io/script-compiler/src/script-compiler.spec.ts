@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { collectDependencies } from 'kamado/files';
 import {
 	describe,
 	test,
@@ -109,6 +110,41 @@ describe('script-compiler', () => {
 		expect(warnSpy).toHaveBeenCalledTimes(1);
 		expect(String(warnSpy.mock.calls[0]?.[0])).toContain('main-with-css.css');
 		warnSpy.mockRestore();
+	});
+});
+
+describe('script-compiler / incremental dependencies', () => {
+	test('reports every bundled module (esbuild metafile inputs) as a dependency', async () => {
+		const compile = await createCompileFn({ banner: '/* BANNER */' });
+		const file = createFile(
+			path.join(tmpDir, 'entry.ts'),
+			path.join(tmpDir, 'out', 'main.js'),
+		);
+
+		const { dependencies } = await collectDependencies(() =>
+			// @ts-ignore -- compile/log/cache are unused by the script compiler
+			compile(file, () => ''),
+		);
+		const deps = [...dependencies];
+
+		// The entry and its imported module are both bundled inputs. Compare by
+		// filename: esbuild reports cwd-relative paths and macOS tmpdir symlinks
+		// make exact absolute-path equality brittle.
+		expect(deps.some((dep) => dep.endsWith(`${path.sep}entry.ts`))).toBe(true);
+		expect(deps.some((dep) => dep.endsWith(`${path.sep}util.ts`))).toBe(true);
+	});
+
+	test('cacheDigest is a string and differs when options differ', async () => {
+		// The digest folds in esbuild.version plus the options/banner; this
+		// guards against the digest being dropped or ignoring its inputs
+		const entry = createScriptCompiler<MetaData>()({ minifier: false });
+		const fn = await entry.compiler(makeContext('build'));
+		const digest = await fn.cacheDigest?.();
+		expect(typeof digest).toBe('string');
+
+		const otherEntry = createScriptCompiler<MetaData>()({ minifier: true });
+		const otherFn = await otherEntry.compiler(makeContext('build'));
+		expect(await otherFn.cacheDigest?.()).not.toBe(digest);
 	});
 });
 

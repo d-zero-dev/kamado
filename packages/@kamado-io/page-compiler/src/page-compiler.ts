@@ -1,13 +1,14 @@
 import type { GetNavTreeOptions } from './features/nav.js';
 import type { TitleListOptions } from './features/title-list.js';
 import type { CompileData, PageCompilerOptions, ParseErrorMode } from './types.js';
+import type { CustomCompileFunction } from 'kamado/compiler';
 import type { Transform, TransformContext } from 'kamado/config';
 import type { MetaData } from 'kamado/files';
 
 import path from 'node:path';
 
 import c from 'ansi-colors';
-import { createCustomCompiler } from 'kamado/compiler';
+import { createCacheDigest, createCustomCompiler } from 'kamado/compiler';
 import { getGlobalData } from 'kamado/data';
 import { getContentFromFile, getContentFromFileObject } from 'kamado/files';
 
@@ -78,7 +79,12 @@ export function createPageCompiler<M extends MetaData>() {
 			const parseErrorMode: ParseErrorMode =
 				options?.formatOptions?.parseError ?? 'silent';
 
-			return async (file, compile, log, cache) => {
+			const compileFunction: CustomCompileFunction = async (
+				file,
+				compile,
+				log,
+				cache,
+			) => {
 				log?.(c.blue('Building...'));
 				const pageContent = await getContentFromFile(file, cache);
 				const { metaData, content: pageMainContent } = pageContent;
@@ -203,6 +209,40 @@ export function createPageCompiler<M extends MetaData>() {
 
 				return result;
 			};
+
+			// Context-level inputs for the incremental-build manifest. Every page
+			// reads other pages through pageList (nav, breadcrumbs, titleList) and
+			// may iterate pageAssetFiles (e.g. a sitemap template), so a change to
+			// either — a page added or removed, a URL renamed, or frontmatter
+			// surfaced by config.pageList — rebuilds every page. pageAssetFiles is
+			// included (not dropped) so additions/removals are caught even when
+			// config.pageList filters them out of pageList. CompilableFile.date is
+			// the per-build timestamp from getFile(), not an input, so it is
+			// stripped from every file to keep the digest stable across builds.
+			// Functions (compileHooks, transform closures, filters.date) are
+			// omitted by the serializer; changes to them are covered by the config
+			// file hash that build() mixes in.
+			const stripDate = <T extends { date?: Date }>(file: T) => ({
+				...file,
+				date: undefined,
+			});
+			compileFunction.cacheDigest = () =>
+				createCacheDigest({
+					compiler: '@kamado-io/page-compiler',
+					pageList: globalData.pageList?.map(stripDate),
+					pageAssetFiles: globalData.pageAssetFiles?.map(stripDate),
+					globalData: {
+						...globalData,
+						pageList: undefined,
+						pageAssetFiles: undefined,
+						filters: undefined,
+					},
+					transforms: transforms.map((transform) => transform.name),
+					options,
+					parseErrorMode,
+				});
+
+			return compileFunction;
 		},
 	}));
 }

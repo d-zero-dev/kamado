@@ -554,9 +554,12 @@ The following options are available for all commands:
 
 The following options are available for the `build` command only:
 
-| Option             | Short | Description                                                                                                                               |
-| ------------------ | ----- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `--skip-unchanged` |       | Skip writing output files whose content is unchanged. The existing file's mtime is preserved, which helps mtime-based deployment diffing. |
+| Option             | Short | Description                                                                                                                                             |
+| ------------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--skip-unchanged` |       | Skip writing output files whose content is unchanged. The existing file's mtime is preserved, which helps mtime-based deployment diffing.               |
+| `--incremental`    |       | Skip compiling outputs whose recorded inputs are unchanged, using a verifying-trace manifest (cached under the OS temp directory by default).           |
+| `--force`          |       | With `--incremental`, ignore the existing cache and rebuild everything, then refresh it (instead of deleting the cache by hand).                        |
+| `--cache-dir <p>`  |       | Directory for the incremental-build cache. Default: a project-specific folder under the OS temp directory. A relative path is resolved against the cwd. |
 
 #### Examples
 
@@ -570,7 +573,36 @@ kamado build --verbose
 
 # Skip rewriting outputs whose content has not changed
 kamado build --skip-unchanged
+
+# Recompile only what changed since the last build
+kamado build --incremental
+
+# Force a clean rebuild without deleting the cache by hand
+kamado build --incremental --force
+
+# Keep the cache in-tree (e.g. to restore it in CI)
+kamado build --incremental --cache-dir .kamado/cache
 ```
+
+#### How `--incremental` works
+
+Each build records a verifying trace per output file: the content hash of every file the compilation read (the page itself, its sidecar JSON, the layout, pug includes, CSS `@import`s, the postcss config, referenced image files, bundled script imports) plus an environment digest (global data, the page list and page asset files, compiler options, the bundled toolchain versions, and the config file's content). The next `--incremental` build skips the whole compilation — not just the write — for any output whose traces all still match and whose output file is still present. Everything is content-hash based, so it works without relying on file modification times, and across machines as long as the cache directory is preserved.
+
+##### Cache location
+
+By default the manifest is written **outside the project tree** — to a project-specific folder under the OS temp directory (`<tmp>/kamado/<name>-<hash>/build-manifest.json`), namespaced by the config file's directory. So by default there is nothing to add to `.gitignore`, and a temp-dir wipe simply triggers a full rebuild. The cache is a build artifact that can be regenerated at any time; a stale or partial manifest never produces a wrong build, only a full rebuild.
+
+- **Force a clean rebuild:** `kamado build --incremental --force` (no manual deletion needed).
+- **Persist across CI runs:** pass `--cache-dir` pointing at a directory you save/restore with your CI cache (e.g. `--cache-dir .kamado/cache`, then gitignore `.kamado/` and cache that path). Because the trace is content-hash based, a cache restored on a different machine or runner is still valid.
+- **In-tree cache:** `--cache-dir .kamado/cache` keeps it in the project; add `.kamado/` to `.gitignore`.
+
+Caveats:
+
+- Changes that live only inside JavaScript functions (custom transforms, compile hooks, JS global-data files returning functions) are invisible to the digest unless they come from an edit to the config file itself, which is hashed. After changing such code outside the config file, run `--force` once (or clear the cache). (Upgrades of the bundled esbuild/postcss/cssnano are folded into the digest automatically; a `tsconfig.json` consumed by esbuild is **not** tracked — treat it like config-adjacent code and run `--force` after editing it.)
+- Custom compilers must read files through kamado's file APIs (`getContentFromFile` / `getFileContent`) or report extra inputs via `trackDependency(path)` from `kamado/files`; the bundled compilers already do. A compiler with no recorded dependencies is never skipped. For context-level inputs that are not files (resolved options, a toolchain version), set a `cacheDigest()` property on the returned compile function — e.g. `fn.cacheDigest = () => createCacheDigest({ options, version })` using `createCacheDigest` from `kamado/compiler` — so changing them rebuilds every output of that compiler. If you wrap a compile function, copy `cacheDigest` onto the wrapper or it is silently lost.
+- Output freshness is verified by byte length only, not content. An output modified out of band to the same size is not detected — pair `--incremental` with `--skip-unchanged` if outputs may be touched after the build.
+- A skipped page keeps its previously written output byte-for-byte, including anything time-dependent a template may have embedded.
+- Editing source files _while_ a build is running is unsupported (a dependency may be hashed after the compile read an older version).
 
 ### Type Safety & Generics
 

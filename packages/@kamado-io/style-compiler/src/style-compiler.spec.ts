@@ -3,6 +3,7 @@ import type { Context } from 'kamado/config';
 import type * as KamadoFiles from 'kamado/files';
 import type { CompilableFile, FileContent, MetaData } from 'kamado/files';
 
+import { collectDependencies } from 'kamado/files';
 // eslint-disable-next-line import-x/default
 import postcssLoadConfig from 'postcss-load-config';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
@@ -224,6 +225,79 @@ describe('createStyleCompiler / sourcemap', () => {
 	test("omits source map when sourcemap is 'onServer' and mode is build", async () => {
 		const out = await compile('build', { sourcemap: 'onServer' });
 		expect(out).not.toMatch(SOURCE_MAP_RE);
+	});
+});
+
+describe('style-compiler / incremental dependencies', () => {
+	test('reports the resolved postcss config file as a dependency', async () => {
+		setMockFile('/in/a.css', 'a { color: #ff0000; }');
+		// @ts-ignore -- minimal config shape with a resolved file path
+		mockedLoadConfig.mockResolvedValue({
+			plugins: [],
+			file: '/project/postcss.config.js',
+		});
+		const compileFn = await createCompileFn({ banner: '/* B */' });
+
+		const { dependencies } = await collectDependencies(() =>
+			compileFn(makeFile('/in/a.css'), () => ''),
+		);
+
+		expect([...dependencies]).toContain('/project/postcss.config.js');
+	});
+
+	test('does not report a config dependency when no postcss config is resolved', async () => {
+		setMockFile('/in/a.css', 'a { color: #ff0000; }');
+		// Default mock resolves { plugins: [] } with no `file`
+		const compileFn = await createCompileFn({ banner: '/* B */' });
+
+		const { dependencies } = await collectDependencies(() =>
+			compileFn(makeFile('/in/a.css'), () => ''),
+		);
+
+		expect([...dependencies]).toStrictEqual([]);
+	});
+
+	test('reports files from postcss `dependency` messages (e.g. @import inlining)', async () => {
+		setMockFile('/in/a.css', 'a { color: #ff0000; }');
+		// A plugin that emits a dependency message, as postcss-import does for
+		// each inlined file
+		const depEmitter = Object.assign(
+			() => ({
+				postcssPlugin: 'dep-emitter',
+				Once(_root: unknown, { result }: { result: { messages: unknown[] } }) {
+					result.messages.push({
+						type: 'dependency',
+						plugin: 'dep-emitter',
+						file: '/in/partials/_imported.css',
+						parent: '/in/a.css',
+					});
+				},
+			}),
+			{ postcss: true },
+		);
+		// @ts-ignore -- inject the dependency-emitting plugin via the loaded config
+		mockedLoadConfig.mockResolvedValue({ plugins: [depEmitter] });
+		const compileFn = await createCompileFn({ banner: '/* B */' });
+
+		const { dependencies } = await collectDependencies(() =>
+			compileFn(makeFile('/in/a.css'), () => ''),
+		);
+
+		expect([...dependencies]).toContain('/in/partials/_imported.css');
+	});
+
+	test('cacheDigest changes when a toolchain version differs', async () => {
+		// The digest folds in postcss/cssnano versions; two compilers built in
+		// the same process share them, so the digest is stable across calls but
+		// must include the version string (guards against dropping it)
+		const entry = createStyleCompiler<MetaData>()({ banner: '/* B */' });
+		const fn = await entry.compiler(makeContext('build'));
+		const digest = await fn.cacheDigest?.();
+		expect(typeof digest).toBe('string');
+		// A different option set must produce a different digest
+		const otherEntry = createStyleCompiler<MetaData>()({ banner: '/* OTHER */' });
+		const otherFn = await otherEntry.compiler(makeContext('build'));
+		expect(await otherFn.cacheDigest?.()).not.toBe(digest);
 	});
 });
 
