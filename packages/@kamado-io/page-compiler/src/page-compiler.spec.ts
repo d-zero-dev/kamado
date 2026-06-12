@@ -195,7 +195,14 @@ describe('page compiler', async () => {
 		expect(hooksFactory).toHaveBeenCalledTimes(1);
 	});
 
-	test('should pass through pug file without compiler', async () => {
+	test('pug source without a registered compiler round-trips as text (undefined behavior, pinned)', async () => {
+		// A .pug file reaching domSerialize without a pug compiler in
+		// compileHooks is a misconfiguration — there is no contract for what
+		// should happen. Under jsdom the previous serializer returned '' (text
+		// nodes were lost because .children is element-only); under linkedom
+		// the new tmpContainer.innerHTML serializer preserves the raw source.
+		// This test pins the new symptom so future migrations can't silently
+		// flip it back without an explicit decision.
 		clearMockFileContents();
 		const content = 'p Hello, world!';
 		const page: CompilableFile = {
@@ -213,8 +220,7 @@ describe('page compiler', async () => {
 			raw: content,
 		});
 		const result = await compilePage(page, {});
-		// Pug syntax is not valid HTML, so domSerialize returns empty string
-		expect(result).toBe('');
+		expect(result).toBe('p Hello, world!\n');
 	});
 
 	test('should compile a page made with pug using compileHooks', async () => {
@@ -294,6 +300,10 @@ describe('page compiler', async () => {
 				},
 			},
 		});
+		// The empty <head></head> here is significant: the layout source has no
+		// <head>, but getDOM auto-inserts one (see dom.ts) so downstream
+		// regex-based transforms (inject-to-head etc.) keep an anchor under
+		// linkedom. Removing the auto-head logic must break this snapshot.
 		expect(result).toBe(`<!DOCTYPE html>
 <html>
   <head></head>

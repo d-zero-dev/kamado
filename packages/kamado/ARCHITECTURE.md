@@ -606,6 +606,22 @@ The `cache` flag travels from `CustomCompileFunction` (4th parameter) through th
 
 ---
 
+## DOM Library (linkedom)
+
+The default page transforms parse and re-serialize HTML through [linkedom](https://github.com/WebReflection/linkedom). linkedom is **deliberately not 100% spec-compliant** — it trades a few HTML5-parser conveniences for ~3–4× lower CPU and ~50% lower RSS vs. jsdom. The places that differ matter for downstream transforms, so they are compensated in `packages/kamado/src/utils/dom.ts`:
+
+| linkedom behavior                                                                       | Why it matters                                                               | Where it is handled                                                                                                                                                                                                                                            |
+| --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `parseHTML('<html><body>...</body></html>')` does **not** auto-insert an empty `<head>` | `inject-to-head` anchors on `</head>`; silently no-ops without one           | `getDOM` inserts `<head>` if the documentElement has none, **for full-document inputs only**. Fragment inputs (CMS partials, includes) intentionally don't get a `<head>` injected, so `inject-to-head` on a fragment-only pipeline still no-ops by design.    |
+| `parseHTML('<!doctype html>')` returns `document.documentElement === null`              | `documentElement.outerHTML` throws                                           | `getDOM` falls back to returning an empty string                                                                                                                                                                                                               |
+| `Document.prototype.baseURI` and `Window.location` are not populated                    | Hooks reading `a.href` for absolute-URL resolution would see relative values | `manipulateDOM` no longer accepts `host`/`url`. Instead the hook receives `ctx.baseURL` (serve→devServer URL, build→`pkg.production.baseURL`/`host`) and `ctx.getHref(el)` which resolves an element's `href` attribute against `ctx.baseURL` (returns `string | null`) |
+| `element.children` is element-only (no text/comment nodes)                              | A fragment containing only text or comments serialized as `''`               | `getDOM`'s fragment branch serializes via `tmpContainer.innerHTML`                                                                                                                                                                                             |
+| `setAttribute` inserts before existing attributes (different order from jsdom)          | Snapshot tests that hard-code attribute order break                          | New tests re-parse the result through linkedom and assert via DOM queries                                                                                                                                                                                      |
+
+If the linkedom version is bumped, re-run the suite — `packages/kamado/src/utils/dom.spec.ts` and `packages/@kamado-io/page-compiler/src/transform/manipulate-dom.spec.ts` are the front-line guards for these behaviors.
+
+---
+
 ## Benchmarking
 
 A synthetic-build benchmark lives in `packages/kamado/benchmark/`:
@@ -614,7 +630,7 @@ A synthetic-build benchmark lives in `packages/kamado/benchmark/`:
 yarn bench                 # 1000 pages, 3 runs, transforms disabled
 yarn bench --pages=500     # page count
 yarn bench --runs=5        # number of runs (median is reported)
-yarn bench --full          # enable the default page transforms (jsdom/prettier/minifier)
+yarn bench --full          # enable the default page transforms (linkedom/prettier/minifier)
 yarn bench --incremental   # measure no-change incremental rebuilds (one unmeasured cold build seeds the manifest)
 ```
 
