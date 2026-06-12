@@ -39,6 +39,8 @@ Replace `2.0.0-alpha.17` with the actual latest tag (`npm view kamado dist-tags`
 
 Every compiler that was a bare callable in v1 is now a factory returning a callable: `createX<M>()(opts)`.
 
+**Why curried**: v2 propagates a generic `<M extends MetaData>` (custom frontmatter) through every compiler. TypeScript does not support partial type-argument inference, so a single-stage `createPageCompiler<M>(opts)` would force the caller to specify either both `M` and `opts` or neither. Splitting into two calls lets the caller pin `M` on the first call and have `opts` inferred on the second. The same pattern is used in Zustand, tRPC, and similar libraries. The extra `()` is the cost. Once TypeScript's partial inference proposal lands, the curry can be unwound — that will be another major version, not a v2 patch.
+
 ### 2a. Imports
 
 ```diff
@@ -99,6 +101,8 @@ File: `kamado.config.ts` (or wherever `Config` / `UserConfig` is declared)
 
 ## 4. `createCompileHooks` is now curried (pug-compiler)
 
+Same curry pattern as section 2 — `createCompileHooks<M>()` pins the metadata type, the second call infers options.
+
 ```diff
 - compileHooks: createCompileHooks({ basedir: '/...' }),
 + compileHooks: createCompileHooks()({ basedir: '/...' }),
@@ -115,6 +119,8 @@ compileHooks: createCompileHooks<MyMeta>()({ basedir: '/...' }),
 ## 5. `afterSerialize` / `beforeSerialize` → `manipulateDOM` transform
 
 v1 attached DOM hooks directly to `pageCompiler` options. v2 puts them inside the `transforms` pipeline.
+
+**Why**: v1's two hard-coded hook slots could not be composed or reordered. v2 generalizes them into a `Transform` interface that the rest of the pipeline (`prettier`, `minifier`, `inject-to-head`, user-supplied transforms) already implements. The new shape lets the caller insert/remove/reorder/replace any stage, and lets third-party packages publish reusable transforms.
 
 ### Before (v1)
 
@@ -163,6 +169,8 @@ Notes:
 
 v2 parses HTML through linkedom, not jsdom. The hook signature uses linkedom-derived types re-exported from `kamado/utils/dom`.
 
+**Why**: linkedom benchmarks roughly 3.9× faster build / 47% lower RSS than jsdom on this project's workload and drops 38+ transitive dependencies. The trade-off is that linkedom is **intentionally not 100% spec-compliant** — see ARCHITECTURE.md "DOM Library (linkedom)" for the compatibility table. The kamado-side compensation (auto `<head>`, null `documentElement` fallback, `--!>` normalization, `ctx.getHref`) is in `packages/kamado/src/utils/dom.ts`.
+
 ```diff
 - import type { Element } from 'lib.dom';   // implicit globals
 + import type { DomElement, DomWindow } from 'kamado/utils/dom';
@@ -190,6 +198,8 @@ Hook code that relied on jsdom-only behavior must be rewritten:
 ## 7. Removed: `manipulateDOM({ host })` and `domSerialize({ url })`
 
 Both `host` (on `manipulateDOM`) and `url` (on `domSerialize`) were deleted. Replacement is automatic via `ctx.baseURL`.
+
+**Why**: linkedom does not populate `window.location` / `Document.baseURI`, so the v1 trick of "tell jsdom which URL we're at, then read `<a>.href`" no longer works. Two options closed: either reimplement URL reflection in user code (verbose, easy to get wrong, leaks credentials in `https://user:pass@…` bases), or surface a first-class helper. v2 chose the helper. As a side effect of moving URL resolution into kamado's helper, dangerous schemes (`javascript:`/`data:`/etc.) and basic-auth credentials are stripped centrally instead of being every hook author's responsibility.
 
 ```diff
   manipulateDOM({
@@ -219,7 +229,9 @@ const abs = ctx.baseURL ? new URL(el.getAttribute('src') ?? '', ctx.baseURL).hre
 
 ## 8. Generic `MetaData` parameter (`<M extends MetaData>`)
 
-v2 propagates a generic `M extends MetaData` through `Config`, `Context`, `PageCompilerOptions`, navigation/breadcrumb structures, and hook contexts. If you have not customized frontmatter, no edit is required — defaults flow through.
+v2 propagates a generic `M extends MetaData` through `Config`, `Context`, `PageCompilerOptions`, navigation/breadcrumb structures, and hook contexts. **This is the reason every compiler factory in sections 2–4 is curried** — pinning `M` requires a separate call from the options so TypeScript can infer the latter independently.
+
+If you have not customized frontmatter, no edit is required — defaults flow through.
 
 If you customize frontmatter:
 
@@ -251,6 +263,8 @@ defineConfig<MyMeta>({
 
 The `kamado/features` deep import is gone. Use the page-compiler exports.
 
+**Why**: navigation / breadcrumb / title-list helpers live conceptually inside page compilation, not the kamado core. v1 already marked the module `@deprecated` in `1.x` and pointed users at `@kamado-io/page-compiler`; v2 finishes the move.
+
 ```diff
 - import { getBreadcrumbs, getNavTree, titleList, getTitle } from 'kamado/features';
 + // breadcrumbs / nav are now built-in to createPageCompiler and exposed via page data
@@ -266,6 +280,8 @@ Behavior changes:
 ---
 
 ## 10. Renames
+
+**Why**: `filter` was ambiguous (every option called `filter` could mean "filter the file list" or "filter nodes in the nav tree"). The new names spell out the target. `transformNode` returning `NavNode` invited mutation; switching to `boolean` separates "decide to keep" from "decide to rewrite" (rewrites go through `transformBreadcrumbItem` / a custom `Transform`).
 
 Apply these one-for-one. Search regex shown.
 
@@ -288,6 +304,8 @@ Apply these one-for-one. Search regex shown.
 ---
 
 ## 11. Prettier error policy moved to pipeline-level (alpha.16)
+
+**Why**: a per-transform `parseError` option meant configuring "what happens when prettier throws" separately from "what happens when minifier / a custom transform throws". The pipeline-level `formatOptions.parseError` applies the same policy to every transform uniformly, and the new error message format (`Transform '<name>' failed on <source>: <original>`) carries the failing transform's name so a single policy can still tell errors apart.
 
 ```diff
   prettier({
