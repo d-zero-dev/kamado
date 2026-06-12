@@ -95,7 +95,16 @@ export async function imageSizes(
 			continue;
 		}
 
-		const filePath = path.join(rootDir ?? '', ...srcPath.split('/'));
+		// Resolve against rootDir, then reject any path that escapes rootDir
+		// (e.g. `<img src="../../../etc/passwd.png">`) so attacker-controlled
+		// markup cannot leak arbitrary bytes through fs.stat / image-size or
+		// pollute the incremental-build manifest with out-of-tree paths.
+		const rootDirAbs = path.resolve(rootDir ?? '');
+		const filePath = path.resolve(rootDirAbs, ...srcPath.split('/'));
+		const relativeFromRoot = path.relative(rootDirAbs, filePath);
+		if (relativeFromRoot.startsWith('..') || path.isAbsolute(relativeFromRoot)) {
+			continue;
+		}
 		// The emitted width/height depend on this image file's bytes, but it is
 		// read here outside kamado's file APIs — report it so incremental builds
 		// invalidate the page when the image is replaced (tracked even when the
