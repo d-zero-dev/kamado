@@ -1,43 +1,57 @@
 import { parseHTML } from 'linkedom';
 
 /**
- * Window-like object returned by linkedom's parseHTML
+ * `Window`-like object returned by linkedom's `parseHTML`. Re-exported so
+ * downstream packages can type their DOM-manipulation hooks without
+ * importing linkedom directly. Does **not** implement layout APIs
+ * (`getBoundingClientRect`, `getComputedStyle`) — see ARCHITECTURE.md for
+ * the linkedom-vs-jsdom compatibility table.
  */
 export type DomWindow = ReturnType<typeof parseHTML>;
 
 /**
- * Document held by a DomWindow
+ * `Document` held by a {@link DomWindow}.
  */
 export type DomDocument = DomWindow['document'];
 
 /**
- * Element type used across the DOM serializer (derived from linkedom's API)
+ * `Element` type as returned by linkedom's `document.querySelector`. Used by
+ * {@link domSerialize}'s hook contract and re-exported so downstream packages
+ * can type their hook implementations without importing linkedom directly.
  */
 export type DomElement = NonNullable<ReturnType<DomDocument['querySelector']>>;
 
 /**
- * Options for DOM serialization
+ * Options for {@link domSerialize}.
  */
 export interface DomSerializeOptions {
 	/**
-	 * Hook function to manipulate DOM elements before serialization
+	 * Hook invoked after parsing but before serialization. Receives the
+	 * top-level elements of the parsed input and the owning window so the
+	 * caller can mutate the DOM in place; mutations are reflected in the
+	 * returned string. May be async.
 	 */
 	readonly hook: (elements: DomElement[], window: DomWindow) => Promise<void> | void;
 }
 
 /**
- * Serializes HTML with DOM manipulation hook
- * @param html - HTML content to serialize
- * @param options - Serialization options (hook)
- * @returns Serialized HTML string
+ * Parses an HTML string, invokes the provided hook against the resulting DOM,
+ * and returns the serialized result.
+ *
+ * Recognizes both fragment and full-document inputs and re-serializes them in
+ * the same shape (fragment in → fragment out). A bare `<!doctype html>` with
+ * no `<html>` body returns an empty string instead of throwing.
+ * @param html - HTML content to serialize (fragment or full document).
+ * @param options - Serialization options (currently just the hook).
+ * @returns The serialized HTML string.
  * @example
- * ```typescript
  * const result = await domSerialize(html, {
  *   hook: async (elements, window) => {
- *     // Manipulate DOM elements
+ *     for (const a of window.document.querySelectorAll('a')) {
+ *       a.setAttribute('rel', 'noopener');
+ *     }
  *   },
  * });
- * ```
  */
 export async function domSerialize(html: string, options: DomSerializeOptions) {
 	const { hook } = options;
@@ -47,20 +61,6 @@ export async function domSerialize(html: string, options: DomSerializeOptions) {
 }
 
 /**
- * Resolves an element's `href` attribute against a base URL.
- *
- * linkedom does not populate `window.location` or `Document.baseURI`, so
- * reading `<a>.href` directly returns the raw attribute value instead of an
- * absolute URL. This helper plugs that gap for DOM-manipulation hooks: pass
- * the element and the base URL the consumer wants relative paths resolved
- * against, and get back an absolute URL string or null.
- * @param el   - DOM element (typically `<a>` / `<link>` / `<area>` / `<base>`)
- * @param base - base URL used to absolutize relative href values
- * @returns absolute URL string, or null when the attribute is missing/empty,
- *          the value cannot be parsed, or the value is relative AND base is
- *          missing.
- */
-/**
  * Schemes resolveHref refuses to emit so the helper is safe-by-default for
  * HTML output. Hook authors that genuinely want to handle them can read the
  * attribute directly and call `new URL(...)` themselves.
@@ -68,9 +68,23 @@ export async function domSerialize(html: string, options: DomSerializeOptions) {
 const REJECTED_SCHEMES = new Set(['javascript:', 'data:', 'vbscript:', 'file:']);
 
 /**
+ * Resolves an element's `href` attribute against a base URL, returning an
+ * absolute URL safe to interpolate into rendered HTML.
  *
- * @param el
- * @param base
+ * linkedom does not populate `window.location` or `Document.baseURI`, so
+ * reading `<a>.href` directly returns the raw attribute instead of an
+ * absolute URL — this helper plugs that gap for DOM-manipulation hooks.
+ * Dangerous schemes (`javascript:` / `data:` / `vbscript:` / `file:`) are
+ * rejected and basic-auth credentials in `base` are scrubbed so the
+ * resolved value cannot leak passwords into HTML, sitemaps, or caches.
+ * @param el - DOM element holding the `href` attribute (typically `<a>` /
+ *   `<link>` / `<area>` / `<base>`).
+ * @param base - Base URL used to absolutize relative `href` values. Accepts a
+ *   string or a `URL` instance; if omitted, only already-absolute `href`
+ *   attributes resolve and relative ones return `null`.
+ * @returns The absolute URL string, or `null` when the attribute is
+ *   missing/empty, the value cannot be parsed, the value is relative and
+ *   `base` is missing, or the scheme is in the rejected list.
  */
 export function resolveHref(el: DomElement, base?: string | URL): string | null {
 	const raw = el.getAttribute('href');
@@ -106,18 +120,22 @@ function getDOM(html: string): {
 	isFragment: boolean;
 	serialize: () => string;
 } {
+	// linkedom recognizes only `-->` as a comment terminator, but HTML5 also
+	// tolerates `--!>`. Normalize the alternate form up-front so both fragment
+	// detection AND the downstream parser see a closed comment instead of an
+	// unclosed one that would swallow the rest of the document.
+	const normalized = html.replaceAll(/<!--([\s\S]*?)--!>/g, '<!--$1-->');
 	// Strip leading HTML comments and whitespace before fragment detection so
 	// a `<!-- license -->` banner doesn't misclassify a full document as a
-	// fragment. Both the standard `-->` terminator and the HTML5-tolerated
-	// `--!>` variant are accepted.
-	const stripped = html.trim().replace(/^(?:<!--[\s\S]*?(?:-->|--!>)\s*)*/, '');
+	// fragment.
+	const stripped = normalized.trim().replace(/^(?:<!--[\s\S]*?-->\s*)*/, '');
 	const isFragment = !/^<html(?:\s|>)|^<!doctype\s/i.test(stripped);
 
 	if (isFragment) {
 		const window = parseHTML('<html></html>');
 		const { document } = window;
 		const tmpContainer = document.createElement('div');
-		tmpContainer.insertAdjacentHTML('beforeend', html);
+		tmpContainer.insertAdjacentHTML('beforeend', normalized);
 
 		return {
 			elements: [...tmpContainer.children] as DomElement[],
@@ -129,7 +147,7 @@ function getDOM(html: string): {
 		};
 	}
 
-	const window = parseHTML(html);
+	const window = parseHTML(normalized);
 	const { document } = window;
 	const root = document.documentElement as DomElement | null;
 
