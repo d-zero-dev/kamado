@@ -61,14 +61,20 @@ export async function imageSizes(
 	} = options ?? {};
 	const cache = new Cache<ImageSize>('@d-zero/builder/image-sizes');
 
-	// linkedom's querySelectorAll returns a real Array, so flatMap flattens
-	// it directly without an intermediate spread copy. The lib.dom-shaped
-	// NodeListOf<Element> declared by TS doesn't satisfy DomElement[]
-	// structurally, so cast through unknown.
-	const images = elements.flatMap(
-		(el) =>
-			el.querySelectorAll('img, picture > source') as unknown as readonly DomElement[],
-	);
+	// linkedom 0.18 returns a real Array from querySelectorAll today, but the
+	// return type is loose enough that a future version could narrow it to a
+	// non-Array iterable and silently break flatMap flattening. Iterate via
+	// for...of (which works for both arrays and iterables) so a future shape
+	// change degrades gracefully instead of producing an array-of-NodeLists.
+	const images: DomElement[] = [];
+	for (const el of elements) {
+		const found = el.querySelectorAll(
+			'img, picture > source',
+		) as unknown as Iterable<DomElement>;
+		for (const item of found) {
+			images.push(item);
+		}
+	}
 
 	for (const img of images) {
 		// selector is documented as targeting <img>; <source> elements never match
