@@ -496,4 +496,75 @@ describe('manipulateDOM > imageSizes', () => {
 			expect(img.getAttribute('height')).toBeNull();
 		}
 	});
+
+	test('rejects src with ../ segments that escape rootDir (path traversal guard)', async () => {
+		// Pre-fix, '<img src="../../../etc/passwd.png">' would resolve outside
+		// rootDir, reach fs.stat on an arbitrary file, and pollute the
+		// incremental-build manifest. The fix uses path.resolve + path.relative
+		// to verify the result stays inside rootDir before touching the FS.
+		const transform = manipulateDOM();
+		const info = createMockTransformInfo({ outputDir: tmpDir });
+		const { dependencies, result } = await collectDependencies(() =>
+			transform.transform(
+				'<html><body><img src="../../../etc/passwd.png"></body></html>',
+				info,
+			),
+		);
+		expect([...dependencies]).toEqual([]);
+		const serialized =
+			typeof result === 'string' ? result : new TextDecoder().decode(result);
+		const { document } = parseHTML(serialized);
+		expect(document.querySelector('img')?.getAttribute('width')).toBeNull();
+		expect(document.querySelector('img')?.getAttribute('height')).toBeNull();
+	});
+
+	test('site-absolute src ("/foo.svg") is rebased under rootDir, not the filesystem root', async () => {
+		// '/foo' is a site-root-relative URL, not a filesystem path. The path
+		// traversal guard must allow it (it stays under rootDir after resolve)
+		// while still blocking actual escapes via '..'.
+		await writeSvg('site-root.svg', 50, 30);
+		const transform = manipulateDOM();
+		const info = createMockTransformInfo({ outputDir: tmpDir });
+
+		const result = await transform.transform(
+			'<html><body><img src="/site-root.svg"></body></html>',
+			info,
+		);
+
+		const { document } = parseHTML(typeof result === 'string' ? result : '');
+		const img = document.querySelector('img');
+		expect(img?.getAttribute('width')).toBe('50');
+		expect(img?.getAttribute('height')).toBe('30');
+	});
+
+	test('trims leading/trailing whitespace in src before the protocol guards', async () => {
+		// A CMS-authored src like ' https://cdn/x.png ' must still be detected
+		// as external — pre-trim, the leading space defeated startsWith('https://').
+		const transform = manipulateDOM();
+		const info = createMockTransformInfo({ outputDir: tmpDir });
+		const { dependencies } = await collectDependencies(() =>
+			transform.transform(
+				'<html><body><img src=" https://cdn.example.com/x.png "></body></html>',
+				info,
+			),
+		);
+		// Must not register a phantom path under rootDir
+		expect([...dependencies]).toEqual([]);
+	});
+
+	test('trims leading whitespace on a local src so it still resolves', async () => {
+		await writeSvg('hero-trim.svg', 200, 100);
+		const transform = manipulateDOM();
+		const info = createMockTransformInfo({ outputDir: tmpDir });
+
+		const result = await transform.transform(
+			'<html><body><img src=" hero-trim.svg "></body></html>',
+			info,
+		);
+
+		const { document } = parseHTML(typeof result === 'string' ? result : '');
+		const img = document.querySelector('img');
+		expect(img?.getAttribute('width')).toBe('200');
+		expect(img?.getAttribute('height')).toBe('100');
+	});
 });
