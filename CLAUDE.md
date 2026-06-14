@@ -58,7 +58,8 @@ kamado — オンデマンド静的サイトジェネレータ。Lerna + Yarn Wo
 
 タスクに応じて `.claude/skills/` 配下のスキルを参照すること。
 
-| スキル          | パス                                      | 用途                                                    |
-| --------------- | ----------------------------------------- | ------------------------------------------------------- |
-| Product Manager | `.claude/skills/product-manager/SKILL.md` | リポジトリ分析、ドキュメント生成・レビュー、PR レビュー |
-| QA Engineer     | `.claude/skills/qa-engineer/SKILL.md`     | コードレビュー、テスト品質チェック、カバレッジ改善      |
+| スキル          | パス                                      | 用途                                                        |
+| --------------- | ----------------------------------------- | ----------------------------------------------------------- |
+| Product Manager | `.claude/skills/product-manager/SKILL.md` | リポジトリ分析、ドキュメント生成・レビュー、PR レビュー     |
+| QA Engineer     | `.claude/skills/qa-engineer/SKILL.md`     | コードレビュー、テスト品質チェック、カバレッジ改善          |
+| Impl            | `.claude/skills/impl/SKILL.md`            | 合意済み計画の実装・検証・PR 作成までのオーケストレーション |
