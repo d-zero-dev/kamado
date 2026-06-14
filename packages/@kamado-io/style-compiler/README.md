@@ -1,12 +1,10 @@
-# @kamado-io/style-compiler
+# `@kamado-io/style-compiler`
 
-Style compiler for Kamado. Processes CSS/SCSS/SASS files with PostCSS and adds a banner before compiling.
+Kamado 用の PostCSS ベースの CSS/SCSS/SASS コンパイラ。
 
 ## Installation
 
-```bash
-npm install @kamado-io/style-compiler
-# or
+```sh
 yarn add @kamado-io/style-compiler
 ```
 
@@ -26,23 +24,16 @@ export default defineConfig({
 });
 ```
 
-## Options
+オプションは型定義（`files` / `ignore` / `outputExtension` / `alias` / `banner` / `sourcemap`）を参照。
 
-- `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input` (default: `'**/*.css'`)
-- `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.{scss,sass}'` will ignore all `.scss` and `.sass` files.
-- `outputExtension` (optional): Output file extension (default: `'.css'`)
-- `alias`: Map of path aliases (key is alias name, value is actual path)
-- `banner`: Banner configuration (can specify CreateBanner function or string)
-- `sourcemap`: Emit an inline source map (`/*# sourceMappingURL=data:... */` appended to the output). Accepts `boolean | 'onServer'`. When set to `'onServer'`, the source map is emitted only while kamado runs in serve mode (`context.mode === 'serve'`). Default: `'onServer'`. When enabled, the banner is fed through PostCSS as a `/*!` important comment so cssnano preserves it and the source map line offsets stay correct.
+## PostCSS 設定
 
-## PostCSS Configuration
+プロジェクトの `postcss.config.js` を `postcss-load-config` で読み込み、ビルトイン（`postcss-import` + cssnano）の後にユーザプラグインをマージする。`postcss-import` をユーザ側で書いた場合は重複回避のためスキップ。
 
-The compiler loads the project's PostCSS config (e.g. `postcss.config.js`) via `postcss-load-config` and merges its plugins after the built-in ones (`postcss-import` with alias support, then `cssnano`). A `postcss-import` entry in the user config is skipped to avoid duplicates.
+- **`kamado build`**: 設定はビルドごとに 1 回ロード、processor は全 CSS ファイルで共有
+- **`kamado server`**: コンパイルごとにリロード → `postcss.config.js` 編集が dev server 再起動なしで反映
+- 読み込み失敗時: ビルトインのみで継続し warning ログ（プラグインが効かない場合はコンソール確認）
 
-- During `kamado build`, the config is loaded **once per build** and the processor is reused for all CSS files.
-- During `kamado server`, the config is reloaded **per compilation**, so edits to `postcss.config.js` apply without restarting the dev server.
-- If no config exists, the built-in plugins alone are used. If the config fails to load for any other reason (e.g. a syntax error), a warning is printed and the built-in plugins are used as a fallback — check the console if your plugins do not seem to apply.
+## `sourcemap`
 
-## License
-
-MIT
+デフォルト `'onServer'`。enabled 時、banner は `/*!` important コメントとして PostCSS に渡され cssnano が保持する（source map の行オフセットを保つため）。
