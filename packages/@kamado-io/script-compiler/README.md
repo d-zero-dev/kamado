@@ -1,12 +1,10 @@
-# @kamado-io/script-compiler
+# `@kamado-io/script-compiler`
 
-Script compiler for Kamado. Bundles JavaScript/TypeScript files with esbuild and adds a banner before compiling.
+Kamado 用の JavaScript/TypeScript バンドラ。esbuild を使い、各エントリをメモリ内でバンドルする。
 
 ## Installation
 
-```bash
-npm install @kamado-io/script-compiler
-# or
+```sh
 yarn add @kamado-io/script-compiler
 ```
 
@@ -27,20 +25,10 @@ export default defineConfig({
 });
 ```
 
-## Options
+オプション（`files` / `ignore` / `outputExtension` / `alias` / `minifier` / `banner` / `sourcemap`）は型定義を参照。
 
-- `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input` (default: `'**/*.{js,ts,jsx,tsx,mjs,cjs}'`)
-- `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.test.ts'` will ignore all test files.
-- `outputExtension` (optional): Output file extension (default: `'.js'`)
-- `alias`: Map of path aliases (key is alias name, value is actual path)
-- `minifier`: Whether to enable minification
-- `banner`: Banner configuration (can specify CreateBanner function or string)
-- `sourcemap`: Emit an inline source map (data URI appended as `//# sourceMappingURL=...`). Accepts `boolean | 'onServer'`. When set to `'onServer'`, the source map is emitted only while kamado runs in serve mode (`context.mode === 'serve'`). Default: `'onServer'`. esbuild adjusts mappings to account for the banner automatically.
+## 重要な挙動
 
-## Bundling Behavior
-
-Each entry file is bundled in memory with esbuild (no temporary files are written) and the resulting JavaScript bundle is returned as the output. When esbuild emits additional output files alongside the bundle — for example a CSS file extracted from a `import './style.css'` statement — only the JavaScript bundle matching the output path is used; the extra outputs are ignored with a console warning.
-
-## License
-
-MIT
+- **メモリ内バンドル**: 一時ファイルを書かず、esbuild の結果を直接返す
+- **`import './style.css'` のような追加出力は無視される**（JS バンドル本体のみ採用、警告ログのみ）。CSS は `@kamado-io/style-compiler` 側で処理する想定
+- **`sourcemap: 'onServer'`（デフォルト）**: `kamado server` 時のみ inline source map を埋める。`true` で常時、`false` で常時無効。esbuild が banner 分のマッピングを自動補正する

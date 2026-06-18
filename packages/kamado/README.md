@@ -2,73 +2,19 @@
 
 [![npm version](https://badge.fury.io/js/kamado.svg)](https://www.npmjs.com/package/kamado)
 
-![kamado](https://cdn.jsdelivr.net/gh/d-zero-dev/kamado@main/assets/kamado_logo.png)
+**Kamado is an extremely simple static site build tool.** No hydration, no client-side runtime, no magic. Pure static HTML, baked on demand.
 
-**Kamado is an extremely simple static site build tool.** No hydration, no client-side runtime, no magic. **No runtime needed**, just the file system and raw HTML. Baked on demand. Thoroughly baked in a Kamado, that is what Kamado is.
+設計の詳細・実行フロー・依存追跡・キャッシュ戦略・型システム上の制約は [ARCHITECTURE.md](./ARCHITECTURE.md) を参照。
 
-## Project Overview
+## Installation
 
-- 🏗️ [Kamado Architecture](./ARCHITECTURE.md) | [Internal Architecture (JA)](./ARCHITECTURE.ja.md)
-
-Kamado is a static site build tool similar to 11ty, but aims for a simpler design. It is a tool for those who stick to the legacy, old-school ways of building.
-
-**The biggest feature of Kamado is that it requires absolutely no runtime.** No client-side runtime (hydration) is needed. Because it generates pure static HTML, it achieves persistence and robustness. It generates HTML that will work just the same 10 years, or even 20 years from now.
-
-Modern frameworks like Astro or Next.js require a runtime. Kamado does not depend on a runtime and generates pure static HTML. It is a tool for developers who prefer legacy approaches and do not want to depend on a runtime.
-
-## Key Features
-
-### No Runtime Required
-
-The biggest feature of Kamado is that it **requires absolutely no runtime**. No client-side runtime (hydration) is needed. Only pure static HTML is generated. This ensures persistence and robustness. You won't be troubled by runtime version upgrades or security patches.
-
-### Use with esbuild/vite
-
-Leave CSS and JavaScript to esbuild or vite, and Kamado will focus on managing HTML. This allows development that leverages the strengths of each tool.
-
-### On-Demand Build System
-
-The development server builds only the necessary files when they are accessed. With the transpile-on-demand method, it works comfortably even on sites with 10,000 pages. A lean design that bakes only what is needed.
-
-### Large-Scale Site Support
-
-Mapping management via a page tree allows for efficient builds even on large-scale sites.
-
-### Rich Logging and Parallel Builds
-
-Kamado adopts parallel build processing. What is happening during the build is clearly output to the console. You can check the build status of each file in real-time, and progress is obvious at a glance. Parallel processing also improves build speed.
-
-## Development Server
-
-### Hono-based Lightweight Server
-
-**Fire up the Kamado with Hono 🔥**
-
-### Transpile-on-Demand Method
-
-If a server request matches a destination path, it builds starting from the requested file in a chain reaction. There is no need to watch dependency files; only the necessary files are automatically built.
-
-### No File Watching
-
-It doesn't use `Chokidar` and doesn't do live reload. During development, only server requests from browser reloads trigger builds.
-
-### Mapping Management via Page Tree
-
-The page tree holds the source file paths and destination paths. Since mapping is managed at this point, if a server request matches a destination path, only the source file needs to be built.
-
-## Basic Usage
-
-### Installation
-
-```bash
-npm install kamado
-# or
+```sh
 yarn add kamado
 ```
 
-### Configuration File
+## 基本的な使い方
 
-Create `kamado.config.ts` in the project root:
+`kamado.config.ts` をプロジェクトルートに作成:
 
 ```ts
 import path from 'node:path';
@@ -84,321 +30,81 @@ export default defineConfig({
 		input: path.resolve(import.meta.dirname, '__assets', 'htdocs'),
 		output: path.resolve(import.meta.dirname, 'htdocs'),
 	},
-	devServer: {
-		open: true,
-		port: 8000,
-	},
+	devServer: { port: 8000, open: true },
 	compilers: (def) => [
 		def(createPageCompiler(), {
-			files: '**/*.{html,pug}',
+			files: '**/*.html',
 			outputExtension: '.html',
-			globalData: {
-				dir: path.resolve(import.meta.dirname, '__assets', '_libs', 'data'),
-			},
-			layouts: {
-				dir: path.resolve(import.meta.dirname, '__assets', '_libs', 'layouts'),
-			},
-			// Transform pipeline (optional, defaults to createDefaultPageTransforms())
-			// See @kamado-io/page-compiler documentation for customization
 		}),
 		def(createStyleCompiler(), {
 			files: '**/*.{css,scss,sass}',
 			ignore: '**/*.{scss,sass}',
 			outputExtension: '.css',
-			alias: {
-				'@': path.resolve(import.meta.dirname, '__assets', '_libs'),
-			},
 		}),
 		def(createScriptCompiler(), {
 			files: '**/*.{js,ts,jsx,tsx,mjs,cjs}',
 			outputExtension: '.js',
 			minifier: true,
-			alias: {
-				'@': path.resolve(import.meta.dirname, '__assets', '_libs'),
-			},
-		}),
-	],
-	async onBeforeBuild(context) {
-		// Process before build
-		// context.mode is available: 'build' or 'serve'
-	},
-	async onAfterBuild(context) {
-		// Process after build
-		// context.mode is available: 'build' or 'serve'
-	},
-});
-```
-
-### Configuration Description
-
-#### Directory Settings
-
-- `dir.root`: Project root directory
-- `dir.input`: Source file directory
-- `dir.output`: Output directory
-
-#### Development Server Settings
-
-- `devServer.port`: Server port number (default: `3000`)
-- `devServer.host`: Server host name (default: `localhost`)
-- `devServer.open`: Whether to automatically open the browser on startup (default: `false`)
-- `devServer.startPath`: Custom path to open in the browser when starting the server (optional, e.g., `'__tmpl/'`)
-- `devServer.transforms`: Array of response transformation functions that modify responses during development (optional, see [Response Transform API](#response-transform-api))
-- `devServer.proxy`: Proxy rules for forwarding requests to external servers during development (optional, see [Proxy API](#proxy-api))
-
-#### Compiler Settings
-
-The `compilers` option uses a callback form for type-safe compiler configuration. The callback receives a `def` helper function that binds compiler factories to their options. Each `def(factory(), options)` call returns a compiler with metadata. The compiler options include:
-
-- `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input`. Default values are provided by each compiler (see below).
-- `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.scss'` will ignore all `.scss` files in the input directory and subdirectories.
-- `outputExtension` (optional): Output file extension (e.g., `.html`, `.css`, `.js`, `.php`). Default values are provided by each compiler (see below).
-- Other compiler-specific options (see each compiler's documentation below)
-
-The order of entries in the returned array determines the processing order.
-
-##### createPageCompiler
-
-- `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input` (default: `'**/*.html'`)
-- `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.tmp'` will ignore all `.tmp` files.
-- `outputExtension` (optional): Output file extension (default: `'.html'`)
-- `globalData.dir`: Global data file directory
-- `globalData.data`: Additional global data
-- `layouts.dir`: Layout file directory
-- `compileHooks`: Compilation hooks for customizing compile process (required for Pug templates)
-- `transforms`: Array of transform functions to apply to compiled HTML. If omitted, uses `createDefaultPageTransforms()`. See [@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md) for details on the Transform Pipeline API.
-
-**Note**: When `compileHooks` or `transforms` is given as a function, it is resolved **once per build/serve context**, not per file. The resolved hooks and transform instances are shared by all pages (which may compile concurrently), so they must be file-independent and must not keep per-page mutable state.
-
-**Note**: `page-compiler` is a generic container compiler and does not compile Pug templates by default. To use Pug templates, install `@kamado-io/pug-compiler` and configure `compileHooks`. See [@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md) for details.
-
-**Example**: To compile `.pug` files to `.html`:
-
-```ts
-def(createPageCompiler(), {
-	files: '**/*.pug',
-	outputExtension: '.html',
-	compileHooks: {
-		main: {
-			compiler: compilePug(),
-		},
-	},
-});
-```
-
-##### createStyleCompiler
-
-- `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input` (default: `'**/*.css'`)
-- `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.{scss,sass}'` will ignore all `.scss` and `.sass` files.
-- `outputExtension` (optional): Output file extension (default: `'.css'`)
-- `alias`: Path alias map (used in PostCSS `@import`)
-- `banner`: Banner configuration (can specify CreateBanner function or string)
-- `sourcemap`: Emit an inline source map appended to the output. Accepts `boolean | 'onServer'`. When set to `'onServer'`, the source map is emitted only while kamado runs in serve mode. Default: `'onServer'`.
-
-**Example**: To compile `.scss` files to `.css` while ignoring source files:
-
-```ts
-def(createStyleCompiler(), {
-	files: '**/*.{css,scss,sass}',
-	ignore: '**/*.{scss,sass}',
-	outputExtension: '.css',
-	alias: {
-		'@': path.resolve(import.meta.dirname, '__assets', '_libs'),
-	},
-});
-```
-
-##### createScriptCompiler
-
-- `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input` (default: `'**/*.{js,ts,jsx,tsx,mjs,cjs}'`)
-- `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.test.ts'` will ignore all test files.
-- `outputExtension` (optional): Output file extension (default: `'.js'`)
-- `alias`: Path alias map (esbuild alias)
-- `minifier`: Whether to enable minification
-- `banner`: Banner configuration (can specify CreateBanner function or string)
-- `sourcemap`: Emit an inline source map appended to the output. Accepts `boolean | 'onServer'`. When set to `'onServer'`, the source map is emitted only while kamado runs in serve mode. Default: `'onServer'`.
-
-**Example**: To compile TypeScript files to JavaScript:
-
-```ts
-def(createScriptCompiler(), {
-	files: '**/*.{js,ts,jsx,tsx}',
-	outputExtension: '.js',
-	minifier: true,
-	alias: {
-		'@': path.resolve(import.meta.dirname, '__assets', '_libs'),
-	},
-});
-```
-
-##### Switching the source map per command
-
-The default is `'onServer'`, so the inline source map is emitted only during `kamado server` and omitted in `kamado build`. Pass `true` to always emit, or `false` to always omit:
-
-```ts
-export default defineConfig({
-	compilers: (def) => [
-		def(createScriptCompiler(), {
-			sourcemap: true, // always emit (build + serve)
-		}),
-		def(createStyleCompiler(), {
-			sourcemap: false, // never emit
 		}),
 	],
 });
 ```
 
-#### Page List Configuration
+CLI:
 
-The `pageList` option allows you to customize the page list used for navigation, breadcrumbs, and other features that require a list of pages.
-
-```ts
-import { defineConfig } from 'kamado/config';
-import { urlToFile, getFile } from 'kamado/files';
-
-export default defineConfig({
-	// ... other config
-	pageList: async (pageAssetFiles, config) => {
-		// Filter pages (e.g., exclude drafts)
-		const filtered = pageAssetFiles.filter((page) => !page.url.includes('/drafts/'));
-
-		// Add external pages with custom metadata
-		const externalPage = {
-			...urlToFile('/external-page/', {
-				inputDir: config.dir.input,
-				outputDir: config.dir.output,
-				outputExtension: '.html',
-			}),
-			metaData: { title: 'External Page Title' },
-		};
-
-		return [...filtered, externalPage];
-	},
-});
+```sh
+kamado build              # 静的ビルド
+kamado server             # 開発サーバ起動
+kamado build --incremental  # キャッシュベースの増分ビルド
+kamado build --skip-unchanged  # 出力が同一ならスキップ（mtime 保持）
 ```
 
-The function receives:
+各オプション・各 compiler の設定値は型定義（`Config<M>`、`CompilerOptions`）と各 compiler パッケージの README を参照。
 
-- `pageAssetFiles`: Array of all page files found in the file system
-- `config`: The full configuration object
+## 重要な罠・設計上の注意
 
-Returns an array of `PageData` objects (extends `CompilableFile` with optional `metaData`).
+### `compileHooks` / `transforms` の解決タイミング
 
-**Note about `metaData` and titles:**
+関数で渡した場合、解決は **ビルド/サーブごとに 1 回**（ファイルごとではない）。並列コンパイル中のすべてのページが**同じインスタンスを共有**するため、ファイル間で状態を持たせてはいけない。
 
-- During individual page compilation, `metaData` is automatically populated from frontmatter
-- However, at `pageList` hook time (globalData collection), `metaData` is NOT yet populated
-- If you need titles for breadcrumbs/navigation, you must explicitly set `metaData.title` in the `pageList` hook
-- Without explicit `metaData.title`, breadcrumbs and navigation will show `__NO_TITLE__`
+### `pageList` フックの `metaData`
 
-**Output path override via frontmatter (opt-in):**
+`pageList` 実行時点では `metaData` はまだ frontmatter から populate されていない。breadcrumbs/navigation で `__NO_TITLE__` を避けるには、`pageList` 内で `metaData.title` を明示的に設定する必要がある。
 
-The page compiler can be configured to read a frontmatter field as an output-path override. The feature is disabled by default — enable it by setting `outputPathField: '<your-field-name>'` in the page compiler's options (`def(createPageCompiler(), { outputPathField: 'path' })`). The same override applies in both `kamado build` and `kamado server`. See [@kamado-io/page-compiler](../@kamado-io/page-compiler/README.md#output-path-override-frontmatter-routing) for details.
+### `outputPathField` は opt-in
 
-#### Hook Functions
+frontmatter の特定フィールドから出力パスを上書きする機能はデフォルト off。既存プロジェクトの frontmatter キーが routing として誤解釈されないため。詳細は [`@kamado-io/page-compiler`](../@kamado-io/page-compiler/) の README。
 
-- `onBeforeBuild`: Function executed before build. Receives `Context` (which extends `Config` with `mode: 'build' | 'serve'`)
-- `onAfterBuild`: Function executed after build. Receives `Context` (which extends `Config` with `mode: 'build' | 'serve'`)
+### `devServer.transforms` と Page Compiler の `transforms` の違い
 
-#### Response Transform API
+| 項目     | `devServer.transforms`               | `createPageCompiler({ transforms })` |
+| -------- | ------------------------------------ | ------------------------------------ |
+| スコープ | serve のみ                           | build + serve 両方                   |
+| 対象     | 全レスポンス（HTML/CSS/JS/画像など） | コンパイル後 HTML のみ               |
+| `filter` | 有効                                 | 無視（全 HTML を処理）               |
 
-The Response Transform API allows you to modify response content during development server mode. This is useful for injecting scripts, implementing pseudo-SSI, adding meta tags, or any other response transformation needs.
+同じ `Transform` インターフェース（`kamado/config`）を使うが、上記の通り適用範囲が異なる。
 
-**Important Distinction:**
+### `sourcemap: 'onServer'`（デフォルト）
 
-Both use the same `Transform` interface (`kamado/config`), but differ in scope and application:
+`kamado server` 時のみ source map を埋め込み、`kamado build` では出力しない。常に出すなら `true`、常に出さないなら `false`。
 
-- **`devServer.transforms`**: Applied to ALL responses during development server mode only (`kamado server`). Middleware-style transforms that can process any file type (HTML, CSS, JS, images, etc.). The `filter` option (include/exclude) is respected here. Does not run during builds.
-- **`createPageCompiler()({ transforms })`**: Applied to compiled HTML pages in both build and serve modes. Transform pipeline for HTML processing only. The `filter` option is ignored (all HTML pages are processed). See [@kamado-io/page-compiler](../packages/@kamado-io/page-compiler/README.md) for details.
+## 主要 API
 
-You can reuse the same transform functions (like `manipulateDOM()`, `prettier()`, or custom transforms) in both places.
+### `devServer.transforms` — レスポンス変換
 
-**Key Features:**
-
-- **Development-only**: Transforms only apply in `serve` mode, not during builds
-- **Flexible filtering**: Filter by glob patterns (include/exclude)
-- **Error resilient**: Errors in transform functions don't break the server
-- **Async support**: Supports both synchronous and asynchronous transform functions
-- **Chainable**: Multiple transforms are applied in array order
-
-**Configuration:**
-
-```typescript
-import path from 'node:path';
-import fs from 'node:fs/promises';
-
-import { defineConfig } from 'kamado/config';
-
-export default defineConfig({
+```ts
+defineConfig({
 	devServer: {
-		port: 3000,
 		transforms: [
-			// Example 1: Inject development script into HTML
 			{
 				name: 'inject-dev-script',
-				filter: {
-					include: '**/*.html',
-				},
+				filter: { include: '**/*.html' },
 				transform: (content) => {
 					if (typeof content !== 'string') {
-						const decoder = new TextDecoder('utf-8');
-						content = decoder.decode(content);
+						content = new TextDecoder('utf-8').decode(content);
 					}
-					return content.replace(
-						'</body>',
-						'<script src="/__dev-tools.js"></script></body>',
-					);
-				},
-			},
-
-			// Example 2: Implement pseudo-SSI (Server Side Includes)
-			{
-				name: 'pseudo-ssi',
-				filter: {
-					include: '**/*.html',
-				},
-				transform: async (content, ctx) => {
-					if (typeof content !== 'string') {
-						const decoder = new TextDecoder('utf-8');
-						content = decoder.decode(content);
-					}
-
-					// Process <!--#include virtual="/path/to/file.html" -->
-					const includeRegex = /<!--#include virtual="([^"]+)" -->/g;
-					let result = content;
-
-					for (const match of content.matchAll(includeRegex)) {
-						const includePath = match[1];
-						const filePath = path.resolve(
-							ctx.context.dir.output,
-							includePath.replace(/^\//, ''),
-						);
-
-						try {
-							const includeContent = await fs.readFile(filePath, 'utf-8');
-							result = result.replace(match[0], includeContent);
-						} catch (error) {
-							console.warn(`Failed to include ${includePath}:`, error);
-						}
-					}
-
-					return result;
-				},
-			},
-
-			// Example 3: Add source comment to CSS files
-			{
-				name: 'css-source-comment',
-				filter: {
-					include: '**/*.css',
-				},
-				transform: (content, ctx) => {
-					if (typeof content !== 'string') {
-						const decoder = new TextDecoder('utf-8');
-						content = decoder.decode(content);
-					}
-					const source = ctx.inputPath || ctx.outputPath;
-					return `/* Generated from: ${source} */\n${content}`;
+					return content.replace('</body>', '<script src="/__dev.js"></script></body>');
 				},
 			},
 		],
@@ -406,80 +112,17 @@ export default defineConfig({
 });
 ```
 
-**Transform Interface:**
+非 HTML は `ArrayBuffer` で渡る点に注意（`TextDecoder` で復号）。transform 内のエラーはサーバを落とさず、元のコンテンツが返る。
 
-```typescript
-interface Transform<M extends MetaData> {
-	readonly name: string; // Transform name for debugging
-	readonly filter?: {
-		readonly include?: string | readonly string[]; // Glob patterns to include
-		readonly exclude?: string | readonly string[]; // Glob patterns to exclude
-	};
-	readonly transform: (
-		content: string | ArrayBuffer,
-		context: TransformContext<M>,
-	) => Promise<string | ArrayBuffer> | string | ArrayBuffer;
-}
+### `devServer.proxy` — 外部 API への転送
 
-interface TransformContext<M extends MetaData> {
-	readonly path: string; // Request path
-	readonly filePath: string; // File path (alias for path)
-	readonly inputPath?: string; // Original input file path (if available)
-	readonly outputPath: string; // Output file path
-	readonly outputDir: string; // Output directory path
-	readonly isServe: boolean; // Always true in dev server
-	readonly context: Context<M>; // Full execution context
-	readonly compile: CompileFunction; // Function to compile other files
-}
-```
-
-**Filter Options:**
-
-- `include`: Glob pattern(s) to match request paths (e.g., `'**/*.html'`, `['**/*.css', '**/*.js']`)
-- `exclude`: Glob pattern(s) to exclude (e.g., `'**/_*.html'` to skip files starting with `_`)
-
-**Important Notes:**
-
-- Transform functions receive either `string` or `ArrayBuffer`. For text-based transformations, decode `ArrayBuffer` using `TextDecoder`:
-  ```typescript
-  if (typeof content !== 'string') {
-  	const decoder = new TextDecoder('utf-8');
-  	content = decoder.decode(content);
-  }
-  ```
-- Static files (non-compiled files) are typically passed as `ArrayBuffer`, so always decode them if you need to process as text
-- Errors in transform functions are logged but don't break the server (original content is returned)
-- Transforms are executed in array order
-- Only applied in development server mode (`kamado server`), not during builds
-
-#### Proxy API
-
-The Proxy API allows you to forward requests to external servers during development. This is useful when your static site makes AJAX requests to APIs on different domains, avoiding CORS issues during local development.
-
-**Key Features:**
-
-- **Development-only**: Proxy only applies in `serve` mode, not during builds
-- **All HTTP methods**: Supports GET, POST, PUT, DELETE, PATCH, and other methods
-- **Streaming**: Responses are streamed without buffering
-- **Path rewriting**: Optionally rewrite request paths before forwarding
-- **Simple and advanced forms**: Use a string shorthand for simple cases or an object for full control
-
-**Configuration:**
-
-```typescript
-import { defineConfig } from 'kamado/config';
-
-export default defineConfig({
+```ts
+defineConfig({
 	devServer: {
-		port: 3000,
 		proxy: {
-			// Simple: string shorthand — forward /api/* to the target
 			'/api': 'https://backend.example.com',
-
-			// Advanced: object form with path rewriting
 			'/api/v2': {
 				target: 'https://api-v2.example.com',
-				// Rewrite /api/v2/users → /users
 				pathRewrite: (path) => path.replace(/^\/api\/v2/, ''),
 				changeOrigin: true,
 			},
@@ -488,205 +131,24 @@ export default defineConfig({
 });
 ```
 
-With the configuration above:
+ストリーミング転送。全 HTTP メソッド対応。serve 時のみ動作（build には影響しない）。
 
-- `GET /api/data` → `GET https://backend.example.com/api/data`
-- `POST /api/v2/users` → `POST https://api-v2.example.com/users` (path rewritten)
+### Hooks
 
-**ProxyRule Interface:**
+`onBeforeBuild` / `onAfterBuild` は `Context`（`Config` + `mode: 'build' | 'serve'`）を受け取る。`mode` は CLI コマンドで自動設定され、ユーザは変更できない。詳細は [ARCHITECTURE.md](./ARCHITECTURE.md#config-vs-context) 参照。
 
-```typescript
-interface ProxyRule {
-	target: string; // Target URL to proxy to
-	pathRewrite?: (path: string) => string | Promise<string>; // Rewrite path before proxying
-	changeOrigin?: boolean; // Change Origin/Host headers to match target (default: false)
-}
-```
+### Page List
 
-**Proxy Configuration:**
-
-The `proxy` option is a record where:
-
-- **Key**: Path prefix to match (e.g., `'/api'`)
-- **Value**: A target URL string (shorthand) or a `ProxyRule` object
-
-**Important Notes:**
-
-- Proxy routes are matched before file-serving routes, so proxy paths take priority over local files
-- Longer path prefixes are matched first (e.g., `/api/v2` takes priority over `/api`)
-- Query strings are preserved and forwarded to the target
-- Request headers are forwarded. Set `changeOrigin: true` to rewrite `Host` and `Origin` headers to match the target (useful when the target server validates the `Host` header)
-- On proxy failure, a `502 Bad Gateway` response is returned
-- Only applied in development server mode (`kamado server`), not during builds
-
-### CLI Commands
-
-#### Build Entire Site
-
-```bash
-kamado build
-```
-
-#### Build Specific Files Only
-
-```bash
-kamado build "path/to/file.pug" # Build a specific file
-kamado build "path/to/*.css" # Build only CSS files
-kamado build "path/to/*.ts" # Build only TypeScript files
-```
-
-#### Start Development Server
-
-```bash
-kamado server
-```
-
-When the development server starts, pages accessed via the browser are built on demand. If there is a request, it bakes it on the spot and returns it.
-
-### CLI Options
-
-The following options are available for all commands:
-
-| Option            | Short | Description                                                                                                        |
-| ----------------- | ----- | ------------------------------------------------------------------------------------------------------------------ |
-| `--config <path>` | `-c`  | Path to a specific config file. If not specified, Kamado searches for `kamado.config.js`, `kamado.config.ts`, etc. |
-| `--verbose`       |       | Enable verbose logging                                                                                             |
-
-The following options are available for the `build` command only:
-
-| Option             | Short | Description                                                                                                                                             |
-| ------------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--skip-unchanged` |       | Skip writing output files whose content is unchanged. The existing file's mtime is preserved, which helps mtime-based deployment diffing.               |
-| `--incremental`    |       | Skip compiling outputs whose recorded inputs are unchanged, using a verifying-trace manifest (cached under the OS temp directory by default).           |
-| `--force`          |       | With `--incremental`, ignore the existing cache and rebuild everything, then refresh it (instead of deleting the cache by hand).                        |
-| `--cache-dir <p>`  |       | Directory for the incremental-build cache. Default: a project-specific folder under the OS temp directory. A relative path is resolved against the cwd. |
-
-#### Examples
-
-```bash
-# Use a specific config file
-kamado build --config ./custom.config.ts
-kamado server -c ./dev.config.js
-
-# Enable verbose logging during build
-kamado build --verbose
-
-# Skip rewriting outputs whose content has not changed
-kamado build --skip-unchanged
-
-# Recompile only what changed since the last build
-kamado build --incremental
-
-# Force a clean rebuild without deleting the cache by hand
-kamado build --incremental --force
-
-# Keep the cache in-tree (e.g. to restore it in CI)
-kamado build --incremental --cache-dir .kamado/cache
-```
-
-#### How `--incremental` works
-
-Each build records a verifying trace per output file: the content hash of every file the compilation read (the page itself, its sidecar JSON, the layout, pug includes, CSS `@import`s, the postcss config, referenced image files, bundled script imports) plus an environment digest (global data, the page list and page asset files, compiler options, the bundled toolchain versions, and the config file's content). The next `--incremental` build skips the whole compilation — not just the write — for any output whose traces all still match and whose output file is still present. Everything is content-hash based, so it works without relying on file modification times, and across machines as long as the cache directory is preserved.
-
-##### Cache location
-
-By default the manifest is written **outside the project tree** — to a project-specific folder under the OS temp directory (`<tmp>/kamado/<name>-<hash>/build-manifest.json`), namespaced by the config file's directory. So by default there is nothing to add to `.gitignore`, and a temp-dir wipe simply triggers a full rebuild. The cache is a build artifact that can be regenerated at any time; a stale or partial manifest never produces a wrong build, only a full rebuild.
-
-- **Force a clean rebuild:** `kamado build --incremental --force` (no manual deletion needed).
-- **Persist across CI runs:** pass `--cache-dir` pointing at a directory you save/restore with your CI cache (e.g. `--cache-dir .kamado/cache`, then gitignore `.kamado/` and cache that path). Because the trace is content-hash based, a cache restored on a different machine or runner is still valid.
-- **In-tree cache:** `--cache-dir .kamado/cache` keeps it in the project; add `.kamado/` to `.gitignore`.
-
-Caveats:
-
-- Changes that live only inside JavaScript functions (custom transforms, compile hooks, JS global-data files returning functions) are invisible to the digest unless they come from an edit to the config file itself, which is hashed. After changing such code outside the config file, run `--force` once (or clear the cache). (Upgrades of the bundled esbuild/postcss/cssnano are folded into the digest automatically; a `tsconfig.json` consumed by esbuild is **not** tracked — treat it like config-adjacent code and run `--force` after editing it.)
-- Custom compilers must read files through kamado's file APIs (`getContentFromFile` / `getFileContent`) or report extra inputs via `trackDependency(path)` from `kamado/files`; the bundled compilers already do. A compiler with no recorded dependencies is never skipped. For context-level inputs that are not files (resolved options, a toolchain version), set a `cacheDigest()` property on the returned compile function — e.g. `fn.cacheDigest = () => createCacheDigest({ options, version })` using `createCacheDigest` from `kamado/compiler` — so changing them rebuilds every output of that compiler. If you wrap a compile function, copy `cacheDigest` onto the wrapper or it is silently lost.
-- Output freshness is verified by byte length only, not content. An output modified out of band to the same size is not detected — pair `--incremental` with `--skip-unchanged` if outputs may be touched after the build.
-- A skipped page keeps its previously written output byte-for-byte, including anything time-dependent a template may have embedded.
-- Editing source files _while_ a build is running is unsupported (a dependency may be hashed after the compile read an older version).
-
-### Type Safety & Generics
-
-Kamado's core types accept a generic type parameter `M extends MetaData` for type-safe custom metadata. This section explains how to use it.
-
-#### Default Generics
-
-Most user-facing types (`Config`, `Context`, `UserConfig`, `Transform`, `TransformContext`, `PageData`, `GlobalData`) have a default of `= MetaData`. If you don't need custom metadata, you can use the types without a type argument:
-
-```typescript
-import type { Config, Transform, PageData } from 'kamado/config';
-
-// No type argument needed — defaults to MetaData
-const config: Config = {
-	/* ... */
-};
-const transform: Transform = {
-	/* ... */
-};
-```
-
-#### Custom Metadata
-
-The base `MetaData` interface is an empty interface (`{}`). Any `interface` or `type` satisfies the `extends MetaData` constraint. You can define custom metadata properties via generics.
-
-To propagate custom metadata types throughout your project, pass a type argument to `defineConfig`:
-
-```typescript
-interface MyMeta {
-	title: string;
-	description?: string;
-	draft?: boolean;
-}
-
-export default defineConfig<MyMeta>({
+```ts
+defineConfig({
 	pageList: async (pageAssetFiles, config) => {
-		// pageAssetFiles are CompilableFile[], return PageData<MyMeta>[]
-		return pageAssetFiles.map((file) => ({
-			...file,
-			metaData: { title: 'Default Title' },
-		}));
-	},
-	async onBeforeBuild(context) {
-		// context is Context<MyMeta> — fully typed
+		return pageAssetFiles.filter((p) => !p.url.includes('/drafts/'));
 	},
 });
 ```
 
-> **Note: `Config<M>` is invariant in `M`.**
->
-> Due to TypeScript's type system, `Config<M>` is invariant in its type parameter `M`. This means `Config<PageMetaData>` cannot be assigned to `Config<MetaData>` (or vice versa), because `M` appears in both covariant positions (return types like `PageData<M>[]`) and contravariant positions (callback parameters like `config: Config<M>`).
->
-> If you write a helper function that receives a `Config`, make it generic:
->
-> ```typescript
-> // ✅ Good — works with any metadata type
-> function helper<M extends MetaData>(config: Config<M>) { ... }
->
-> // ❌ Bad — Config<PageMetaData> is NOT assignable to Config<MetaData>
-> function helper(config: Config<MetaData>) { ... }
-> ```
+External page を追加する場合は `urlToFile` を使う（`kamado/files` から import）。
 
-#### The `def` Callback
+## License
 
-The `compilers` option uses a callback form: `compilers: (def) => [...]`. The `def` parameter is a `CompilerDefine<M>` function that binds a compiler factory to its options. This exists so TypeScript can automatically infer each compiler's option types — you never need to write type arguments manually:
-
-```typescript
-compilers: (def) => [
-	// TypeScript infers the options type from createPageCompiler's return type
-	def(createPageCompiler(), {
-		files: '**/*.html',
-		outputExtension: '.html',
-	}),
-];
-```
-
-#### `M` Propagation Chain
-
-The type parameter `M` flows through the system:
-
-```
-defineConfig<M>() → Config<M> → Context<M> → TransformContext<M>
-                                            → PageData<M>
-                                            → CompileData<M> → NavNode<M>
-```
-
-This ensures that custom metadata types are consistent across configuration, compilation, and template data.
+MIT

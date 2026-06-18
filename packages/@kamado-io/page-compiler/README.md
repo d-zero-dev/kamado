@@ -1,12 +1,10 @@
-# @kamado-io/page-compiler
+# `@kamado-io/page-compiler`
 
-Page compiler for Kamado. A generic container compiler that applies layouts and formats the output. Template compilation is handled via `compileHooks`.
+Kamado 用のページコンパイラ。**汎用コンテナ**としてレイアウト適用と HTML フォーマットを担い、テンプレートエンジンは `compileHooks` 経由で差し込む。
 
 ## Installation
 
-```bash
-npm install @kamado-io/page-compiler
-# or
+```sh
 yarn add @kamado-io/page-compiler
 ```
 
@@ -19,949 +17,101 @@ import { createPageCompiler } from '@kamado-io/page-compiler';
 export default defineConfig({
 	compilers: (def) => [
 		def(createPageCompiler(), {
-			globalData: {
-				dir: './data',
-			},
-			layouts: {
-				dir: './layouts',
-			},
-			// Transform pipeline is configured via transforms option
-			// If omitted, uses createDefaultPageTransforms()
+			globalData: { dir: './data' },
+			layouts: { dir: './layouts' },
+			// transforms 省略時は createDefaultPageTransforms()
 		}),
 	],
 });
 ```
 
-## Options
+主要オプション・型定義は `src/types.ts` / `src/page-compiler.ts` を参照。Pug を使うには [`@kamado-io/pug-compiler`](../pug-compiler/) と組み合わせる。
 
-- `files` (optional): Glob pattern for files to compile. Patterns are resolved relative to `dir.input` (default: `'**/*.html'`)
-- `ignore` (optional): Glob pattern for files to exclude from compilation. Patterns are resolved relative to `dir.input`. For example, `'**/*.tmp'` will ignore all `.tmp` files.
-- `outputExtension` (optional): Output file extension (default: `'.html'`)
-- `globalData`: Global data configuration
-  - `dir`: Directory path where global data files are stored
-  - `data`: Additional global data
-- `layouts`: Layout file configuration
-  - `dir`: Directory path where layout files are stored
-  - `files`: Map of layout files
-  - `contentVariableName`: Variable name for content in layout (default: `'content'`)
-- `transforms`: Transform functions to apply to compiled HTML in both build and serve modes. Can be:
-  - `Transform[]` - Array of transform functions (uses `kamado/config` Transform interface)
-  - `(defaultTransforms: readonly Transform[]) => Transform[]` - Function that receives default transforms (5 transforms) and returns modified array
-  - If omitted, uses `createDefaultPageTransforms()` (5 transforms: manipulateDOM, doctype, prettier, minifier, lineBreak). See [Transform Pipeline](#transform-pipeline) for details.
-  - **Note**: Uses the same `Transform` interface as `devServer.transforms`, but applies only to HTML pages in both build and serve modes. The `filter` option is ignored here (use `devServer.transforms` for filtering).
-  - **Note**: When given as a function, it is resolved **once per build/serve context**, not per file. The returned transform instances are shared by all pages in that context (and may run concurrently), so they must not keep per-page mutable state.
-- `transformBreadcrumbItem`: Function to transform each breadcrumb item. Each item includes a `meta` property containing the source page's metadata, enabling metadata-based transformations (e.g., redirect URLs). `(item: BreadcrumbItem<M>) => BreadcrumbItem<M>`
-- `filterNavigationNode`: Function to filter navigation nodes. Return `true` to keep the node, `false` to remove it. `(node: NavNode<M>) => boolean`
-- `navigationComparator`: Sort comparator for the navigation path list. Can be overridden per-call via `nav({ comparator })` in templates.
-  - `'path'`: Sort by path using `pathComparator`
-  - `(a: string, b: string) => number`: Custom comparator function
-  - `null` (default): No sorting (preserve original order)
-- `formatOptions`: Pipeline-level error policy applied to **every** transform in the compiled chain (both built-in transforms like `prettier`/`minifier` and any custom ones from `transforms`).
-  - `parseError`: Behavior when a transform throws. One of:
-    - `'silent'` (default) — swallow the error, skip the failing transform, and pass the previous step's output to the next one
-    - `'warning'` — `console.warn` with `Transform '<name>' failed on <source>: <original>`, then skip the failing transform
-    - `'error'` — throw an `Error` with the same message prefix; the original error is preserved on `error.cause`
-  - Example:
+## Transform Pipeline
 
-    ```typescript
-    import { createPageCompiler } from '@kamado-io/page-compiler';
+`createPageCompiler()` のデフォルトは 5 段:
 
-    createPageCompiler()({
-    	formatOptions: { parseError: 'warning' },
-    });
-    ```
+```
+manipulateDOM → doctype → prettier → minifier → lineBreak
+```
 
-- `compileHooks`: Compilation hooks for customizing compile process
-  - Can be an object or a function `(options: PageCompilerOptions<M>) => CompileHooksObject<M> | Promise<CompileHooksObject<M>>` that returns an object (sync or async)
-  - **Note**: A function form is resolved **once per build/serve context**, not per file. Hook factories must be file-independent; the returned hooks are shared by all pages compiled in that context.
-  - `main`: Hooks for main content compilation
-    - `before`: Hook called before compilation (receives content and data, returns processed content)
-    - `after`: Hook called after compilation (receives HTML and data, returns processed HTML)
-    - `compiler`: Custom compiler function `(content: string, data: CompileData<M>, extension: string, cache?: boolean) => Promise<string> | string`. The optional `cache` flag tells the compiler whether it may reuse cached compilation artifacts (e.g. compiled template functions) — it is `false` in serve mode so that template/include edits are always reflected
-  - `layout`: Hooks for layout compilation
-    - `before`: Hook called before compilation (receives content and data, returns processed content)
-    - `after`: Hook called after compilation (receives HTML and data, returns processed HTML)
-    - `compiler`: Custom compiler function `(content: string, data: CompileData<M>, extension: string, cache?: boolean) => Promise<string> | string` (same `cache` semantics as `main.compiler`)
-
-**Note**: To use Pug templates, install `@kamado-io/pug-compiler` and use `createCompileHooks` helper. See the [@kamado-io/pug-compiler README](../@kamado-io/pug-compiler/README.md) for integration examples.
-
-## Output Path Override (frontmatter routing)
-
-> Conceptually similar to `permalink` in 11ty / Jekyll / Hugo.
-
-This feature is **opt-in** and **disabled by default**. To enable it, pass an `outputPathField` to the compiler. The value is the name of the frontmatter (or JSON sidecar) field that should be interpreted as a URL-style output path. The same override applies in both `kamado build` and `kamado server` modes.
+`characterEntities` は含まれないので、必要なら明示的に挟む。
 
 ```ts
-import { defineConfig } from 'kamado/config';
-import { createPageCompiler } from '@kamado-io/page-compiler';
-
-export default defineConfig({
-	compilers: (def) => [
-		def(createPageCompiler(), {
-			outputPathField: 'path', // pick any name you like, e.g. 'permalink'
-			layouts: { dir: './layouts' },
-		}),
+createPageCompiler()({
+	layouts: { dir: './layouts' },
+	transforms: (defaults) => [
+		{ name: 'pre', transform: (c) => /* ... */ },
+		...defaults,
+		{ name: 'analytics', transform: (c) => /* ... */ },
 	],
 });
 ```
 
-Pages can then declare an override:
+### `Transform` インターフェース
+
+`kamado/config` の `Transform` と同型（`devServer.transforms` と共有）。ただし **page compiler では `filter` が無視される**（全 HTML を処理）。フィルタリングが必要なら `devServer.transforms` 側で行う。
+
+### `formatOptions.parseError` — 失敗時ポリシー
+
+ビルトイン含む全 transform が throw した時の挙動を 1 か所で決める:
+
+- `'silent'`（デフォルト） … 失敗 transform をスキップして前段の出力を次段に渡す
+- `'warning'` … `console.warn` してスキップ
+- `'error'` … `Error` を throw（`error.cause` に原例外を保持）
+
+### `manipulateDOM` の `baseURL` / `getHref`
+
+linkedom が `window.location` / `Document.baseURI` を populate しないため、ホック内で `ctx.baseURL` と `ctx.getHref(el)` を使う。`getHref` は base 解決済みの絶対 URL を返し、`javascript:` / `data:` / `vbscript:` / `file:` の危険スキームと relative + base 無しケースは `null` を返す（basic-auth 資格情報も結果からスクラブされる）。
+
+## Output Path Override（frontmatter routing）
+
+**opt-in**。`outputPathField: 'path'` のように field 名を指定して有効化（既存 frontmatter キーが routing に誤解釈されないようデフォルト off）。
+
+```ts
+def(createPageCompiler(), {
+	outputPathField: 'path', // 'permalink' などでも可
+});
+```
 
 ```html
 ---
 path: /docs/getting-started/
-layout: doc
 ---
-
-<h1>Getting Started</h1>
 ```
 
-The override is interpreted relative to `dir.output` and accepts three forms:
+許容される 3 形式:
 
-- **Explicit extension** — `/custom/foo.html` writes to `<output>/custom/foo.html`.
-- **Without extension** — `/custom/foo` appends the compiler's `outputExtension` and writes to `<output>/custom/foo.html`.
-- **Trailing slash** — `/section/` is treated as a directory and writes to `<output>/section/index.html`.
+- `/foo.html` — そのまま
+- `/foo` — `outputExtension` を付与
+- `/foo/` — `index<outputExtension>` を付与
 
-Rules:
+`.` / `..` セグメントは拒否（`dir.output` 外に出ない保証）。string 以外は無視。JSON sidecar が同名フィールドを持つ場合は **JSON が優先**。
 
-- The value must start with `/`.
-- `.` and `..` segments are rejected (the resolved path must stay inside `dir.output`).
-- Non-string values (numbers, arrays, etc.) for the configured field are ignored — only string values trigger an override.
-- If two source files resolve to the same output path, the behavior is controlled by `outputPathConflict` (see below).
-- A same-name `.json` sidecar takes precedence over the YAML frontmatter — the field declared in JSON wins.
-- Quote the value when it contains characters with special meaning in YAML (e.g. `:`). For example, `path: '/foo:bar/'` instead of `path: /foo:bar/`.
+### 衝突時の挙動 `outputPathConflict`
 
-> **Note**: `compilableFileMap` is built once at dev-server startup. If you add a new page or change an override value, restart `kamado server` for the change to take effect.
+| 値                        | 動作                      |
+| ------------------------- | ------------------------- |
+| `'error'`                 | abort                     |
+| `'warning'`（デフォルト） | stderr に警告、勝者を選ぶ |
+| `'silent'`                | 無音で勝者を選ぶ          |
 
-### Choosing a Field Name
+勝者選択: **frontmatter override が default computed path に優先**、同列なら first-seen。順序依存しない（`getAssetGroup` の Map 順）。
 
-`outputPathField` is intentionally configurable so it cannot collide with a frontmatter key your project already uses for other purposes. Pick a name that doesn't conflict — common choices are `path`, `permalink`, `outputPath`, or a project-specific name. Without `outputPathField` set, the page compiler does **not** read frontmatter eagerly and **does not** treat any field as routing data.
+> **Note**: `compilableFileMap` は dev server 起動時に 1 度だけ構築されるため、ページ追加や override 変更は `kamado server` 再起動が必要。
 
-### Handling Output-Path Conflicts
+## 重要な解決タイミング
 
-When two source files resolve to the same output path, `outputPathConflict` selects how the build reacts. The option lives on the compiler entry next to `outputPathField` and accepts three values:
+`transforms` / `compileHooks` を関数で渡した場合、解決は **ビルド/サーブごとに 1 回**。返したインスタンスは並列コンパイル中の全ページで共有されるため、**ファイル間の可変状態を持たせてはいけない**。
 
-| Value       | Behavior                                                         |
-| ----------- | ---------------------------------------------------------------- |
-| `'error'`   | Abort the build with a collision error pointing to both sources. |
-| `'warning'` | Log a warning to `stderr` and keep one file. **Default.**        |
-| `'silent'`  | Keep one file with no log output.                                |
+`compileHooks.*.compiler` の `cache` 引数: serve モードでは `false` が渡る（template/include の編集を確実に反映するため）。build モードでは `true`（再利用可）。
 
-```ts
-def(createPageCompiler(), {
-	outputPathField: 'path',
-	outputPathConflict: 'error', // abort the build on any collision
-});
-```
+## 主要な拡張 API
 
-When the policy is `'warning'` or `'silent'` and a winner must be picked:
+- `createDefaultPageTransforms()` — デフォルト 5 transforms を返す
+- `manipulateDOM({ hook, imageSizes })` — DOM 操作 + 自動画像サイズ
+- `characterEntities()` — 非 ASCII → HTML エンティティ
+- `prettier({ options })` / `minifier({ options })` / `lineBreak({ lineBreak })`
+- `transformBreadcrumbItem` / `filterNavigationNode` / `navigationComparator` — Navigation / Breadcrumb 制御
 
-1. A file whose `outputPath` came from the frontmatter override **beats** one using the default computed path.
-2. Among ties (both override, or both default), the **first-seen** file wins.
-
-This means a routing override always takes precedence over an accidental default-path collision, regardless of the order in which the files are processed.
-
-## Transform Pipeline
-
-The page compiler uses a Transform Pipeline to process HTML content after compilation. Each transform is an object with a `name` and `transform` function that receives content and contextual information.
-
-### Transform Interface
-
-```typescript
-interface Transform<M extends MetaData> {
-	readonly name: string;
-	readonly filter?: {
-		// Note: filter is ignored in page compiler transforms
-		readonly include?: string | readonly string[];
-		readonly exclude?: string | readonly string[];
-	};
-	readonly transform: (
-		content: string | ArrayBuffer,
-		context: TransformContext<M>,
-	) => Promise<string | ArrayBuffer> | string | ArrayBuffer;
-}
-
-interface TransformContext<M extends MetaData> {
-	readonly path: string; // Request path relative to output directory
-	readonly filePath: string; // File path (alias for path)
-	readonly inputPath?: string; // Original input file path (always provided by page compiler)
-	readonly outputPath: string; // Output file path
-	readonly outputDir: string; // Output directory path
-	readonly isServe: boolean; // true in serve mode, false in build mode
-	readonly context: Context<M>; // Kamado Context (Config + mode)
-	readonly compile: CompileFunction; // Function to compile other files
-}
-```
-
-**Note**: The `Transform` interface is shared with `devServer.transforms` (from `kamado/config`). However, the `filter` option is only effective in `devServer.transforms` and is ignored when used in `createPageCompiler()({ transforms })`. All HTML pages are processed regardless of filter settings.
-
-### Transform Factory Functions
-
-The package provides **6 transform factory functions** (5 included in default pipeline):
-
-1. **`manipulateDOM(options?)`** - DOM manipulation (includes imageSizes integration)
-   - `options.hook`: Custom DOM manipulation function. The third argument is `ManipulateDOMHookContext<M>`, an extension of `TransformContext<M>` with two extra fields that compensate for linkedom not populating `window.location` / `Document.baseURI`:
-     - `baseURL: string | undefined` — resolved automatically: dev-server URL in serve mode, `pkg.production.baseURL` (or `https://${pkg.production.host}` as a fallback) in build mode, `undefined` otherwise.
-     - `getHref(el): string | null` — resolves the element's `href` attribute against `baseURL` and returns an absolute URL. Returns `null` for missing/empty `href`, unparsable values, relative values when no base is configured, and dangerous schemes (`javascript:` / `data:` / `vbscript:` / `file:`). Basic-auth credentials in the base URL are scrubbed from the result.
-
-     ```typescript
-     (
-       elements: readonly DomElement[],
-       window: DomWindow,
-       context: ManipulateDOMHookContext<M>,
-     ) => Promise<void> | void
-     ```
-
-     - `DomElement` / `DomWindow` are linkedom-derived types re-exported from `kamado/utils/dom`; they do **not** implement layout APIs (`getBoundingClientRect`, `getComputedStyle`) or absolute-URL reflection (`<a>.href` returns the raw attribute, not the resolved URL — use `ctx.getHref(a)` instead).
-
-   - `options.imageSizes`: Enable/configure automatic image size detection (default: `true`)
-     - `boolean` - `true` to enable with defaults, `false` to disable
-     - `ImageSizesOptions` object with properties:
-       - `rootDir?: string` - Root directory for resolving image paths (defaults to `outputDir` from context). Paths that escape `rootDir` via `..` segments are rejected.
-       - `selector?: string` - CSS selector applied to `<img>` elements only. `<picture> > <source>` elements are always processed regardless of this option so picture-driven sources stay sized even when an img-shaped selector is given. Default: no filter.
-       - `ext?: readonly string[]` - Image extensions to process (default: `['png', 'jpg', 'jpeg', 'webp', 'avif', 'svg']`). Query strings and fragments (e.g. `?v=abc`, `#frag`) are stripped before the extension check, so a cache-busted `src` still resolves.
-     - Note: Width and height attributes are always set/overwritten, even if they already exist
-     - Note: Uses kamado's `domSerialize` utility which preserves fragments as fragments and full documents as full documents
-
-2. **`characterEntities()`** - Convert characters to HTML entities
-   - Converts non-ASCII characters (code points ≥ 127) to their HTML entity equivalents (e.g., `©` → `&copy;`)
-   - **Note**: Not included in `createDefaultPageTransforms()` - must be explicitly added if needed
-   - No options currently available
-
-3. **`doctype()`** - Add DOCTYPE declaration
-   - No options currently available
-
-4. **`prettier(options?)`** - Format HTML with Prettier
-   - `options.options`: Prettier configuration object
-     ```typescript
-     {
-       printWidth?: number;
-       tabWidth?: number;
-       useTabs?: boolean;
-       // ... other Prettier options
-     }
-     ```
-   - **Errors**: This transform throws raw Prettier errors (typically `SyntaxError` for malformed input). Failures are handled at the pipeline level by `PageCompilerOptions.formatOptions.parseError` — see the [Options](#options) section.
-
-5. **`minifier(options?)`** - Minify HTML
-   - `options.options`: html-minifier-terser configuration object
-     ```typescript
-     {
-       collapseWhitespace?: boolean;
-       removeComments?: boolean;
-       minifyCSS?: boolean;
-       minifyJS?: boolean;
-       // ... other minifier options
-     }
-     ```
-   - **Errors**: This transform throws raw `html-minifier-terser` errors when the input cannot be parsed. Failures are handled at the pipeline level by `PageCompilerOptions.formatOptions.parseError` — see the [Options](#options) section.
-
-6. **`lineBreak(options?)`** - Normalize line breaks
-   - `options.lineBreak`: Line break style
-     - `'\n'` (default) - Unix/Linux/macOS line breaks
-     - `'\r\n'` - Windows line breaks
-
-### Default Transform Pipeline
-
-```typescript
-import { createDefaultPageTransforms } from '@kamado-io/page-compiler';
-
-// The default pipeline includes 5 transforms:
-const defaultPageTransforms = createDefaultPageTransforms();
-// Equivalent to:
-// [
-// 	manipulateDOM({ imageSizes: true }), // 1. DOM manipulation
-// 	doctype(),                           // 2. DOCTYPE injection
-// 	prettier(),                          // 3. HTML formatting
-// 	minifier(),                          // 4. HTML minification
-// 	lineBreak(),                         // 5. Line break normalization
-// ]
-// Note: characterEntities() is NOT included by default
-```
-
-### Usage Examples
-
-#### Using Default Transforms
-
-```typescript
-import {
-	createPageCompiler,
-	createDefaultPageTransforms,
-} from '@kamado-io/page-compiler';
-
-createPageCompiler()({
-	layouts: { dir: './layouts' },
-	transforms: createDefaultPageTransforms(), // Explicitly use defaults
-});
-
-// Or simply omit transforms to use defaults
-createPageCompiler()({
-	layouts: { dir: './layouts' },
-	// transforms defaults to createDefaultPageTransforms()
-});
-```
-
-#### Extending Defaults with Function (Recommended)
-
-Use a function to extend defaults without importing `createDefaultPageTransforms`:
-
-```typescript
-import { createPageCompiler } from '@kamado-io/page-compiler';
-
-createPageCompiler()({
-	layouts: { dir: './layouts' },
-	transforms: (defaults) => [
-		// Add custom transform before defaults
-		{
-			name: 'custom-preprocessing',
-			transform: async (content) => {
-				if (typeof content !== 'string') return content;
-				return content.replace(/\{DATE\}/g, new Date().toISOString());
-			},
-		},
-		...defaults,
-		// Add custom transform after defaults
-		{
-			name: 'custom-analytics',
-			transform: async (content) => {
-				if (typeof content !== 'string') return content;
-				return content.replace('</head>', '<script src="/analytics.js"></script></head>');
-			},
-		},
-	],
-});
-```
-
-#### Extending Defaults with Array (Requires Import)
-
-```typescript
-import {
-	createPageCompiler,
-	createDefaultPageTransforms,
-} from '@kamado-io/page-compiler';
-
-const defaultPageTransforms = createDefaultPageTransforms();
-
-// Add custom transform after defaults
-createPageCompiler()({
-	layouts: { dir: './layouts' },
-	transforms: [
-		...defaultPageTransforms,
-		{
-			name: 'custom-analytics',
-			transform: async (content) => {
-				if (typeof content !== 'string') return content;
-				return content.replace('</head>', '<script src="/analytics.js"></script></head>');
-			},
-		},
-	],
-});
-```
-
-#### Custom Transform Selection
-
-```typescript
-import { createPageCompiler, manipulateDOM, prettier } from '@kamado-io/page-compiler';
-
-createPageCompiler()({
-	layouts: { dir: './layouts' },
-	transforms: [
-		manipulateDOM({
-			imageSizes: true,
-			hook: async (elements, window, context) => {
-				// Custom DOM manipulation
-				const links = window.document.querySelectorAll('a[href^="http"]');
-				links.forEach((link) => link.setAttribute('target', '_blank'));
-			},
-		}),
-		prettier({ options: { printWidth: 120 } }),
-	],
-});
-```
-
-#### Customizing Specific Transforms
-
-```typescript
-import { createPageCompiler, prettier, minifier } from '@kamado-io/page-compiler';
-
-// Replace specific transforms using function
-createPageCompiler()({
-	layouts: { dir: './layouts' },
-	transforms: (defaults) =>
-		defaults.map((t) => {
-			if (t.name === 'prettier') {
-				return prettier({ options: { printWidth: 120 } });
-			}
-			if (t.name === 'minifier') {
-				return minifier({ options: { collapseWhitespace: true, removeComments: true } });
-			}
-			return t;
-		}),
-});
-```
-
-#### Filtering Transforms
-
-```typescript
-import { createPageCompiler } from '@kamado-io/page-compiler';
-
-// Remove specific transforms
-createPageCompiler()({
-	layouts: { dir: './layouts' },
-	transforms: (defaults) => defaults.filter((t) => t.name !== 'minifier'),
-});
-```
-
-#### Adding Character Entities Transform
-
-The `characterEntities` transform is not included in `createDefaultPageTransforms()`. Add it explicitly if needed:
-
-```typescript
-import { createPageCompiler, characterEntities } from '@kamado-io/page-compiler';
-
-// Add characterEntities to the pipeline
-createPageCompiler()({
-	layouts: { dir: './layouts' },
-	transforms: (defaults) => [
-		...defaults.slice(0, 1), // manipulateDOM
-		characterEntities(), // Insert after DOM manipulation
-		...defaults.slice(1), // doctype, prettier, minifier, lineBreak
-	],
-});
-```
-
-#### Environment-Specific Transforms
-
-```typescript
-import { createPageCompiler, prettier, minifier } from '@kamado-io/page-compiler';
-
-const isProduction = process.env.NODE_ENV === 'production';
-
-createPageCompiler()({
-	layouts: { dir: './layouts' },
-	transforms: (defaults) =>
-		defaults.map((t) => {
-			// Skip prettier in production
-			if (t.name === 'prettier' && isProduction) {
-				return prettier({ options: { printWidth: 200 } }); // Less formatting in prod
-			}
-			// Enhanced minification in production
-			if (t.name === 'minifier' && isProduction) {
-				return minifier({
-					options: {
-						collapseWhitespace: true,
-						removeComments: true,
-						minifyCSS: true,
-						minifyJS: true,
-					},
-				});
-			}
-			return t;
-		}),
-});
-```
-
-#### Advanced: Custom Transform with imageSizes Configuration
-
-```typescript
-import { createPageCompiler, manipulateDOM } from '@kamado-io/page-compiler';
-
-createPageCompiler()({
-	layouts: { dir: './layouts' },
-	transforms: (defaults) => [
-		// Replace manipulateDOM with custom configuration
-		manipulateDOM({
-			imageSizes: {
-				rootDir: '/custom/root',
-				selector: 'img[data-auto-size]', // Only process images with data attribute
-				ext: ['png', 'jpg', 'webp'], // Process only specific formats
-			},
-			hook: async (elements, window) => {
-				// Additional DOM manipulation
-				const images = window.document.querySelectorAll('img');
-				images.forEach((img) => {
-					if (!img.getAttribute('loading')) {
-						img.setAttribute('loading', 'lazy');
-					}
-				});
-			},
-		}),
-		...defaults.slice(1), // Include remaining defaults
-	],
-});
-```
-
-## Navigation
-
-The page compiler provides a `nav()` function in template data (`CompileData`) that returns a navigation tree for the current page. The tree is built from the page list and reflects the URL hierarchy.
-
-### Configuration
-
-Set a project-wide default sort order via `navigationComparator`:
-
-```ts
-import { defineConfig } from 'kamado/config';
-import { createPageCompiler } from '@kamado-io/page-compiler';
-
-export default defineConfig({
-	compilers: (def) => [
-		def(createPageCompiler(), {
-			globalData: { dir: './data' },
-			layouts: { dir: './layouts' },
-			// Sort navigation by path order
-			navigationComparator: 'path',
-			// Filter out draft pages from navigation
-			filterNavigationNode: (node) => !node.url.includes('/drafts/'),
-		}),
-	],
-});
-```
-
-### Template Usage
-
-The `nav(options)` function is available in template data. It accepts `GetNavTreeOptions`:
-
-- `baseDepth`: Base depth for navigation tree (default: current page's depth - 1)
-- `ignoreGlobs`: Glob patterns for files to ignore
-- `comparator`: Sort comparator (overrides `navigationComparator` per-call)
-
-```pug
-//- Get navigation tree using project-wide default sort
-- const tree = nav({ baseDepth: 0 })
-
-//- Override sort for this call only (reverse alphabetical)
-- const tree = nav({ baseDepth: 0, comparator: (a, b) => b.localeCompare(a) })
-
-//- Disable sorting for this call (even if navigationComparator is set)
-- const tree = nav({ baseDepth: 0, comparator: null })
-```
-
-The returned `NavNode` has the following properties:
-
-- `url`: Page URL
-- `meta.title`: Page title
-- `children`: Child navigation nodes
-- `current`: Whether this node is the current page
-- `isAncestor`: Whether the current page is under this node
-- `depth`: Depth in the tree (0 for root)
-
-## Example: Using compileHooks
-
-```ts
-import { defineConfig } from 'kamado/config';
-import { createPageCompiler } from '@kamado-io/page-compiler';
-
-export default defineConfig({
-	compilers: (def) => [
-		def(createPageCompiler(), {
-			compileHooks: {
-				main: {
-					before: (content, data) => {
-						// Pre-process content before compilation
-						return content.replace(/<!--.*?-->/g, '');
-					},
-					after: (html, data) => {
-						// Post-process HTML after compilation
-						return html.replace(/<br\s*\/?>/g, '<br />');
-					},
-				},
-				layout: {
-					compiler: async (content, data, extension) => {
-						// Use custom compiler for layouts
-						// extension is the file extension (e.g., '.pug', '.html')
-						return await myCustomCompiler(content, data, extension);
-					},
-				},
-			},
-		}),
-	],
-});
-```
-
-## Development Transform Utilities
-
-The page-compiler package provides utilities for Kamado's Transform API, which allows you to modify response content during both development server mode and build time.
-
-### Available Utilities
-
-#### injectToHead
-
-Inject content into the HTML `<head>` element. Useful for adding development scripts, meta tags, or stylesheets during local development.
-
-```ts
-import { defineConfig } from 'kamado/config';
-import { injectToHead } from '@kamado-io/page-compiler/transform/inject-to-head';
-
-export default defineConfig({
-	devServer: {
-		transforms: [
-			injectToHead({
-				content: '<script src="/__dev-tools.js"></script>',
-				position: 'head-end', // or 'head-start'
-			}),
-		],
-	},
-});
-```
-
-**Important:** The `devServer.transforms` array only applies during development server mode (`kamado server`). Transforms in this array are automatically applied to responses in serve mode only.
-
-**Options:**
-
-- `content`: String or function that returns the content to inject
-- `position`: `'head-start'` (after `<head>`) or `'head-end'` (before `</head>`, default)
-- `name`: Optional name for debugging (default: `'injectToHead'`)
-- `filter`: Optional filter options
-  - `include`: Glob pattern(s) to include (default: `'**/*.html'`)
-  - `exclude`: Glob pattern(s) to exclude
-
-**Customizing with spread syntax:**
-
-```ts
-transforms: [
-	{
-		...injectToHead({ content: '<script src="/dev.js"></script>' }),
-		name: 'my-custom-inject',
-		filter: { include: '**/*.htm' },
-	},
-];
-```
-
-#### createSSIShim
-
-Implement pseudo Server Side Includes (SSI) for development. Processes `<!--#include virtual="/path/to/file.html" -->` directives and replaces them with file content.
-
-```ts
-import { defineConfig } from 'kamado/config';
-import { createSSIShim } from '@kamado-io/page-compiler/transform/ssi-shim';
-
-export default defineConfig({
-	devServer: {
-		transforms: [createSSIShim()],
-	},
-});
-```
-
-**Usage in HTML:**
-
-```html
-<!DOCTYPE html>
-<html>
-	<head>
-		<title>My Page</title>
-	</head>
-	<body>
-		<!--#include virtual="/header.html" -->
-		<main>Content here</main>
-		<!--#include virtual="/footer.html" -->
-	</body>
-</html>
-```
-
-**Options:**
-
-- `filter`: Optional filter options
-  - `include`: Glob pattern(s) to include (default: `'**/*.html'`)
-  - `exclude`: Glob pattern(s) to exclude
-- `dir`: Server document root path to simulate. When specified, virtual paths are treated as absolute paths from this document root, and the relative portion is resolved against the output directory. Useful for simulating production server paths.
-- `onError`: Custom error handler `(includePath: string, error: unknown) => string | Promise<string>`
-
-**With custom error handling:**
-
-```ts
-createSSIShim({
-	onError: (path, error) => {
-		console.error(`Failed to include ${path}:`, error);
-		return `<!-- Failed to include: ${path} -->`;
-	},
-});
-```
-
-**Simulating server document root:**
-
-```ts
-createSSIShim({
-	dir: '/home/www/document_root/',
-});
-// In HTML: <!--#include virtual="/home/www/document_root/includes/header.html" -->
-// Will read from: {output}/includes/header.html
-```
-
-### Using Transform Utilities in Page Transforms
-
-Transform utilities can be used within the `manipulateDOM` hook or custom transforms. The utilities provide lower-level transform functions for advanced integration.
-
-#### Example: Using injectToHead in manipulateDOM
-
-```ts
-import { manipulateDOM } from '@kamado-io/page-compiler';
-import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
-
-manipulateDOM({
-	imageSizes: true,
-	hook: async (elements, window, context) => {
-		// Get the document HTML
-		const html = window.document.documentElement.outerHTML;
-
-		// Apply injectToHead transform
-		const injectTransform = createInjectToHeadTransform({
-			content: context.isServe
-				? '<script src="/__dev-tools.js"></script>'
-				: '<meta name="build-time" content="' + Date.now() + '">',
-		});
-
-		const result = await injectTransform(html, context);
-
-		// Update document with result
-		window.document.documentElement.outerHTML = result;
-	},
-});
-```
-
-#### Example: Resolving Anchor URLs with `ctx.getHref`
-
-`linkedom` (the DOM library used by `manipulateDOM`) does not populate `window.location` or `Document.baseURI`, so reading `<a>.href` returns the raw attribute value, not an absolute URL. Use `ctx.getHref(el)` for absolute-URL resolution against the build/serve base URL.
-
-```ts
-import { manipulateDOM } from '@kamado-io/page-compiler';
-
-manipulateDOM({
-	hook: (_elements, window, ctx) => {
-		// ctx.baseURL — dev-server URL in serve mode, pkg.production.baseURL in
-		// build mode, undefined when neither is configured.
-		// ctx.getHref(a) — absolute URL or null.
-		for (const a of window.document.querySelectorAll('a')) {
-			const abs = ctx.getHref(a);
-			if (abs && !abs.startsWith(ctx.baseURL ?? '')) {
-				a.setAttribute('rel', 'noopener noreferrer');
-				a.setAttribute('target', '_blank');
-			}
-		}
-	},
-});
-```
-
-`ctx.getHref` returns `null` for:
-
-- missing or empty `href` attribute
-- unparsable URLs (malformed input, relative `href` when `ctx.baseURL` is `undefined`)
-- dangerous schemes (`javascript:`, `data:`, `vbscript:`, `file:`) — so the helper is safe to interpolate into rendered HTML
-
-Basic-auth credentials in `ctx.baseURL` (e.g. a `https://user:pass@staging.example.com` preview URL) are stripped from the returned string.
-
-#### Example: Using createSSIShim in Custom Transform
-
-```ts
-import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
-
-const customTransform = {
-	name: 'custom-ssi',
-	transform: async (content, context) => {
-		if (typeof content !== 'string') return content;
-
-		// Apply SSI shim transform
-		const ssiTransform = createSSIShimTransform({
-			onError: (path) => `<!-- Failed to include: ${path} -->`,
-		});
-
-		return await ssiTransform(content, context);
-	},
-};
-```
-
-#### Example: Combining Multiple Utility Transforms
-
-```ts
-import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
-import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
-
-const combinedTransform = {
-	name: 'combined-utilities',
-	transform: async (content, context) => {
-		if (typeof content !== 'string') return content;
-
-		// Apply SSI first
-		const ssiTransform = createSSIShimTransform();
-		let result = await ssiTransform(content, context);
-
-		// Then inject to head
-		const injectTransform = createInjectToHeadTransform({
-			content: '<meta name="generator" content="Kamado">',
-		});
-		result = await injectTransform(result, context);
-
-		return result;
-	},
-};
-```
-
-#### Example: Conditional Processing Based on Context
-
-```ts
-import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
-
-const contextAwareTransform = {
-	name: 'context-aware',
-	transform: async (content, context) => {
-		if (typeof content !== 'string') return content;
-
-		// Inject admin tools only for admin pages
-		if (context.path.startsWith('admin/')) {
-			const adminTransform = createInjectToHeadTransform({
-				content: '<script src="/__admin-tools.js"></script>',
-			});
-			content = await adminTransform(content, context);
-		}
-
-		// Add analytics only in production builds
-		if (!context.isServe) {
-			const analyticsTransform = createInjectToHeadTransform({
-				content: '<script src="/analytics.js"></script>',
-			});
-			content = await analyticsTransform(content, context);
-		}
-
-		return content;
-	},
-};
-```
-
-#### Example: Using Context for File Operations
-
-```ts
-import { existsSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-
-const fileBasedTransform = {
-	name: 'file-based',
-	transform: async (content, context) => {
-		if (typeof content !== 'string') return content;
-
-		// Read a sibling file based on current file location
-		const inputDir = dirname(context.inputPath);
-		const metaFile = join(inputDir, 'meta.json');
-
-		if (existsSync(metaFile)) {
-			const meta = JSON.parse(readFileSync(metaFile, 'utf-8'));
-			console.log(`Processing ${context.path} with meta:`, meta);
-
-			// Use meta information for custom processing
-			if (meta.inject) {
-				content = content.replace('</head>', `${meta.inject}</head>`);
-			}
-		}
-
-		return content;
-	},
-};
-```
-
-### Advanced: Transform Functions
-
-For advanced use cases, you can use the lower-level transform functions to create custom `Transform` objects:
-
-```ts
-import { defineConfig } from 'kamado/config';
-import { createInjectToHeadTransform } from '@kamado-io/page-compiler/transform/inject-to-head';
-import { createSSIShimTransform } from '@kamado-io/page-compiler/transform/ssi-shim';
-
-export default defineConfig({
-	devServer: {
-		transforms: [
-			{
-				name: 'my-custom-transform',
-				filter: { include: '**/*.html' },
-				transform: createInjectToHeadTransform({
-					content: '<script src="/__dev.js"></script>',
-					position: 'head-end',
-				}),
-			},
-		],
-	},
-});
-```
-
-These functions return the raw transform function `(content, context) => Promise<string | ArrayBuffer>` without the name and filter configuration, allowing you to create fully custom `Transform` objects.
-
-## API Exports
-
-### Main Package (`@kamado-io/page-compiler`)
-
-```typescript
-import {
-	// Compiler
-	createPageCompiler,
-
-	// Default transforms
-	createDefaultPageTransforms,
-
-	// Transform factory functions
-	manipulateDOM,
-	characterEntities,
-	doctype,
-	prettier,
-	minifier,
-	lineBreak,
-
-	// Title utilities
-	getTitleFromHtmlString,
-
-	// Types
-	type PageCompilerOptions,
-	type BreadcrumbItem,
-	type Transform,
-	type TransformContext,
-	type CompileData,
-	type CompileHooks,
-	type CompileHooksObject,
-	type CompileHook,
-	// ... other types
-} from '@kamado-io/page-compiler';
-```
-
-### Transform Utilities
-
-```typescript
-// Inject to head
-import {
-	injectToHead,
-	createInjectToHeadTransform,
-	type InjectToHeadOptions,
-	type InjectToHeadTransformOptions,
-} from '@kamado-io/page-compiler/transform/inject-to-head';
-
-// SSI shim
-import {
-	createSSIShim,
-	createSSIShimTransform,
-	type SSIShimOptions,
-	type SSIShimTransformOptions,
-} from '@kamado-io/page-compiler/transform/ssi-shim';
-```
-
-### Title Utilities
-
-```typescript
-// Extract title from HTML string (searches only in <head> section for performance)
-import { getTitleFromHtmlString } from '@kamado-io/page-compiler/title';
-
-const title = getTitleFromHtmlString(
-	'<html><head><title>My Page</title></head>...</html>',
-);
-// Returns: 'My Page'
-```
-
-### Individual Transforms (Subpath Exports)
-
-```typescript
-import { manipulateDOM } from '@kamado-io/page-compiler/transform/manipulate-dom';
-import { characterEntities } from '@kamado-io/page-compiler/transform/character-entities';
-import { doctype } from '@kamado-io/page-compiler/transform/doctype';
-import { prettier } from '@kamado-io/page-compiler/transform/prettier';
-import { minifier } from '@kamado-io/page-compiler/transform/minifier';
-import { lineBreak } from '@kamado-io/page-compiler/transform/line-break';
-```
-
-## License
-
-MIT
+各 API の詳細・引数仕様は src の JSDoc を参照。
