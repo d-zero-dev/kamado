@@ -33,6 +33,6 @@
 		"kamado": "2.0.0-alpha.16"
 	},
 	"devDependencies": {
-		"typescript": "6.0.2"
+		"typescript": "6.0.3"
 	}
 }
