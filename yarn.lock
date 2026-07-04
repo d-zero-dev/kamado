@@ -1021,12 +1021,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@d-zero/roar@npm:2.0.1":
-  version: 2.0.1
-  resolution: "@d-zero/roar@npm:2.0.1"
+"@d-zero/roar@npm:2.1.2":
+  version: 2.1.2
+  resolution: "@d-zero/roar@npm:2.1.2"
   dependencies:
     yargs-parser: "npm:22.0.0"
-  checksum: 10c0/48ac0bc7283a16d8d4f46436f9ef69539dbd99f9bac778edfeaaec0bf473900b4963fd30fd9b79067644a25805e496e93a75cfd80a4d34bd380f72f1d6deb62c
+  checksum: 10c0/cb6f24c648386901b3d70353eac093e11817adf2b2622139da5fbe35e01585d0f567ee4bcbccc57be3591f3272b9676dd6bb22e9b553a67473faeb267e9e5b2e
   languageName: node
   linkType: hard
 
@@ -8733,7 +8733,7 @@ __metadata:
   resolution: "kamado@workspace:packages/kamado"
   dependencies:
     "@d-zero/dealer": "npm:1.9.2"
-    "@d-zero/roar": "npm:2.0.1"
+    "@d-zero/roar": "npm:2.1.2"
     "@d-zero/shared": "npm:0.21.1"
     "@hono/node-server": "npm:1.19.14"
     "@types/node": "npm:24.13.0"
