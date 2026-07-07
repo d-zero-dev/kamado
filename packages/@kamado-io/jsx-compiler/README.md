@@ -95,6 +95,7 @@ export default function Page() {
 
 - **SSR のみ** — Reactの標準的な SSR 制約をそのまま受け入れる（`useEffect` はサーバーで実行されない等）。kamado 側で機能制限は行わない
 - **コンパイル結果のキャッシュ** — コンパイル済みコンポーネントは compiler インスタンスごとに LRU キャッシュされる（上限 256）。`cache = false`（dev server が自動で渡す）でバイパスし、依存ファイルの編集が即反映される
+- **非標準の `jsxImportSource` を使う場合のみ: incremental ビルドでの検知範囲に注意**（既定の `react`/`react-dom` を使っている限り気にする必要はない） — `cacheDigest`（page-compiler の incremental ビルド判定に合成される）は esbuild・ランタイムの実行時バージョン・`JsxCompilerOptions` を含めるが、これは `react`/`react-dom` が両方とも `version` を公開しているから成り立つ。`jsxImportSource` に代替ランタイムを指定する場合、そのランタイム（および `<jsxImportSource>/server`）が同様に `version` を公開していなければ依存更新を検知できず、incremental ビルドが古い HTML を再利用し続けることがある。該当する場合は `--force` でフルリビルドすること
 - **main と layout は別々にキャッシュされる** — 理由は `createCompileHooks` の JSDoc を参照。実用上の影響として、layout 内のコンパイルエラーはファイルパスがプレースホルダーになる場合があるが、page-compiler 側で実際の layout パスに差し替えられる
 - **`registerHooks()` について** — JSX を Node.js 上で実行するため、esbuild でバンドルしたコードをディスク I/O なしで `import()` する `node:module` の `registerHooks()`（同期版カスタム ESM ローダー）を使う。このフックはプロセス全体に一度だけ登録され、対象は専用のスキーム（`kamado-jsx:`）に限定されるため、他の `import`/`require` には影響しない
 - **serve モードでのメモリ特性** — Node.js の ESM には一度 `import()` したモジュールをレジストリから明示的に解放する標準 API がない。`cache = false` で同一ファイルを繰り返しコンパイルするたびに新しい仮想モジュールが作られ import され続けるため、プロセスのメモリ使用量は理論上無制限に増加する。実測（同一ファイルを2000回連続編集・再コンパイル）では heap 使用量の増加は数十MB程度に留まり、通常の開発セッション規模では実害はない。長時間・大量の編集を行う dev サーバープロセスは定期的に再起動することを推奨する
