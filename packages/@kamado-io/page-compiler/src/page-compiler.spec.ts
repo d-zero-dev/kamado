@@ -1,6 +1,6 @@
 import type { BreadcrumbItem } from './features/breadcrumbs.js';
 import type { NavNode } from './features/nav.js';
-import type { CompileData, PageCompilerOptions } from './types.js';
+import type { CompileData, CompilerFunction, PageCompilerOptions } from './types.js';
 import type { CompilableFile, FileContent, MetaData, PageData } from 'kamado/files';
 
 import { mergeConfig } from 'kamado/config';
@@ -341,6 +341,58 @@ describe('page compiler', async () => {
 			}),
 		});
 		expect(result).toBe('<p>Hello, world!</p>\n');
+	});
+
+	describe('cacheDigest', () => {
+		/**
+		 * A minimal compiler function stub carrying a fixed `cacheDigest()`,
+		 * for asserting that page-compiler's own cacheDigest reacts to it.
+		 * @param digestValue - Value `cacheDigest()` resolves to
+		 */
+		function compilerWithDigest(digestValue: string) {
+			const compiler = ((content: string) => content) as CompilerFunction<MetaData>;
+			compiler.cacheDigest = () => digestValue;
+			return compiler;
+		}
+
+		test('folds compileHooks.main.compiler.cacheDigest() into the page compiler digest', async () => {
+			const entryA = createPageCompiler()({
+				compileHooks: { main: { compiler: compilerWithDigest('digest-a') } },
+			});
+			const fnA = await entryA.compiler(config);
+			const entryB = createPageCompiler()({
+				compileHooks: { main: { compiler: compilerWithDigest('digest-b') } },
+			});
+			const fnB = await entryB.compiler(config);
+
+			const digestA = await fnA.cacheDigest?.();
+			const digestB = await fnB.cacheDigest?.();
+			expect(digestA).not.toBe(digestB);
+		});
+
+		test('folds compileHooks.layout.compiler.cacheDigest() into the page compiler digest', async () => {
+			const entryA = createPageCompiler()({
+				compileHooks: { layout: { compiler: compilerWithDigest('digest-a') } },
+			});
+			const fnA = await entryA.compiler(config);
+			const entryB = createPageCompiler()({
+				compileHooks: { layout: { compiler: compilerWithDigest('digest-b') } },
+			});
+			const fnB = await entryB.compiler(config);
+
+			const digestA = await fnA.cacheDigest?.();
+			const digestB = await fnB.cacheDigest?.();
+			expect(digestA).not.toBe(digestB);
+		});
+
+		test('still produces a digest when compileHooks omit cacheDigest entirely', async () => {
+			const compiler = ((content: string) => content) as CompilerFunction<MetaData>;
+			const entry = createPageCompiler()({ compileHooks: { main: { compiler } } });
+			const fn = await entry.compiler(config);
+			const digest = await fn.cacheDigest?.();
+			expect(typeof digest).toBe('string');
+			expect(digest?.length).toBeGreaterThan(0);
+		});
 	});
 });
 

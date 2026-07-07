@@ -154,6 +154,31 @@ describe('create-compile-hooks', () => {
 			expect(result.html).toBe('<div><p>main html</p></div>');
 		});
 
+		test('exposes cacheDigest on both main and layout compilers (copied from the underlying compileJsx() instances)', async () => {
+			const result = await runCreateCompileHooksScript<{
+				hasMainDigest: boolean;
+				hasLayoutDigest: boolean;
+				mainDigest: string;
+				layoutDigest: string;
+			}>(`
+				const hooksFactory = createCompileHooks({ define: { FOO: '"bar"' } });
+				const hooks = hooksFactory({ layouts: { dir: ${JSON.stringify(layoutsDir)} } });
+				const hasMainDigest = typeof hooks.main.compiler.cacheDigest === 'function';
+				const hasLayoutDigest = typeof hooks.layout.compiler.cacheDigest === 'function';
+				const mainDigest = await hooks.main.compiler.cacheDigest();
+				const layoutDigest = await hooks.layout.compiler.cacheDigest();
+				console.log(JSON.stringify({ hasMainDigest, hasLayoutDigest, mainDigest, layoutDigest }));
+			`);
+			expect(result.hasMainDigest).toBe(true);
+			expect(result.hasLayoutDigest).toBe(true);
+			expect(typeof result.mainDigest).toBe('string');
+			expect(result.mainDigest.length).toBeGreaterThan(0);
+			// main and layout use separate compileJsx() instances (see class
+			// doc), but were built from the same jsxOptions, so their digests
+			// should agree.
+			expect(result.mainDigest).toBe(result.layoutDigest);
+		});
+
 		test('throws instead of silently clobbering a pre-existing `content` field when contentVariableName is customized', async () => {
 			await expect(
 				runCreateCompileHooksScript(`

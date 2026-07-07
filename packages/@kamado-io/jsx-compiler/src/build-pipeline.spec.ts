@@ -98,8 +98,13 @@ async function writeSite(root: string, pageNames: readonly string[] = ['a', 'b',
  * @param root - Site root directory
  * @param options - Build options
  * @param options.incremental - Enable incremental builds
+ * @param options.jsxOptions - Forwarded to `createCompileHooks()`, to
+ *   exercise cacheDigest reacting to JsxCompilerOptions changes
  */
-async function buildSite(root: string, options?: { incremental?: boolean }) {
+async function buildSite(
+	root: string,
+	options?: { incremental?: boolean; jsxOptions?: Record<string, unknown> },
+) {
 	await runNodeScript(`
 		const { createPageCompiler } = await import('@kamado-io/page-compiler');
 		const { build } = await import('kamado/build');
@@ -113,7 +118,7 @@ async function buildSite(root: string, options?: { incremental?: boolean }) {
 			compilers: (def) => [
 				def(createPageCompiler(), {
 					files: '**/*.tsx',
-					compileHooks: createCompileHooks(),
+					compileHooks: createCompileHooks(${JSON.stringify(options?.jsxOptions ?? {})}),
 					layouts: { dir: ${JSON.stringify(path.join(root, 'layouts'))} },
 					globalData: { dir: ${JSON.stringify(path.join(root, 'data'))} },
 					transforms: [],
@@ -299,5 +304,29 @@ describe('incremental build pipeline', () => {
 		);
 		const untouchedAfter = await fs.stat(path.join(siteOutput, 'page-a.html'));
 		expect(untouchedAfter.mtimeMs).toBeGreaterThan(untouchedBefore.mtimeMs);
+	}, 30_000);
+
+	test('changing JsxCompilerOptions (e.g. `define`) rebuilds every page even though no source file changed', async () => {
+		// Guards createCompileHooks()'s cacheDigest: without it, a
+		// jsx-compiler-level option change (or an esbuild/react/react-dom
+		// upgrade) is invisible to page-compiler's own digest and an
+		// incremental build would wrongly serve stale HTML.
+		await buildSite(siteDir, { incremental: true });
+		const before = await Promise.all(
+			['a', 'b', 'c'].map((name) => fs.stat(path.join(siteOutput, `page-${name}.html`))),
+		);
+
+		await sleep(20);
+		await buildSite(siteDir, {
+			incremental: true,
+			jsxOptions: { define: { KAMADO_TEST_FLAG: '"on"' } },
+		});
+
+		const after = await Promise.all(
+			['a', 'b', 'c'].map((name) => fs.stat(path.join(siteOutput, `page-${name}.html`))),
+		);
+		for (const [i, element] of before.entries()) {
+			expect(after[i]?.mtimeMs).toBeGreaterThan(element?.mtimeMs ?? 0);
+		}
 	}, 30_000);
 });

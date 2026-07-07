@@ -29,22 +29,37 @@ export interface JsxCompilerOptions {
 
 /**
  * Low-level JSX compiler function
- * @param source - JSX/TSX source code (frontmatter already stripped)
- * @param props - Data passed as the component's sole props argument
- * @param resolveDir - Base directory used to resolve relative imports
- * @param filePath - Absolute path of the file `source` originated from, used
- *   for `//# sourceURL=` annotations and error messages
- * @param cache - Whether a previously compiled component may be reused from
- *   cache. `false` in serve mode so that source and dependency edits are
- *   always reflected. Default: `true`
  */
-export type CompilerFunction = (
-	source: string,
-	props: Record<string, unknown>,
-	resolveDir: string,
-	filePath: string,
-	cache?: boolean,
-) => Promise<string>;
+export interface CompilerFunction {
+	/**
+	 * @param source - JSX/TSX source code (frontmatter already stripped)
+	 * @param props - Data passed as the component's sole props argument
+	 * @param resolveDir - Base directory used to resolve relative imports
+	 * @param filePath - Absolute path of the file `source` originated from, used
+	 *   for `//# sourceURL=` annotations and error messages
+	 * @param cache - Whether a previously compiled component may be reused from
+	 *   cache. `false` in serve mode so that source and dependency edits are
+	 *   always reflected. Default: `true`
+	 */
+	(
+		source: string,
+		props: Record<string, unknown>,
+		resolveDir: string,
+		filePath: string,
+		cache?: boolean,
+	): Promise<string>;
+	/**
+	 * Digest of context-level inputs invisible to page-compiler's own
+	 * cacheDigest (esbuild/React toolchain versions, resolved options) —
+	 * folded into `@kamado-io/page-compiler`'s cacheDigest via
+	 * `CompilerFunction<M>.cacheDigest` (see that package's types.ts).
+	 * Without this, upgrading esbuild/react/react-dom or changing
+	 * `JsxCompilerOptions` would go unnoticed by an incremental build, since
+	 * none of that is visible in the kamado.config.ts source the build
+	 * already hashes.
+	 */
+	cacheDigest?: () => string | Promise<string>;
+}
 
 /**
  * Shape a `.jsx`/`.tsx` page file's default export must satisfy

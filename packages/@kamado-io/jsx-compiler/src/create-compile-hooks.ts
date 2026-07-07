@@ -119,6 +119,12 @@ export function createCompileHooks<M extends MetaData>(
 			return layoutCompiler(content, props, layoutsDir, filePath, cache);
 		};
 
+		// Wrapping mainCompiler/layoutCompiler in the closures above drops
+		// their cacheDigest unless copied explicitly onto the wrapper (see
+		// CompilerFunction<M>.cacheDigest's JSDoc in page-compiler's types.ts).
+		main.cacheDigest = mainCompiler.cacheDigest;
+		layout.cacheDigest = layoutCompiler.cacheDigest;
+
 		return {
 			main: { compiler: main },
 			layout: { compiler: layout },

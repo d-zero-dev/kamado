@@ -216,6 +216,22 @@ describe('compile-jsx', () => {
 			expect(result.third).toBe('<p>2</p>');
 		});
 
+		test('caches byte-identical sources separately per filePath (so //# sourceURL= never points at the wrong file)', async () => {
+			const filePathA = path.join(tmpDir, 'PageA.tsx');
+			const filePathB = path.join(tmpDir, 'PageB.tsx');
+			const result = await runCompileJsxScript<{ first: string; second: string }>(`
+				const compiler = compileJsx();
+				const source = ${JSON.stringify(countingSource('Page'))};
+				const first = await compiler(source, {}, ${JSON.stringify(tmpDir)}, ${JSON.stringify(filePathA)});
+				const second = await compiler(source, {}, ${JSON.stringify(tmpDir)}, ${JSON.stringify(filePathB)});
+				console.log(JSON.stringify({ first, second }));
+			`);
+			// Same resolveDir and source, but different filePath => separate
+			// cache entry => count restarts instead of continuing from PageA's.
+			expect(result.first).toBe('<p>1</p>');
+			expect(result.second).toBe('<p>1</p>');
+		});
+
 		test('deduplicates concurrent compiles of the same not-yet-cached source', async () => {
 			const filePath = path.join(tmpDir, 'Page.tsx');
 			const result = await runCompileJsxScript<{ results: string[] }>(`
@@ -351,5 +367,102 @@ describe('compile-jsx', () => {
 		expect(result.secondDeps.some((dep) => dep.endsWith(`${path.sep}Button.tsx`))).toBe(
 			true,
 		);
+	});
+
+	describe('cacheDigest', () => {
+		test('returns a stable string for the same options', async () => {
+			const result = await runCompileJsxScript<{ first: string; second: string }>(`
+				const compiler = compileJsx({ define: { FOO: '"bar"' } });
+				const first = await compiler.cacheDigest();
+				const second = await compiler.cacheDigest();
+				console.log(JSON.stringify({ first, second }));
+			`);
+			expect(typeof result.first).toBe('string');
+			expect(result.first.length).toBeGreaterThan(0);
+			expect(result.first).toBe(result.second);
+		});
+
+		test('differs when JsxCompilerOptions differ', async () => {
+			const result = await runCompileJsxScript<{ a: string; b: string }>(`
+				const a = await compileJsx({ define: { FOO: '"bar"' } }).cacheDigest();
+				const b = await compileJsx({ define: { FOO: '"baz"' } }).cacheDigest();
+				console.log(JSON.stringify({ a, b }));
+			`);
+			expect(result.a).not.toBe(result.b);
+		});
+
+		test('differs when the resolved runtime version differs (jsxImportSource pinned to two different fake-runtime versions)', async () => {
+			// createCacheDigest hashes its input, so a version string can't be
+			// read back out of a digest directly — instead, this proves the
+			// runtime's declared `version` actually reaches the digest by
+			// installing the same fake runtime twice under different names,
+			// differing only in package.json's `version` field.
+			const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..', '..');
+			const writeRuntime = async (name: string, version: string) => {
+				const dir = path.join(repoRoot, 'node_modules', name);
+				await fs.rm(dir, { recursive: true, force: true });
+				await fs.mkdir(dir, { recursive: true });
+				await fs.writeFile(
+					path.join(dir, 'package.json'),
+					JSON.stringify({
+						name,
+						version,
+						exports: {
+							'.': './index.js',
+							'./jsx-runtime': './jsx-runtime.js',
+							'./server': './server.js',
+						},
+					}),
+				);
+				await fs.writeFile(
+					path.join(dir, 'index.js'),
+					[
+						`export const version = ${JSON.stringify(version)};`,
+						'export function createElement(type, props, ...children) { return { type, props: props || {}, children }; }',
+						'',
+					].join('\n'),
+				);
+				await fs.writeFile(
+					path.join(dir, 'jsx-runtime.js'),
+					[
+						"import { createElement } from './index.js';",
+						'export function jsx(type, props) { const { children, ...rest } = props || {}; return createElement(type, rest, children); }',
+						'export const jsxs = jsx;',
+						'',
+					].join('\n'),
+				);
+				await fs.writeFile(
+					path.join(dir, 'server.js'),
+					[
+						`export const version = ${JSON.stringify(version)};`,
+						'export function renderToStaticMarkup() { return ""; }',
+						'',
+					].join('\n'),
+				);
+			};
+
+			const nameA = 'jsx-compiler-test-digest-runtime-a';
+			const nameB = 'jsx-compiler-test-digest-runtime-b';
+			try {
+				await writeRuntime(nameA, '1.0.0');
+				await writeRuntime(nameB, '2.0.0');
+
+				const result = await runCompileJsxScript<{ a: string; b: string }>(`
+					const a = await compileJsx({ jsxImportSource: ${JSON.stringify(nameA)} }).cacheDigest();
+					const b = await compileJsx({ jsxImportSource: ${JSON.stringify(nameB)} }).cacheDigest();
+					console.log(JSON.stringify({ a, b }));
+				`);
+				expect(result.a).not.toBe(result.b);
+			} finally {
+				await fs.rm(path.join(repoRoot, 'node_modules', nameA), {
+					recursive: true,
+					force: true,
+				});
+				await fs.rm(path.join(repoRoot, 'node_modules', nameB), {
+					recursive: true,
+					force: true,
+				});
+			}
+		});
 	});
 });
