@@ -29,7 +29,7 @@
 		"dist"
 	],
 	"dependencies": {
-		"cssnano": "7.1.9",
+		"cssnano": "8.0.2",
 		"kamado": "2.0.0-alpha.16",
 		"postcss": "8.5.16",
 		"postcss-import": "16.1.1",
