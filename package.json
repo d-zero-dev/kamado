@@ -52,9 +52,9 @@
 		"typescript": "6.0.3",
 		"vitest": "4.1.10"
 	},
-	"packageManager": "yarn@4.17.0",
+	"packageManager": "yarn@4.17.1",
 	"volta": {
 		"node": "24.18.0",
-		"yarn": "4.17.0"
+		"yarn": "4.17.1"
 	}
 }
