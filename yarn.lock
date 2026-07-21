@@ -971,13 +971,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@d-zero/dealer@npm:1.9.4":
-  version: 1.9.4
-  resolution: "@d-zero/dealer@npm:1.9.4"
+"@d-zero/dealer@npm:1.10.1":
+  version: 1.10.1
+  resolution: "@d-zero/dealer@npm:1.10.1"
   dependencies:
     "@d-zero/shared": "npm:0.22.2"
     ansi-colors: "npm:4.1.3"
-  checksum: 10c0/26052d5d4571535c898460ce18efe294932eea24431368ca977fdd26e7ad693b84b523c0a9c7e0d4c3dee73d5a35e72cd2bce0ebe50822aa4c5f32dfe7eb59f7
+  checksum: 10c0/7ea6e587880a7483a330119ecae643118d5d90b1e8586658ab51cf8c80c8c5f8b5ee627f13deac34313ade6481f984d1df8601b023b7bb845239e5c5814804ef
   languageName: node
   linkType: hard
 
@@ -8650,7 +8650,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "kamado@workspace:packages/kamado"
   dependencies:
-    "@d-zero/dealer": "npm:1.9.4"
+    "@d-zero/dealer": "npm:1.10.1"
     "@d-zero/roar": "npm:2.1.3"
     "@d-zero/shared": "npm:0.22.1"
     "@hono/node-server": "npm:2.0.8"
