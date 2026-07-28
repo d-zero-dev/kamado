@@ -40,7 +40,7 @@ description: Git 操作ルール
 | ------ | ---------------------------------------------------- |
 | 0      | `kamado`                                             |
 | 1      | `page-compiler`, `script-compiler`, `style-compiler` |
-| 2      | `pug-compiler`                                       |
+| 2      | `pug-compiler`, `jsx-compiler`                       |
 
 - 同一ティア内では順序不問
 - ルート設定の変更（`tsconfig.json`, CI 等）はパッケージの変更より先にコミット
@@ -54,7 +54,7 @@ description: Git 操作ルール
 - Conventional Commits を使用すること
   - 使用するタイプ: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
   - 使用するスコープ:
-    - 各パッケージ名（ネームスペースなし）: `kamado`, `page-compiler`, `script-compiler`, `style-compiler`, `pug-compiler`
+    - 各パッケージ名（ネームスペースなし）: `kamado`, `page-compiler`, `script-compiler`, `style-compiler`, `pug-compiler`, `jsx-compiler`
     - `repo`, `deps`, `github`
 - メッセージ本文の各行は100文字以下
 - 件名は sentence-case, start-case, pascal-case, upper-case にしない

@@ -131,8 +131,7 @@ export function createPageCompiler<M extends MetaData>() {
 
 				// Apply layout if specified
 				const layoutName = (metaData as Record<string, unknown>)?.layout as
-					| string
-					| undefined;
+					string | undefined;
 				if (layoutName) {
 					const layout = layouts[layoutName];
 					if (!layout) {
@@ -219,14 +218,18 @@ export function createPageCompiler<M extends MetaData>() {
 			// config.pageList filters them out of pageList. CompilableFile.date is
 			// the per-build timestamp from getFile(), not an input, so it is
 			// stripped from every file to keep the digest stable across builds.
-			// Functions (compileHooks, transform closures, filters.date) are
-			// omitted by the serializer; changes to them are covered by the config
-			// file hash that build() mixes in.
+			// Functions (transform closures, filters.date) are omitted by the
+			// serializer; changes to them are covered by the config file hash
+			// that build() mixes in. compileHooks itself is a function too, but
+			// unlike a transform closure it may wrap external state invisible in
+			// the config file source (e.g. a bundler toolchain version) — its
+			// main/layout compiler can expose that through its own
+			// cacheDigest(), which is folded in explicitly below.
 			const stripDate = <T extends { date?: Date }>(file: T) => ({
 				...file,
 				date: undefined,
 			});
-			compileFunction.cacheDigest = () =>
+			compileFunction.cacheDigest = async () =>
 				createCacheDigest({
 					compiler: '@kamado-io/page-compiler',
 					pageList: globalData.pageList?.map(stripDate),
@@ -240,6 +243,8 @@ export function createPageCompiler<M extends MetaData>() {
 					transforms: transforms.map((transform) => transform.name),
 					options,
 					parseErrorMode,
+					mainCompilerDigest: await compileHooks?.main?.compiler?.cacheDigest?.(),
+					layoutCompilerDigest: await compileHooks?.layout?.compiler?.cacheDigest?.(),
 				});
 
 			return compileFunction;

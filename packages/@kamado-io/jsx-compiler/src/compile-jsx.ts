@@ -1,0 +1,204 @@
+import type { CompilerFunction, JsxCompilerOptions } from './types.js';
+import type { createElement as ReactCreateElement, ComponentType } from 'react';
+import type { renderToStaticMarkup as ReactRenderToStaticMarkup } from 'react-dom/server';
+
+import { createCacheDigest } from 'kamado/compiler';
+import { trackDependency } from 'kamado/files';
+
+import { bundleJsx } from './bundle-jsx.js';
+import { registerVirtualModule } from './jsx-loader-hooks.js';
+
+interface JsxRuntime {
+	readonly createElement: typeof ReactCreateElement;
+	readonly renderToStaticMarkup: typeof ReactRenderToStaticMarkup;
+	// Folded into cacheDigest() below — an esbuild/react/react-dom upgrade
+	// changes compiled output but never touches the kamado.config.ts source,
+	// so it would otherwise go unnoticed by an incremental build.
+	readonly runtimeVersion?: string;
+	readonly serverVersion?: string;
+}
+
+/**
+ * Resolves the createElement/renderToStaticMarkup pair to render with.
+ *
+ * `jsxImportSource` (forwarded to esbuild's `jsx: 'automatic'` transform)
+ * only controls where a compiled component's own JSX calls are imported
+ * from; it says nothing about how *this* module renders that component to
+ * a string. When it's the default `'react'`, `react-dom/server` is used
+ * directly. For any other value, a react-dom/server-compatible SSR API is
+ * expected at `<jsxImportSource>/server` (e.g. a drop-in React
+ * alternative) — there is no universal convention for this across JSX
+ * runtimes (Preact, for instance, ships a separate `preact-render-to-string`
+ * package instead), so runtimes that don't follow it aren't supported.
+ * @param jsxImportSource - The `jsxImportSource` compiler option (default `'react'`)
+ */
+async function resolveJsxRuntime(jsxImportSource: string): Promise<JsxRuntime> {
+	if (jsxImportSource === 'react') {
+		const [react, reactDomServer] = await Promise.all([
+			import('react'),
+			import('react-dom/server'),
+		]);
+		return {
+			createElement: react.createElement,
+			renderToStaticMarkup: reactDomServer.renderToStaticMarkup,
+			runtimeVersion: (react as { version?: string }).version,
+			serverVersion: (reactDomServer as { version?: string }).version,
+		};
+	}
+	const [runtimeModule, serverModule] = (await Promise.all([
+		import(jsxImportSource),
+		import(`${jsxImportSource}/server`),
+	])) as [
+		{ createElement: typeof ReactCreateElement; version?: string },
+		{ renderToStaticMarkup: typeof ReactRenderToStaticMarkup; version?: string },
+	];
+	return {
+		createElement: runtimeModule.createElement,
+		renderToStaticMarkup: serverModule.renderToStaticMarkup,
+		runtimeVersion: runtimeModule.version,
+		serverVersion: serverModule.version,
+	};
+}
+
+// Maximum number of compiled components kept per compiler instance. Mirrors
+// `@kamado-io/pug-compiler`'s TEMPLATE_CACHE_LIMIT: shared layouts stay hot
+// via LRU refresh, unique page components churn through without growing
+// memory unboundedly on large sites.
+const COMPONENT_CACHE_LIMIT = 256;
+
+interface CacheEntry {
+	readonly component: ComponentType<Record<string, unknown>>;
+	readonly dependencies: readonly string[];
+}
+
+/**
+ * Creates a JSX/TSX compiler function.
+ *
+ * Compiled components are cached per compiler instance, keyed by the source
+ * string, so a component bundled once is imported and reused across every
+ * page that shares it. Pass `cache = false` (serve mode) to bypass the
+ * cache — the component and its dependencies are then re-bundled on every
+ * call, so edits are always reflected.
+ * @param options - JSX compiler options
+ * @example
+ * ```typescript
+ * const compiler = compileJsx();
+ * const html = await compiler(
+ *   'export default function Page({ title }) { return <h1>{title}</h1>; }',
+ *   { title: 'Hello' },
+ *   '/site/src/pages',
+ *   '/site/src/pages/index.tsx',
+ * );
+ * ```
+ */
+export function compileJsx(options: JsxCompilerOptions = {}): CompilerFunction {
+	const componentCache = new Map<string, CacheEntry>();
+	// Concurrent compiles of the same not-yet-cached source (e.g. a shared
+	// layout requested by several pages building in parallel) collapse into
+	// a single bundle+import, regardless of the cache flag.
+	const inFlight = new Map<string, Promise<CacheEntry>>();
+	const jsxImportSource = options.jsxImportSource ?? 'react';
+	const jsxRuntimePromise = resolveJsxRuntime(jsxImportSource);
+
+	/**
+	 * Bundles and imports `source`, returning its default-exported component
+	 * plus the local files the bundle pulled in.
+	 * @param source - JSX/TSX source code
+	 * @param filePath - Absolute path of the file `source` originated from
+	 * @param resolveDir - Directory relative imports inside `source` resolve against
+	 */
+	async function loadComponent(
+		source: string,
+		filePath: string,
+		resolveDir: string,
+	): Promise<CacheEntry> {
+		const { code, dependencies } = await bundleJsx(
+			{ source, filePath, resolveDir },
+			options,
+		);
+		const moduleUrl = registerVirtualModule(code, resolveDir);
+		const imported = (await import(moduleUrl)) as { default?: unknown };
+		if (typeof imported.default !== 'function') {
+			throw new TypeError(
+				`JSX/TSX file must \`export default\` a function component: ${filePath}`,
+			);
+		}
+		return {
+			component: imported.default as ComponentType<Record<string, unknown>>,
+			dependencies,
+		};
+	}
+
+	const compile: CompilerFunction = async (
+		source,
+		props,
+		resolveDir,
+		filePath,
+		cache = true,
+	) => {
+		// resolveDir and filePath are both part of the key: the same source
+		// text resolves its relative imports differently depending on which
+		// directory it came from (resolveDir), and two byte-identical files
+		// must still compile to independent cache entries (filePath) —
+		// bundle-jsx.ts embeds a `//# sourceURL=` for filePath, so sharing a
+		// cache entry across files would point every stack trace/error at
+		// whichever file happened to compile first.
+		const cacheKey = JSON.stringify([resolveDir, filePath, source]);
+		let entry = cache ? componentCache.get(cacheKey) : undefined;
+		if (entry) {
+			// Refresh LRU position, same rationale as compile-pug.ts.
+			componentCache.delete(cacheKey);
+			componentCache.set(cacheKey, entry);
+		} else {
+			let pending = inFlight.get(cacheKey);
+			if (!pending) {
+				pending = loadComponent(source, filePath, resolveDir);
+				inFlight.set(cacheKey, pending);
+				pending.finally(() => inFlight.delete(cacheKey)).catch(() => {});
+			}
+			entry = await pending;
+			if (cache) {
+				if (componentCache.size >= COMPONENT_CACHE_LIMIT) {
+					const oldestKey = componentCache.keys().next().value;
+					if (oldestKey !== undefined) {
+						componentCache.delete(oldestKey);
+					}
+				}
+				componentCache.set(cacheKey, entry);
+			}
+		}
+
+		// Report dependencies on every call, including cache hits: the
+		// incremental-build manifest is keyed per compiled file, so a cache
+		// hit must still declare the same inputs it declared the first time.
+		for (const dependency of entry.dependencies) {
+			trackDependency(dependency);
+		}
+
+		const { createElement, renderToStaticMarkup } = await jsxRuntimePromise;
+		try {
+			return renderToStaticMarkup(createElement(entry.component, props));
+		} catch (error) {
+			throw new Error(`Failed to render JSX/TSX component: ${filePath}`, {
+				cause: error,
+			});
+		}
+	};
+
+	compile.cacheDigest = async () => {
+		const [esbuild, jsxRuntime] = await Promise.all([
+			import('esbuild'),
+			jsxRuntimePromise,
+		]);
+		return createCacheDigest({
+			compiler: '@kamado-io/jsx-compiler',
+			esbuildVersion: esbuild.version,
+			jsxImportSource,
+			runtimeVersion: jsxRuntime.runtimeVersion,
+			serverVersion: jsxRuntime.serverVersion,
+			options,
+		});
+	};
+
+	return compile;
+}
