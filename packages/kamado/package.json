@@ -41,7 +41,7 @@
 		"fast-glob": "3.3.3",
 		"gray-matter": "4.0.3",
 		"hono": "4.12.31",
-		"linkedom": "0.18.12",
+		"linkedom": "0.18.13",
 		"open": "11.0.0",
 		"picomatch": "4.0.5",
 		"yaml": "2.9.0"
