@@ -3,6 +3,7 @@
 	"ignorePaths": ["**/CHANGELOG.md", "**/CODEOWNERS"],
 	"words": [
 		//
+		"jsxs",
 		"kamado",
 		"unstub",
 		"vbscript"

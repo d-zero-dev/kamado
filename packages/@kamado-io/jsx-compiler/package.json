@@ -1,0 +1,52 @@
+{
+	"name": "@kamado-io/jsx-compiler",
+	"version": "2.0.0-alpha.16",
+	"description": "JSX/TSX (React SSR) compiler for Kamado",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/d-zero-dev/kamado.git",
+		"directory": "packages/@kamado-io/jsx-compiler"
+	},
+	"author": "D-ZERO Co., Ltd.",
+	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	},
+	"type": "module",
+	"main": "./dist/jsx-compiler.js",
+	"types": "./dist/jsx-compiler.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/jsx-compiler.d.ts",
+			"default": "./dist/jsx-compiler.js"
+		}
+	},
+	"engines": {
+		"node": ">=24.13.1"
+	},
+	"scripts": {
+		"build": "tsc --project tsconfig.build.json",
+		"dev": "tsc --watch --project tsconfig.build.json"
+	},
+	"files": [
+		"dist"
+	],
+	"dependencies": {
+		"esbuild": "0.28.1"
+	},
+	"peerDependencies": {
+		"@kamado-io/page-compiler": "^1.0.0",
+		"kamado": "^1.0.0",
+		"react": "^18.0.0 || ^19.0.0",
+		"react-dom": "^18.0.0 || ^19.0.0"
+	},
+	"devDependencies": {
+		"@kamado-io/page-compiler": "2.0.0-alpha.16",
+		"@types/react": "19.2.17",
+		"@types/react-dom": "19.2.3",
+		"kamado": "2.0.0-alpha.16",
+		"react": "19.2.7",
+		"react-dom": "19.2.7",
+		"typescript": "6.0.3"
+	}
+}

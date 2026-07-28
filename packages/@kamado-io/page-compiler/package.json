@@ -84,8 +84,8 @@
 		"html-minifier-terser": "7.2.0",
 		"image-size": "2.0.2",
 		"kamado": "2.0.0-alpha.16",
-		"linkedom": "0.18.12",
-		"prettier": "3.9.4"
+		"linkedom": "0.18.13",
+		"prettier": "3.9.5"
 	},
 	"devDependencies": {
 		"@types/html-minifier-terser": "7.0.2",

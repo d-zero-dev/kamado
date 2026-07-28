@@ -31,7 +31,7 @@
 	"dependencies": {
 		"cssnano": "8.0.2",
 		"kamado": "2.0.0-alpha.16",
-		"postcss": "8.5.16",
+		"postcss": "8.5.20",
 		"postcss-import": "16.1.1",
 		"postcss-load-config": "6.0.1"
 	},

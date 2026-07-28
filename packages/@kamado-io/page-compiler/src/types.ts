@@ -114,8 +114,7 @@ export interface PageCompilerOptions<M extends MetaData> {
 	 * ```
 	 */
 	readonly transforms?:
-		| Transform<M>[]
-		| ((defaultTransforms: readonly Transform<M>[]) => Transform<M>[]);
+		Transform<M>[] | ((defaultTransforms: readonly Transform<M>[]) => Transform<M>[]);
 	/**
 	 * Compilation hooks for customizing compile process
 	 * Can be an object or a function that returns an object
@@ -230,19 +229,34 @@ export type ContentHook<M extends MetaData> = (
 /**
  * Compiler function type
  * @template M - Custom metadata type extending MetaData
- * @param content - Template content to compile
- * @param data - Compile data object containing page info, navigation, and breadcrumbs
- * @param extension - File extension of the source file (e.g., `.pug`, `.html`)
- * @param cache - Whether the compiler may reuse cached compilation artifacts
- *   (e.g. compiled template functions). `false` in serve mode. Default: `true`
- * @returns Compiled HTML string (sync or async)
  */
-export type CompilerFunction<M extends MetaData> = (
-	content: string,
-	data: CompileData<M>,
-	extension: string,
-	cache?: boolean,
-) => Promise<string> | string;
+export interface CompilerFunction<M extends MetaData> {
+	/**
+	 * @param content - Template content to compile
+	 * @param data - Compile data object containing page info, navigation, and breadcrumbs
+	 * @param extension - File extension of the source file (e.g., `.pug`, `.html`)
+	 * @param cache - Whether the compiler may reuse cached compilation artifacts
+	 *   (e.g. compiled template functions). `false` in serve mode. Default: `true`
+	 * @returns Compiled HTML string (sync or async)
+	 */
+	(
+		content: string,
+		data: CompileData<M>,
+		extension: string,
+		cache?: boolean,
+	): Promise<string> | string;
+	/**
+	 * Optional digest of the compiler's context-level inputs (toolchain
+	 * version, resolved options — anything that affects every output of this
+	 * compiler but is not a per-file dependency). Folded into
+	 * `@kamado-io/page-compiler`'s own `cacheDigest`, so an incremental build
+	 * recompiles every page when it changes. Mirrors
+	 * `kamado/compiler`'s `CustomCompileFunction.cacheDigest` — same
+	 * "copy it onto any wrapper" caveat applies (e.g. an extension-check
+	 * wrapper around the real compiler must forward this property).
+	 */
+	cacheDigest?: () => string | Promise<string>;
+}
 
 /**
  * Compile hook configuration
