@@ -48,7 +48,7 @@
 		"husky": "9.1.7",
 		"lerna": "9.0.7",
 		"memfs": "4.64.0",
-		"npm-run-all2": "9.0.2",
+		"npm-run-all2": "9.0.3",
 		"typescript": "6.0.3",
 		"vitest": "4.1.10"
 	},
