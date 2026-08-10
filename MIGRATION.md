@@ -242,17 +242,13 @@ interface MyMeta extends MetaData {
 }
 
 createPageCompiler<MyMeta>()({
-	layouts: {
-		/* ... */
-	},
+	layouts: {/* ... */},
 	filterNavigationNode: (node) => !node.meta.noindex,
 });
 
 createCompileHooks<MyMeta>()({ basedir: '/...' });
 
-defineConfig<MyMeta>({
-	/* ... */
-});
+defineConfig<MyMeta>({/* ... */});
 ```
 
 ---
