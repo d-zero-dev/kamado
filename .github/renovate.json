@@ -16,7 +16,8 @@
 	"internalChecksFilter": "strict",
 	"osvVulnerabilityAlerts": true,
 	"vulnerabilityAlerts": {
-		"minimumReleaseAge": null
+		"minimumReleaseAge": null,
+		"automerge": true
 	},
 	"autoApprove": true,
 	"labels": ["Dependencies", "Renovate"],
