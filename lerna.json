@@ -1,5 +1,5 @@
 {
-	"lerna": "8.1.2",
+	"lerna": "9.0.7",
 	"version": "2.0.0-alpha.16",
 	"npmClient": "yarn",
 	"packages": ["packages/*", "packages/@kamado-io/*"],

@@ -49,7 +49,7 @@ jobs:
         run: yarn build
 
       - name: Lint
-        run: yarn lint
+        run: yarn lint:check
 
       - name: Test
         run: yarn test

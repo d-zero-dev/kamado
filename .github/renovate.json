@@ -9,10 +9,9 @@
 		":pinDevDependencies",
 		":semanticCommitTypeAll(chore)"
 	],
-	"lockFileMaintenance": {
-		"enabled": true,
-		"automerge": true
-	},
+	"timezone": "Asia/Tokyo",
+	"schedule": ["* 22-23,0-4 * * 1-5"],
+	"rangeStrategy": "pin",
 	"minimumReleaseAge": "7 days",
 	"internalChecksFilter": "strict",
 	"osvVulnerabilityAlerts": true,
@@ -22,6 +21,11 @@
 	},
 	"autoApprove": true,
 	"labels": ["Dependencies", "Renovate"],
+	"lockFileMaintenance": {
+		"enabled": true,
+		"automerge": true,
+		"schedule": ["* 0-5 * * 1"]
+	},
 	"packageRules": [
 		{
 			"matchDepTypes": ["optionalDependencies"],
@@ -36,10 +40,43 @@
 			"addLabels": ["Dependencies: Production"]
 		},
 		{
-			"description": "Automerge non-major updates",
+			"description": "Automerge non-major updates, except for 0.x where minor is breaking",
 			"matchUpdateTypes": ["minor", "patch", "pin", "digest"],
 			"matchCurrentVersion": "!/^0/",
 			"automerge": true
+		},
+		{
+			"description": "Keep yarn resolutions on auto range strategy",
+			"matchDepTypes": ["resolutions"],
+			"rangeStrategy": "auto"
+		},
+		{
+			"groupName": "typescript",
+			"matchPackageNames": ["typescript", "@d-zero/tsconfig"]
+		},
+		{
+			"groupName": "@d-zero configs",
+			"matchPackageNames": [
+				"@d-zero/commitlint-config",
+				"@d-zero/cspell-config",
+				"@d-zero/eslint-config",
+				"@d-zero/lint-staged-config",
+				"@d-zero/prettier-config",
+				"@d-zero/textlint-config"
+			]
+		},
+		{
+			"groupName": "@d-zero runtime",
+			"matchPackageNames": ["@d-zero/dealer", "@d-zero/roar", "@d-zero/shared"]
+		},
+		{
+			"description": "hono and its official server adapter move together",
+			"groupName": "hono",
+			"matchPackageNames": ["hono", "/^@hono\\//"]
+		},
+		{
+			"groupName": "react",
+			"matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"]
 		}
 	]
 }
