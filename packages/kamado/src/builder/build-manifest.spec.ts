@@ -169,7 +169,9 @@ describe('createFileHasher', () => {
 		// replacement character under utf8, so a string-based hash would
 		// collide; the byte-based hasher must keep them distinct
 		await memfs.promises.mkdir('/bin', { recursive: true });
+		// eslint-disable-next-line unicorn/number-literal-case -- prettier lowercases hex literals, conflicting with this rule
 		await memfs.promises.writeFile('/bin/a', Buffer.from([0xc3, 0x28]));
+		// eslint-disable-next-line unicorn/number-literal-case -- prettier lowercases hex literals, conflicting with this rule
 		await memfs.promises.writeFile('/bin/b', Buffer.from([0xc4, 0x28]));
 		const hashFile = createFileHasher();
 
