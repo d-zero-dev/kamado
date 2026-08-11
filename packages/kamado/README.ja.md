@@ -616,12 +616,8 @@ Kamadoのコア型は、型安全なカスタムメタデータのためにジ�
 import type { Config, Transform, PageData } from 'kamado/config';
 
 // 型引数不要 — MetaData がデフォルト
-const config: Config = {
-	/* ... */
-};
-const transform: Transform = {
-	/* ... */
-};
+const config: Config = {/* ... */};
+const transform: Transform = {/* ... */};
 ```
 
 #### カスタムメタデータ

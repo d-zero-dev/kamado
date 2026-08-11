@@ -47,14 +47,14 @@
 		"@d-zero/tsconfig": "2.0.0",
 		"husky": "9.1.7",
 		"lerna": "9.0.7",
-		"memfs": "4.64.0",
-		"npm-run-all2": "9.0.2",
+		"memfs": "4.66.1",
+		"npm-run-all2": "9.0.3",
 		"typescript": "6.0.3",
 		"vitest": "4.1.10"
 	},
-	"packageManager": "yarn@4.17.1",
+	"packageManager": "yarn@4.18.0",
 	"volta": {
-		"node": "24.18.0",
-		"yarn": "4.17.1"
+		"node": "24.19.0",
+		"yarn": "4.18.0"
 	}
 }
