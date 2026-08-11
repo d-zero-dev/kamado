@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 concurrency:
   group: publish
@@ -23,16 +24,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 24
+          node-version: 24.19.0
           registry-url: "https://registry.npmjs.org"
-
-      - name: Enable Corepack and setup Yarn v4
-        run: |
-          corepack enable
-          yarn --version
 
       - name: Install dependencies
         run: yarn install --immutable
@@ -43,7 +42,7 @@ jobs:
       - name: Determine dist-tag
         id: dist-tag
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
+          VERSION=$(node -e "console.log(require('./lerna.json').version)")
           if [[ "$VERSION" == *"-alpha"* ]]; then
             echo "tag=alpha" >> "$GITHUB_OUTPUT"
           elif [[ "$VERSION" == *"-beta"* ]]; then
@@ -57,4 +56,4 @@ jobs:
           fi
 
       - name: Publish
-        run: npx lerna publish from-git --dist-tag ${{ steps.dist-tag.outputs.tag }} --yes
+        run: npx lerna publish from-package --dist-tag ${{ steps.dist-tag.outputs.tag }} --yes

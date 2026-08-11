@@ -23,7 +23,7 @@ kamado — オンデマンド静的サイトジェネレータ。Lerna + Yarn Wo
 - `yarn test` — Vitest でテスト（test-timeout 60000）
 - `yarn lint` — eslint / prettier / textlint / cspell を直列実行
 - `yarn bench` — ビルドベンチマーク（`--pages=N` / `--runs=N` / `--full` / `--incremental`。要事前 `yarn build`。詳細は `packages/kamado/ARCHITECTURE.md` 参照）
-- `yarn release` / `yarn release:alpha` 等 — `lerna version`（push なし）。リリース手順は `/release` コマンド参照
+- `yarn release` / `yarn release:alpha` 等 — `lerna version`（push なし）。リリース手順は `.claude/skills/npm-publish/SKILL.md` 参照
 
 ### コマンド制約
 
@@ -35,7 +35,22 @@ kamado — オンデマンド静的サイトジェネレータ。Lerna + Yarn Wo
 ## パッケージ依存関係
 
 - `kamado`（コア） ← `@kamado-io/page-compiler` / `script-compiler` / `style-compiler`
-- `kamado` + `@kamado-io/page-compiler` ← `@kamado-io/pug-compiler`
+- `kamado` + `@kamado-io/page-compiler` ← `@kamado-io/pug-compiler` / `jsx-compiler`
+
+## 依存関係の追加
+
+- バージョンは固定で追加する（`yarn add foo@1.2.3`）。`^` / `~` を付けない（`.yarnrc.yml` の `defaultSemverRangePrefix: ''` で既定化されている）
+- **追加したら `.github/renovate.json` の `packageRules` を確認する**。そのパッケージが既存の `groupName` グループに入るべきか、新しいグループを作るべきかを判断する
+  - `config:recommended` は `group:monorepos` を含むため、同一 monorepo から公開されるパッケージ群は設定なしで自動的に束ねられる。手で書く必要はない
+  - 手当てが必要なのは Renovate が推測できない**ベンダー横断の結合**:
+    - 本体と型定義のペア（`debug` + `@types/debug`）。DefinitelyTyped は別リポジトリで公開されるため自動グループ化されない
+    - peer dependency で結ばれた別ベンダーのパッケージ（`hono` + `@hono/node-server`）
+    - `resolutions` で固定しているパッケージとその利用側
+    - 自前の `@d-zero/*` パッケージ群（configs と runtime で分ける）
+    - `typescript` + `@d-zero/tsconfig`
+  - 判断基準は「**片方だけバージョンが上がった状態でビルドと型チェックが通るか**」。通らないなら同じ `groupName` にまとめる
+- グループ化を怠ると、Renovate が個別に PR を作り、片方だけマージされた中間状態で CI が赤になる。結果として**両方の PR がマージできなくなる**
+- グルーピングの現状は `git branch -r --list 'origin/renovate/*'` で確認できる。`*-monorepo` サフィックスのブランチは `group:monorepos` による自動グループ
 
 ## セキュリティ
 
@@ -43,6 +58,7 @@ kamado — オンデマンド静的サイトジェネレータ。Lerna + Yarn Wo
 
 - `.env`、`.env.*` 等の機密ファイルを読み取り・編集・コミットしない（機密ファイルの判断は `.gitignore` を参考にすること）
 - コミット前に `git diff --staged` で機密情報（API キー、トークン、パスワード、企業名、顧客情報）が含まれていないか確認する
+- **サンプル値は予約済み慣例に従う**: ドメインは `example.com` / `*.example` / `*.test` 等（RFC 2606/6761）、IP は TEST-NET。実在の無関係ドメイン、未取得の創作ドメイン、案件識別子、実データ・実コーパスの断片を成果物に残さない（詳細は `.claude/skills/git/SKILL.md` のサンプル値慣例チェック）
 - 環境変数やシークレットをコード内にハードコードしない
 
 ### サプライチェーン保護
@@ -58,8 +74,12 @@ kamado — オンデマンド静的サイトジェネレータ。Lerna + Yarn Wo
 
 タスクに応じて `.claude/skills/` 配下のスキルを参照すること。
 
-| スキル          | パス                                      | 用途                                                        |
-| --------------- | ----------------------------------------- | ----------------------------------------------------------- |
-| Product Manager | `.claude/skills/product-manager/SKILL.md` | リポジトリ分析、ドキュメント生成・レビュー、PR レビュー     |
-| QA Engineer     | `.claude/skills/qa-engineer/SKILL.md`     | コードレビュー、テスト品質チェック、カバレッジ改善          |
-| Impl            | `.claude/skills/impl/SKILL.md`            | 合意済み計画の実装・検証・PR 作成までのオーケストレーション |
+| スキル          | パス                                      | 用途                                                            |
+| --------------- | ----------------------------------------- | --------------------------------------------------------------- |
+| Product Manager | `.claude/skills/product-manager/SKILL.md` | リポジトリ分析、ドキュメント整合チェック、PR レビュー           |
+| QA Engineer     | `.claude/skills/qa-engineer/SKILL.md`     | コードレビュー、テスト品質チェック、カバレッジ改善              |
+| Impl            | `.claude/skills/impl/SKILL.md`            | 合意済み計画の実装・検証・PR 作成までのオーケストレーション     |
+| Grill me        | `.claude/skills/grill-me/SKILL.md`        | 計画・設計の前提を掘り下げて合意形成する                        |
+| Git             | `.claude/skills/git/SKILL.md`             | コミット規約・コミット前コンテンツチェック                      |
+| PR              | `.claude/skills/pr/SKILL.md`              | PR 作成フロー（base 追従・push はユーザー実行・CI 監視）        |
+| npm publish     | `.claude/skills/npm-publish/SKILL.md`     | リリース（dev→main マージ・バージョニング・publish 監視・検証） |

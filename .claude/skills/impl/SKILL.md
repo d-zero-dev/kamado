@@ -1,5 +1,5 @@
 ---
-description: 合意済み計画を実装し、レビュー・QA・PdM・ドキュメント・lint/test を通して PR 作成まで進める実行系オーケストレーター
+description: 合意済み計画を実装し、レビュー・QA・PdM・lint/test を通して PR 作成まで進める実行系オーケストレーター
 when_to_use: ユーザーが「実装して」「進めて」「/impl」と指示した場合。grill-me で合意済みの計画を実装フェーズに進めるとき
 disable-model-invocation: true
 ---
@@ -7,11 +7,11 @@ disable-model-invocation: true
 # 手順
 
 1. 実装スコープ・アプローチ・トレードオフの合意が会話文脈で成立しているか確認する。未成立なら `/grill-me` を起動し、合意してから次へ
-2. 合意した計画の通りに実装する
-3. `/code-review xhigh` を実行し、指摘を fix all
-4. `/qa-engineer` を実行し、指摘を fix all
-5. `/product-manager` を実行し、指摘を fix all
-6. `/doc` を実行し、指摘を fix all
+2. **ブランチ確認**: 現在のブランチを確認し、`dev` / `main` 上にいる場合は `git switch -c` でサブブランチを切ってから進む。git worktree かどうかの確認は行わない（エージェントは worktree 起動が前提のため、あえてチェックしない）
+3. 合意した計画の通りに実装する
+4. `/code-review medium` を実行し、指摘を fix all
+5. `/qa-engineer` を実行し、指摘を fix all
+6. `/product-manager` を実行し、指摘を fix all（ドキュメント整合 — JSDoc・README の役割分担との一致 — のチェックを含む）
 7. `yarn lint` を実行し、エラーを修正
 8. `yarn test` を実行し、失敗を修正
 9. `/git` の手順でコミット
@@ -20,5 +20,5 @@ disable-model-invocation: true
 # 重要ルール
 
 - **fix all の範囲**: コードレベル・テスト追加・ドキュメント修正の指摘はその場で適用。仕様変更やスコープ拡張を伴う指摘はユーザーに許可を取る
-- **ループバック**: いずれかのステップで重大な方向転換や巨大なコード変更が発生したら、ステップ 3（`/code-review xhigh`）からやり直す
+- **ループバック**: いずれかのステップで重大な方向転換や巨大なコード変更が発生したら、ステップ 4（`/code-review medium`）からやり直す
 - **スコープ厳守**: grill-me で合意したスコープを勝手に拡張しない
