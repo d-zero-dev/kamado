@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.17](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.16...v2.0.0-alpha.17) (2026-08-12)
+
+### Bug Fixes
+
+- **page-compiler:** close incremental-build staleness gaps in bundled compilers ([6f5509e](https://github.com/d-zero-dev/kamado/commit/6f5509e64cbf583aabee038a897314870c91e79b))
+
+### Features
+
+- **page-compiler:** report incremental-build inputs from the bundled compilers ([93d371c](https://github.com/d-zero-dev/kamado/commit/93d371c6ff8827b57bf82174f4a7d55d01534bb1))
+- **style-compiler:** add inline sourcemap option ([4660ded](https://github.com/d-zero-dev/kamado/commit/4660dedbc13985bfa41e1ce578d6a986efb0bc00))
+- **style-compiler:** build the PostCSS processor once per context ([3c0e50f](https://github.com/d-zero-dev/kamado/commit/3c0e50f8621c8d92eff3a2f83bcdf239ef224f51))
+- **style-compiler:** default sourcemap to 'onServer' ([0e8f13e](https://github.com/d-zero-dev/kamado/commit/0e8f13e7042083ee20ffd988c0011b7dbe117ef2))
+- **style-compiler:** support 'onServer' for sourcemap option ([10c8019](https://github.com/d-zero-dev/kamado/commit/10c80194b62a5e075928d4543ec9eea7822f450f))
+
 # [2.0.0-alpha.16](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.15...v2.0.0-alpha.16) (2026-05-12)
 
 **Note:** Version bump only for package @kamado-io/style-compiler

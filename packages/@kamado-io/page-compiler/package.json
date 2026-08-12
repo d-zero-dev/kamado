@@ -1,6 +1,6 @@
 {
 	"name": "@kamado-io/page-compiler",
-	"version": "2.0.0-alpha.16",
+	"version": "2.0.0-alpha.17",
 	"description": "Page compiler for Kamado",
 	"repository": {
 		"type": "git",
@@ -83,7 +83,7 @@
 		"fast-glob": "3.3.3",
 		"html-minifier-terser": "7.2.0",
 		"image-size": "2.0.2",
-		"kamado": "2.0.0-alpha.16",
+		"kamado": "2.0.0-alpha.17",
 		"linkedom": "0.18.13",
 		"prettier": "3.9.6"
 	},

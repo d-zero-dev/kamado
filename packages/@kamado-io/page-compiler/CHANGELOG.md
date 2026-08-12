@@ -3,6 +3,45 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.17](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.16...v2.0.0-alpha.17) (2026-08-12)
+
+- refactor(page-compiler)!: drop host option and align hook types with linkedom ([ea9e4ef](https://github.com/d-zero-dev/kamado/commit/ea9e4ef277744e1cc8829fe47fd73c9f63f88be4))
+- feat(page-compiler)!: resolve compileHooks and transforms once per context ([33132ee](https://github.com/d-zero-dev/kamado/commit/33132ee68f8c7f9438206342a6fbccf2a05a167c))
+
+### Bug Fixes
+
+- **jsx-compiler:** fold toolchain/options into cacheDigest, key cache by filePath ([ed56d32](https://github.com/d-zero-dev/kamado/commit/ed56d32a35b4ae05ed37c0bb3ac9b09c8158d7c8))
+- **kamado:** harden getDOM for linkedom edge cases ([a3d3400](https://github.com/d-zero-dev/kamado/commit/a3d340012b6f41299735a8b2d3b92d867d7ae774))
+- **page-compiler:** block path traversal in imageSizes file resolution ([a06d0f4](https://github.com/d-zero-dev/kamado/commit/a06d0f4d62236fc24aa0f88308a7663a4f234161))
+- **page-compiler:** close incremental-build staleness gaps in bundled compilers ([6f5509e](https://github.com/d-zero-dev/kamado/commit/6f5509e64cbf583aabee038a897314870c91e79b))
+- **page-compiler:** harden resolveBaseURL against bad config and devServer gaps ([c53bfc0](https://github.com/d-zero-dev/kamado/commit/c53bfc04f70dcd4095ad247a7262f45f1f8b3067))
+- **page-compiler:** iterate querySelectorAll result defensively ([7908097](https://github.com/d-zero-dev/kamado/commit/7908097c2affa22ac4687748b18951d63f59c699))
+- **page-compiler:** tighten imageSizes URL/extension guards and selector scope ([491f2e7](https://github.com/d-zero-dev/kamado/commit/491f2e7bd22896348144d322a50a3ace6d3cf058))
+- **page-compiler:** trim src and key imageSizes cache by file path ([e659f6f](https://github.com/d-zero-dev/kamado/commit/e659f6f71e3a544b67562e3340b520822e11156e))
+
+### Features
+
+- **page-compiler:** add ctx.getHref/baseURL to manipulateDOM hook context ([5cb2009](https://github.com/d-zero-dev/kamado/commit/5cb200942ce0ca978f0f0ae0c3fa5753fa1478cd))
+- **page-compiler:** report incremental-build inputs from the bundled compilers ([93d371c](https://github.com/d-zero-dev/kamado/commit/93d371c6ff8827b57bf82174f4a7d55d01534bb1))
+
+### BREAKING CHANGES
+
+- function forms of `compileHooks` and `transforms` are now
+  resolved once per build/serve context instead of once per file. Resolved
+  hooks and transform instances are shared by all pages of a context and may
+  run concurrently, so factories must be file-independent and instances must
+  not keep per-page mutable state. See MILESTONE.md for the migration guide.
+
+  Details:
+  - pass the compile cache flag through the transpile layer into compile hook
+    compilers (CompilerFunction gains an optional 4th `cache` parameter)
+  - hoist parseErrorMode resolution out of the per-file path
+  - add specs for cache-flag plumbing and once-per-context hook resolution
+
+- ManipulateDOMOptions no longer accepts `host`; it
+  existed only to pass `url` into the (now removed) DomSerializeOptions.
+  Hook signatures use DomElement/DomWindow from kamado/utils/dom.
+
 # [2.0.0-alpha.16](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.15...v2.0.0-alpha.16) (2026-05-12)
 
 - refactor(page-compiler)!: route all transform failures through formatOptions.parseError ([4b1d189](https://github.com/d-zero-dev/kamado/commit/4b1d1897c4db2daadba7a4555f916f6682eed48c))

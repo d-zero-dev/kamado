@@ -1,6 +1,6 @@
 {
 	"name": "@kamado-io/style-compiler",
-	"version": "2.0.0-alpha.16",
+	"version": "2.0.0-alpha.17",
 	"description": "Style compiler for Kamado",
 	"repository": {
 		"type": "git",
@@ -30,7 +30,7 @@
 	],
 	"dependencies": {
 		"cssnano": "8.0.2",
-		"kamado": "2.0.0-alpha.16",
+		"kamado": "2.0.0-alpha.17",
 		"postcss": "8.5.25",
 		"postcss-import": "16.1.1",
 		"postcss-load-config": "6.0.1"

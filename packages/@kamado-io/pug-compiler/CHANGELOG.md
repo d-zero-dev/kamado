@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.17](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.16...v2.0.0-alpha.17) (2026-08-12)
+
+### Features
+
+- **pug-compiler:** cache compiled templates per build context ([fe7da15](https://github.com/d-zero-dev/kamado/commit/fe7da15ac55258a19068e95c2b56e55a0c30a7e1))
+- **pug-compiler:** report pug includes for the incremental-build manifest ([2fc928d](https://github.com/d-zero-dev/kamado/commit/2fc928d8df9f2ffef204bd76930b2a89da8c8be9))
+
 # [2.0.0-alpha.16](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.15...v2.0.0-alpha.16) (2026-05-12)
 
 **Note:** Version bump only for package @kamado-io/pug-compiler

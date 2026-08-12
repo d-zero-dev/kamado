@@ -1,6 +1,6 @@
 {
 	"name": "@kamado-io/jsx-compiler",
-	"version": "2.0.0-alpha.16",
+	"version": "2.0.0-alpha.17",
 	"description": "JSX/TSX (React SSR) compiler for Kamado",
 	"repository": {
 		"type": "git",
@@ -41,10 +41,10 @@
 		"react-dom": "^18.0.0 || ^19.0.0"
 	},
 	"devDependencies": {
-		"@kamado-io/page-compiler": "2.0.0-alpha.16",
+		"@kamado-io/page-compiler": "2.0.0-alpha.17",
 		"@types/react": "19.2.18",
 		"@types/react-dom": "19.2.4",
-		"kamado": "2.0.0-alpha.16",
+		"kamado": "2.0.0-alpha.17",
 		"react": "19.2.8",
 		"react-dom": "19.2.8",
 		"typescript": "6.0.3"

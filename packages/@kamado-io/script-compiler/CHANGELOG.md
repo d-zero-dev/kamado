@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.17](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.16...v2.0.0-alpha.17) (2026-08-12)
+
+### Bug Fixes
+
+- **page-compiler:** close incremental-build staleness gaps in bundled compilers ([6f5509e](https://github.com/d-zero-dev/kamado/commit/6f5509e64cbf583aabee038a897314870c91e79b))
+
+### Features
+
+- **jsx-compiler:** add JSX/TSX compiler package for React SSR ([77c6dc5](https://github.com/d-zero-dev/kamado/commit/77c6dc5158342814cdd997e24312d39a3777702e))
+- **page-compiler:** report incremental-build inputs from the bundled compilers ([93d371c](https://github.com/d-zero-dev/kamado/commit/93d371c6ff8827b57bf82174f4a7d55d01534bb1))
+- **script-compiler:** add inline sourcemap option ([ef1747e](https://github.com/d-zero-dev/kamado/commit/ef1747e3f7afb2a36e1f87c3c48b2c20f16ee418))
+- **script-compiler:** bundle in memory and select output by path ([fb87d98](https://github.com/d-zero-dev/kamado/commit/fb87d986b777371be39bf7efd0a63df7eeb672fc))
+- **script-compiler:** default sourcemap to 'onServer' ([e3c1a53](https://github.com/d-zero-dev/kamado/commit/e3c1a536d4287f7f64f75a4d8cbf15140b7dbc63))
+- **script-compiler:** support 'onServer' for sourcemap option ([fdec413](https://github.com/d-zero-dev/kamado/commit/fdec413b7ed109b1554ba1ff06985a577f421718))
+
 # [2.0.0-alpha.16](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.15...v2.0.0-alpha.16) (2026-05-12)
 
 **Note:** Version bump only for package @kamado-io/script-compiler

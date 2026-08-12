@@ -3,6 +3,73 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.17](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.16...v2.0.0-alpha.17) (2026-08-12)
+
+- refactor(page-compiler)!: drop host option and align hook types with linkedom ([ea9e4ef](https://github.com/d-zero-dev/kamado/commit/ea9e4ef277744e1cc8829fe47fd73c9f63f88be4))
+- refactor(kamado)!: rewrite utils/dom on linkedom and drop url option ([ae36e68](https://github.com/d-zero-dev/kamado/commit/ae36e68accd671ba0ef73c89f46395de555421c4))
+- feat(page-compiler)!: resolve compileHooks and transforms once per context ([33132ee](https://github.com/d-zero-dev/kamado/commit/33132ee68f8c7f9438206342a6fbccf2a05a167c))
+
+### Bug Fixes
+
+- **github:** automerge renovate vulnerability alert PRs ([d80f29e](https://github.com/d-zero-dev/kamado/commit/d80f29ebb9b78167e2bad340cf64cb2615bf5a4d))
+- **github:** force renovate direct merge to preserve branch protection bypass ([7d399bf](https://github.com/d-zero-dev/kamado/commit/7d399bf5dfb5647f4fae3960908a45b2330d3590))
+- **jsx-compiler:** fold toolchain/options into cacheDigest, key cache by filePath ([ed56d32](https://github.com/d-zero-dev/kamado/commit/ed56d32a35b4ae05ed37c0bb3ac9b09c8158d7c8))
+- **kamado:** accept --!> comment terminator and detect head without getter side effect ([42558a0](https://github.com/d-zero-dev/kamado/commit/42558a0363676349ef478d9288c9e245a8f784d2))
+- **kamado:** harden getDOM for linkedom edge cases ([a3d3400](https://github.com/d-zero-dev/kamado/commit/a3d340012b6f41299735a8b2d3b92d867d7ae774))
+- **kamado:** harden incremental-build cache correctness ([d4bd38a](https://github.com/d-zero-dev/kamado/commit/d4bd38a1e01cb5244f8f1adb665f9449a2878f3c))
+- **kamado:** preserve non-targeted cache entries when --force meets a target glob ([a0b6506](https://github.com/d-zero-dev/kamado/commit/a0b65062a16bdb8ca43030df511bf09974f69ba0))
+- **kamado:** reject dangerous schemes and strip userinfo in resolveHref ([e694275](https://github.com/d-zero-dev/kamado/commit/e6942755dcc94b7b09fe3a765a7386d4617c28fa))
+- **kamado:** resolve eslint/prettier hex-literal casing conflict ([f57d135](https://github.com/d-zero-dev/kamado/commit/f57d1356bc5b518001d8e5e44786aeb970aa78f9))
+- **page-compiler:** block path traversal in imageSizes file resolution ([a06d0f4](https://github.com/d-zero-dev/kamado/commit/a06d0f4d62236fc24aa0f88308a7663a4f234161))
+- **page-compiler:** close incremental-build staleness gaps in bundled compilers ([6f5509e](https://github.com/d-zero-dev/kamado/commit/6f5509e64cbf583aabee038a897314870c91e79b))
+- **page-compiler:** harden resolveBaseURL against bad config and devServer gaps ([c53bfc0](https://github.com/d-zero-dev/kamado/commit/c53bfc04f70dcd4095ad247a7262f45f1f8b3067))
+- **page-compiler:** iterate querySelectorAll result defensively ([7908097](https://github.com/d-zero-dev/kamado/commit/7908097c2affa22ac4687748b18951d63f59c699))
+- **page-compiler:** tighten imageSizes URL/extension guards and selector scope ([491f2e7](https://github.com/d-zero-dev/kamado/commit/491f2e7bd22896348144d322a50a3ace6d3cf058))
+- **page-compiler:** trim src and key imageSizes cache by file path ([e659f6f](https://github.com/d-zero-dev/kamado/commit/e659f6f71e3a544b67562e3340b520822e11156e))
+- **repo:** sync lerna.json version field with installed lerna 10.0.0 ([ded33be](https://github.com/d-zero-dev/kamado/commit/ded33be5d2f71f5e8ea0968a75c945b28f6c74f9))
+
+### Features
+
+- **jsx-compiler:** add JSX/TSX compiler package for React SSR ([77c6dc5](https://github.com/d-zero-dev/kamado/commit/77c6dc5158342814cdd997e24312d39a3777702e))
+- **kamado:** add incremental builds with verifying traces ([9adfae9](https://github.com/d-zero-dev/kamado/commit/9adfae9e1353ee8833399702da2d3842d09b5c21))
+- **kamado:** add shared compiler helpers and unified cache clearing ([ad148e4](https://github.com/d-zero-dev/kamado/commit/ad148e419b5d8a3ad2c5274b3a059c34e5a209b7))
+- **kamado:** default incremental cache to a temp dir, add --cache-dir and --force ([54b2625](https://github.com/d-zero-dev/kamado/commit/54b2625e3048fcc9ac7fe84dfdadf05ef0404c94))
+- **kamado:** measure no-change incremental rebuilds in the benchmark ([6b7d0a1](https://github.com/d-zero-dev/kamado/commit/6b7d0a1b426221f0d6dd1472376572c4da298a50))
+- **kamado:** optimize the build pipeline and add skip-unchanged writes ([445ae6a](https://github.com/d-zero-dev/kamado/commit/445ae6a705b749947ce05347b61e240f4842684d))
+- **page-compiler:** add ctx.getHref/baseURL to manipulateDOM hook context ([5cb2009](https://github.com/d-zero-dev/kamado/commit/5cb200942ce0ca978f0f0ae0c3fa5753fa1478cd))
+- **page-compiler:** report incremental-build inputs from the bundled compilers ([93d371c](https://github.com/d-zero-dev/kamado/commit/93d371c6ff8827b57bf82174f4a7d55d01534bb1))
+- **pug-compiler:** cache compiled templates per build context ([fe7da15](https://github.com/d-zero-dev/kamado/commit/fe7da15ac55258a19068e95c2b56e55a0c30a7e1))
+- **pug-compiler:** report pug includes for the incremental-build manifest ([2fc928d](https://github.com/d-zero-dev/kamado/commit/2fc928d8df9f2ffef204bd76930b2a89da8c8be9))
+- **script-compiler:** add inline sourcemap option ([ef1747e](https://github.com/d-zero-dev/kamado/commit/ef1747e3f7afb2a36e1f87c3c48b2c20f16ee418))
+- **script-compiler:** bundle in memory and select output by path ([fb87d98](https://github.com/d-zero-dev/kamado/commit/fb87d986b777371be39bf7efd0a63df7eeb672fc))
+- **script-compiler:** default sourcemap to 'onServer' ([e3c1a53](https://github.com/d-zero-dev/kamado/commit/e3c1a536d4287f7f64f75a4d8cbf15140b7dbc63))
+- **script-compiler:** support 'onServer' for sourcemap option ([fdec413](https://github.com/d-zero-dev/kamado/commit/fdec413b7ed109b1554ba1ff06985a577f421718))
+- **style-compiler:** add inline sourcemap option ([4660ded](https://github.com/d-zero-dev/kamado/commit/4660dedbc13985bfa41e1ce578d6a986efb0bc00))
+- **style-compiler:** build the PostCSS processor once per context ([3c0e50f](https://github.com/d-zero-dev/kamado/commit/3c0e50f8621c8d92eff3a2f83bcdf239ef224f51))
+- **style-compiler:** default sourcemap to 'onServer' ([0e8f13e](https://github.com/d-zero-dev/kamado/commit/0e8f13e7042083ee20ffd988c0011b7dbe117ef2))
+- **style-compiler:** support 'onServer' for sourcemap option ([10c8019](https://github.com/d-zero-dev/kamado/commit/10c80194b62a5e075928d4543ec9eea7822f450f))
+
+### BREAKING CHANGES
+
+- DomSerializeOptions no longer accepts `url`. The
+  previous lib.dom-shaped Window/Element types are replaced with linkedom
+  derived DomWindow/DomElement types, so hook signatures change.
+- function forms of `compileHooks` and `transforms` are now
+  resolved once per build/serve context instead of once per file. Resolved
+  hooks and transform instances are shared by all pages of a context and may
+  run concurrently, so factories must be file-independent and instances must
+  not keep per-page mutable state. See MILESTONE.md for the migration guide.
+
+  Details:
+  - pass the compile cache flag through the transpile layer into compile hook
+    compilers (CompilerFunction gains an optional 4th `cache` parameter)
+  - hoist parseErrorMode resolution out of the per-file path
+  - add specs for cache-flag plumbing and once-per-context hook resolution
+
+- ManipulateDOMOptions no longer accepts `host`; it
+  existed only to pass `url` into the (now removed) DomSerializeOptions.
+  Hook signatures use DomElement/DomWindow from kamado/utils/dom.
+
 # [2.0.0-alpha.16](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.15...v2.0.0-alpha.16) (2026-05-12)
 
 - refactor(page-compiler)!: route all transform failures through formatOptions.parseError ([4b1d189](https://github.com/d-zero-dev/kamado/commit/4b1d1897c4db2daadba7a4555f916f6682eed48c))

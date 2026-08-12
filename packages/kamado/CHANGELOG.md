@@ -3,6 +3,34 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [2.0.0-alpha.17](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.16...v2.0.0-alpha.17) (2026-08-12)
+
+- refactor(kamado)!: rewrite utils/dom on linkedom and drop url option ([ae36e68](https://github.com/d-zero-dev/kamado/commit/ae36e68accd671ba0ef73c89f46395de555421c4))
+
+### Bug Fixes
+
+- **kamado:** accept --!> comment terminator and detect head without getter side effect ([42558a0](https://github.com/d-zero-dev/kamado/commit/42558a0363676349ef478d9288c9e245a8f784d2))
+- **kamado:** harden getDOM for linkedom edge cases ([a3d3400](https://github.com/d-zero-dev/kamado/commit/a3d340012b6f41299735a8b2d3b92d867d7ae774))
+- **kamado:** harden incremental-build cache correctness ([d4bd38a](https://github.com/d-zero-dev/kamado/commit/d4bd38a1e01cb5244f8f1adb665f9449a2878f3c))
+- **kamado:** preserve non-targeted cache entries when --force meets a target glob ([a0b6506](https://github.com/d-zero-dev/kamado/commit/a0b65062a16bdb8ca43030df511bf09974f69ba0))
+- **kamado:** reject dangerous schemes and strip userinfo in resolveHref ([e694275](https://github.com/d-zero-dev/kamado/commit/e6942755dcc94b7b09fe3a765a7386d4617c28fa))
+- **kamado:** resolve eslint/prettier hex-literal casing conflict ([f57d135](https://github.com/d-zero-dev/kamado/commit/f57d1356bc5b518001d8e5e44786aeb970aa78f9))
+
+### Features
+
+- **kamado:** add incremental builds with verifying traces ([9adfae9](https://github.com/d-zero-dev/kamado/commit/9adfae9e1353ee8833399702da2d3842d09b5c21))
+- **kamado:** add shared compiler helpers and unified cache clearing ([ad148e4](https://github.com/d-zero-dev/kamado/commit/ad148e419b5d8a3ad2c5274b3a059c34e5a209b7))
+- **kamado:** default incremental cache to a temp dir, add --cache-dir and --force ([54b2625](https://github.com/d-zero-dev/kamado/commit/54b2625e3048fcc9ac7fe84dfdadf05ef0404c94))
+- **kamado:** measure no-change incremental rebuilds in the benchmark ([6b7d0a1](https://github.com/d-zero-dev/kamado/commit/6b7d0a1b426221f0d6dd1472376572c4da298a50))
+- **kamado:** optimize the build pipeline and add skip-unchanged writes ([445ae6a](https://github.com/d-zero-dev/kamado/commit/445ae6a705b749947ce05347b61e240f4842684d))
+- **page-compiler:** add ctx.getHref/baseURL to manipulateDOM hook context ([5cb2009](https://github.com/d-zero-dev/kamado/commit/5cb200942ce0ca978f0f0ae0c3fa5753fa1478cd))
+
+### BREAKING CHANGES
+
+- DomSerializeOptions no longer accepts `url`. The
+  previous lib.dom-shaped Window/Element types are replaced with linkedom
+  derived DomWindow/DomElement types, so hook signatures change.
+
 # [2.0.0-alpha.16](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.15...v2.0.0-alpha.16) (2026-05-12)
 
 ### Features
