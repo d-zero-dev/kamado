@@ -1,4 +1,10 @@
 {
 	"extends": ["@d-zero/tsconfig"],
+	"compilerOptions": {
+		// @d-zero/tsconfig only raises `lib` to ESNext; `target` still inherits
+		// es2024 from @tsconfig/node-lts. Override to ESNext so `using`/
+		// `await using` emit natively (no downlevel helpers) on Node >=24.11.
+		"target": "ESNext"
+	},
 	"exclude": ["node_modules", "**/*.js", "**/*.mjs", "**/*.cjs", "**/*.d.ts"]
 }
