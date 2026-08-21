@@ -32,7 +32,7 @@
 		"cssnano": "8.0.5",
 		"kamado": "2.0.0-alpha.17",
 		"postcss": "8.5.26",
-		"postcss-import": "16.1.1",
+		"postcss-import": "16.2.0",
 		"postcss-load-config": "6.0.1"
 	},
 	"devDependencies": {
