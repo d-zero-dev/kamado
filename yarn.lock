@@ -1491,12 +1491,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@hono/node-server@npm:2.1.0":
-  version: 2.1.0
-  resolution: "@hono/node-server@npm:2.1.0"
+"@hono/node-server@npm:2.1.1":
+  version: 2.1.1
+  resolution: "@hono/node-server@npm:2.1.1"
   peerDependencies:
     hono: ^4
-  checksum: 10c0/907aa2cabb804cf6f9c6bc329a898803b0794992d1c2d1bea7e4ae803f5d205fd2733d684c9c87b28338964dc437341e3bee1544b4d504a6b19f9e65ba28b198
+  checksum: 10c0/7ef810ca647c56d8d9386fd81609e18443b3a5634aa5ecabdf357e7ca724613c535e863c15ded9b7ae89b935a073040fb11e6d59041f3b1c3e153d8ecb699880
   languageName: node
   linkType: hard
 
@@ -8571,7 +8571,7 @@ __metadata:
     "@d-zero/dealer": "npm:1.10.4"
     "@d-zero/roar": "npm:2.2.0"
     "@d-zero/shared": "npm:0.23.0"
-    "@hono/node-server": "npm:2.1.0"
+    "@hono/node-server": "npm:2.1.1"
     "@types/node": "npm:24.13.3"
     "@types/picomatch": "npm:4.0.3"
     ansi-colors: "npm:4.1.3"
