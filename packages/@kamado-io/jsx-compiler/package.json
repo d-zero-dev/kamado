@@ -22,7 +22,7 @@
 		}
 	},
 	"engines": {
-		"node": ">=24.13.1"
+		"node": "v26.8.1"
 	},
 	"scripts": {
 		"build": "tsc --project tsconfig.build.json",

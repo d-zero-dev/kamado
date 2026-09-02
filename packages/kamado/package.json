@@ -23,7 +23,7 @@
 		"./utils/dom": "./dist/utils/dom.js"
 	},
 	"engines": {
-		"node": ">=24.11.0"
+		"node": "v26.8.1"
 	},
 	"scripts": {
 		"build": "tsc --project tsconfig.build.json",
