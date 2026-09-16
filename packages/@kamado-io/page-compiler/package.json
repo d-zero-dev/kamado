@@ -85,7 +85,7 @@
 		"character-entities": "2.0.2",
 		"fast-glob": "3.3.3",
 		"html-minifier-terser": "7.2.0",
-		"image-size": "2.0.2",
+		"image-size": "2.0.3",
 		"kamado": "2.0.0-alpha.17",
 		"linkedom": "0.18.13",
 		"prettier": "3.9.6"
