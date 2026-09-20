@@ -47,7 +47,7 @@
 		"linkedom": "0.18.13",
 		"open": "11.0.3",
 		"picomatch": "4.0.7",
-		"yaml": "2.9.0"
+		"yaml": "2.9.1"
 	},
 	"devDependencies": {
 		"@types/node": "24.13.4",
