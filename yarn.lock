@@ -7572,10 +7572,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:4.13.7":
-  version: 4.13.7
-  resolution: "hono@npm:4.13.7"
-  checksum: 10c0/29672a94a4f2be7f3f4d959ad69808dd3bbc220909ca4f9660997022ff45d48ae71e42a460e417d808809d68110196f19359aaab2b14ae6a750331d789601b5a
+"hono@npm:4.13.8":
+  version: 4.13.8
+  resolution: "hono@npm:4.13.8"
+  checksum: 10c0/9c420a6599e38242f78686c5ade10f2539c4e98451b0bd0778ab17e4311691d8d1263ed45cd7047a6274ddd3196db39188c6526a4c2c46dd1baf39f37266819c
   languageName: node
   linkType: hard
 
@@ -8581,7 +8581,7 @@ __metadata:
     dayjs: "npm:1.11.23"
     fast-glob: "npm:3.3.3"
     gray-matter: "npm:4.0.3"
-    hono: "npm:4.13.7"
+    hono: "npm:4.13.8"
     linkedom: "npm:0.18.13"
     open: "npm:11.0.3"
     picomatch: "npm:4.0.7"
