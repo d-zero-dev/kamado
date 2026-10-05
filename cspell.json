@@ -23,6 +23,7 @@
 		"libc",
 		"libkd",
 		"napi",
+		"rfind",
 		"RTLD",
 		"rustc",
 		"unstub",
