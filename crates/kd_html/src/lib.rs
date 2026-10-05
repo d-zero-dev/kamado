@@ -8,5 +8,7 @@ pub mod entities;
 mod entities_table;
 pub mod page;
 pub mod parser;
+pub mod pattern;
+pub mod rules;
 pub mod selector;
 pub mod serialize;

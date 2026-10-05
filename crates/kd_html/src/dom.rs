@@ -239,6 +239,43 @@ impl Document {
 		}
 	}
 
+	/// Inserts `child` after `reference`, a child of some parent.
+	pub fn insert_after(&mut self, reference: NodeId, child: NodeId) {
+		match self.next_sibling(reference) {
+			Some(next) => self.insert_before(next, child),
+			None => {
+				let parent = self.nodes[reference as usize]
+					.parent
+					.expect("reference node has a parent");
+				self.append_child(parent, child);
+			}
+		}
+	}
+
+	/// Copies the subtree rooted at `node` of `from` into this arena and
+	/// returns the id of the (detached) copy. For the document node of `from`
+	/// the copy is a fragment holder: its children are the copied children,
+	/// and the caller moves them where they belong.
+	pub fn import_subtree(&mut self, from: &Document, node: NodeId) -> NodeId {
+		let copy = match from.kind(node) {
+			NodeKind::Document => {
+				let holder = self.create_element("template");
+				self.nodes[holder as usize].kind = NodeKind::Document;
+				holder
+			}
+			NodeKind::Element(e) => self.create_element_with(e.clone()),
+			NodeKind::Text(t) => self.create_text(t),
+			NodeKind::Comment(c) => self.create_comment(c),
+			NodeKind::Doctype(d) => self.create_doctype(d.clone()),
+			NodeKind::ProcessingInstruction(raw) => self.create_processing_instruction(raw),
+		};
+		for child in from.children(node) {
+			let child_copy = self.import_subtree(from, child);
+			self.append_child(copy, child_copy);
+		}
+		copy
+	}
+
 	/// Inserts `child` as the first child of `parent`.
 	pub fn prepend_child(&mut self, parent: NodeId, child: NodeId) {
 		match self.first_child(parent) {
@@ -311,6 +348,25 @@ impl Document {
 }
 
 impl Element {
+	/// Sets attribute `name` (exact match), keeping its position when it
+	/// exists and appending it otherwise.
+	pub fn set_attr(&mut self, name: &str, value: &str) {
+		match self.attrs.iter_mut().find(|a| a.name == name) {
+			Some(existing) => existing.value = value.to_owned(),
+			None => self.attrs.push(Attr {
+				name: name.to_owned(),
+				value: value.to_owned(),
+			}),
+		}
+	}
+
+	/// Removes attribute `name` (exact match); whether it was there.
+	pub fn remove_attr(&mut self, name: &str) -> bool {
+		let before = self.attrs.len();
+		self.attrs.retain(|a| a.name != name);
+		self.attrs.len() != before
+	}
+
 	/// The value of attribute `name` (exact, case-sensitive match).
 	#[must_use]
 	pub fn attr(&self, name: &str) -> Option<&str> {
