@@ -56,6 +56,10 @@ enum Simple {
 	},
 	Not(Vec<Complex>),
 	Is(Vec<Complex>),
+	/// `:has()`: relative selectors, each anchored at the element tested.
+	Has(Vec<(Combinator, Complex)>),
+	/// The element a `:has()` is evaluated for; never produced by the parser.
+	Anchor(NodeId),
 	Nth {
 		a: i64,
 		b: i64,
@@ -354,7 +358,7 @@ impl<'a> Reader<'a> {
 			"only-child" => Ok(Self::only_child()),
 			"empty" => Ok(Simple::Empty),
 			"root" => Ok(Simple::Root),
-			"not" | "is" => {
+			"not" | "is" | "where" => {
 				self.expect_open()?;
 				let list = self.list(true)?;
 				self.pos += 1;
@@ -363,6 +367,34 @@ impl<'a> Reader<'a> {
 				} else {
 					Simple::Is(list)
 				})
+			}
+			"has" => {
+				self.expect_open()?;
+				let mut list = Vec::new();
+				loop {
+					self.skip_ws();
+					let combinator = match self.peek() {
+						Some(b'>') => Combinator::Child,
+						Some(b'+') => Combinator::Adjacent,
+						Some(b'~') => Combinator::Sibling,
+						_ => Combinator::Descendant,
+					};
+					if combinator != Combinator::Descendant {
+						self.pos += 1;
+					}
+					let complex = self.complex()?;
+					list.push((combinator, complex));
+					self.skip_ws();
+					match self.peek() {
+						Some(b',') => self.pos += 1,
+						Some(b')') => {
+							self.pos += 1;
+							break;
+						}
+						_ => return self.err("a `)` is missing"),
+					}
+				}
+				Ok(Simple::Has(list))
 			}
 			"nth-child" | "nth-last-child" | "nth-of-type" | "nth-last-of-type" => {
 				self.expect_open()?;
@@ -565,6 +597,22 @@ fn matches_from(doc: &Document, node: NodeId, complex: &Complex, index: usize) -
 	}
 }
 
+/// All element descendants of `scope` in document order.
+fn descendants(doc: &Document, scope: NodeId) -> Vec<NodeId> {
+	let mut out = Vec::new();
+	let mut stack: Vec<NodeId> = doc.children(scope).collect();
+	stack.reverse();
+	while let Some(node) = stack.pop() {
+		if doc.element(node).is_some() {
+			out.push(node);
+		}
+		let mut children: Vec<NodeId> = doc.children(node).collect();
+		children.reverse();
+		stack.extend(children);
+	}
+	out
+}
+
 fn previous_element(doc: &Document, node: NodeId) -> Option<NodeId> {
 	let mut prev = doc.prev_sibling(node);
 	while let Some(p) = prev {
@@ -622,6 +670,25 @@ fn matches_simple(doc: &Document, node: NodeId, simple: &Simple) -> bool {
 		}
 		Simple::Not(list) => !list.iter().any(|c| matches_complex(doc, node, c)),
 		Simple::Is(list) => list.iter().any(|c| matches_complex(doc, node, c)),
+		Simple::Anchor(anchor) => node == *anchor,
+		Simple::Has(list) => list.iter().any(|(combinator, relative)| {
+			let mut compounds = vec![vec![Simple::Anchor(node)]];
+			compounds.extend(relative.compounds.iter().cloned());
+			let mut combinators = vec![*combinator];
+			combinators.extend(relative.combinators.iter().copied());
+			let anchored = Complex {
+				compounds,
+				combinators,
+			};
+			// A sibling combinator's subject can sit anywhere below the parent.
+			let scope = match combinator {
+				Combinator::Adjacent | Combinator::Sibling => doc.parent(node).unwrap_or(node),
+				_ => node,
+			};
+			descendants(doc, scope)
+				.into_iter()
+				.any(|candidate| matches_complex(doc, candidate, &anchored))
+		}),
 		Simple::Empty => doc.children(node).all(|c| match doc.kind(c) {
 			NodeKind::Element(_) => false,
 			NodeKind::Text(t) => t.is_empty(),
@@ -768,6 +835,23 @@ mod tests {
 		assert_eq!(texts("<i>1</i><b>2</b><i>3</i>", "i:last-of-type"), ["3"]);
 		assert_eq!(texts("<i>1</i><b>2</b><i>3</i>", "i:first-of-type"), ["1"]);
 		assert_eq!(texts("<html><body>x</body></html>", ":root").len(), 1);
+		assert_eq!(texts(html, ":where(p) "), ["", "x"]);
+	}
+
+	#[test]
+	fn has_looks_down_and_sideways_from_the_element() {
+		let html = "<div>a<p class=k>1</p></div><div>b<span>2</span></div><section>c<div><p>3</p></div></section>";
+		assert_eq!(texts(html, "div:has(p)"), ["a1", "3"]);
+		assert_eq!(texts(html, "div:has(> p)"), ["a1", "3"]);
+		assert_eq!(texts(html, "section:has(> p)"), Vec::<String>::new());
+		assert_eq!(texts(html, "section:has(p)"), ["c3"]);
+		assert_eq!(texts(html, "div:has(.k, span)"), ["a1", "b2"]);
+		assert_eq!(texts("<h1>t</h1><p>u</p><i>v</i>", "h1:has(+ p)"), ["t"]);
+		assert_eq!(texts("<h1>t</h1><p>u</p><i>v</i>", "h1:has(~ i)"), ["t"]);
+		assert_eq!(
+			texts("<h1>t</h1><p>u</p><i>v</i>", "p:has(+ p)"),
+			Vec::<String>::new()
+		);
 	}
 
 	#[test]
