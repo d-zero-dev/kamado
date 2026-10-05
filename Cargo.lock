@@ -25,6 +25,7 @@ version = "0.0.0"
 dependencies = [
  "kd_build",
  "kd_config",
+ "kd_css",
  "kd_glob",
  "kd_hash",
  "kd_html",
@@ -34,6 +35,10 @@ dependencies = [
  "kd_site",
  "kd_yaml",
 ]
+
+[[package]]
+name = "kd_css"
+version = "0.0.0"
 
 [[package]]
 name = "kd_glob"

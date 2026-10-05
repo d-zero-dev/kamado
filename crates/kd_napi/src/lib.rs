@@ -13,6 +13,7 @@
 
 #![allow(non_camel_case_types, clippy::missing_safety_doc)]
 
+mod serve;
 mod session;
 
 use std::ffi::{CStr, c_char, c_int, c_void};
@@ -317,6 +318,93 @@ unsafe extern "C" fn abort(env: napi_env, info: napi_callback_info) -> napi_valu
 	std::ptr::null_mut()
 }
 
+/// Calls `f` with the `N` string arguments of the call and returns its string
+/// result; an error becomes a thrown JS `Error`, wrong arguments throw `usage`.
+unsafe fn string_call<const N: usize>(
+	env: napi_env,
+	info: napi_callback_info,
+	usage: &CStr,
+	f: impl FnOnce([String; N]) -> Result<String, String>,
+) -> napi_value {
+	let Some(api) = api() else {
+		return std::ptr::null_mut();
+	};
+	// SAFETY: env/info belong to this call.
+	let Some(args) = (unsafe { string_args::<N>(api, env, info) }) else {
+		return unsafe { throw(api, env, usage) };
+	};
+	match f(args) {
+		Ok(text) => unsafe { string(api, env, &text) },
+		Err(message) => unsafe { throw_message(api, env, message) },
+	}
+}
+
+/// `serveOpen(configPath, optionsJson, runtimeUrl)` -> JSON with the handle and
+/// what the HTTP side needs to know.
+unsafe extern "C" fn serve_open(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<3>(
+			env,
+			info,
+			c"serveOpen: expected (configPath, optionsJson, runtimeUrl) strings",
+			|[config, options, runtime]| serve::open(&config, &options, &runtime),
+		)
+	}
+}
+
+/// `serveRequest(handle, urlPath, rendererStarted)` -> JSON answer
+/// (`rendererStarted` is `"1"` or `"0"`).
+unsafe extern "C" fn serve_request(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<3>(
+			env,
+			info,
+			c"serveRequest: expected (handle, urlPath, rendererStarted) strings",
+			|[handle, path, started]| serve::request(&handle, &path, &started),
+		)
+	}
+}
+
+/// `serveFinishRender(handle, token, html)` -> JSON answer.
+unsafe extern "C" fn serve_finish_render(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<3>(
+			env,
+			info,
+			c"serveFinishRender: expected (handle, token, html) strings",
+			|[handle, token, html]| serve::finish_render(&handle, &token, &html),
+		)
+	}
+}
+
+/// `serveFinishScript(handle, token, outputJson)` -> JSON answer.
+unsafe extern "C" fn serve_finish_script(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<3>(
+			env,
+			info,
+			c"serveFinishScript: expected (handle, token, outputJson) strings",
+			|[handle, token, output]| serve::finish_script(&handle, &token, &output),
+		)
+	}
+}
+
+/// `serveClose(handle)`: forgets a dev server.
+unsafe extern "C" fn serve_close(env: napi_env, info: napi_callback_info) -> napi_value {
+	let Some(api) = api() else {
+		return std::ptr::null_mut();
+	};
+	// SAFETY: env/info belong to this call.
+	if let Some([handle]) = unsafe { string_args::<1>(api, env, info) } {
+		serve::close(&handle);
+	}
+	std::ptr::null_mut()
+}
+
 /// Throws a JS `Error` and returns the NULL value a callback must return after throwing.
 unsafe fn throw(api: &Api, env: napi_env, message: &CStr) -> napi_value {
 	// SAFETY: `message` is NUL-terminated; a NULL code means "no code property".
@@ -425,6 +513,11 @@ pub unsafe extern "C" fn napi_register_module_v1(env: napi_env, exports: napi_va
 		export(api, env, exports, c"prepare", prepare);
 		export(api, env, exports, c"finish", finish);
 		export(api, env, exports, c"abort", abort);
+		export(api, env, exports, c"serveOpen", serve_open);
+		export(api, env, exports, c"serveRequest", serve_request);
+		export(api, env, exports, c"serveFinishRender", serve_finish_render);
+		export(api, env, exports, c"serveFinishScript", serve_finish_script);
+		export(api, env, exports, c"serveClose", serve_close);
 	}
 	exports
 }

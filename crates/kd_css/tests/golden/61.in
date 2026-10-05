@@ -1,0 +1,3 @@
+.a {
+	background:RED url(a.png);
+}

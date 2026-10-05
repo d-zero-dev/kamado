@@ -1,0 +1,4 @@
+.a {
+	margin:0 /* c */ 1px;
+	color:red/* c */;
+}

@@ -1,0 +1,1 @@
+a[href~="x"]{x:y}a[href|=x]{x:y}a[lang|="en"]{x:y}

@@ -161,18 +161,40 @@ impl Modules {
 	/// A message with `path:line:column` for a syntax error, or the import
 	/// that cannot be resolved.
 	pub(crate) fn compile(&self, src: &str) -> Result<Arc<Compiled>, String> {
+		self.compile_walk(src, false)
+	}
+
+	/// Like [`Modules::compile`], but also follows the imports of modules that
+	/// were compiled before. A build compiles each module once and trusts the
+	/// cache; after [`Modules::refresh`] some module of a cached closure may be
+	/// missing, and only a walk through the cached modules finds it.
+	pub(crate) fn compile_closure(&self, src: &str) -> Result<Arc<Compiled>, String> {
+		self.compile_walk(src, true)
+	}
+
+	fn compile_walk(&self, src: &str, through_cached: bool) -> Result<Arc<Compiled>, String> {
 		let mut queue = vec![src.to_owned()];
+		let mut visited: HashSet<String> = HashSet::new();
 		let mut entry: Option<Arc<Compiled>> = None;
 		while let Some(next) = queue.pop() {
-			if let Some(done) = self.lock().get(&next) {
-				if entry.is_none() {
-					entry = Some(Arc::clone(done));
-				}
+			if !visited.insert(next.clone()) {
 				continue;
 			}
-			let compiled = Arc::new(self.compile_one(&next)?);
-			self.lock().insert(next.clone(), Arc::clone(&compiled));
-			queue.extend(compiled.imports.iter().cloned());
+			let cached = self.lock().get(&next).cloned();
+			let compiled = match cached {
+				Some(done) => {
+					if through_cached {
+						queue.extend(done.imports.iter().cloned());
+					}
+					done
+				}
+				None => {
+					let compiled = Arc::new(self.compile_one(&next)?);
+					self.lock().insert(next.clone(), Arc::clone(&compiled));
+					queue.extend(compiled.imports.iter().cloned());
+					compiled
+				}
+			};
 			if entry.is_none() {
 				entry = Some(compiled);
 			}
@@ -257,6 +279,33 @@ impl Modules {
 			imports,
 			has_default_export: output.has_default_export,
 		})
+	}
+
+	/// Forgets the compiled modules in the closure of `src` whose source has
+	/// changed, so that the next [`Modules::compile`] compiles them again (the
+	/// dev server calls this before every request). Returns whether any
+	/// module was forgotten.
+	pub(crate) fn refresh(&self, src: &str) -> bool {
+		let fingerprinter = kd_build::Fingerprinter::new();
+		let mut state = self.lock();
+		let mut seen = HashSet::new();
+		let mut stale = Vec::new();
+		let mut stack = vec![src.to_owned()];
+		while let Some(path) = stack.pop() {
+			if !seen.insert(path.clone()) {
+				continue;
+			}
+			if let Some(compiled) = state.get(&path) {
+				if !fingerprinter.unchanged(&path, &compiled.dep) {
+					stale.push(path.clone());
+				}
+				stack.extend(compiled.imports.iter().cloned());
+			}
+		}
+		for path in &stale {
+			state.remove(path);
+		}
+		!stale.is_empty()
 	}
 
 	/// The fingerprints of `src` and every file it imports, transitively.

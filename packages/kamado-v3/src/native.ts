@@ -30,6 +30,23 @@ export interface Native {
 	finish(handle: string, resultsJson: string): string;
 	/** Forgets a prepared build that will not be finished. */
 	abort(handle: string): void;
+	/**
+	 * Opens the dev server of a project. The result is JSON: `{ handle,
+	 * devServer, inputDir, outputDir, siteName }` (see `ServeDescription`).
+	 */
+	serveOpen(configPath: string, optionsJson: string, runtimeUrl: string): string;
+	/**
+	 * Answers a request for a path; the result is JSON (see `Answer`).
+	 * `rendererStarted` is `"0"` when the caller lost the renderer, so the
+	 * core sends the whole context again.
+	 */
+	serveRequest(handle: string, urlPath: string, rendererStarted: "1" | "0"): string;
+	/** Takes the HTML rendered for a `render` answer; the result is JSON. */
+	serveFinishRender(handle: string, token: string, html: string): string;
+	/** Takes what esbuild built for a `script` answer; the result is JSON. */
+	serveFinishScript(handle: string, token: string, outputJson: string): string;
+	/** Forgets a dev server. */
+	serveClose(handle: string): void;
 }
 
 const LIBRARY_NAME = process.platform === 'darwin' ? 'libkd_napi.dylib' : 'libkd_napi.so';

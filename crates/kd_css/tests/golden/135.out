@@ -1,0 +1,1 @@
+.a{animation:foo step-end steps(4) 1s step-start}

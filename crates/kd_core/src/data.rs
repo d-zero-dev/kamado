@@ -15,6 +15,38 @@ pub(crate) struct Data {
 	pub hash: String,
 }
 
+/// A cheap stamp of the data directory: the name, size and modification time
+/// of every file in it. A different stamp means the data may have changed
+/// (the dev server compares it before every request instead of reading the
+/// files).
+pub(crate) fn stamp(config: &Config) -> String {
+	let Some(dir) = &config.data.dir else {
+		return String::new();
+	};
+	let mut parts: Vec<String> = fs::read_dir(dir)
+		.into_iter()
+		.flatten()
+		.filter_map(Result::ok)
+		.filter_map(|e| {
+			let meta = e.metadata().ok()?;
+			let modified = meta
+				.modified()
+				.ok()?
+				.duration_since(std::time::UNIX_EPOCH)
+				.ok()?;
+			Some(format!(
+				"{}:{}:{}.{}",
+				e.file_name().to_string_lossy(),
+				meta.len(),
+				modified.as_secs(),
+				modified.subsec_nanos()
+			))
+		})
+		.collect();
+	parts.sort();
+	parts.join("|")
+}
+
 /// Reads the data directory (not recursively; files starting with `.` are
 /// skipped) in name order.
 ///

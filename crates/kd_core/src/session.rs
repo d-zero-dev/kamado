@@ -22,6 +22,7 @@ use crate::banner::{self, LocalTime};
 use crate::html;
 use crate::jsx::Modules;
 use crate::minifiers::Minifiers;
+use crate::style::{self, StyleSettings};
 use crate::{
 	AssetResult, BuildOptions, Loaded, Page, PageKind, PageResult, Plan, Report, Status,
 	compile_globs, plan, write_output,
@@ -89,6 +90,9 @@ struct Shared {
 	env_js: String,
 	/// The environment digest of the scripts.
 	env_scripts: String,
+	/// The environment digest of the stylesheets.
+	env_styles: String,
+	style_settings: StyleSettings,
 	pipeline: html::Pipeline,
 	/// Minifies the code inside pages (inline scripts and handlers).
 	minifiers: Minifiers,
@@ -113,12 +117,41 @@ type Outcome = Result<(PageResult, Option<kd_build::Entry>, Vec<String>), String
 type AssetOutcome = Result<(AssetResult, Option<kd_build::Entry>), String>;
 
 /// The compiled layout (its module) and the fingerprints of its import closure.
-type LayoutModule = (String, BTreeMap<String, kd_build::Dep>);
+pub(crate) type LayoutModule = (String, BTreeMap<String, kd_build::Dep>);
 
-fn layout_module(
+/// Whether JavaScript renders the page: a JSX page, or a page that names a
+/// layout (a layout is a component).
+pub(crate) fn needs_js(page: &Page) -> bool {
+	!page.is_virtual
+		&& (page.kind == PageKind::Tsx
+			|| page
+				.meta
+				.iter()
+				.any(|(k, v)| k == "layout" && v.as_str().is_some_and(|s| !s.is_empty())))
+}
+
+/// The environment digest of pages that JavaScript does not render: what
+/// decides their output apart from their own files. esbuild minifies the code
+/// inside pages, so its version is part of it.
+pub(crate) fn page_env(loaded: &Loaded, options: &BuildOptions) -> String {
+	kd_hash::to_hex(&kd_hash::sha256(
+		format!(
+			"{}\0{}\0html-pipeline\0{}",
+			crate::VERSION,
+			loaded.config_hash,
+			options.esbuild_version.as_deref().unwrap_or_default()
+		)
+		.as_bytes(),
+	))
+}
+
+/// The compiled layout a page names. `walk` follows the imports of modules
+/// that were compiled before (see `Modules::compile_closure`).
+pub(crate) fn layout_module(
 	config: &kd_config::Config,
 	modules: &Modules,
 	page: &Page,
+	walk: bool,
 ) -> Result<Option<LayoutModule>, String> {
 	let Some(name) = page
 		.meta
@@ -143,7 +176,11 @@ fn layout_module(
 	for ext in [".tsx", ".jsx"] {
 		let path = format!("{}/{name}{ext}", dir.trim_end_matches('/'));
 		if fs::metadata(&path).is_ok_and(|m| m.is_file()) {
-			let compiled = modules.compile(&path)?;
+			let compiled = if walk {
+				modules.compile_closure(&path)?
+			} else {
+				modules.compile(&path)?
+			};
 			if !compiled.has_default_export {
 				return Err(format!(
 					"{path}: a layout must `export default` a component"
@@ -173,7 +210,7 @@ fn pages_digest(plan: &Plan) -> String {
 	kd_hash::to_hex(&kd_hash::sha256(hasher_input.as_bytes()))
 }
 
-fn page_json(page: &Page, date: &str) -> Value {
+pub(crate) fn page_json(page: &Page, date: &str) -> Value {
 	let f = &page.file;
 	Value::Object(vec![
 		("url".to_owned(), Value::String(f.url.clone())),
@@ -193,7 +230,7 @@ fn page_json(page: &Page, date: &str) -> Value {
 	])
 }
 
-fn site_json(config: &kd_config::Config) -> Value {
+pub(crate) fn site_json(config: &kd_config::Config) -> Value {
 	let s = &config.site;
 	let opt = |v: &Option<String>| v.as_ref().map_or(Value::Null, |s| Value::String(s.clone()));
 	Value::Object(vec![
@@ -219,30 +256,12 @@ fn site_json(config: &kd_config::Config) -> Value {
 pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result<Prepared, String> {
 	let started = Instant::now();
 	let config = &loaded.config;
-	let plan = plan(config)?;
+	let mut plan = plan(config)?;
 	let targets = compile_globs(&options.targets)?;
-	// esbuild minifies the code inside pages, so its version is part of what a
-	// page was built with.
-	let env = kd_hash::to_hex(&kd_hash::sha256(
-		format!(
-			"{}\0{}\0html-pipeline\0{}",
-			crate::VERSION,
-			loaded.config_hash,
-			options.esbuild_version.as_deref().unwrap_or_default()
-		)
-		.as_bytes(),
-	));
+	let env = page_env(loaded, options);
 	let pipeline = html::Pipeline::compile(config)?;
 	let data = crate::data::load(config)?;
 
-	let needs_js = |page: &Page| {
-		!page.is_virtual
-			&& (page.kind == PageKind::Tsx
-				|| page
-					.meta
-					.iter()
-					.any(|(k, v)| k == "layout" && v.as_str().is_some_and(|s| !s.is_empty())))
-	};
 	let any_js = plan.pages.iter().any(needs_js);
 	let env_js = if any_js {
 		kd_hash::to_hex(&kd_hash::sha256(
@@ -332,7 +351,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		} else {
 			None
 		};
-		let layout = match layout_module(config, &modules, page)? {
+		let layout = match layout_module(config, &modules, page, false)? {
 			Some((out, closure)) => {
 				deps.extend(closure);
 				Some(out)
@@ -382,7 +401,34 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		)
 		.as_bytes(),
 	));
-	let assets = assets::discover(config, AssetKind::Script)?;
+	let style_banner = config.styles.banner.as_ref().map(|template| {
+		let template = if options.serving {
+			banner::DEV_BANNER
+		} else {
+			template
+		};
+		banner::for_style(template, time, version)
+	});
+	let style_settings = StyleSettings::new(config, style_banner);
+	let env_styles = kd_hash::to_hex(&kd_hash::sha256(
+		format!(
+			"{}\0{}\0styles\0{:?}",
+			crate::VERSION,
+			loaded.config_hash,
+			style_settings
+		)
+		.as_bytes(),
+	));
+	let mut assets = assets::discover(config, AssetKind::Style)?;
+	assets.extend(assets::discover(config, AssetKind::Script)?);
+	if assets.iter().any(|a| a.kind == AssetKind::Style)
+		&& assets::sourcemap_enabled(config.styles.sourcemap, options.serving)
+	{
+		plan.warnings.push(
+			"styles.sourcemap: source maps of stylesheets are not generated; the stylesheets are written without one"
+				.to_owned(),
+		);
+	}
 	{
 		let page_outputs: std::collections::HashSet<&str> = plan
 			.pages
@@ -411,10 +457,17 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 				entry,
 				&asset.output_path,
 				&asset.input_path,
-				&env_scripts,
+				match asset.kind {
+					AssetKind::Style => &env_styles,
+					AssetKind::Script => &env_scripts,
+				},
 				&fingerprinter,
 			) {
 			asset_decisions.push(Decision::Cached(refreshed));
+			continue;
+		}
+		if asset.kind == AssetKind::Style {
+			asset_decisions.push(Decision::Build { render: None });
 			continue;
 		}
 		script_entries.push(Value::Object(vec![
@@ -459,6 +512,8 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 			env,
 			env_js,
 			env_scripts,
+			env_styles,
+			style_settings,
 			pipeline,
 			minifiers: Minifiers::new(
 				options.esbuild_binary.clone(),
@@ -487,7 +542,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 }
 
 /// The current time as an ISO 8601 string (UTC), for `page.date`.
-fn now_iso() -> String {
+pub(crate) fn now_iso() -> String {
 	let secs = std::time::SystemTime::now()
 		.duration_since(std::time::UNIX_EPOCH)
 		.map_or(0, |d| d.as_secs() as i64);
@@ -588,7 +643,10 @@ impl Prepared {
 			}
 		}
 		for (i, decision) in shared.asset_decisions.iter().enumerate() {
-			if matches!(decision, Decision::Build { .. }) && script_by_asset[i].is_none() {
+			if matches!(decision, Decision::Build { .. })
+				&& shared.assets[i].kind == AssetKind::Script
+				&& script_by_asset[i].is_none()
+			{
 				return Err(format!(
 					"{}: the script was not built",
 					shared.assets[i].input_path
@@ -639,7 +697,7 @@ impl Prepared {
 				let shared = Arc::clone(&shared);
 				let script_by_asset = Arc::clone(&script_by_asset);
 				s.spawn(move || {
-					let outcome = finish_script(&shared, i, script_by_asset[i].as_ref());
+					let outcome = finish_asset(&shared, i, script_by_asset[i].as_ref());
 					shared
 						.asset_results
 						.lock()
@@ -749,28 +807,20 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 	Ok((result(status), Some(entry), out.warnings))
 }
 
-/// Writes the bundle esbuild made for a script and records what it read.
-fn finish_script(shared: &Shared, i: usize, output: Option<&ScriptOutput>) -> AssetOutcome {
-	let asset = &shared.assets[i];
-	let result = |status| AssetResult {
-		kind: asset.kind,
-		input_path: asset.input_path.clone(),
-		output_path: asset.output_path.clone(),
-		status,
-	};
-	let output = match &shared.asset_decisions[i] {
-		Decision::Virtual | Decision::Skipped => return Ok((result(Status::Skipped), None)),
-		Decision::Cached(entry) => return Ok((result(Status::Cached), Some(entry.clone()))),
-		Decision::Build { .. } => {
-			output.ok_or_else(|| format!("{}: the script was not built", asset.input_path))?
-		}
-	};
-	let bytes = output.code.as_bytes();
-	let status = write_output(&asset.output_path, bytes, shared.skip_unchanged)?;
-	// esbuild reads its inputs on its own, so their fingerprints are taken
-	// afterwards. An input modified since the build began may have been read
-	// before the edit; recording it would let the next build call the output
-	// current, so such an output gets no entry and is rebuilt next time.
+/// What was built for an asset: its text, what it was read from, and whether
+/// the fingerprints can vouch for the text.
+struct AssetBuild {
+	text: String,
+	deps: BTreeMap<String, kd_build::Dep>,
+	settled: bool,
+}
+
+/// The bundle esbuild made for a script. esbuild reads its inputs on its own,
+/// so their fingerprints are taken afterwards. An input modified since the
+/// build began may have been read before the edit; recording it would let the
+/// next build call the output current, so such an output is not `settled` and
+/// gets no entry: it is rebuilt next time.
+fn script_build(shared: &Shared, asset: &Asset, output: &ScriptOutput) -> AssetBuild {
 	let mut deps = BTreeMap::new();
 	let mut settled = true;
 	for input in output.inputs.iter().chain([&asset.input_path]) {
@@ -782,11 +832,53 @@ fn finish_script(shared: &Shared, i: usize, output: Option<&ScriptOutput>) -> As
 		}
 		deps.insert(input.clone(), dep);
 	}
-	let entry = settled.then(|| kd_build::Entry {
-		input_path: asset.input_path.clone(),
-		env: shared.env_scripts.clone(),
-		output_size: bytes.len() as u64,
+	AssetBuild {
+		text: output.code.clone(),
 		deps,
+		settled,
+	}
+}
+
+/// Writes a script or a stylesheet and records what it was built from.
+fn finish_asset(shared: &Shared, i: usize, script: Option<&ScriptOutput>) -> AssetOutcome {
+	let asset = &shared.assets[i];
+	let result = |status| AssetResult {
+		kind: asset.kind,
+		input_path: asset.input_path.clone(),
+		output_path: asset.output_path.clone(),
+		status,
+	};
+	match &shared.asset_decisions[i] {
+		Decision::Virtual | Decision::Skipped => return Ok((result(Status::Skipped), None)),
+		Decision::Cached(entry) => return Ok((result(Status::Cached), Some(entry.clone()))),
+		Decision::Build { .. } => {}
+	}
+	let (built, env) = match asset.kind {
+		AssetKind::Script => {
+			let output =
+				script.ok_or_else(|| format!("{}: the script was not built", asset.input_path))?;
+			(script_build(shared, asset, output), &shared.env_scripts)
+		}
+		AssetKind::Style => {
+			let style = style::build(&asset.input_path, &shared.style_settings)?;
+			// The files were fingerprinted as they were read.
+			(
+				AssetBuild {
+					text: style.css,
+					deps: style.deps,
+					settled: true,
+				},
+				&shared.env_styles,
+			)
+		}
+	};
+	let bytes = built.text.as_bytes();
+	let status = write_output(&asset.output_path, bytes, shared.skip_unchanged)?;
+	let entry = built.settled.then(|| kd_build::Entry {
+		input_path: asset.input_path.clone(),
+		env: env.clone(),
+		output_size: bytes.len() as u64,
+		deps: built.deps,
 	});
 	Ok((result(status), entry))
 }

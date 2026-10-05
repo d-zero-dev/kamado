@@ -1,0 +1,3 @@
+.a {
+	font-feature-settings:"liga" 1 , "kern" 1;
+}

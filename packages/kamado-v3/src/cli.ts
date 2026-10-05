@@ -5,6 +5,7 @@ import path from 'node:path';
 import { parseArgs, styleText } from 'node:util';
 
 import { build } from './build.js';
+import { start } from './server/start.js';
 import { summarize } from './summary.js';
 
 const USAGE = `Usage:
@@ -74,7 +75,16 @@ async function main(argv: readonly string[]): Promise<number> {
 			return 0;
 		}
 		case 'server': {
-			throw new Error('the server command is not part of this CLI: it only builds');
+			await start(resolveConfig(values.config), {
+				verbose: values.verbose,
+				cacheDir:
+					values['cache-dir'] === undefined
+						? undefined
+						: path.resolve(process.cwd(), values['cache-dir']),
+			});
+			// The server keeps the process alive; the exit code is decided by the
+			// signal handlers it installed.
+			return 0;
 		}
 		default: {
 			console.error(styleText(['bold', 'red'], `unknown command: ${command}`));

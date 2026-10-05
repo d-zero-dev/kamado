@@ -8578,8 +8578,10 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "kamado-v3@workspace:packages/kamado-v3"
   dependencies:
+    "@hono/node-server": "npm:2.1.1"
     "@types/node": "npm:24.13.6"
     esbuild: "npm:0.28.2"
+    hono: "npm:4.13.9"
   bin:
     kamado3: ./dist/cli.js
   languageName: unknown

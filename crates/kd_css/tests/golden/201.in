@@ -1,0 +1,5 @@
+.a {
+	background-position:center left;
+	background-position:left center;
+	background-position:left;
+}

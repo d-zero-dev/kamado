@@ -1,0 +1,5 @@
+.a {
+	border:1px solid red;
+	border:solid 1px red;
+	border:red 1px solid;
+}

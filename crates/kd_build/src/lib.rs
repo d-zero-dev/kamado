@@ -340,6 +340,21 @@ impl Fingerprinter {
 		dep
 	}
 
+	/// Whether `path` still has the content that `recorded` fingerprints
+	/// (the file is read only when its stat changed).
+	///
+	/// # Example
+	///
+	/// ```no_run
+	/// let fp = kd_build::Fingerprinter::new();
+	/// let (_, dep) = kd_build::read_with_fingerprint("/site/src/a.tsx").unwrap();
+	/// assert!(fp.unchanged("/site/src/a.tsx", &dep));
+	/// ```
+	#[must_use]
+	pub fn unchanged(&self, path: &str, recorded: &Dep) -> bool {
+		self.verify(path, recorded).is_some()
+	}
+
 	/// Checks a recorded dependency against the file system, reading the
 	/// file only when its stat changed. Returns the fingerprint to record
 	/// when the content is unchanged, `None` when it changed.
@@ -397,12 +412,35 @@ pub fn check(
 	env: &str,
 	fingerprinter: &Fingerprinter,
 ) -> Verdict {
-	if entry.env != env || entry.input_path != input_path || entry.deps.is_empty() {
-		return Verdict::Stale;
-	}
 	match stat(output_path) {
 		Some((size, _, _)) if size == entry.output_size => {}
 		_ => return Verdict::Stale,
+	}
+	check_inputs(entry, input_path, env, fingerprinter)
+}
+
+/// Like [`check`] but without looking at the output file: for output that is
+/// kept in memory (the dev server writes nothing).
+///
+/// # Example
+///
+/// ```no_run
+/// let fp = kd_build::Fingerprinter::new();
+/// # let entry: kd_build::Entry = unimplemented!();
+/// match kd_build::check_inputs(&entry, "/site/src/index.html", "env-digest", &fp) {
+///     kd_build::Verdict::UpToDate(_) => println!("serve from memory"),
+///     kd_build::Verdict::Stale => println!("compile again"),
+/// }
+/// ```
+#[must_use]
+pub fn check_inputs(
+	entry: &Entry,
+	input_path: &str,
+	env: &str,
+	fingerprinter: &Fingerprinter,
+) -> Verdict {
+	if entry.env != env || entry.input_path != input_path || entry.deps.is_empty() {
+		return Verdict::Stale;
 	}
 	let mut refreshed = BTreeMap::new();
 	for (path, recorded) in &entry.deps {

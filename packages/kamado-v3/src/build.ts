@@ -2,6 +2,7 @@ import type { RenderContext } from './props.js';
 
 import { native } from './native.js';
 import { renderJobs, type RenderJob } from './render.js';
+import { RUNTIME_URL } from './runtime-url.js';
 import {
 	buildScripts,
 	ESBUILD_VERSION,
@@ -54,9 +55,6 @@ interface Prepared {
 	/** `null` when no script is stale. */
 	readonly scripts: ScriptRequest | null;
 }
-
-/** File URL of the JSX runtime that compiled modules import. */
-const RUNTIME_URL = new URL('jsx/runtime.js', import.meta.url).href;
 
 /**
  * Builds the site described by `configPath` (an absolute path to

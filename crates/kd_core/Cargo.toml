@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 kd_build = { path = "../kd_build" }
 kd_config = { path = "../kd_config" }
+kd_css = { path = "../kd_css" }
 kd_glob = { path = "../kd_glob" }
 kd_hash = { path = "../kd_hash" }
 kd_html = { path = "../kd_html" }

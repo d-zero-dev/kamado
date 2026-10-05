@@ -19,7 +19,9 @@ mod data;
 mod html;
 mod jsx;
 mod minifiers;
+pub mod serve;
 mod session;
+pub mod style;
 pub mod style_import;
 
 pub use session::{Prepared, RenderJob, ScriptOutput, build, prepare, write_report};
@@ -323,6 +325,51 @@ pub fn plan(config: &Config) -> Result<Plan, String> {
 	Ok(Plan {
 		pages,
 		warnings: resolved.warnings,
+	})
+}
+
+/// The parsed `pages.overrides` file, if the config names one.
+pub(crate) fn read_overrides(config: &Config) -> Result<Option<Overrides>, String> {
+	let Some(path) = &config.pages.overrides else {
+		return Ok(None);
+	};
+	let text =
+		fs::read_to_string(path).map_err(|e| format!("cannot read pages.overrides {path}: {e}"))?;
+	Overrides::parse(&text)
+		.map(Some)
+		.map_err(|e| format!("{path}: {e}"))
+}
+
+/// What a page's own files say now: its metadata (the file, its sidecar and
+/// the override for its URL merged), its body, and the fingerprints of the
+/// files that were read.
+pub(crate) struct Reloaded {
+	pub meta: Meta,
+	pub body: Option<String>,
+	pub deps: BTreeMap<String, kd_build::Dep>,
+}
+
+/// Reads a page again (the dev server does this when the page's files
+/// changed). The output location is not recomputed: a change of the
+/// `outputPathField` takes a restart.
+///
+/// # Errors
+///
+/// A message for an unreadable file, invalid front matter or sidecar, or a
+/// `meta` that cannot be read without running the file.
+pub(crate) fn reload_page(page: &Page, overrides: Option<&Overrides>) -> Result<Reloaded, String> {
+	let input_path = &page.file.input_path;
+	let (in_file, body, input_dep) = read_page(input_path, page.kind)?;
+	let sidecar = sidecar_path(input_path);
+	let (side, sidecar_dep) = read_sidecar(&sidecar)?;
+	let mut meta = kd_site::meta::merge(&[&in_file, &side]);
+	if let Some(o) = overrides.and_then(|o| o.by_url.get(&page.file.url)) {
+		meta = kd_site::meta::merge(&[&meta, &o.meta]);
+	}
+	Ok(Reloaded {
+		meta,
+		body,
+		deps: BTreeMap::from([(input_path.clone(), input_dep), (sidecar, sidecar_dep)]),
 	})
 }
 
@@ -1482,6 +1529,105 @@ mod tests {
 		// Without esbuild the same page is built, with its code as it was.
 		let plain = run("2", None);
 		assert!(plain.contains("window.a  =  1;"), "{plain}");
+	}
+
+	fn style_site(name: &str) -> (Site, Loaded) {
+		let site = Site::new(name);
+		site.write("src/index.html", "<p>x</p>");
+		site.write("src/css/base.css", "a { color : white }\n");
+		site.write(
+			"src/css/main.css",
+			"@import 'base.css';\nb { margin : 0px 0px }\n",
+		);
+		let loaded = site.config(r#", "styles": { "banner": "rev. {{year}}" }"#);
+		(site, loaded)
+	}
+
+	#[test]
+	fn stylesheets_are_bundled_minified_and_written_by_the_core() {
+		let (site, loaded) = style_site("styles-build");
+		let report = build(&loaded, &BuildOptions::default()).unwrap();
+
+		let outputs: Vec<(&str, &str)> = report
+			.assets
+			.iter()
+			.map(|a| (a.kind.as_str(), a.status.as_str()))
+			.collect();
+		assert_eq!(outputs, [("style", "built"), ("style", "built")]);
+		let main = site.read("out/css/main.css");
+		assert!(main.starts_with("/*!\nrev. 20"), "{main}");
+		assert!(main.ends_with("*/a{color:#fff}b{margin:0}"), "{main}");
+		assert_eq!(
+			site.read("out/css/base.css").rsplit("*/").next().unwrap(),
+			"a{color:#fff}"
+		);
+	}
+
+	#[test]
+	fn a_stylesheet_is_rebuilt_when_an_import_or_the_config_changes() {
+		let (site, loaded) = style_site("styles-incremental");
+		let run = |loaded: &Loaded| {
+			let prepared = prepare_incremental(loaded);
+			let report = prepared.finish(Vec::new(), Vec::new()).unwrap();
+			report
+				.assets
+				.iter()
+				.map(|a| {
+					(
+						a.input_path.rsplit('/').next().unwrap().to_owned(),
+						a.status,
+					)
+				})
+				.collect::<Vec<_>>()
+		};
+		let built = |name: &str| (name.to_owned(), Status::Built);
+		let cached = |name: &str| (name.to_owned(), Status::Cached);
+		assert_eq!(run(&loaded), [built("base.css"), built("main.css")]);
+		assert_eq!(run(&loaded), [cached("base.css"), cached("main.css")]);
+
+		// A file that main.css imports: both it and main.css are rebuilt.
+		site.write("src/css/base.css", "a { color : black; margin : 0 }\n");
+		assert_eq!(run(&loaded), [built("base.css"), built("main.css")]);
+		assert!(
+			site.read("out/css/main.css")
+				.contains("a{color:#000;margin:0}")
+		);
+
+		// Another banner is another environment for every stylesheet.
+		let other = site.config(r#", "styles": { "banner": "changed" }"#);
+		assert_eq!(run(&other), [built("base.css"), built("main.css")]);
+	}
+
+	#[test]
+	fn a_stylesheet_may_not_be_written_over_a_page() {
+		let site = Site::new("styles-vs-page");
+		site.write("src/a.html", "<p>a</p>");
+		site.write("src/a.css", "a{}");
+		let loaded = site.config(r#", "pages": { "outputExtension": ".css" }"#);
+		let e = prepare(&loaded, &BuildOptions::default(), "file:///runtime.js").unwrap_err();
+		assert!(e.contains("is also the output of a page"), "{e}");
+	}
+
+	#[test]
+	fn a_requested_stylesheet_sourcemap_is_reported_as_not_generated() {
+		let (_site, loaded) = style_site("styles-sourcemap");
+		let loaded = Loaded {
+			config: kd_config::Config {
+				styles: kd_config::Styles {
+					sourcemap: kd_config::Sourcemap::On,
+					..loaded.config.styles.clone()
+				},
+				..loaded.config.clone()
+			},
+			..loaded
+		};
+		let report = build(&loaded, &BuildOptions::default()).unwrap();
+		assert_eq!(
+			report.warnings,
+			[
+				"styles.sourcemap: source maps of stylesheets are not generated; the stylesheets are written without one"
+			]
+		);
 	}
 
 	fn prepare_incremental_result(loaded: &Loaded) -> Result<Prepared, String> {

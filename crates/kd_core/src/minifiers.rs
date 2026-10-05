@@ -158,8 +158,14 @@ impl Minifiers {
 }
 
 impl Hooks for Minifiers {
-	fn css(&self, text: &str, _kind: CssKind) -> String {
-		text.to_owned()
+	fn css(&self, text: &str, kind: CssKind) -> String {
+		// CSS that cannot be minified is left as it was.
+		match kind {
+			CssKind::Block => kd_css::minify(text),
+			CssKind::Inline => kd_css::minify_declarations(text),
+			CssKind::Media => return kd_css::minify_media_query(text),
+		}
+		.unwrap_or_else(|_| text.to_owned())
 	}
 
 	fn js(&self, text: &str, inline: bool) -> String {
@@ -232,10 +238,26 @@ mod tests {
 	}
 
 	#[test]
-	fn without_a_binary_the_code_is_left_alone() {
+	fn without_a_binary_the_scripts_are_left_alone() {
 		let m = Minifiers::new(None, "t", None);
 		assert_eq!(m.js("a  =  1;", false), "a  =  1;");
-		assert_eq!(m.css("a  { }", CssKind::Block), "a  { }");
+	}
+
+	#[test]
+	fn styles_are_minified_by_kd_css_in_all_three_places() {
+		let m = Minifiers::new(None, "t", None);
+		assert_eq!(
+			m.css("a  { color : white }", CssKind::Block),
+			"a{color:#fff}"
+		);
+		assert_eq!(
+			m.css("color : white ;  margin : 0px", CssKind::Inline),
+			"color:#fff;margin:0"
+		);
+		assert_eq!(
+			m.css("screen  and (min-width : 100px)", CssKind::Media),
+			"screen and (min-width:100px)"
+		);
 	}
 
 	#[test]
