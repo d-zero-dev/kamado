@@ -42,6 +42,10 @@ name = "kd_hash"
 version = "0.0.0"
 
 [[package]]
+name = "kd_html"
+version = "0.0.0"
+
+[[package]]
 name = "kd_jsonc"
 version = "0.0.0"
 
