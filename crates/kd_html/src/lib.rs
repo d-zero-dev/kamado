@@ -6,6 +6,7 @@
 pub mod dom;
 pub mod entities;
 mod entities_table;
+pub mod includes;
 pub mod inject;
 pub mod page;
 pub mod parser;
