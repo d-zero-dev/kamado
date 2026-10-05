@@ -13,6 +13,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 
+pub mod banner;
 mod data;
 mod html;
 mod jsx;
