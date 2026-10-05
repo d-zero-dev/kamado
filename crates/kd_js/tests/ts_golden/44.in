@@ -1,0 +1,1 @@
+let a: { a: number; b?: string; readonly c: boolean; [k: string]: any } = x;

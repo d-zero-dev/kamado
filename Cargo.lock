@@ -54,6 +54,10 @@ name = "kd_image"
 version = "0.0.0"
 
 [[package]]
+name = "kd_js"
+version = "0.0.0"
+
+[[package]]
 name = "kd_jsonc"
 version = "0.0.0"
 

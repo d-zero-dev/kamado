@@ -1,0 +1,1 @@
+const a = { b, c: d, [e]: f, ...g, h() {}, get i() { return 1; }, async *j() {} };

@@ -1,0 +1,1 @@
+class A { private x = 1; protected y?: number; public readonly z: string = ""; static s: number; declare d: number; }

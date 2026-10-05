@@ -1,0 +1,1 @@
+let a: { readonly [K in keyof T as `get${K}`]-?: () => T[K] } = x;

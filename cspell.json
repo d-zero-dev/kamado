@@ -7,6 +7,8 @@
 		// Differential test data: deliberately misspelled tags and names.
 		"crates/kd_html/tests/golden/**",
 		"crates/kd_html/tests/minify_golden/**",
+		"crates/kd_js/tests/ts_golden/**",
+		"scripts/generate-kd-js-golden.mjs",
 		"scripts/generate-minify-golden.mjs",
 		"scripts/html-golden-cases.mjs"
 	],
@@ -30,6 +32,7 @@
 		"alnum",
 		"kdignore",
 		"kdfrag",
+		"punct",
 		"srcx",
 		"avifmif",
 		"cgbi",
@@ -74,6 +77,9 @@
 		"unstub",
 		"vbscript",
 		"vsha",
-		"WHATWG"
+		"WHATWG",
+		"cript",
+		"hrefs",
+		"tyle"
 	]
 }

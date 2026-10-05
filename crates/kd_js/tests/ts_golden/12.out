@@ -1,0 +1,1 @@
+constf=(a)=>String(a);

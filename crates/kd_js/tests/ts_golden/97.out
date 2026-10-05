@@ -1,0 +1,1 @@
+classA{getx(){return1;}setx(v){}}

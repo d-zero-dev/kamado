@@ -1,0 +1,1 @@
+let a: (x: number) => (y: string) => boolean = f;
