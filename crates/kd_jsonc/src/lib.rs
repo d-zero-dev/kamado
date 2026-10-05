@@ -204,6 +204,7 @@ pub fn parse(input: &str) -> Result<Value, Error> {
 	let mut p = Parser {
 		bytes: input.as_bytes(),
 		pos: 0,
+		depth: 0,
 	};
 	p.skip_trivia()?;
 	let value = p.parse_value()?;
@@ -214,9 +215,15 @@ pub fn parse(input: &str) -> Result<Value, Error> {
 	Ok(value)
 }
 
+/// Maximum nesting of arrays and objects. Why: parsing recurses, user-authored
+/// files (sidecars, overrides) are untrusted input, and the build runs inside
+/// Node with `panic = "abort"`, so a stack overflow would kill the process.
+const MAX_DEPTH: usize = 512;
+
 struct Parser<'a> {
 	bytes: &'a [u8],
 	pos: usize,
+	depth: usize,
 }
 
 impl Parser<'_> {
@@ -288,8 +295,21 @@ impl Parser<'_> {
 	fn parse_value(&mut self) -> Result<Value, Error> {
 		match self.peek() {
 			None => Err(self.error("unexpected end of input")),
-			Some(b'{') => self.parse_object(),
-			Some(b'[') => self.parse_array(),
+			Some(b'{' | b'[') if self.depth >= MAX_DEPTH => {
+				Err(self.error(format!("nesting is deeper than {MAX_DEPTH} levels")))
+			}
+			Some(b'{') => {
+				self.depth += 1;
+				let r = self.parse_object();
+				self.depth -= 1;
+				r
+			}
+			Some(b'[') => {
+				self.depth += 1;
+				let r = self.parse_array();
+				self.depth -= 1;
+				r
+			}
 			Some(b'"') => Ok(Value::String(self.parse_string()?)),
 			Some(b't') => self.parse_literal("true", Value::Bool(true)),
 			Some(b'f') => self.parse_literal("false", Value::Bool(false)),
@@ -345,9 +365,12 @@ impl Parser<'_> {
 		}
 		// The slice is ASCII by construction.
 		let text = std::str::from_utf8(&self.bytes[start..self.pos]).expect("ascii");
-		text.parse::<f64>()
-			.map(Value::Number)
-			.map_err(|_| self.error_at(start, "invalid number"))
+		match text.parse::<f64>() {
+			// `1e999` parses to infinity, which JSON cannot represent.
+			Ok(n) if n.is_finite() => Ok(Value::Number(n)),
+			Ok(_) => Err(self.error_at(start, "number is out of range")),
+			Err(_) => Err(self.error_at(start, "invalid number")),
+		}
 	}
 
 	fn skip_digits(&mut self) {
@@ -435,8 +458,11 @@ impl Parser<'_> {
 			.bytes
 			.get(self.pos..self.pos + 4)
 			.ok_or_else(|| self.error("expected 4 hex digits after \\u"))?;
-		let text = std::str::from_utf8(digits)
-			.map_err(|_| self.error("expected 4 hex digits after \\u"))?;
+		// `from_str_radix` alone would accept a leading `+` ("\u+041").
+		if !digits.iter().all(u8::is_ascii_hexdigit) {
+			return Err(self.error("expected 4 hex digits after \\u"));
+		}
+		let text = std::str::from_utf8(digits).expect("ascii hex digits");
 		let code = u32::from_str_radix(text, 16)
 			.map_err(|_| self.error("expected 4 hex digits after \\u"))?;
 		self.pos += 4;
@@ -640,6 +666,45 @@ mod tests {
 	fn column_counts_characters_not_bytes() {
 		let err = parse("{\"日本\": 1 }}").unwrap_err();
 		assert_eq!((err.line, err.column), (1, 11));
+	}
+
+	#[test]
+	fn rejects_numbers_that_overflow_to_infinity() {
+		let e = parse("[1e999]").unwrap_err();
+		assert_eq!(
+			(e.column, e.message.as_str()),
+			(2, "number is out of range")
+		);
+		assert!(parse("-1e999").is_err());
+		assert_eq!(parse("1e308").unwrap().to_json(), "1e308");
+	}
+
+	#[test]
+	fn unicode_escapes_need_exactly_four_hex_digits() {
+		assert!(parse(r#""\u+041""#).is_err());
+		assert!(parse(r#""\u-041""#).is_err());
+		assert!(parse(r#""\u00G1""#).is_err());
+		assert!(parse(r#""\u041""#).is_err());
+		assert_eq!(parse(r#""A""#).unwrap(), s("A"));
+	}
+
+	#[test]
+	fn nesting_depth_is_limited_instead_of_overflowing_the_stack() {
+		let ok = format!("{}1{}", "[".repeat(512), "]".repeat(512));
+		assert!(parse(&ok).is_ok());
+		let deep = format!("{}1{}", "[".repeat(513), "]".repeat(513));
+		assert_eq!(
+			parse(&deep).unwrap_err().message,
+			"nesting is deeper than 512 levels"
+		);
+		let deep_obj = format!("{}1{}", "{\"a\":".repeat(600), "}".repeat(600));
+		assert_eq!(
+			parse(&deep_obj).unwrap_err().message,
+			"nesting is deeper than 512 levels"
+		);
+		// 100k levels must be an error, not a crash.
+		let huge = "[".repeat(100_000);
+		assert!(parse(&huge).is_err());
 	}
 
 	#[test]

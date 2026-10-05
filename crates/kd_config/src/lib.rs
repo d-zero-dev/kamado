@@ -273,10 +273,24 @@ pub fn parse(config_text: &str, root_dir: &str, package_json: Option<&str>) -> R
 	let dir = {
 		let o = root.obj("dir")?;
 		o.allow(&["input", "output"])?;
-		Dir {
+		let dir = Dir {
 			input: resolve(o.str_or("input", ".")?.as_str()),
 			output: resolve(o.str_or("output", ".")?.as_str()),
+		};
+		// Why an error: with the same directory an output file has the path of
+		// its source, so a build would overwrite the author's files (and strip
+		// their front matter). The default for both is the config directory,
+		// so this also catches a config that sets neither.
+		if dir.input == dir.output {
+			return Err(Error {
+				path: "dir.output".to_string(),
+				message: format!(
+					"must differ from dir.input ({}); the build would overwrite its own sources. Set \"dir\": {{ \"input\": ..., \"output\": ... }}",
+					dir.input
+				),
+			});
 		}
+		dir
 	};
 
 	let site = {
@@ -712,10 +726,21 @@ fn globs_from(v: &Value, path: &str) -> R<Vec<String>> {
 		}
 	};
 	for g in &items {
-		kd_glob::Pattern::new(g).map_err(|e| Error {
+		let pattern = kd_glob::Pattern::new(g).map_err(|e| Error {
 			path: path.to_string(),
 			message: format!("invalid glob {g:?}: {e}"),
 		})?;
+		// Why an error: a negated pattern compiles but nothing applies the
+		// negation, so `["**/*.html", "!drafts/**"]` would silently include
+		// drafts. Exclusion has its own option (`ignore` / `exclude`).
+		if pattern.is_negated() {
+			return Err(Error {
+				path: path.to_string(),
+				message: format!(
+					"negated glob {g:?} is not supported; list what to leave out in the matching \"ignore\" / \"exclude\" option"
+				),
+			});
+		}
 	}
 	Ok(items)
 }
@@ -899,12 +924,57 @@ impl<'a> Obj<'a> {
 mod tests {
 	use super::*;
 
+	/// Most tests are about other options, so they get a valid `dir` unless
+	/// they spell their own (the input and output directories must differ).
+	fn with_dir(text: &str) -> String {
+		if text.contains("\"dir\"") {
+			text.to_string()
+		} else {
+			text.replacen('{', r#"{ "dir": { "input": "src", "output": "out" },"#, 1)
+		}
+	}
+
 	fn ok(text: &str) -> Config {
-		parse(text, "/site", None).unwrap()
+		parse(&with_dir(text), "/site", None).unwrap()
 	}
 
 	fn fail(text: &str) -> Error {
-		parse(text, "/site", None).unwrap_err()
+		parse(&with_dir(text), "/site", None).unwrap_err()
+	}
+
+	#[test]
+	fn input_and_output_directories_must_differ() {
+		for text in [
+			"{}",
+			r#"{ "dir": { "input": "src", "output": "src" } }"#,
+			r#"{ "dir": { "input": "a/../src", "output": "src/" } }"#,
+		] {
+			let e = parse(text, "/site", None).unwrap_err();
+			assert_eq!(e.path, "dir.output", "{text}");
+			assert!(
+				e.message.starts_with("must differ from dir.input"),
+				"{text}"
+			);
+		}
+		assert!(parse(r#"{ "dir": { "output": "htdocs" } }"#, "/site", None).is_ok());
+	}
+
+	#[test]
+	fn negated_globs_are_rejected_with_a_hint() {
+		let e = fail(r#"{ "pages": { "files": ["**/*.html", "!drafts/**"] } }"#);
+		assert_eq!(e.path, "pages.files");
+		assert!(
+			e.message
+				.contains("negated glob \"!drafts/**\" is not supported")
+		);
+		assert_eq!(
+			fail(r#"{ "styles": { "ignore": "!keep/**" } }"#).path,
+			"styles.ignore"
+		);
+		assert_eq!(
+			fail(r#"{ "html": { "imageSizes": { "exclude": ["!a"] } } }"#).path,
+			"html.imageSizes.exclude"
+		);
 	}
 
 	#[test]
@@ -914,8 +984,8 @@ mod tests {
 		assert_eq!(
 			c.dir,
 			Dir {
-				input: "/site".into(),
-				output: "/site".into()
+				input: "/site/src".into(),
+				output: "/site/out".into()
 			}
 		);
 		assert_eq!(c.pages.files, ["**/*.{html,tsx}"]);
@@ -974,7 +1044,7 @@ mod tests {
 	fn site_falls_back_to_package_json_production() {
 		let pkg = r#"{ "name": "my-site", "version": "1.2.3", "production": { "host": "example.com", "baseURL": "https://example.com/", "siteName": "Example", "siteNameEn": "Example EN" } }"#;
 		let c = parse(
-			r#"{ "site": { "siteName": "Override" } }"#,
+			&with_dir(r#"{ "site": { "siteName": "Override" } }"#),
 			"/site",
 			Some(pkg),
 		)
@@ -985,7 +1055,7 @@ mod tests {
 		assert_eq!(c.site.site_name_en.as_deref(), Some("Example EN"));
 		assert_eq!(c.site.package_name.as_deref(), Some("my-site"));
 		assert_eq!(c.site.package_version.as_deref(), Some("1.2.3"));
-		let c = parse("{}", "/site", Some(r#"{ "name": "x" }"#)).unwrap();
+		let c = parse(&with_dir("{}"), "/site", Some(r#"{ "name": "x" }"#)).unwrap();
 		assert_eq!(c.site.host, None);
 	}
 
@@ -1077,7 +1147,8 @@ mod tests {
 
 	#[test]
 	fn invalid_jsonc_reports_position() {
-		let e = fail("{ \"a\": }");
+		// Parsed without the test helper's `dir`, so the position is the file's own.
+		let e = parse("{ \"a\": }", "/site", None).unwrap_err();
 		assert_eq!(e.path, "");
 		assert!(e.message.starts_with("invalid JSONC at 1:8"));
 	}

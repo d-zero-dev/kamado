@@ -116,6 +116,32 @@ impl Pattern {
 			.any(|alt| match_segments(alt, &segments))
 	}
 
+	/// True when the pattern ends in `**` and its leading segments match
+	/// `dir` exactly, i.e. everything below `dir` is matched. A walker uses it
+	/// to skip an ignored directory without descending into it.
+	///
+	/// This treats `dir/**` as covering the whole subtree, including entries
+	/// whose names start with `.` (which `matches` alone would not match under
+	/// `dot: false`): "ignore this directory" is how a config reader means it.
+	///
+	/// # Example
+	///
+	/// ```
+	/// let p = kd_glob::Pattern::new("_includes/**").unwrap();
+	/// assert!(p.covers_dir("_includes"));
+	/// assert!(!p.covers_dir("pages"));
+	/// assert!(!kd_glob::Pattern::new("_includes/*.html").unwrap().covers_dir("_includes"));
+	/// ```
+	#[must_use]
+	pub fn covers_dir(&self, dir: &str) -> bool {
+		let dir = dir.strip_prefix("./").unwrap_or(dir);
+		let segments: Vec<&str> = dir.split('/').collect();
+		self.alternatives.iter().any(|alt| match alt.split_last() {
+			Some((Segment::Globstar, lead)) => match_segments(lead, &segments) && !lead.is_empty(),
+			_ => false,
+		})
+	}
+
 	/// The longest leading run of path segments that contain no glob
 	/// characters, joined with `/`. A directory walker can start from here.
 	/// Empty when the first segment is already a glob (or the pattern has
@@ -293,6 +319,15 @@ fn split_alternatives(inner: &[char]) -> Vec<Vec<char>> {
 				i += 2;
 				continue;
 			}
+			// A class is copied verbatim so its `,` `{` `}` are literal, in
+			// agreement with `find_brace_end`.
+			'[' => {
+				if let Some(end) = find_class_end(inner, i) {
+					current.extend(&inner[i..=end]);
+					i = end + 1;
+					continue;
+				}
+			}
 			'{' => depth += 1,
 			'}' => depth = depth.saturating_sub(1),
 			',' if depth == 0 => {
@@ -314,7 +349,10 @@ fn compile_segments(pattern: &str) -> Result<Vec<Segment>, Error> {
 	let mut offset = 0;
 	for raw in pattern.split('/') {
 		if raw == "**" {
-			segments.push(Segment::Globstar);
+			// `**/**` is `**`; keeping one avoids needless work in the matcher.
+			if !matches!(segments.last(), Some(Segment::Globstar)) {
+				segments.push(Segment::Globstar);
+			}
 		} else {
 			segments.push(Segment::Tokens(compile_tokens(raw, offset)?));
 		}
@@ -404,30 +442,42 @@ fn parse_class(inner: &[char]) -> Token {
 	Token::Class { negated, ranges }
 }
 
+/// Dynamic programming over (pattern segment, path segment): `table[i][j]` is
+/// whether `pattern[i..]` matches `path[j..]`. Why not plain recursion: with
+/// several `**` the number of ways to split the path grows exponentially, and
+/// `discover` runs every pattern against every file, so one unlucky config
+/// glob would hang the build. This is O(pattern x path) segment matches.
 fn match_segments(pattern: &[Segment], path: &[&str]) -> bool {
-	match pattern.split_first() {
-		None => path.is_empty(),
-		Some((Segment::Globstar, rest)) => {
-			// A trailing `**` must consume at least one segment (`a/**` does not
-			// match `a`), and none of them may be a dot-segment.
-			if rest.is_empty() {
-				return !path.is_empty() && path.iter().all(|s| !s.starts_with('.'));
+	let n = pattern.len();
+	let m = path.len();
+	let mut table = vec![vec![false; m + 1]; n + 1];
+	table[n][m] = true;
+	for i in (0..n).rev() {
+		match &pattern[i] {
+			Segment::Globstar if i == n - 1 => {
+				// A trailing `**` consumes at least one segment (`a/**` does not
+				// match `a`), and none of them may be a dot-segment.
+				let mut all_plain = true;
+				for j in (0..m).rev() {
+					all_plain = all_plain && !path[j].starts_with('.');
+					table[i][j] = all_plain;
+				}
 			}
-			// Elsewhere: zero segments, or consume segments one at a time as
-			// long as they are not dot-segments.
-			if match_segments(rest, path) {
-				return true;
+			Segment::Globstar => {
+				for j in (0..=m).rev() {
+					// Zero segments, or one more non-dot segment and stay on `**`.
+					table[i][j] =
+						table[i + 1][j] || (j < m && !path[j].starts_with('.') && table[i][j + 1]);
+				}
 			}
-			match path.split_first() {
-				Some((head, tail)) if !head.starts_with('.') => match_segments(pattern, tail),
-				_ => false,
+			Segment::Tokens(tokens) => {
+				for j in 0..m {
+					table[i][j] = table[i + 1][j + 1] && match_tokens(tokens, path[j]);
+				}
 			}
 		}
-		Some((Segment::Tokens(tokens), rest)) => match path.split_first() {
-			Some((head, tail)) => match_tokens(tokens, head) && match_segments(rest, tail),
-			None => false,
-		},
 	}
+	table[0][0]
 }
 
 fn match_tokens(tokens: &[Token], segment: &str) -> bool {
@@ -439,25 +489,52 @@ fn match_tokens(tokens: &[Token], segment: &str) -> bool {
 	match_tokens_at(tokens, &chars)
 }
 
-fn match_tokens_at(tokens: &[Token], chars: &[char]) -> bool {
-	match tokens.split_first() {
-		None => chars.is_empty(),
-		Some((Token::Any, rest)) => {
-			// Greedy with backtracking.
-			(0..=chars.len()).any(|skip| match_tokens_at(rest, &chars[skip..]))
+/// Whether a single-character token accepts `c`. `Any` never reaches here.
+fn single_matches(token: &Token, c: char) -> bool {
+	match token {
+		Token::One => true,
+		Token::Char(x) => *x == c,
+		Token::Class { negated, ranges } => {
+			ranges.iter().any(|&(lo, hi)| lo <= c && c <= hi) != *negated
 		}
-		Some((Token::One, rest)) => !chars.is_empty() && match_tokens_at(rest, &chars[1..]),
-		Some((Token::Char(c), rest)) => {
-			chars.first() == Some(c) && match_tokens_at(rest, &chars[1..])
-		}
-		Some((Token::Class { negated, ranges }, rest)) => match chars.first() {
-			Some(&c) => {
-				let inside = ranges.iter().any(|&(lo, hi)| lo <= c && c <= hi);
-				inside != *negated && match_tokens_at(rest, &chars[1..])
-			}
-			None => false,
-		},
+		Token::Any => false,
 	}
+}
+
+/// Wildcard matching with the "remember the last `*`" technique: on a
+/// mismatch, retry from the last star with one more character swallowed.
+/// O(tokens x chars) worst case; recursion would be exponential in the
+/// number of stars (`*a*a*a*b` against `aaaa...`).
+fn match_tokens_at(tokens: &[Token], chars: &[char]) -> bool {
+	let (mut ti, mut ci) = (0usize, 0usize);
+	let mut star: Option<(usize, usize)> = None;
+	while ci < chars.len() {
+		match tokens.get(ti) {
+			Some(Token::Any) => {
+				star = Some((ti, ci));
+				ti += 1;
+				continue;
+			}
+			Some(token) if single_matches(token, chars[ci]) => {
+				ti += 1;
+				ci += 1;
+				continue;
+			}
+			_ => {}
+		}
+		match star {
+			Some((star_ti, star_ci)) => {
+				ti = star_ti + 1;
+				ci = star_ci + 1;
+				star = Some((star_ti, star_ci + 1));
+			}
+			None => return false,
+		}
+	}
+	while matches!(tokens.get(ti), Some(Token::Any)) {
+		ti += 1;
+	}
+	ti == tokens.len()
 }
 
 #[cfg(test)]
@@ -593,6 +670,72 @@ mod tests {
 			Pattern::new("a/x\\*y/*.css").unwrap().literal_prefix(),
 			"a/x*y"
 		);
+	}
+
+	#[test]
+	fn pathological_patterns_finish_quickly() {
+		// These took minutes with plain backtracking.
+		let stars = format!("{}b", "*a".repeat(10));
+		assert!(!m(&stars, &"a".repeat(40)));
+		let globstars = "**/a/".repeat(8) + "b";
+		assert!(!m(&globstars, &"a/".repeat(40)));
+		assert!(m(
+			&format!("{}b", "*a".repeat(10)),
+			&format!("{}b", "a".repeat(40))
+		));
+		let mut deep = "x/".repeat(200);
+		deep.push('y');
+		assert!(m("**/y", &deep));
+	}
+
+	#[test]
+	fn consecutive_globstars_collapse() {
+		assert!(m("**/**/a.html", "a.html"));
+		assert!(m("**/**/a.html", "x/y/a.html"));
+		assert!(!m("a/**/**", "a"));
+		assert!(m("a/**/**", "a/b"));
+	}
+
+	#[test]
+	fn star_matching_edge_cases() {
+		assert!(m("*", ""));
+		assert!(m("a*", "a"));
+		assert!(m("*a", "ba"));
+		assert!(!m("*a", "ab"));
+		assert!(m("a*b*c", "aXbYc"));
+		assert!(!m("a*b*c", "aXbY"));
+		assert!(m("*.*", "a.b"));
+		assert!(m("[a-c]*[x-z]", "bxxxz"));
+	}
+
+	#[test]
+	fn character_classes_inside_braces_keep_their_commas() {
+		assert!(m("{a,[,]b}", "a"));
+		assert!(m("{a,[,]b}", ",b"));
+		assert!(!m("{a,[,]b}", "b"));
+		assert!(m("x{[{],y}z", "x{z"));
+		assert!(m("x{[{],y}z", "xyz"));
+	}
+
+	#[test]
+	fn covers_dir_for_pruning() {
+		let p = Pattern::new("_includes/**").unwrap();
+		assert!(p.covers_dir("_includes"));
+		assert!(!p.covers_dir("_includes/sub"));
+		assert!(!p.covers_dir("pages"));
+		assert!(
+			Pattern::new("**/node_modules/**")
+				.unwrap()
+				.covers_dir("a/node_modules")
+		);
+		assert!(
+			Pattern::new("**/node_modules/**")
+				.unwrap()
+				.covers_dir("node_modules")
+		);
+		assert!(Pattern::new("{a,b}/**").unwrap().covers_dir("b"));
+		assert!(!Pattern::new("**").unwrap().covers_dir("anything"));
+		assert!(!Pattern::new("a/*.html").unwrap().covers_dir("a"));
 	}
 
 	#[test]

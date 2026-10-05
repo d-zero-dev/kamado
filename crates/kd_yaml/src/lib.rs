@@ -54,6 +54,7 @@ pub fn parse(input: &str) -> Result<Value, Error> {
 		chars: input.chars().collect(),
 		pos: 0,
 		anchors: HashMap::new(),
+		depth: 0,
 	};
 	p.parse_document()
 }
@@ -119,10 +120,16 @@ pub fn split_front_matter(input: &str) -> Result<(Option<Value>, &str), Error> {
 	Ok((Some(value), &after_open[body_start..]))
 }
 
+/// Maximum nesting of collections. Why: parsing recurses, front matter and
+/// data files are user-authored, and the build runs inside Node with
+/// `panic = "abort"`, so a stack overflow would kill the whole process.
+const MAX_DEPTH: usize = 256;
+
 struct Parser {
 	chars: Vec<char>,
 	pos: usize,
 	anchors: HashMap<String, Value>,
+	depth: usize,
 }
 
 type PResult<T> = Result<T, Error>;
@@ -369,6 +376,26 @@ impl Parser {
 	/// Parses a node whose first character is at the cursor, where `indent`
 	/// is the column of that character.
 	fn parse_node_at(&mut self, indent: usize, parent_indent: Option<isize>) -> PResult<Value> {
+		self.enter()?;
+		let result = self.parse_node_at_inner(indent, parent_indent);
+		self.depth -= 1;
+		result
+	}
+
+	/// Counts one level of nesting; errors past [`MAX_DEPTH`].
+	fn enter(&mut self) -> PResult<()> {
+		if self.depth >= MAX_DEPTH {
+			return Err(self.error(format!("nesting is deeper than {MAX_DEPTH} levels")));
+		}
+		self.depth += 1;
+		Ok(())
+	}
+
+	fn parse_node_at_inner(
+		&mut self,
+		indent: usize,
+		parent_indent: Option<isize>,
+	) -> PResult<Value> {
 		match self.peek() {
 			Some('-') if matches!(self.peek_at(1), None | Some(' ' | '\t' | '\n' | '\r')) => {
 				self.parse_block_sequence(indent)
@@ -848,12 +875,6 @@ impl Parser {
 	}
 
 	fn line_is_mapping_key(&self, at: usize) -> bool {
-		let saved = Parser {
-			chars: Vec::new(),
-			pos: 0,
-			anchors: HashMap::new(),
-		};
-		let _ = saved;
 		let mut i = at;
 		while let Some(&c) = self.chars.get(i) {
 			match c {
@@ -1284,6 +1305,13 @@ impl Parser {
 	}
 
 	fn parse_flow_value(&mut self) -> PResult<Value> {
+		self.enter()?;
+		let result = self.parse_flow_value_inner();
+		self.depth -= 1;
+		result
+	}
+
+	fn parse_flow_value_inner(&mut self) -> PResult<Value> {
 		match self.peek() {
 			Some('"') => Ok(Value::String(self.parse_double_quoted()?)),
 			Some('\'') => Ok(Value::String(self.parse_single_quoted()?)),
@@ -1809,6 +1837,26 @@ mod tests {
 			err("%YAML 1.2\n---\na: 1").message,
 			"YAML directives (%...) are not supported"
 		);
+	}
+
+	#[test]
+	fn nesting_depth_is_limited_instead_of_overflowing_the_stack() {
+		// Flow collections.
+		let flow = format!("{}1{}", "[".repeat(100_000), "]".repeat(100_000));
+		assert_eq!(err(&flow).message, "nesting is deeper than 256 levels");
+		// Block collections: 300 nested mappings.
+		let mut block = String::new();
+		for level in 0..300 {
+			block.push_str(&" ".repeat(level));
+			block.push_str("k:\n");
+		}
+		assert_eq!(err(&block).message, "nesting is deeper than 256 levels");
+		// Block sequences: 300 nested "- ".
+		let seq = "- ".repeat(300) + "x";
+		assert_eq!(err(&seq).message, "nesting is deeper than 256 levels");
+		// Moderate nesting still parses.
+		let ok = format!("{}1{}", "[".repeat(100), "]".repeat(100));
+		assert!(parse(&ok).is_ok());
 	}
 
 	#[test]

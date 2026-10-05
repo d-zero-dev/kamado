@@ -4,7 +4,7 @@
 	// NIST SHA-256 test vectors are long lowercase letter strings, not words.
 	// Glob tests use short nonsense paths (abbbc, axxb, acdf, acef) to show
 	// which alternatives expand; they are inputs, not words.
-	"ignoreRegExpList": ["/\\b[a-z]{40,}\\b/", "/\\b(abbbc|axxb|acdf|acef)\\b/"],
+	"ignoreRegExpList": ["/\\b[a-z]{40,}\\b/", "/\\b(abbbc|axxb|acdf|acef|bxxxz)\\b/"],
 	"words": [
 		//
 		"amet",
@@ -24,6 +24,7 @@
 		"libkd",
 		"napi",
 		"nsec",
+		"replacen",
 		"rfind",
 		"rsplit",
 		"RTLD",

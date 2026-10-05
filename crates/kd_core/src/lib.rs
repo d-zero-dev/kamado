@@ -70,9 +70,10 @@ pub struct Page {
 	pub meta: Meta,
 	/// HTML body (front matter removed) for `Html` pages.
 	pub body: Option<String>,
-	/// Path of the sidecar `.json`, whether or not it exists (it is a
-	/// dependency either way).
-	pub sidecar_path: String,
+	/// What the page was built from: the input file and its sidecar `.json`
+	/// (a missing sidecar is recorded too, so creating it later invalidates
+	/// the output). Fingerprinted when the bytes were read, not afterwards.
+	pub deps: BTreeMap<String, kd_build::Dep>,
 	/// Declared in `pages.overrides` without an input file.
 	pub is_virtual: bool,
 	/// `lastmod` from `pages.overrides`.
@@ -100,10 +101,19 @@ fn sidecar_path(input_path: &str) -> String {
 	format!("{}.json", &input_path[..input_path.len() - ext.len()])
 }
 
-/// Reads the in-file metadata and body of a page.
-fn read_page(input_path: &str, kind: PageKind) -> Result<(Meta, Option<String>), String> {
-	let text =
-		fs::read_to_string(input_path).map_err(|e| format!("cannot read {input_path}: {e}"))?;
+fn utf8(path: &str, bytes: Vec<u8>) -> Result<String, String> {
+	String::from_utf8(bytes).map_err(|_| format!("{path}: file is not valid UTF-8"))
+}
+
+/// Reads the in-file metadata and body of a page, with the fingerprint of
+/// the bytes that were read.
+fn read_page(
+	input_path: &str,
+	kind: PageKind,
+) -> Result<(Meta, Option<String>, kd_build::Dep), String> {
+	let (bytes, dep) = kd_build::read_with_fingerprint(input_path)
+		.map_err(|e| format!("cannot read {input_path}: {e}"))?;
+	let text = utf8(input_path, bytes)?;
 	match kind {
 		PageKind::Html => {
 			let (meta, body) =
@@ -112,20 +122,25 @@ fn read_page(input_path: &str, kind: PageKind) -> Result<(Meta, Option<String>),
 				Some(v) => kd_site::meta::as_meta(&v, input_path)?,
 				None => Vec::new(),
 			};
-			Ok((meta, Some(body.to_string())))
+			Ok((meta, Some(body.to_string()), dep))
 		}
-		PageKind::Tsx => Ok((Vec::new(), None)),
+		PageKind::Tsx => Ok((Vec::new(), None, dep)),
 	}
 }
 
-fn read_sidecar(path: &str) -> Result<Meta, String> {
-	match fs::read_to_string(path) {
-		Ok(text) => {
+/// Reads a sidecar `.json`. A missing one is empty metadata and a "missing"
+/// dependency.
+fn read_sidecar(path: &str) -> Result<(Meta, kd_build::Dep), String> {
+	match kd_build::read_with_fingerprint(path) {
+		Ok((bytes, dep)) => {
+			let text = utf8(path, bytes)?;
 			let value = kd_jsonc::parse(&text)
 				.map_err(|e| format!("{path}:{}:{}: {}", e.line, e.column, e.message))?;
-			kd_site::meta::as_meta(&value, path)
+			Ok((kd_site::meta::as_meta(&value, path)?, dep))
 		}
-		Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+		Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+			Ok((Vec::new(), kd_build::Dep::missing()))
+		}
 		Err(e) => Err(format!("cannot read {path}: {e}")),
 	}
 }
@@ -133,7 +148,15 @@ fn read_sidecar(path: &str) -> Result<Meta, String> {
 fn compile_globs(globs: &[String]) -> Result<Vec<kd_glob::Pattern>, String> {
 	globs
 		.iter()
-		.map(|g| kd_glob::Pattern::new(g).map_err(|e| format!("invalid glob {g:?}: {e}")))
+		.map(|g| {
+			let pattern =
+				kd_glob::Pattern::new(g).map_err(|e| format!("invalid glob {g:?}: {e}"))?;
+			// Config globs are rejected at load time; this covers CLI targets.
+			if pattern.is_negated() {
+				return Err(format!("negated glob {g:?} is not supported"));
+			}
+			Ok(pattern)
+		})
 		.collect()
 }
 
@@ -150,15 +173,28 @@ pub fn plan(config: &Config) -> Result<Plan, String> {
 	let found = kd_site::discover(&config.dir.input, &files, &ignore)
 		.map_err(|e| format!("cannot read input directory {}: {e}", config.dir.input))?;
 
+	// An output directory inside the input directory (`input: "."`,
+	// `output: "htdocs"`) is not a source: without this the next build would
+	// discover its own output as pages and write it to `htdocs/htdocs/...`.
+	let output_rel = kd_site::path::relative(&config.dir.input, &config.dir.output);
+	let output_inside_input = !output_rel.is_empty() && !output_rel.starts_with("..");
+
 	let mut candidates = Vec::with_capacity(found.len());
-	let mut pages_by_output: BTreeMap<String, Page> = BTreeMap::new();
+	// Keyed by input path: several inputs may claim one output path, and the
+	// conflict policy decides which input survives.
+	let mut pages_by_input: BTreeMap<String, Page> = BTreeMap::new();
 	for rel in found {
+		if output_inside_input && (rel == output_rel || rel.starts_with(&format!("{output_rel}/")))
+		{
+			continue;
+		}
 		let input_path = format!("{}/{rel}", config.dir.input.trim_end_matches('/'));
 		let mut file = kd_site::page_file(&input_path, &dirs);
 		let kind = page_kind(&file.extension)?;
-		let (in_file, body) = read_page(&input_path, kind)?;
+		let (in_file, body, input_dep) = read_page(&input_path, kind)?;
 		let sidecar = sidecar_path(&input_path);
-		let side = read_sidecar(&sidecar)?;
+		let (side, sidecar_dep) = read_sidecar(&sidecar)?;
+		let deps = BTreeMap::from([(input_path.clone(), input_dep), (sidecar, sidecar_dep)]);
 		let meta = kd_site::meta::merge(&[&in_file, &side]);
 		let mut from_override = false;
 		if let Some(field) = &config.pages.output_path_field
@@ -169,14 +205,14 @@ pub fn plan(config: &Config) -> Result<Plan, String> {
 				.map_err(|e| format!("{input_path}: invalid {field:?}: {e}"))?;
 			from_override = true;
 		}
-		pages_by_output.insert(
-			file.output_path.clone(),
+		pages_by_input.insert(
+			file.input_path.clone(),
 			Page {
 				file: file.clone(),
 				kind,
 				meta,
 				body,
-				sidecar_path: sidecar,
+				deps,
 				is_virtual: false,
 				lastmod: None,
 			},
@@ -191,8 +227,23 @@ pub fn plan(config: &Config) -> Result<Plan, String> {
 	let mut pages: Vec<Page> = resolved
 		.files
 		.iter()
-		.filter_map(|f| pages_by_output.remove(&f.output_path))
+		.filter_map(|f| pages_by_input.remove(&f.input_path))
 		.collect();
+
+	// A page whose output path is the path of any source file would be built
+	// over that source. The config check covers equal directories; this covers
+	// per-page overrides (`path: "/other-page.html"` onto a real input).
+	let inputs: std::collections::HashSet<&str> =
+		pages.iter().map(|p| p.file.input_path.as_str()).collect();
+	if let Some(page) = pages
+		.iter()
+		.find(|p| inputs.contains(p.file.output_path.as_str()))
+	{
+		return Err(format!(
+			"{}: its output path {} is also a source file; the build would overwrite it",
+			page.file.input_path, page.file.output_path
+		));
+	}
 
 	if let Some(path) = &config.pages.overrides {
 		let text = fs::read_to_string(path)
@@ -216,7 +267,7 @@ pub fn plan(config: &Config) -> Result<Plan, String> {
 						kind: PageKind::Html,
 						meta: o.meta.clone(),
 						body: None,
-						sidecar_path: String::new(),
+						deps: BTreeMap::new(),
 						is_virtual: true,
 						lastmod: o.lastmod.clone(),
 					});
@@ -408,20 +459,14 @@ fn build_one(shared: &Shared, i: usize) -> Outcome {
 	}
 	let bytes = produce(page)?;
 	let status = write_output(&page.file.output_path, &bytes, shared.skip_unchanged)?;
-	let mut deps = BTreeMap::new();
-	deps.insert(
-		page.file.input_path.clone(),
-		shared.fingerprinter.fingerprint(&page.file.input_path),
-	);
-	deps.insert(
-		page.sidecar_path.clone(),
-		shared.fingerprinter.fingerprint(&page.sidecar_path),
-	);
+	// The fingerprints were taken when the bytes were read, so an edit made
+	// after that is detected by the next build instead of being recorded as if
+	// the output had been built from it.
 	let entry = kd_build::Entry {
 		input_path: page.file.input_path.clone(),
 		env: shared.env.clone(),
 		output_size: bytes.len() as u64,
-		deps,
+		deps: page.deps.clone(),
 	};
 	Ok((result(status), Some(entry)))
 }
@@ -453,10 +498,18 @@ pub fn build(loaded: &Loaded, options: &BuildOptions) -> Result<Report, String> 
 	);
 	let manifest_path = kd_build::manifest_path(&cache_dir);
 	let incremental = options.incremental || config.build.incremental;
-	let previous = if incremental && !options.force {
+	// The on-disk manifest is read whenever the build is incremental, even with
+	// `force`: a forced partial build must still carry over the entries of the
+	// pages it did not touch. `force` only stops them from being *used* to skip.
+	let on_disk = if incremental {
 		kd_build::Manifest::load(&manifest_path).unwrap_or_default()
 	} else {
 		kd_build::Manifest::default()
+	};
+	let previous = if options.force {
+		kd_build::Manifest::default()
+	} else {
+		on_disk.clone()
 	};
 
 	let jobs = options.jobs.unwrap_or(match config.build.jobs {
@@ -509,7 +562,7 @@ pub fn build(loaded: &Loaded, options: &BuildOptions) -> Result<Report, String> 
 	let mut next = if shared.targets.is_empty() {
 		kd_build::Manifest::default()
 	} else {
-		shared.previous.clone()
+		on_disk
 	};
 	for outcome in results.into_iter().flatten() {
 		let (result, entry) = outcome?;
@@ -652,10 +705,16 @@ mod tests {
 			r#"{"title":"About (override)","layout":"sub"}"#
 		);
 		assert_eq!(about.lastmod.as_deref(), Some("2026-01-02"));
+		// Both the page and its (existing) sidecar are dependencies.
+		let dep_paths: Vec<&str> = about.deps.keys().map(String::as_str).collect();
 		assert_eq!(
-			about.sidecar_path,
-			format!("{}/src/about/index.json", site.root)
+			dep_paths,
+			[
+				format!("{}/src/about/index.html", site.root),
+				format!("{}/src/about/index.json", site.root)
+			]
 		);
+		assert!(about.deps.values().all(|d| d.hash.len() == 64));
 
 		let service = plan
 			.pages
@@ -686,6 +745,13 @@ mod tests {
 		let plan = plan(&loaded.config).unwrap();
 		let outputs: Vec<&str> = plan.pages.iter().map(|p| p.file.url.as_str()).collect();
 		assert_eq!(outputs, ["/legacy/a.html", "/x/"]);
+		// Both inputs override to the same path: the first one seen wins and its
+		// body (not the loser's) is what gets built.
+		assert_eq!(
+			plan.pages[0].file.input_path,
+			format!("{}/src/100.html", site.root)
+		);
+		assert_eq!(plan.pages[0].body.as_deref(), Some("<p>a</p>"));
 		assert_eq!(plan.warnings.len(), 1);
 		assert!(plan.warnings[0].starts_with("Output path collision"));
 
@@ -819,6 +885,130 @@ mod tests {
 			statuses(&fifth),
 			[("/a.html", "built"), ("/b.html", "built")]
 		);
+	}
+
+	#[test]
+	fn an_output_directory_inside_the_input_directory_is_not_a_source() {
+		let site = Site::new("nested_out");
+		site.write("a.html", "<p>a</p>");
+		site.write("sub/b.html", "<p>b</p>");
+		let loaded = site.config_raw(
+			r#"{ "dir": { "input": ".", "output": "htdocs" }, "build": { "cacheDir": ".cache" } }"#,
+		);
+		let opts = BuildOptions {
+			jobs: Some(1),
+			..Default::default()
+		};
+		assert_eq!(
+			statuses(&build(&loaded, &opts).unwrap()),
+			[("/a.html", "built"), ("/sub/b.html", "built")]
+		);
+		// The second build must not treat htdocs/*.html as pages.
+		assert_eq!(
+			statuses(&build(&loaded, &opts).unwrap()),
+			[("/a.html", "built"), ("/sub/b.html", "built")]
+		);
+		assert!(!std::path::Path::new(&format!("{}/htdocs/htdocs", site.root)).exists());
+		assert_eq!(site.read("htdocs/a.html"), "<p>a</p>");
+	}
+
+	#[test]
+	fn an_override_that_points_at_a_source_file_is_refused() {
+		let site = Site::new("clobber");
+		site.write("src/a.html", "---\npath: \"/src/b.html\"\n---\n<p>a</p>");
+		site.write("src/b.html", "<p>b</p>");
+		// Output dir `.` makes `/src/b.html` the real source file of page b.
+		let loaded = site.config_raw(
+			r#"{ "dir": { "input": "src", "output": "out" }, "pages": { "outputPathField": "path" } }"#,
+		);
+		// Inside the normal layout the override resolves under out/, so it is fine...
+		assert!(plan(&loaded.config).is_ok());
+		// ...but when the output directory is the parent of the sources it is not.
+		let loaded = site.config_raw(
+			r#"{ "dir": { "input": "src", "output": "." }, "pages": { "outputPathField": "path" } }"#,
+		);
+		let err = plan(&loaded.config).unwrap_err();
+		assert!(
+			err.contains("is also a source file; the build would overwrite it"),
+			"{err}"
+		);
+	}
+
+	#[test]
+	fn a_source_edited_after_it_was_read_is_rebuilt_not_recorded_as_current() {
+		let site = Site::new("race");
+		let a = site.write("src/a.html", "<p>old</p>");
+		let loaded = site.config("");
+		let planned = plan(&loaded.config).unwrap();
+		// The edit lands after planning (the read) and before the page is built.
+		std::thread::sleep(std::time::Duration::from_millis(20));
+		fs::write(&a, "<p>new!</p>").unwrap();
+
+		let page = &planned.pages[0];
+		let current = kd_build::Fingerprinter::new().fingerprint(&a);
+		assert_ne!(
+			page.deps[&a].hash, current.hash,
+			"plan fingerprinted the old bytes"
+		);
+		assert_eq!(page.body.as_deref(), Some("<p>old</p>"));
+
+		// A real build after the edit sees the new bytes; the recorded entry
+		// describes what was actually read.
+		let opts = BuildOptions {
+			incremental: true,
+			jobs: Some(1),
+			..Default::default()
+		};
+		build(&loaded, &opts).unwrap();
+		assert_eq!(site.read("out/a.html"), "<p>new!</p>");
+		assert_eq!(
+			statuses(&build(&loaded, &opts).unwrap()),
+			[("/a.html", "cached")]
+		);
+	}
+
+	#[test]
+	fn forced_partial_builds_keep_the_manifest_entries_of_untouched_pages() {
+		let site = Site::new("force_targets");
+		site.write("src/a.html", "<p>a</p>");
+		site.write("src/sub/b.html", "<p>b</p>");
+		let loaded = site.config("");
+		let all = BuildOptions {
+			incremental: true,
+			jobs: Some(1),
+			..Default::default()
+		};
+		build(&loaded, &all).unwrap();
+		let forced_sub = BuildOptions {
+			force: true,
+			targets: vec!["sub/**".to_string()],
+			..all.clone()
+		};
+		assert_eq!(
+			statuses(&build(&loaded, &forced_sub).unwrap()),
+			[("/a.html", "skipped"), ("/sub/b.html", "built")]
+		);
+		// `a` was not touched, so a later normal build still finds it cached.
+		assert_eq!(
+			statuses(&build(&loaded, &all).unwrap()),
+			[("/a.html", "cached"), ("/sub/b.html", "cached")]
+		);
+	}
+
+	#[test]
+	fn negated_cli_targets_are_refused() {
+		let site = Site::new("neg_targets");
+		site.write("src/a.html", "<p>a</p>");
+		let loaded = site.config("");
+		let err = build(
+			&loaded,
+			&BuildOptions {
+				targets: vec!["!a.html".to_string()],
+				..Default::default()
+			},
+		)
+		.unwrap_err();
+		assert_eq!(err, "negated glob \"!a.html\" is not supported");
 	}
 
 	#[test]

@@ -47,8 +47,41 @@ pub struct Dep {
 	pub hash: String,
 }
 
+/// Reads a file and fingerprints exactly the bytes returned.
+///
+/// The stat is taken **before** the read. Why: if the file is edited between
+/// the two, the recorded mtime is older than the file's real mtime, so the
+/// next build sees a stat mismatch, re-hashes, finds different content and
+/// rebuilds. Fingerprinting after the output was written (as a separate
+/// step) would instead record the new mtime for output built from old bytes,
+/// and every later build would report "cached" forever.
+///
+/// # Example
+///
+/// ```no_run
+/// let (bytes, dep) = kd_build::read_with_fingerprint("/site/src/index.html").unwrap();
+/// assert_eq!(dep.size, bytes.len() as u64);
+/// ```
+pub fn read_with_fingerprint(path: &str) -> io::Result<(Vec<u8>, Dep)> {
+	let (size, sec, nsec) = stat(path)
+		.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("cannot stat {path}")))?;
+	let bytes = fs::read(path)?;
+	let hash = kd_hash::to_hex(&kd_hash::sha256(&bytes));
+	Ok((
+		bytes,
+		Dep {
+			size,
+			mtime_sec: sec,
+			mtime_nsec: nsec,
+			hash,
+		},
+	))
+}
+
 impl Dep {
-	fn missing() -> Dep {
+	/// The fingerprint of a dependency that does not exist.
+	#[must_use]
+	pub fn missing() -> Dep {
 		Dep {
 			size: 0,
 			mtime_sec: 0,
@@ -496,6 +529,23 @@ mod tests {
 		assert_eq!(Manifest::load(&p), None);
 		let p = write(&root, "empty.json", br#"{"version":2,"entries":{}}"#);
 		assert_eq!(Manifest::load(&p), Some(Manifest::default()));
+		let _ = fs::remove_dir_all(&root);
+	}
+
+	#[test]
+	fn read_with_fingerprint_describes_the_bytes_it_returned() {
+		let root = temp_root("rwf");
+		let a = write(&root, "a.txt", b"alpha");
+		let (bytes, dep) = read_with_fingerprint(&a).unwrap();
+		assert_eq!(bytes, b"alpha");
+		assert_eq!(dep.size, 5);
+		assert_eq!(
+			dep.hash,
+			"8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"
+		);
+		let err = read_with_fingerprint(&format!("{root}/nowhere")).unwrap_err();
+		assert_eq!(err.kind(), io::ErrorKind::NotFound);
+		assert!(Dep::missing().is_missing());
 		let _ = fs::remove_dir_all(&root);
 	}
 

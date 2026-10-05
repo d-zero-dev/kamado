@@ -395,6 +395,7 @@ pub fn resolve_conflicts(
 /// Lists the files under `input_dir` that match any of `files` and none of
 /// `ignore`. Paths are returned relative to `input_dir`, `/` separated and
 /// sorted. Symlinked directories are followed once (cycles are skipped).
+/// Directories matched by an `ignore` pattern ending in `**` are not entered.
 ///
 /// # Example
 ///
@@ -427,7 +428,15 @@ fn walk(
 	out: &mut Vec<String>,
 	visited: &mut HashSet<std::path::PathBuf>,
 ) -> std::io::Result<()> {
-	for entry in fs::read_dir(dir)? {
+	let entries = match fs::read_dir(dir) {
+		Ok(entries) => entries,
+		// An unreadable directory the config ignores must not abort the build.
+		Err(_) if !rel_prefix.is_empty() && ignore.iter().any(|p| p.covers_dir(rel_prefix)) => {
+			return Ok(());
+		}
+		Err(e) => return Err(e),
+	};
+	for entry in entries {
 		let entry = entry?;
 		let name = entry.file_name();
 		let Some(name) = name.to_str() else {
@@ -445,6 +454,11 @@ fn walk(
 			Err(_) => continue, // dangling symlink
 		};
 		if meta.is_dir() {
+			// Prune: an ignored directory (`_includes/**`, `**/node_modules/**`)
+			// is never entered, so a large ignored tree costs nothing.
+			if ignore.iter().any(|p| p.covers_dir(&rel)) {
+				continue;
+			}
 			if let Ok(canon) = fs::canonicalize(entry.path())
 				&& !visited.insert(canon)
 			{
@@ -774,6 +788,37 @@ mod tests {
 		let ignore = [kd_glob::Pattern::new("_includes/**").unwrap()];
 		let found = discover(tmp.to_str().unwrap(), &files, &ignore).unwrap();
 		assert_eq!(found, ["a/index.tsx", "b/page.html", "c/deep/er/leaf.html"]);
+		let _ = fs::remove_dir_all(&tmp);
+	}
+
+	#[test]
+	fn discover_does_not_enter_ignored_directories() {
+		use std::os::unix::fs::PermissionsExt;
+		let tmp = std::env::temp_dir().join(format!("kd_site_prune_{}", std::process::id()));
+		let _ = fs::remove_dir_all(&tmp);
+		fs::create_dir_all(tmp.join("keep")).unwrap();
+		fs::write(tmp.join("keep/a.html"), b"").unwrap();
+		fs::create_dir_all(tmp.join("node_modules/pkg")).unwrap();
+		fs::write(tmp.join("node_modules/pkg/x.html"), b"").unwrap();
+		// An ignored directory that cannot be read must not abort discovery.
+		fs::create_dir_all(tmp.join("sealed")).unwrap();
+		fs::write(tmp.join("sealed/s.html"), b"").unwrap();
+		fs::set_permissions(tmp.join("sealed"), fs::Permissions::from_mode(0o000)).unwrap();
+
+		let files = [kd_glob::Pattern::new("**/*.html").unwrap()];
+		let ignore = [
+			kd_glob::Pattern::new("**/node_modules/**").unwrap(),
+			kd_glob::Pattern::new("sealed/**").unwrap(),
+		];
+		let found = discover(tmp.to_str().unwrap(), &files, &ignore);
+		fs::set_permissions(tmp.join("sealed"), fs::Permissions::from_mode(0o755)).unwrap();
+		assert_eq!(found.unwrap(), ["keep/a.html"]);
+
+		// The same unreadable directory without an ignore pattern is an error.
+		fs::set_permissions(tmp.join("sealed"), fs::Permissions::from_mode(0o000)).unwrap();
+		let strict = discover(tmp.to_str().unwrap(), &files, &[]);
+		fs::set_permissions(tmp.join("sealed"), fs::Permissions::from_mode(0o755)).unwrap();
+		assert!(strict.is_err());
 		let _ = fs::remove_dir_all(&tmp);
 	}
 }
