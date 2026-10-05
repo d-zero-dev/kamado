@@ -15,6 +15,23 @@ node scripts/check-rust-no-external-crates.mjs
 
 ツールチェーンの版は `.github/workflows/rust.yml` で固定している。`rust-toolchain.toml` は置かない。置くと、ローカルの `stable` とは別のツールチェーンが再インストールされ、環境によっては中途半端な状態で失敗する。
 
+## クレートの構成
+
+| クレート    | 担当                                                                               | 依存するクレート               |
+| ----------- | ---------------------------------------------------------------------------------- | ------------------------------ |
+| `kd_hash`   | SHA-256                                                                            | なし                           |
+| `kd_jsonc`  | JSONC のパーサと決定的な JSON 出力（`Value` 型）                                   | なし                           |
+| `kd_glob`   | glob のマッチと、探索を枝刈りするための判定                                        | なし                           |
+| `kd_yaml`   | YAML のサブセットと front matter の分割                                            | `kd_jsonc`                     |
+| `kd_pool`   | スレッドプール                                                                     | なし                           |
+| `kd_site`   | 出力パス・URL の写像、`outputPathField`、衝突、探索、メタデータのマージ、overrides | `kd_glob` `kd_jsonc`           |
+| `kd_build`  | 差分ビルドの manifest（stat 先行の指紋）                                           | `kd_hash` `kd_jsonc`           |
+| `kd_config` | `kamado.config.jsonc` の型・既定値・検証                                           | `kd_glob` `kd_jsonc` `kd_site` |
+| `kd_core`   | ビルドの組み立て（設定 → 探索 → メタ → 差分判定 → 書き出し）                       | 上のすべて                     |
+| `kd_napi`   | Node-API の接続層。`unsafe` はここだけ                                             | `kd_core` `kd_hash` `kd_jsonc` |
+
+依存の向きは上から下の一方向で、`kd_napi` が一番上位にある。パース系のクレート（`kd_jsonc` `kd_glob` `kd_yaml`）は、ユーザーが書くファイルを読むので、入れ子の深さや計算量を制限している。
+
 ## N-API アドオン（`crates/kd_napi`）
 
 ```sh

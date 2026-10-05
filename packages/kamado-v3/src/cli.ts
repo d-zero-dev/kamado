@@ -74,7 +74,7 @@ function main(argv: readonly string[]): number {
 			return 0;
 		}
 		case 'server': {
-			throw new Error('kamado server is not available in this build yet');
+			throw new Error('the server command is not part of this CLI: it only builds');
 		}
 		default: {
 			console.error(styleText(['bold', 'red'], `unknown command: ${command}`));

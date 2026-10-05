@@ -387,13 +387,15 @@ impl Report {
 	}
 }
 
-/// Produces the bytes for one page. Rendering of `.tsx` pages happens in
-/// the JavaScript layer; until it is wired in, such a page is an error.
+/// Produces the bytes for one page. `.html` pages are their body as is.
+/// `.tsx` pages are components that only a JavaScript renderer can run, and
+/// this crate has none, so such a page is an error rather than being written
+/// out as unrendered source.
 fn produce(page: &Page) -> Result<Vec<u8>, String> {
 	match page.kind {
 		PageKind::Html => Ok(page.body.clone().unwrap_or_default().into_bytes()),
 		PageKind::Tsx => Err(format!(
-			"{}: JSX pages are rendered by the JavaScript layer, which this build does not include",
+			"{}: JSX pages need a JavaScript renderer, which this build does not have",
 			page.file.input_path
 		)),
 	}
@@ -1071,7 +1073,7 @@ mod tests {
 	}
 
 	#[test]
-	fn tsx_pages_are_an_error_until_rendering_is_wired_in() {
+	fn tsx_pages_are_an_error_because_this_crate_has_no_renderer() {
 		let site = Site::new("tsx");
 		site.write("src/page.tsx", "export default () => <p/>;");
 		let loaded = site.config("");
@@ -1083,7 +1085,7 @@ mod tests {
 			},
 		)
 		.unwrap_err();
-		assert!(err.contains("JSX pages are rendered by the JavaScript layer"));
+		assert!(err.contains("JSX pages need a JavaScript renderer"));
 	}
 
 	#[test]
