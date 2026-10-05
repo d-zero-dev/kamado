@@ -17,6 +17,7 @@
 //! is raw like the others (linkedom escaped it).
 
 use crate::dom::{Document, Element, NodeId, NodeKind, ROOT};
+use crate::entities::Entities;
 
 /// Attribute names that print bare when their value is empty.
 fn is_empty_attribute(name: &str) -> bool {
@@ -105,7 +106,7 @@ fn push_escaped_text(text: &str, out: &mut String) {
 
 /// Prints one attribute (with a leading space), or nothing for an empty
 /// `id`, `class` or `style`.
-fn push_attribute(name: &str, value: &str, out: &mut String) {
+fn push_attribute(name: &str, value: &str, ent: &Entities, out: &mut String) {
 	if value.is_empty() {
 		if is_empty_attribute(name) {
 			if matches!(name, "id" | "class" | "style") {
@@ -123,29 +124,44 @@ fn push_attribute(name: &str, value: &str, out: &mut String) {
 	out.push(' ');
 	out.push_str(name);
 	out.push_str("=\"");
+	let mut quoted = String::with_capacity(value.len());
 	for c in value.chars() {
 		if c == '"' {
-			out.push_str("&quot;");
+			quoted.push_str("&quot;");
 		} else {
-			out.push(c);
+			quoted.push(c);
 		}
+	}
+	if ent.is_none() {
+		out.push_str(&quoted);
+	} else {
+		out.push_str(&ent.apply(&quoted));
 	}
 	out.push('"');
 }
 
-fn push_node(doc: &Document, id: NodeId, parent_raw: bool, out: &mut String) {
+fn push_node(doc: &Document, id: NodeId, parent_raw: bool, ent: &Entities, out: &mut String) {
 	match doc.kind(id) {
-		NodeKind::Document => push_children(doc, id, false, out),
+		NodeKind::Document => push_children(doc, id, false, ent, out),
 		NodeKind::Text(t) => {
+			let mut text = String::new();
 			if parent_raw {
-				out.push_str(t);
+				text.push_str(t);
 			} else {
-				push_escaped_text(t, out);
+				push_escaped_text(t, &mut text);
+			}
+			// The content of script, style and xmp is code or plain text where
+			// a character reference would not be decoded, so it is never
+			// rewritten. title and textarea decode references.
+			if ent.is_none() || (parent_raw && !parent_decodes_references(doc, id)) {
+				out.push_str(&text);
+			} else {
+				out.push_str(&ent.apply(&text));
 			}
 		}
 		NodeKind::Comment(c) => {
 			out.push_str("<!--");
-			out.push_str(c);
+			out.push_str(&ent.apply(c));
 			out.push_str("-->");
 		}
 		NodeKind::ProcessingInstruction(raw) => out.push_str(raw),
@@ -167,21 +183,29 @@ fn push_node(doc: &Document, id: NodeId, parent_raw: bool, out: &mut String) {
 			}
 			out.push('>');
 		}
-		NodeKind::Element(e) => push_element(doc, id, e, out),
+		NodeKind::Element(e) => push_element(doc, id, e, ent, out),
 	}
 }
 
-fn push_children(doc: &Document, id: NodeId, parent_raw: bool, out: &mut String) {
+fn push_children(doc: &Document, id: NodeId, parent_raw: bool, ent: &Entities, out: &mut String) {
 	for child in doc.children(id) {
-		push_node(doc, child, parent_raw, out);
+		push_node(doc, child, parent_raw, ent, out);
 	}
 }
 
-fn push_element(doc: &Document, id: NodeId, e: &Element, out: &mut String) {
+/// Whether the parent of the text node `id` decodes character references
+/// (`title`, `textarea`) as opposed to `script`, `style` and `xmp`.
+fn parent_decodes_references(doc: &Document, id: NodeId) -> bool {
+	doc.parent(id)
+		.and_then(|p| doc.element(p))
+		.is_some_and(|p| matches!(p.name.as_str(), "title" | "textarea"))
+}
+
+fn push_element(doc: &Document, id: NodeId, e: &Element, ent: &Entities, out: &mut String) {
 	out.push('<');
 	out.push_str(&e.name);
 	for a in &e.attrs {
-		push_attribute(&a.name, &a.value, out);
+		push_attribute(&a.name, &a.value, ent, out);
 	}
 	if doc.first_child(id).is_none() {
 		if e.svg {
@@ -196,10 +220,17 @@ fn push_element(doc: &Document, id: NodeId, e: &Element, out: &mut String) {
 		return;
 	}
 	out.push('>');
-	push_children(doc, id, is_raw_text_element(&e.name), out);
+	push_children(doc, id, is_raw_text_element(&e.name), ent, out);
 	out.push_str("</");
 	out.push_str(&e.name);
 	out.push('>');
+}
+
+/// How the serializer writes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Options {
+	/// Which characters become character references.
+	pub entities: Entities,
 }
 
 /// The markup of `id` including the node itself.
@@ -213,23 +244,35 @@ fn push_element(doc: &Document, id: NodeId, e: &Element, out: &mut String) {
 /// ```
 #[must_use]
 pub fn outer_html(doc: &Document, id: NodeId) -> String {
+	outer_html_with(doc, id, &Options::default())
+}
+
+/// [`outer_html`] with options.
+#[must_use]
+pub fn outer_html_with(doc: &Document, id: NodeId, options: &Options) -> String {
 	let mut out = String::new();
 	let parent_raw = doc
 		.parent(id)
 		.and_then(|p| doc.element(p))
 		.is_some_and(|p| is_raw_text_element(&p.name));
-	push_node(doc, id, parent_raw, &mut out);
+	push_node(doc, id, parent_raw, &options.entities, &mut out);
 	out
 }
 
 /// The markup of the children of `id`.
 #[must_use]
 pub fn inner_html(doc: &Document, id: NodeId) -> String {
+	inner_html_with(doc, id, &Options::default())
+}
+
+/// [`inner_html`] with options.
+#[must_use]
+pub fn inner_html_with(doc: &Document, id: NodeId, options: &Options) -> String {
 	let mut out = String::new();
 	let raw = doc
 		.element(id)
 		.is_some_and(|e| is_raw_text_element(&e.name));
-	push_children(doc, id, raw, &mut out);
+	push_children(doc, id, raw, &options.entities, &mut out);
 	out
 }
 
@@ -242,6 +285,7 @@ pub fn document_html(doc: &Document) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::entities::Entities;
 	use crate::parser::parse;
 
 	fn rt(src: &str) -> String {
@@ -402,6 +446,50 @@ mod tests {
 		assert_eq!(
 			rt("<p title=\"日本語\">こんにちは &amp; é</p>"),
 			"<p title=\"日本語\">こんにちは &amp; é</p>"
+		);
+	}
+
+	fn with_entities(src: &str, entities: Entities) -> String {
+		let doc = parse(src);
+		inner_html_with(&doc, ROOT, &Options { entities })
+	}
+
+	#[test]
+	fn entities_all_rewrites_text_attributes_and_comments() {
+		assert_eq!(
+			with_entities("<p title=\"é\">© 日本 <!-- — --></p>", Entities::All),
+			"<p title=\"&eacute;\">&copy; 日本 <!-- &mdash; --></p>"
+		);
+	}
+
+	#[test]
+	fn entities_leave_script_style_and_xmp_alone_but_not_title_or_textarea() {
+		let src = "<script>var s = \"©\";</script><style>a::after{content:\"©\"}</style><xmp>©</xmp><title>©</title><textarea>©</textarea>";
+		assert_eq!(
+			with_entities(src, Entities::All),
+			"<script>var s = \"©\";</script><style>a::after{content:\"©\"}</style><xmp>©</xmp><title>&copy;</title><textarea>&copy;</textarea>"
+		);
+	}
+
+	#[test]
+	fn custom_entities_replace_only_the_listed_characters() {
+		let custom = Entities::Custom(vec![('©', "&#169;".to_owned())]);
+		assert_eq!(with_entities("<p>© é</p>", custom), "<p>&#169; é</p>");
+		assert_eq!(
+			with_entities("<p>© é</p>", Entities::Custom(vec![])),
+			"<p>© é</p>"
+		);
+	}
+
+	#[test]
+	fn entities_apply_after_escaping_so_ampersands_stay_valid() {
+		assert_eq!(
+			with_entities("<p>a & é</p>", Entities::All),
+			"<p>a &amp; &eacute;</p>"
+		);
+		assert_eq!(
+			with_entities("<p title='\"é'>x</p>", Entities::All),
+			"<p title=\"&quot;&eacute;\">x</p>"
 		);
 	}
 }

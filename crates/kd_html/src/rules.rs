@@ -504,7 +504,7 @@ fn root_error(action: &str) -> RuleError {
 	))
 }
 
-fn fragment(doc: &mut Document, html: &str) -> Vec<NodeId> {
+pub(crate) fn fragment(doc: &mut Document, html: &str) -> Vec<NodeId> {
 	let parsed = parse(html);
 	let holder = doc.import_subtree(&parsed, ROOT);
 	let children: Vec<NodeId> = doc.children(holder).collect();

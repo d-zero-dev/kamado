@@ -15,7 +15,7 @@
 
 use crate::dom::{Document, NodeId, ROOT};
 use crate::parser::parse;
-use crate::serialize::{document_html, outer_html};
+use crate::serialize::{Options, inner_html_with, outer_html_with};
 
 /// A parsed page.
 pub struct Page {
@@ -131,11 +131,18 @@ impl Page {
 	/// The markup of the page in the shape it came in.
 	#[must_use]
 	pub fn serialize(&self) -> String {
+		self.serialize_with(&Options::default())
+	}
+
+	/// [`Page::serialize`] with serializer options.
+	#[must_use]
+	pub fn serialize_with(&self, options: &Options) -> String {
 		if self.is_fragment {
-			return document_html(&self.doc);
+			return inner_html_with(&self.doc, ROOT, options);
 		}
-		self.root
-			.map_or_else(String::new, |root| outer_html(&self.doc, root))
+		self.root.map_or_else(String::new, |root| {
+			outer_html_with(&self.doc, root, options)
+		})
 	}
 }
 

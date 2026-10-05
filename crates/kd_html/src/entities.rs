@@ -399,3 +399,53 @@ mod tests {
 		);
 	}
 }
+
+/// Which characters the serializer writes as character references
+/// (`html.entities`).
+///
+/// # Example
+///
+/// ```
+/// use kd_html::entities::Entities;
+/// assert_eq!(Entities::All.apply("© é"), "&copy; &eacute;");
+/// let some = Entities::Custom(vec![('©', "&#169;".to_owned())]);
+/// assert_eq!(some.apply("© é"), "&#169; é");
+/// assert_eq!(Entities::None.apply("© é"), "© é");
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Entities {
+	/// Write characters as they are.
+	#[default]
+	None,
+	/// Every character with a named reference, by its preferred name.
+	All,
+	/// Only these characters, each with its own replacement text.
+	Custom(Vec<(char, String)>),
+}
+
+impl Entities {
+	/// Applies the mode to already-escaped text or an attribute value.
+	#[must_use]
+	pub fn apply(&self, text: &str) -> String {
+		match self {
+			Entities::None => text.to_owned(),
+			Entities::All => encode_non_ascii(text),
+			Entities::Custom(map) => {
+				let mut out = String::with_capacity(text.len());
+				for ch in text.chars() {
+					match map.iter().find(|(c, _)| *c == ch) {
+						Some((_, replacement)) => out.push_str(replacement),
+						None => out.push(ch),
+					}
+				}
+				out
+			}
+		}
+	}
+
+	/// Whether the mode changes anything.
+	#[must_use]
+	pub fn is_none(&self) -> bool {
+		matches!(self, Entities::None) || matches!(self, Entities::Custom(m) if m.is_empty())
+	}
+}
