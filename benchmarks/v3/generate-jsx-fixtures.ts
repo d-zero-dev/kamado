@@ -8,7 +8,7 @@
  * instead (a shared layout, shared components, lists, tables, images that
  * need `width`/`height`, inline JSON-LD, a few CSS and script entries).
  *
- * Usage: node benchmarks/v3/generate-jsx-fixtures.ts --pages=1000 [--seed=1] [--out=dir]
+ * Usage: node benchmarks/v3/generate-jsx-fixtures.ts --pages=1000 [--seed=1] [--out=dir] [--target=v2|v3]
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -57,6 +57,12 @@ export type GenerateOptions = {
 	readonly seed: number;
 	/** Output directory (created if missing). */
 	readonly outDir: string;
+	/**
+	 * Which major version the layout is written for. v3 components read
+	 * `props.meta`; v2 spread the metadata into the props and read it from
+	 * sidecar JSON files (written for `v2`), so the same tree can be built by both.
+	 */
+	readonly target?: 'v2' | 'v3';
 };
 
 /**
@@ -65,10 +71,16 @@ export type GenerateOptions = {
  * @param options.pages
  * @param options.seed
  * @param options.outDir
+ * @param options.target
  * @example
  * generateJsxFixtures({ pages: 100, seed: 1, outDir: '/tmp/fx' });
  */
-export function generateJsxFixtures({ pages, seed, outDir }: GenerateOptions): void {
+export function generateJsxFixtures({
+	pages,
+	seed,
+	outDir,
+	target = 'v3',
+}: GenerateOptions): void {
 	if (!Number.isInteger(pages) || pages < 1) {
 		throw new Error(`pages must be a positive integer: ${pages}`);
 	}
@@ -81,6 +93,20 @@ export function generateJsxFixtures({ pages, seed, outDir }: GenerateOptions): v
 		mkdirSync(path.dirname(file), { recursive: true });
 		writeFileSync(file, content);
 	};
+
+	if (target === 'v3') {
+		write(
+			'kamado.config.jsonc',
+			`{
+	"dir": { "input": "input", "output": "output" },
+	"site": { "siteName": "Bench" },
+	"pages": { "files": "pages/**/*.tsx", "layouts": { "dir": "input/_libs/layouts" } },
+	"data": { "dir": "input/_libs/data" },
+	"build": { "cacheDir": ".cache" }
+}
+`,
+		);
+	}
 
 	write('input/img/a.png', png(320, 200));
 	write('input/img/b.png', png(640, 360));
@@ -100,13 +126,13 @@ export function generateJsxFixtures({ pages, seed, outDir }: GenerateOptions): v
 		`import { Header } from '../components/header.tsx';
 import { Footer } from '../components/footer.tsx';
 
-export default function Layout(props: { content: string; title: string; description: string }) {
+export default function Layout(props: { content: string; ${target === 'v2' ? 'title: string; description: string' : 'meta: { title: string; description: string }'} }) {
 	return (
 		<html lang="ja">
 			<head>
 				<meta charSet="utf-8" />
-				<title>{props.title} | Bench</title>
-				<meta name="description" content={props.description} />
+				<title>{props.${target === 'v2' ? '' : 'meta.'}title} | Bench</title>
+				<meta name="description" content={props.${target === 'v2' ? '' : 'meta.'}description} />
 				<link rel="stylesheet" href="/css/style.css" />
 			</head>
 			<body>
@@ -233,14 +259,22 @@ export default function Layout(props: { content: string; title: string; descript
 			body: sentence(40),
 		}));
 		const dir = `section-${i % 100}`;
+		const title = sentence(4);
+		const description = sentence(12);
+		if (target === 'v2') {
+			write(
+				`input/pages/${dir}/page-${id}.json`,
+				JSON.stringify({ title, description, layout: 'default.tsx' }) + '\n',
+			);
+		}
 		write(
 			`input/pages/${dir}/page-${id}.tsx`,
 			`import { Card } from '../../_libs/components/card.tsx';
 import { DataTable } from '../../_libs/components/table.tsx';
 
 export const meta = {
-	title: ${JSON.stringify(sentence(4))},
-	description: ${JSON.stringify(sentence(12))},
+	title: ${JSON.stringify(title)},
+	description: ${JSON.stringify(description)},
 	layout: 'default',
 } as const;
 
@@ -280,6 +314,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 			pages: { type: 'string', default: '1000' },
 			seed: { type: 'string', default: '1' },
 			out: { type: 'string' },
+			target: { type: 'string', default: 'v3' },
 		},
 	});
 	const pages = Number(values.pages);
@@ -287,6 +322,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	const outDir = path.resolve(
 		values.out ?? path.join(import.meta.dirname, '.bench', `fixtures-${pages}`),
 	);
-	generateJsxFixtures({ pages, seed, outDir });
+	generateJsxFixtures({
+		pages,
+		seed,
+		outDir,
+		target: values.target === 'v2' ? 'v2' : 'v3',
+	});
 	console.log(`generated ${pages} pages (seed ${seed}) in ${outDir}`);
 }

@@ -32,7 +32,7 @@ function resolveConfig(configFlag: string | undefined): string {
  * @param argv - Arguments without the node binary and script
  * @returns The process exit code
  */
-function main(argv: readonly string[]): number {
+async function main(argv: readonly string[]): Promise<number> {
 	const { values, positionals } = parseArgs({
 		args: [...argv],
 		allowPositionals: true,
@@ -59,7 +59,7 @@ function main(argv: readonly string[]): number {
 			if (jobs !== undefined && (!Number.isInteger(jobs) || jobs < 1)) {
 				throw new Error(`--jobs must be a positive integer: ${values.jobs}`);
 			}
-			const report = build(configPath, {
+			const report = await build(configPath, {
 				incremental: values.incremental,
 				force: values.force,
 				skipUnchanged: values['skip-unchanged'],
@@ -85,7 +85,7 @@ function main(argv: readonly string[]): number {
 }
 
 try {
-	process.exitCode = main(process.argv.slice(2));
+	process.exitCode = await main(process.argv.slice(2));
 } catch (error) {
 	const message = error instanceof Error ? error.message : String(error);
 	console.error(styleText(['bold', 'red'], message));

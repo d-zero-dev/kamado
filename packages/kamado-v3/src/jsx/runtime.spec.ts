@@ -909,7 +909,7 @@ describe('differential: documents', () => {
 	});
 
 	test('images preload into the head', () => {
-		const img = (props: Props): E => e('img', props);
+		const img = (props: Props, ...children: unknown[]): E => e('img', props, ...children);
 		expectSame(e('div', null, img({ src: '/a.png', alt: 'a' })));
 		expectSame(
 			e(

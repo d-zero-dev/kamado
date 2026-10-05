@@ -18,6 +18,15 @@ export interface Native {
 	sha256Hex(buffer: Buffer): string;
 	/** Runs a build; `optionsJson` is a `BuildOptions` object, the result is a report. */
 	build(configPath: string, optionsJson: string): string;
+	/**
+	 * Plans a build and compiles the JSX modules. The result is JSON:
+	 * `{ handle, jobs, context }` (see `Prepared` in `build.ts`).
+	 */
+	prepare(configPath: string, optionsJson: string, runtimeUrl: string): string;
+	/** Finishes a prepared build with `[[page, html], ...]`; the result is a report. */
+	finish(handle: string, renderedJson: string): string;
+	/** Forgets a prepared build that will not be finished. */
+	abort(handle: string): void;
 }
 
 const LIBRARY_NAME = process.platform === 'darwin' ? 'libkd_napi.dylib' : 'libkd_napi.so';

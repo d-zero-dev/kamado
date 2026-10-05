@@ -2258,7 +2258,10 @@ function assemble(context: RenderContext, root: string): string {
  * // '<html lang="ja"><head><title>T</title></head><body>x</body></html>'
  * ```
  */
-export function render(component: (props: unknown) => unknown, props: Props): string {
+export function render<P extends Props>(
+	component: (props: P) => unknown,
+	props: P,
+): string {
 	const previousContext = rc;
 	const previousScope = scope;
 	const context = new RenderContext();
