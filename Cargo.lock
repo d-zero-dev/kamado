@@ -44,6 +44,13 @@ version = "0.0.0"
 [[package]]
 name = "kd_html"
 version = "0.0.0"
+dependencies = [
+ "kd_image",
+]
+
+[[package]]
+name = "kd_image"
+version = "0.0.0"
 
 [[package]]
 name = "kd_jsonc"
