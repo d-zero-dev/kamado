@@ -256,7 +256,9 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 7. 印字（`doctype`、`format`、`minify`、`entities`、`lineBreak`）。`<style>` と `style` 属性の CSS は Rust の CSS 圧縮、`<script>` は esbuild（子プロセス、内容のハッシュでキャッシュ）
 8. 書き出し
 
-`html.overrides` は、`pages` の glob に一致するページに限り、`html` の任意のオプションを上書きする。たとえば整形と圧縮を切る、`imageSizes` を切る、といった使い方ができる。
+`html.overrides` は、`pages` の glob（出力 URL に対して）に一致するページに限り、`html` の任意のオプションを上書きする。上書きするのは、そのエントリが**書いたオプションだけ**で（`rules` を書けば `rules` 全体が置き換わる）、書かなかったオプションは `html` の値のまま。一致するエントリが複数あれば、書かれた順に適用する。たとえば整形と圧縮を切る、`imageSizes` を切る、といった使い方ができる。エントリの中に `overrides` は書けない。
+
+**ステージの失敗と `html.onError`**: 手順 2〜6（パース・取り込み・ルール・inject・画像）は 1 つの「DOM ステージ」で、`doctype`、`format`、`minify` はそれぞれ別のステージ。v2 の `formatOptions.parseError` と同じく、ステージが失敗したとき `silent`（既定）は何も報告せずそのステージを飛ばして直前の文字列を次のステージに渡し、`warning` は警告を出して同じく飛ばし、`error` はそのページのビルドを失敗にする。DOM ステージの失敗（たとえば取り込みの path traversal）で、ルールや inject も一緒に飛ばされるので、CI では `warning` か `error` にする。警告はそのビルドで組み立てたページ分だけ出る（差分ビルドで `cached` になったページの警告は再掲されない）。
 
 ### 9.1 `html.rules`
 
@@ -284,7 +286,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 | `insert`                   | `position`（`before` `after` `prepend` `append`）, `html`                                              | HTML を挿入                                                                               |
 | `rewriteUrl`               | `to`（`absolute` / `rootRelative`）, `origin`, `attrs`（既定 `href` `src` `srcset` `poster` `action`） | URL を書き換える。危険なスキーム（`javascript:` `data:` `vbscript:` `file:`）は変更しない |
 
-条件は `selector` で表す。属性値による条件（例: 同じホストでない外部リンク）は `:not([href*='{{host}}'])` のように `{{host}}` を使える。
+条件は `selector` で表す。属性値による条件（例: 同じホストでない外部リンク）は `:not([href*='{{host}}'])` のように `{{host}}`（`site.host`）を使える。`site.host` が未設定のまま `{{host}}` を使うと、何にも一致しないルールになってしまうので、設定エラーにする。
 
 ### 9.2 `html.includes`
 
@@ -297,7 +299,8 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 ```
 
 - 取り込んだファイルは、差分ビルドの依存として記録する（存在しないファイルも記録する）。
-- パスの起点（`root`）の外に出るパス（`..` による脱出）はエラー（path traversal の防御）。起点の内側にとどまる `..` は許す。シンボリックリンクは辿らない前提（解決しない）。
+- パスの起点（`root`）の外に出るパス（`..` による脱出）はエラー（path traversal の防御）。起点の内側にとどまる `..` は許す。境界の判定はパスの文字列だけで行い、シンボリックリンクは解決しない（起点の内側にあるリンクは辿って読む。ページの書き手は信頼する前提）。`root` の相対パスは、設定ファイルのあるディレクトリ基準。
+- `ssi` は出力ディレクトリのファイルを読む。取り込み先がこのビルドで作られるページなら、並列ビルドでは作られる前後のどちらを読むかが決まらない（v2 の並行ビルドも同じ）。取り込み先は、出力ディレクトリに先にあるものにする。
 - 取り込み先のファイルの中の include も展開する。入れ子は 16 段まで、循環（自分自身を取り込む）はエラー。
 - 取り込めない（読めない）ファイルの扱いは `html.onError`（`error` は失敗、`warning` は警告して空に、`silent` は空に）に従う。
 - 汎用ルール（`selector`）: `attr` の値が取り込むファイルのパス（`/` 始まりは `root` 基準、それ以外は取り込み元のファイル基準）。`pick` は取り込んだファイルの中から使う部分（セレクタの最初の一致。省略すると全体）。`replace` は `element`（一致した要素を置き換える）か `children`（一致した要素の子を置き換える）。
@@ -317,7 +320,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 }
 ```
 
-`position`: `head-start` / `head-end` / `body-start` / `body-end`。`mode`: `build` / `serve` / `both`。同じ内容を重複して挿入しない（`name` で識別できる）。
+`position`: `head-start` / `head-end` / `body-start` / `body-end`。`mode`: `build` / `serve` / `both`。挿入先にすでに同じマークアップがあれば、重複して挿入しない（内容で判定する。名前での識別はしない）。`<head>` / `<body>` のない断片には挿入しない。
 
 ### 9.4 `entities` と `imageSizes`
 

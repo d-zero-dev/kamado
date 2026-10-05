@@ -511,6 +511,27 @@ pub fn parse(config_text: &str, root_dir: &str, package_json: Option<&str>) -> R
 	})
 }
 
+/// Parses the options of an `html.overrides` entry (what remains once its
+/// `pages` is taken out) as an `html` object, with every option that the entry
+/// leaves out at its default. The caller applies only the options the entry
+/// names.
+///
+/// # Errors
+///
+/// The error of the first invalid option, with its dotted path.
+///
+/// # Example
+///
+/// ```
+/// let options = kd_jsonc::parse(r#"{ "format": false }"#).unwrap();
+/// let html = kd_config::parse_html_options(&options, "html.overrides[0].").unwrap();
+/// assert!(html.format.is_none());
+/// assert!(html.minify.is_some());
+/// ```
+pub fn parse_html_options(options: &Value, path_prefix: &str) -> R<Html> {
+	parse_html(&Obj::new(options, path_prefix)?)
+}
+
 fn parse_html(o: &Obj<'_>) -> R<Html> {
 	o.allow(&[
 		"doctype",

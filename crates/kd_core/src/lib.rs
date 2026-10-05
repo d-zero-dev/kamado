@@ -15,6 +15,8 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+mod html;
+
 use kd_config::Config;
 use kd_jsonc::Value;
 use kd_site::meta::{Meta, Overrides};
@@ -387,13 +389,33 @@ impl Report {
 	}
 }
 
-/// Produces the bytes for one page. `.html` pages are their body as is.
+/// What producing a page yields.
+struct Produced {
+	bytes: Vec<u8>,
+	warnings: Vec<String>,
+	/// Files read while producing it, besides the page's own input.
+	deps: BTreeMap<String, kd_build::Dep>,
+}
+
+/// Produces the bytes for one page. `.html` pages go through the HTML stages.
 /// `.tsx` pages are components that only a JavaScript renderer can run, and
 /// this crate has none, so such a page is an error rather than being written
 /// out as unrendered source.
-fn produce(page: &Page) -> Result<Vec<u8>, String> {
+fn produce(pipeline: &html::Pipeline, page: &Page) -> Result<Produced, String> {
 	match page.kind {
-		PageKind::Html => Ok(page.body.clone().unwrap_or_default().into_bytes()),
+		PageKind::Html => {
+			let out = pipeline.process(&html::PageInput {
+				source: page.body.as_deref().unwrap_or_default(),
+				url: &page.file.url,
+				input_path: &page.file.input_path,
+				phase: kd_html::inject::Phase::Build,
+			})?;
+			Ok(Produced {
+				bytes: out.html.into_bytes(),
+				warnings: out.warnings,
+				deps: out.deps,
+			})
+		}
 		PageKind::Tsx => Err(format!(
 			"{}: JSX pages need a JavaScript renderer, which this build does not have",
 			page.file.input_path
@@ -419,7 +441,8 @@ fn write_output(path: &str, bytes: &[u8], skip_unchanged: bool) -> Result<Status
 	Ok(Status::Built)
 }
 
-type Outcome = Result<(PageResult, Option<kd_build::Entry>), String>;
+/// A page result, its manifest entry and the warnings it raised.
+type Outcome = Result<(PageResult, Option<kd_build::Entry>, Vec<String>), String>;
 
 /// State shared by the pool jobs of one build.
 struct Shared {
@@ -427,6 +450,7 @@ struct Shared {
 	previous: kd_build::Manifest,
 	fingerprinter: kd_build::Fingerprinter,
 	env: String,
+	pipeline: html::Pipeline,
 	targets: Vec<kd_glob::Pattern>,
 	input_dir: String,
 	skip_unchanged: bool,
@@ -443,11 +467,11 @@ fn build_one(shared: &Shared, i: usize) -> Outcome {
 		meta: page.meta.clone(),
 	};
 	if page.is_virtual {
-		return Ok((result(Status::Virtual), None));
+		return Ok((result(Status::Virtual), None, Vec::new()));
 	}
 	let rel = kd_site::path::relative(&shared.input_dir, &page.file.input_path);
 	if !shared.targets.is_empty() && !shared.targets.iter().any(|t| t.matches(&rel)) {
-		return Ok((result(Status::Skipped), None));
+		return Ok((result(Status::Skipped), None, Vec::new()));
 	}
 	if let Some(entry) = shared.previous.entries.get(&page.file.output_path)
 		&& let kd_build::Verdict::UpToDate(refreshed) = kd_build::check(
@@ -457,20 +481,23 @@ fn build_one(shared: &Shared, i: usize) -> Outcome {
 			&shared.env,
 			&shared.fingerprinter,
 		) {
-		return Ok((result(Status::Cached), Some(refreshed)));
+		return Ok((result(Status::Cached), Some(refreshed), Vec::new()));
 	}
-	let bytes = produce(page)?;
+	let produced = produce(&shared.pipeline, page)?;
+	let bytes = produced.bytes;
 	let status = write_output(&page.file.output_path, &bytes, shared.skip_unchanged)?;
 	// The fingerprints were taken when the bytes were read, so an edit made
 	// after that is detected by the next build instead of being recorded as if
 	// the output had been built from it.
+	let mut deps = page.deps.clone();
+	deps.extend(produced.deps);
 	let entry = kd_build::Entry {
 		input_path: page.file.input_path.clone(),
 		env: shared.env.clone(),
 		output_size: bytes.len() as u64,
-		deps: page.deps.clone(),
+		deps,
 	};
-	Ok((result(status), Some(entry)))
+	Ok((result(status), Some(entry), produced.warnings))
 }
 
 /// Runs a build and returns the report. Any page error aborts the build.
@@ -488,8 +515,9 @@ pub fn build(loaded: &Loaded, options: &BuildOptions) -> Result<Report, String> 
 	let plan = plan(config)?;
 	let targets = compile_globs(&options.targets)?;
 	let env = kd_hash::to_hex(&kd_hash::sha256(
-		format!("{VERSION}\0{}\0html-passthrough", loaded.config_hash).as_bytes(),
+		format!("{VERSION}\0{}\0html-pipeline", loaded.config_hash).as_bytes(),
 	));
+	let pipeline = html::Pipeline::compile(config)?;
 
 	let cache_dir = kd_build::cache_dir(
 		&config.root_dir,
@@ -531,6 +559,7 @@ pub fn build(loaded: &Loaded, options: &BuildOptions) -> Result<Report, String> 
 		previous,
 		fingerprinter: kd_build::Fingerprinter::new(),
 		env,
+		pipeline,
 		targets,
 		input_dir: config.dir.input.clone(),
 		skip_unchanged: options.skip_unchanged || config.build.skip_unchanged,
@@ -567,7 +596,8 @@ pub fn build(loaded: &Loaded, options: &BuildOptions) -> Result<Report, String> 
 		on_disk
 	};
 	for outcome in results.into_iter().flatten() {
-		let (result, entry) = outcome?;
+		let (result, entry, warnings) = outcome?;
+		report.warnings.extend(warnings);
 		if let Some(entry) = entry {
 			next.entries.insert(result.output_path.clone(), entry);
 		}
@@ -819,7 +849,7 @@ mod tests {
 			[("/", "built"), ("/news/2026.html", "built")]
 		);
 		assert_eq!(site.read("out/index.html"), "<h1>Home</h1>\n");
-		assert_eq!(site.read("out/news/2026.html"), "<p>news</p>");
+		assert_eq!(site.read("out/news/2026.html"), "<p>news</p>\n");
 		assert!(!std::path::Path::new(&format!("{}/out/_includes/h.html", site.root)).exists());
 		let written = site.read("report.json");
 		assert!(written.contains(r#""status":"built""#));
@@ -856,7 +886,7 @@ mod tests {
 			statuses(&third),
 			[("/a.html", "built"), ("/b.html", "cached")]
 		);
-		assert_eq!(site.read("out/a.html"), "<p>A</p>");
+		assert_eq!(site.read("out/a.html"), "<p>A</p>\n");
 
 		// A sidecar appearing later invalidates the page (it was a missing dependency).
 		site.write("src/b.json", r#"{ "title": "B" }"#);
@@ -911,7 +941,7 @@ mod tests {
 			[("/a.html", "built"), ("/sub/b.html", "built")]
 		);
 		assert!(!std::path::Path::new(&format!("{}/htdocs/htdocs", site.root)).exists());
-		assert_eq!(site.read("htdocs/a.html"), "<p>a</p>");
+		assert_eq!(site.read("htdocs/a.html"), "<p>a</p>\n");
 	}
 
 	#[test]
@@ -962,7 +992,7 @@ mod tests {
 			..Default::default()
 		};
 		build(&loaded, &opts).unwrap();
-		assert_eq!(site.read("out/a.html"), "<p>new!</p>");
+		assert_eq!(site.read("out/a.html"), "<p>new!</p>\n");
 		assert_eq!(
 			statuses(&build(&loaded, &opts).unwrap()),
 			[("/a.html", "cached")]
@@ -1110,5 +1140,386 @@ mod tests {
 			[("/a.html", "built"), ("/v/", "virtual")]
 		);
 		assert!(!std::path::Path::new(&format!("{}/out/v/index.html", site.root)).exists());
+	}
+
+	/// The whole HTML chain against v2 on random broken pages. Needs the
+	/// corpus that `scripts/fuzz-html-chain.mjs` writes (see that script).
+	#[test]
+	#[ignore = "needs KD_CHAIN_DIR, a corpus written by scripts/fuzz-html-chain.mjs"]
+	fn chain_matches_v2() {
+		let dir =
+			std::path::PathBuf::from(std::env::var("KD_CHAIN_DIR").expect("set KD_CHAIN_DIR"));
+		let config = kd_config::parse(
+			r#"{ "dir": { "input": "src", "output": "out" }, "html": { "onError": "error", "imageSizes": false } }"#,
+			"/kd-chain-root",
+			None,
+		)
+		.unwrap();
+		let pipeline = html::Pipeline::compile(&config).unwrap();
+		let mut names: Vec<String> = fs::read_dir(&dir)
+			.unwrap()
+			.map(|e| e.unwrap().file_name().into_string().unwrap())
+			.filter_map(|n| n.strip_suffix(".in").map(str::to_owned))
+			.collect();
+		names.sort_by_key(|n| n.parse::<u64>().unwrap_or(u64::MAX));
+		assert!(!names.is_empty(), "the corpus is empty");
+		let (mut failures, mut shown) = (0, 0);
+		for name in &names {
+			let input = fs::read_to_string(dir.join(format!("{name}.in"))).unwrap();
+			let expected = fs::read_to_string(dir.join(format!("{name}.out"))).unwrap();
+			let actual = match pipeline.process(&html::PageInput {
+				source: &input,
+				url: "/x.html",
+				input_path: "/kd-chain-root/x.html",
+				phase: kd_html::inject::Phase::Build,
+			}) {
+				Ok(out) => out.html,
+				Err(_) => "__ERROR__".to_owned(),
+			};
+			if actual != expected {
+				failures += 1;
+				if shown < 5 {
+					shown += 1;
+					println!(
+						"--- case {name}\n  input:\n{input}\n  expected:\n{expected}\n  actual:\n{actual}"
+					);
+				}
+			}
+		}
+		assert_eq!(
+			failures,
+			0,
+			"{failures} of {} cases differ from v2",
+			names.len()
+		);
+	}
+
+	fn run_build(loaded: &Loaded) -> Result<Report, String> {
+		build(
+			loaded,
+			&BuildOptions {
+				jobs: Some(1),
+				..Default::default()
+			},
+		)
+	}
+
+	const DOCUMENT: &str = "<html><head><title>t</title></head><body><input type=\"text\" disabled=\"disabled\"><p>x</p></body></html>";
+
+	#[test]
+	fn pages_go_through_doctype_format_and_minify_in_v2_order() {
+		let site = Site::new("pipeline");
+		site.write("src/a.html", DOCUMENT);
+		let loaded = site.config("");
+		run_build(&loaded).unwrap();
+		assert_eq!(
+			site.read("out/a.html"),
+			"<!DOCTYPE html>\n<html>\n\t<head>\n\t\t<title>t</title>\n\t</head>\n\t<body>\n\t\t<input disabled>\n\t\t<p>x</p>\n\t</body>\n</html>\n"
+		);
+	}
+
+	#[test]
+	fn line_break_crlf_applies_to_the_whole_page() {
+		let site = Site::new("crlf");
+		site.write("src/a.html", "<p>a</p><p>b</p>");
+		let loaded = site.config(r#", "html": { "lineBreak": "crlf" }"#);
+		run_build(&loaded).unwrap();
+		assert_eq!(site.read("out/a.html"), "<p>a</p>\r\n<p>b</p>\r\n");
+	}
+
+	#[test]
+	fn an_override_replaces_only_the_options_it_names_for_the_pages_it_matches() {
+		let site = Site::new("overrides");
+		site.write("src/a.html", DOCUMENT);
+		site.write("src/legacy/b.html", DOCUMENT);
+		let loaded = site.config(
+			r#", "html": { "overrides": [ { "pages": ["/legacy/**"], "format": false, "minify": false, "doctype": false } ] }"#,
+		);
+		run_build(&loaded).unwrap();
+		assert!(
+			site.read("out/a.html")
+				.starts_with("<!DOCTYPE html>\n<html>\n\t<head>")
+		);
+		assert_eq!(site.read("out/legacy/b.html"), DOCUMENT);
+	}
+
+	#[test]
+	fn rules_inject_and_entities_run_before_the_formatter() {
+		let site = Site::new("rules");
+		site.write(
+			"src/a.html",
+			"<html><head></head><body><a href=\"https://other.test/\">x</a><p class=\"old\">\u{a9}</p></body></html>",
+		);
+		let loaded = site.config(
+			r#", "html": {
+				"entities": "all",
+				"rules": [
+					{ "selector": "a[href^='https://']", "action": "setAttr", "name": "rel", "value": "noopener" },
+					{ "selector": "p", "action": "removeClass", "value": "old", "pages": ["/nope/**"] }
+				],
+				"inject": [ { "position": "head-end", "html": "<meta name=\"robots\" content=\"noindex\">" } ]
+			}"#,
+		);
+		run_build(&loaded).unwrap();
+		assert_eq!(
+			site.read("out/a.html"),
+			"<!DOCTYPE html>\n<html>\n\t<head>\n\t\t<meta name=\"robots\" content=\"noindex\">\n\t</head>\n\t<body>\n\t\t<a href=\"https://other.test/\" rel=\"noopener\">x</a>\n\t\t<p class=\"old\">&copy;</p>\n\t</body>\n</html>\n"
+		);
+	}
+
+	#[test]
+	fn included_and_measured_files_are_dependencies_even_when_missing() {
+		let site = Site::new("deps");
+		let png = [
+			0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, b'I', b'H', b'D', b'R',
+			0, 0, 0, 3, 0, 0, 0, 2, 8, 6, 0, 0, 0,
+		];
+		fs::create_dir_all(format!("{}/out", site.root)).unwrap();
+		fs::write(format!("{}/out/p.png", site.root), png).unwrap();
+		site.write("src/_parts/h.html", "<header>h</header>");
+		site.write(
+			"src/a.html",
+			"<!-- @include(/_parts/h.html) -->\n<img src=\"/p.png\"><img src=\"/missing.png\">",
+		);
+		let loaded = site.config_raw(
+			r#"{ "dir": { "input": "src", "output": "out" }, "pages": { "ignore": ["_parts/**"] }, "build": { "cacheDir": ".cache", "incremental": true }, "html": { "includes": [ { "preset": "includeComment", "root": "src" } ] } }"#,
+		);
+		run_build(&loaded).unwrap();
+		assert_eq!(
+			site.read("out/a.html"),
+			"<header>h</header>\n<img src=\"/p.png\" width=\"3\" height=\"2\"><img src=\"/missing.png\">\n"
+		);
+		let cache = kd_build::cache_dir(&loaded.config.root_dir, Some(".cache"));
+		let manifest =
+			kd_build::Manifest::load(&kd_build::manifest_path(&cache)).expect("manifest written");
+		let entry = &manifest.entries[&format!("{}/out/a.html", site.root)];
+		let missing = format!("{}/out/missing.png", site.root);
+		assert_eq!(entry.deps[&missing].hash, kd_build::MISSING_FILE_HASH);
+		assert!(
+			entry
+				.deps
+				.contains_key(&format!("{}/src/_parts/h.html", site.root))
+		);
+		assert!(entry.deps.contains_key(&format!("{}/out/p.png", site.root)));
+
+		// Editing an included file rebuilds the page that includes it.
+		fs::write(
+			format!("{}/src/_parts/h.html", site.root),
+			"<header>H2</header>",
+		)
+		.unwrap();
+		let again = build(
+			&loaded,
+			&BuildOptions {
+				jobs: Some(1),
+				incremental: true,
+				..Default::default()
+			},
+		)
+		.unwrap();
+		assert_eq!(statuses(&again), [("/a.html", "built")]);
+		assert!(site.read("out/a.html").starts_with("<header>H2</header>"));
+	}
+
+	#[test]
+	fn a_host_placeholder_in_a_selector_uses_the_site_host() {
+		let site = Site::new("host");
+		site.write(
+			"src/a.html",
+			"<a href=\"https://example.com/x\">in</a><a href=\"https://other.test/\">out</a>",
+		);
+		let loaded = site.config(
+			r#", "site": { "host": "example.com" }, "html": { "rules": [ { "selector": "a:not([href*='{{host}}'])", "action": "setAttr", "name": "rel", "value": "noopener" } ] }"#,
+		);
+		run_build(&loaded).unwrap();
+		assert_eq!(
+			site.read("out/a.html"),
+			"<a href=\"https://example.com/x\">in</a><a href=\"https://other.test/\" rel=\"noopener\">out</a>\n"
+		);
+	}
+
+	#[test]
+	fn rule_pages_are_globs_on_the_output_url() {
+		let site = Site::new("scope");
+		site.write("src/index.html", "<p>top</p>");
+		site.write("src/a/index.html", "<p>a</p>");
+		site.write("src/b.html", "<p>b</p>");
+		let loaded = site.config(
+			r#", "html": { "rules": [ { "pages": ["/a/**"], "selector": "p", "action": "addClass", "value": "hit" }, { "pages": ["**"], "exclude": ["/b.html"], "selector": "p", "action": "setAttr", "name": "data-all", "value": "1" } ] }"#,
+		);
+		run_build(&loaded).unwrap();
+		assert_eq!(site.read("out/index.html"), "<p data-all=\"1\">top</p>\n");
+		assert_eq!(
+			site.read("out/a/index.html"),
+			"<p class=\"hit\" data-all=\"1\">a</p>\n"
+		);
+		assert_eq!(site.read("out/b.html"), "<p>b</p>\n");
+	}
+
+	#[test]
+	fn an_override_can_replace_the_rules_and_the_error_policy() {
+		let site = Site::new("override-rules");
+		site.write("src/a.html", "<p>a</p>");
+		site.write("src/legacy/b.html", "<p>b</p>");
+		let loaded = site.config(
+			r#", "html": {
+				"rules": [ { "selector": "p", "action": "addClass", "value": "x" } ],
+				"overrides": [
+					{ "pages": ["/legacy/**"], "rules": [ { "selector": "p", "action": "addClass", "value": "old" } ] },
+					{ "pages": ["/legacy/**"], "doctype": false }
+				]
+			}"#,
+		);
+		run_build(&loaded).unwrap();
+		assert_eq!(site.read("out/a.html"), "<p class=\"x\">a</p>\n");
+		assert_eq!(site.read("out/legacy/b.html"), "<p class=\"old\">b</p>\n");
+	}
+
+	#[test]
+	fn creating_a_missing_image_or_include_rebuilds_the_page_that_asked_for_it() {
+		let site = Site::new("appears");
+		site.write(
+			"src/a.html",
+			"<!--#include virtual=\"/part.html\" --><img src=\"/p.svg\">",
+		);
+		let loaded = site.config_raw(
+			r#"{ "dir": { "input": "src", "output": "out" }, "build": { "cacheDir": ".cache", "incremental": true }, "html": { "includes": [ { "preset": "ssi" } ], "onError": "silent" } }"#,
+		);
+		let incremental = || {
+			build(
+				&loaded,
+				&BuildOptions {
+					jobs: Some(1),
+					incremental: true,
+					..Default::default()
+				},
+			)
+			.unwrap()
+		};
+		assert_eq!(statuses(&incremental()), [("/a.html", "built")]);
+		assert_eq!(site.read("out/a.html"), "<img src=\"/p.svg\">\n");
+		assert_eq!(statuses(&incremental()), [("/a.html", "cached")]);
+
+		site.write("out/part.html", "<b>part</b>");
+		assert_eq!(statuses(&incremental()), [("/a.html", "built")]);
+		assert_eq!(site.read("out/a.html"), "<b>part</b><img src=\"/p.svg\">\n");
+
+		site.write("out/p.svg", "<svg width=\"4\" height=\"3\"></svg>");
+		assert_eq!(statuses(&incremental()), [("/a.html", "built")]);
+		assert_eq!(
+			site.read("out/a.html"),
+			"<b>part</b><img src=\"/p.svg\" width=\"4\" height=\"3\">\n"
+		);
+	}
+
+	#[test]
+	fn many_pages_sharing_an_include_and_an_image_build_the_same_on_every_thread_count() {
+		let site = Site::new("shared");
+		site.write("src/_parts/h.html", "<header>h</header>");
+		fs::create_dir_all(format!("{}/out", site.root)).unwrap();
+		fs::write(
+			format!("{}/out/s.svg", site.root),
+			"<svg width=\"8\" height=\"6\"></svg>",
+		)
+		.unwrap();
+		for i in 0..24 {
+			site.write(
+				&format!("src/p{i}.html"),
+				"<!-- @include(/_parts/h.html) --><img src=\"/s.svg\">",
+			);
+		}
+		let loaded = site.config_raw(
+			r#"{ "dir": { "input": "src", "output": "out" }, "pages": { "ignore": ["_parts/**"] }, "build": { "cacheDir": ".cache" }, "html": { "includes": [ { "preset": "includeComment", "root": "src" } ] } }"#,
+		);
+		let report = build(
+			&loaded,
+			&BuildOptions {
+				jobs: Some(6),
+				..Default::default()
+			},
+		)
+		.unwrap();
+		assert_eq!(report.pages.len(), 24);
+		for i in 0..24 {
+			assert_eq!(
+				site.read(&format!("out/p{i}.html")),
+				"<header>h</header>\n<img src=\"/s.svg\" width=\"8\" height=\"6\">\n"
+			);
+		}
+	}
+
+	#[test]
+	fn on_error_decides_what_a_failing_stage_does() {
+		let page = "<p title=\"&unknown;\">x</p>";
+		let site = Site::new("on-error");
+		site.write("src/a.html", page);
+
+		// silent: the format stage is skipped and the serialized text flows on.
+		let loaded = site.config("");
+		let report = run_build(&loaded).unwrap();
+		assert!(report.warnings.is_empty());
+		assert_eq!(site.read("out/a.html"), page);
+
+		let loaded = site.config(r#", "html": { "onError": "warning" }"#);
+		let report = run_build(&loaded).unwrap();
+		assert_eq!(report.warnings.len(), 1);
+		assert!(report.warnings[0].starts_with("Transform 'format' failed on "));
+
+		let loaded = site.config(r#", "html": { "onError": "error" }"#);
+		let err = run_build(&loaded).unwrap_err();
+		assert!(err.starts_with("Transform 'format' failed on "));
+	}
+
+	#[test]
+	fn invalid_html_options_fail_before_any_page_is_built() {
+		let site = Site::new("bad-options");
+		site.write("src/a.html", "<p>a</p>");
+		for (extra, expected) in [
+			(
+				r#"{ "rules": [ { "selector": "p", "action": "bogus" } ] }"#,
+				"html.rules[0].action: unknown action",
+			),
+			(
+				r#"{ "rules": [ { "selector": "p", "action": "remove", "name": "x" } ] }"#,
+				"html.rules[0].name: unknown option",
+			),
+			(
+				r#"{ "rules": [ { "selector": "p[", "action": "remove" } ] }"#,
+				"html.rules[0]",
+			),
+			(
+				r#"{ "includes": [ { "preset": "nope" } ] }"#,
+				"html.includes[0].preset: unknown preset",
+			),
+			(
+				r#"{ "inject": [ { "position": "middle", "html": "x" } ] }"#,
+				"html.inject[0].position",
+			),
+			(
+				r#"{ "entities": { "ab": "x" } }"#,
+				"html.entities.ab: the key must be exactly one character",
+			),
+			(
+				r#"{ "overrides": [ { "pages": ["**"], "overrides": [] } ] }"#,
+				"overrides cannot be nested",
+			),
+			(
+				r#"{ "inject": [ { "position": "head-end", "html": "x", "name": "a" } ] }"#,
+				"html.inject[0].name: unknown option",
+			),
+			(
+				r#"{ "rules": [ { "selector": "a:not([href*='{{host}}'])", "action": "remove" } ] }"#,
+				"html.rules[0].selector: uses {{host}}, but site.host is not set",
+			),
+			(
+				r#"{ "includes": [ { "selector": "p", "attr": "x", "root": "src", "pick": "i[data='{{host}}']" } ] }"#,
+				"html.includes[0].pick: uses {{host}}",
+			),
+		] {
+			let loaded = site.config(&format!(r#", "html": {extra}"#));
+			let err = run_build(&loaded).unwrap_err();
+			assert!(err.contains(expected), "{extra}: {err}");
+		}
+		assert!(!std::path::Path::new(&format!("{}/out/a.html", site.root)).exists());
 	}
 }

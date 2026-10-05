@@ -27,6 +27,7 @@ dependencies = [
  "kd_config",
  "kd_glob",
  "kd_hash",
+ "kd_html",
  "kd_jsonc",
  "kd_pool",
  "kd_site",
