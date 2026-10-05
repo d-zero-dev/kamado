@@ -8561,6 +8561,7 @@ __metadata:
     lerna: "npm:10.0.1"
     memfs: "npm:4.79.0"
     npm-run-all2: "npm:9.0.3"
+    prettier: "npm:3.9.9"
     typescript: "npm:6.0.3"
     vitest: "npm:4.1.11"
   languageName: unknown
