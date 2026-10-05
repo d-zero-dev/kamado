@@ -47,6 +47,7 @@ name = "kd_site"
 version = "0.0.0"
 dependencies = [
  "kd_glob",
+ "kd_jsonc",
 ]
 
 [[package]]

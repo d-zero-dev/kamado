@@ -10,3 +10,4 @@ workspace = true
 
 [dependencies]
 kd_glob = { path = "../kd_glob" }
+kd_jsonc = { path = "../kd_jsonc" }

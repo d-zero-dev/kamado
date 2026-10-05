@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 
+pub mod meta;
 pub mod path;
 
 use path::{basename, dirname, extname, join, normalize, relative};
