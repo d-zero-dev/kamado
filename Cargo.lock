@@ -11,6 +11,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kd_config"
+version = "0.0.0"
+dependencies = [
+ "kd_glob",
+ "kd_jsonc",
+ "kd_site",
+]
+
+[[package]]
 name = "kd_glob"
 version = "0.0.0"
 
