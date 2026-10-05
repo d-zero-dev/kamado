@@ -1070,10 +1070,13 @@ impl<'s> Parser<'s> {
 			end: tok.end,
 			specifier: self.string_value(tok),
 			kind,
+			attributes: false,
 		});
+		let record = self.imports.len() - 1;
 		self.advance()?;
 		// Import attributes: `with { type: "json" }`.
 		if self.is_kw("with") || (self.is_kw("assert") && !self.tok.nl_before) {
+			self.imports[record].attributes = true;
 			self.advance()?;
 			self.expect_p("{")?;
 			while !self.is_p("}") {

@@ -382,20 +382,27 @@ impl Parser<'_> {
 			return self.property_name();
 		}
 		self.expect_p("(")?;
+		let mut record = None;
 		if self.tok.kind == Kind::Str {
 			let next = self.peek()?;
 			if next.kind == Kind::Punct && (next.punct == ")" || next.punct == ",") {
 				let tok = self.tok;
+				record = Some(self.imports.len());
 				self.imports.push(crate::ast::ImportRecord {
 					start: tok.start,
 					end: tok.end,
 					specifier: crate::strings::decode(self.text(tok)),
 					kind: crate::ast::ImportKind::Dynamic,
+					attributes: false,
 				});
 			}
 		}
 		self.assign()?;
 		if self.eat_p(",")? && !self.is_p(")") {
+			// The second argument holds the import attributes.
+			if let Some(i) = record {
+				self.imports[i].attributes = true;
+			}
 			self.assign()?;
 			self.eat_p(",")?;
 		}

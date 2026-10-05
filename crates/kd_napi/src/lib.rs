@@ -13,6 +13,8 @@
 
 #![allow(non_camel_case_types, clippy::missing_safety_doc)]
 
+mod session;
+
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -218,6 +220,82 @@ unsafe extern "C" fn build(env: napi_env, info: napi_callback_info) -> napi_valu
 	}
 }
 
+/// Reads the `N` string arguments of the call; `None` if one is missing or
+/// not a string.
+unsafe fn string_args<const N: usize>(
+	api: &Api,
+	env: napi_env,
+	info: napi_callback_info,
+) -> Option<[String; N]> {
+	// SAFETY: env/info belong to this call.
+	let (argv, argc) = unsafe { args::<N>(api, env, info) };
+	if argc < N {
+		return None;
+	}
+	let mut out: [String; N] = std::array::from_fn(|_| String::new());
+	for (slot, value) in out.iter_mut().zip(argv) {
+		// SAFETY: `value` is an argument handle valid for this call.
+		*slot = unsafe { string_arg(api, env, value) }?;
+	}
+	Some(out)
+}
+
+/// Turns a build error into a thrown JS `Error`.
+unsafe fn throw_message(api: &Api, env: napi_env, message: String) -> napi_value {
+	let message = std::ffi::CString::new(message.replace('\0', " ")).unwrap_or_default();
+	// SAFETY: env is live.
+	unsafe { throw(api, env, &message) }
+}
+
+/// `prepare(configPath, optionsJson, runtimeUrl)` -> JSON with the handle, the
+/// render jobs and the context. Throws on any configuration or plan error.
+unsafe extern "C" fn prepare(env: napi_env, info: napi_callback_info) -> napi_value {
+	let Some(api) = api() else {
+		return std::ptr::null_mut();
+	};
+	// SAFETY: env/info belong to this call.
+	let Some([config, options, runtime]) = (unsafe { string_args::<3>(api, env, info) }) else {
+		return unsafe {
+			throw(
+				api,
+				env,
+				c"prepare: expected (configPath, optionsJson, runtimeUrl) strings",
+			)
+		};
+	};
+	match session::prepare(&config, &options, &runtime) {
+		Ok(json) => unsafe { string(api, env, &json) },
+		Err(message) => unsafe { throw_message(api, env, message) },
+	}
+}
+
+/// `finish(handle, renderedJson)` -> report JSON.
+unsafe extern "C" fn finish(env: napi_env, info: napi_callback_info) -> napi_value {
+	let Some(api) = api() else {
+		return std::ptr::null_mut();
+	};
+	// SAFETY: env/info belong to this call.
+	let Some([handle, rendered]) = (unsafe { string_args::<2>(api, env, info) }) else {
+		return unsafe { throw(api, env, c"finish: expected (handle, renderedJson) strings") };
+	};
+	match session::finish(&handle, &rendered) {
+		Ok(json) => unsafe { string(api, env, &json) },
+		Err(message) => unsafe { throw_message(api, env, message) },
+	}
+}
+
+/// `abort(handle)`: forgets a prepared build.
+unsafe extern "C" fn abort(env: napi_env, info: napi_callback_info) -> napi_value {
+	let Some(api) = api() else {
+		return std::ptr::null_mut();
+	};
+	// SAFETY: env/info belong to this call.
+	if let Some([handle]) = unsafe { string_args::<1>(api, env, info) } {
+		session::abort(&handle);
+	}
+	std::ptr::null_mut()
+}
+
 /// Throws a JS `Error` and returns the NULL value a callback must return after throwing.
 unsafe fn throw(api: &Api, env: napi_env, message: &CStr) -> napi_value {
 	// SAFETY: `message` is NUL-terminated; a NULL code means "no code property".
@@ -323,6 +401,9 @@ pub unsafe extern "C" fn napi_register_module_v1(env: napi_env, exports: napi_va
 		export(api, env, exports, c"counter", counter);
 		export(api, env, exports, c"sha256Hex", sha256_hex);
 		export(api, env, exports, c"build", build);
+		export(api, env, exports, c"prepare", prepare);
+		export(api, env, exports, c"finish", finish);
+		export(api, env, exports, c"abort", abort);
 	}
 	exports
 }

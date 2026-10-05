@@ -17,6 +17,7 @@ mod expr;
 mod jsx;
 mod jsx_entities;
 pub mod lexer;
+mod meta;
 pub mod parser;
 // The generated table also lists the unitless style properties, which a
 // compile-time fold of static `style` objects will use.
@@ -29,6 +30,7 @@ use std::collections::HashSet;
 
 use ast::{Edit, EditKind};
 pub use lexer::SyntaxError;
+pub use meta::{Const, extract_meta};
 
 /// How to compile one file.
 pub struct Options<'a> {
@@ -87,13 +89,27 @@ pub fn compile(src: &str, options: &Options<'_>) -> Result<Output, SyntaxError> 
 		elide_unused_imports(src, &parsed.decls, &parsed.refs, &mut edits);
 	}
 	for record in &parsed.imports {
-		if let Some(replacement) = (options.rewrite)(&record.specifier) {
-			edits.push(Edit {
-				start: record.start,
-				end: record.end,
-				kind: EditKind::Replace(strings::quote(&replacement)),
+		let rewritten = (options.rewrite)(&record.specifier);
+		let specifier = rewritten.as_deref().unwrap_or(&record.specifier);
+		// Node only loads JSON as a module with an attribute that says so;
+		// the source need not repeat it.
+		let json_attributes = specifier.ends_with(".json") && !record.attributes;
+		if rewritten.is_none() && !json_attributes {
+			continue;
+		}
+		let mut text = strings::quote(specifier);
+		if json_attributes {
+			text.push_str(if record.kind == ast::ImportKind::Dynamic {
+				", { with: { type: \"json\" } }"
+			} else {
+				" with { type: \"json\" }"
 			});
 		}
+		edits.push(Edit {
+			start: record.start,
+			end: record.end,
+			kind: EditKind::Replace(text),
+		});
 	}
 
 	let mut applier = codegen::Applier::new(src, edits);
@@ -196,9 +212,9 @@ mod tests {
 
 	#[test]
 	fn dynamic_parts_become_one_concatenation() {
-		let out = tsx("const x = <a href={u} id=\"i\">{t}</a>;");
+		let out = tsx("const x = <div title={u} id=\"i\">{t}</div>;");
 		assert!(out.contains(
-			"__kd_m(\"<a\" + __kd_a(\"href\", u) + \" id=\\\"i\\\">\" + __kd_c(t) + \"</a>\")"
+			"__kd_m(\"<div\" + __kd_a(\"title\", u) + \" id=\\\"i\\\">\" + __kd_c(t) + \"</div>\")"
 		));
 	}
 
@@ -251,7 +267,10 @@ mod tests {
 	#[test]
 	fn enums_and_namespaces_are_refused_clearly() {
 		assert!(js_error("enum A { X }").contains("enums are not supported"));
-		assert!(js_error("namespace N { }").contains("namespaces are not supported"));
+		assert!(
+			js_error("namespace N { export const x = 1; }")
+				.contains("namespaces with values are not supported")
+		);
 		assert!(js_error("@dec class A {}").contains("decorators are not supported"));
 	}
 

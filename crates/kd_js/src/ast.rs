@@ -88,6 +88,9 @@ pub struct ImportRecord {
 	/// The specifier with escapes decoded.
 	pub specifier: String,
 	pub kind: ImportKind,
+	/// Import attributes (`with { type: "json" }`, or the second argument of
+	/// `import()`) are already written.
+	pub attributes: bool,
 }
 
 /// One binding of an import declaration.

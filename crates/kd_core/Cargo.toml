@@ -14,6 +14,7 @@ kd_config = { path = "../kd_config" }
 kd_glob = { path = "../kd_glob" }
 kd_hash = { path = "../kd_hash" }
 kd_html = { path = "../kd_html" }
+kd_js = { path = "../kd_js" }
 kd_jsonc = { path = "../kd_jsonc" }
 kd_pool = { path = "../kd_pool" }
 kd_site = { path = "../kd_site" }

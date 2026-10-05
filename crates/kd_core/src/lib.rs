@@ -12,10 +12,13 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
+mod data;
 mod html;
+mod jsx;
+mod session;
+
+pub use session::{Prepared, RenderJob, build, prepare, write_report};
 
 use kd_config::Config;
 use kd_jsonc::Value;
@@ -126,7 +129,38 @@ fn read_page(
 			};
 			Ok((meta, Some(body.to_string()), dep))
 		}
-		PageKind::Tsx => Ok((Vec::new(), None, dep)),
+		PageKind::Tsx => {
+			let is_ts = !input_path.ends_with(".jsx");
+			let meta = match kd_js::extract_meta(&text, true, is_ts)
+				.map_err(|e| format!("{input_path}:{e}"))?
+			{
+				Some(kd_js::Const::Object(members)) => members
+					.into_iter()
+					.map(|(k, v)| (k, const_to_value(v)))
+					.collect(),
+				Some(_) => {
+					return Err(format!("{input_path}: `meta` must be an object"));
+				}
+				None => Vec::new(),
+			};
+			Ok((meta, None, dep))
+		}
+	}
+}
+
+fn const_to_value(c: kd_js::Const) -> Value {
+	match c {
+		kd_js::Const::Null => Value::Null,
+		kd_js::Const::Bool(b) => Value::Bool(b),
+		kd_js::Const::Num(n) => Value::Number(n),
+		kd_js::Const::Str(s) => Value::String(s),
+		kd_js::Const::Array(items) => Value::Array(items.into_iter().map(const_to_value).collect()),
+		kd_js::Const::Object(members) => Value::Object(
+			members
+				.into_iter()
+				.map(|(k, v)| (k, const_to_value(v)))
+				.collect(),
+		),
 	}
 }
 
@@ -389,41 +423,11 @@ impl Report {
 	}
 }
 
-/// What producing a page yields.
-struct Produced {
-	bytes: Vec<u8>,
-	warnings: Vec<String>,
-	/// Files read while producing it, besides the page's own input.
-	deps: BTreeMap<String, kd_build::Dep>,
-}
-
-/// Produces the bytes for one page. `.html` pages go through the HTML stages.
-/// `.tsx` pages are components that only a JavaScript renderer can run, and
-/// this crate has none, so such a page is an error rather than being written
-/// out as unrendered source.
-fn produce(pipeline: &html::Pipeline, page: &Page) -> Result<Produced, String> {
-	match page.kind {
-		PageKind::Html => {
-			let out = pipeline.process(&html::PageInput {
-				source: page.body.as_deref().unwrap_or_default(),
-				url: &page.file.url,
-				input_path: &page.file.input_path,
-				phase: kd_html::inject::Phase::Build,
-			})?;
-			Ok(Produced {
-				bytes: out.html.into_bytes(),
-				warnings: out.warnings,
-				deps: out.deps,
-			})
-		}
-		PageKind::Tsx => Err(format!(
-			"{}: JSX pages need a JavaScript renderer, which this build does not have",
-			page.file.input_path
-		)),
-	}
-}
-
-fn write_output(path: &str, bytes: &[u8], skip_unchanged: bool) -> Result<Status, String> {
+pub(crate) fn write_output(
+	path: &str,
+	bytes: &[u8],
+	skip_unchanged: bool,
+) -> Result<Status, String> {
 	if skip_unchanged
 		&& let Ok(meta) = fs::metadata(path)
 		&& meta.len() == bytes.len() as u64
@@ -439,183 +443,6 @@ fn write_output(path: &str, bytes: &[u8], skip_unchanged: bool) -> Result<Status
 	}
 	fs::write(path, bytes).map_err(|e| format!("cannot write {path}: {e}"))?;
 	Ok(Status::Built)
-}
-
-/// A page result, its manifest entry and the warnings it raised.
-type Outcome = Result<(PageResult, Option<kd_build::Entry>, Vec<String>), String>;
-
-/// State shared by the pool jobs of one build.
-struct Shared {
-	plan: Plan,
-	previous: kd_build::Manifest,
-	fingerprinter: kd_build::Fingerprinter,
-	env: String,
-	pipeline: html::Pipeline,
-	targets: Vec<kd_glob::Pattern>,
-	input_dir: String,
-	skip_unchanged: bool,
-	results: Mutex<Vec<Option<Outcome>>>,
-}
-
-fn build_one(shared: &Shared, i: usize) -> Outcome {
-	let page = &shared.plan.pages[i];
-	let result = |status| PageResult {
-		url: page.file.url.clone(),
-		input_path: page.file.input_path.clone(),
-		output_path: page.file.output_path.clone(),
-		status,
-		meta: page.meta.clone(),
-	};
-	if page.is_virtual {
-		return Ok((result(Status::Virtual), None, Vec::new()));
-	}
-	let rel = kd_site::path::relative(&shared.input_dir, &page.file.input_path);
-	if !shared.targets.is_empty() && !shared.targets.iter().any(|t| t.matches(&rel)) {
-		return Ok((result(Status::Skipped), None, Vec::new()));
-	}
-	if let Some(entry) = shared.previous.entries.get(&page.file.output_path)
-		&& let kd_build::Verdict::UpToDate(refreshed) = kd_build::check(
-			entry,
-			&page.file.output_path,
-			&page.file.input_path,
-			&shared.env,
-			&shared.fingerprinter,
-		) {
-		return Ok((result(Status::Cached), Some(refreshed), Vec::new()));
-	}
-	let produced = produce(&shared.pipeline, page)?;
-	let bytes = produced.bytes;
-	let status = write_output(&page.file.output_path, &bytes, shared.skip_unchanged)?;
-	// The fingerprints were taken when the bytes were read, so an edit made
-	// after that is detected by the next build instead of being recorded as if
-	// the output had been built from it.
-	let mut deps = page.deps.clone();
-	deps.extend(produced.deps);
-	let entry = kd_build::Entry {
-		input_path: page.file.input_path.clone(),
-		env: shared.env.clone(),
-		output_size: bytes.len() as u64,
-		deps,
-	};
-	Ok((result(status), Some(entry), produced.warnings))
-}
-
-/// Runs a build and returns the report. Any page error aborts the build.
-///
-/// # Example
-///
-/// ```no_run
-/// let loaded = kd_core::load("/site/kamado.config.jsonc").unwrap();
-/// let report = kd_core::build(&loaded, &kd_core::BuildOptions::default()).unwrap();
-/// println!("{} pages", report.pages.len());
-/// ```
-pub fn build(loaded: &Loaded, options: &BuildOptions) -> Result<Report, String> {
-	let started = Instant::now();
-	let config = &loaded.config;
-	let plan = plan(config)?;
-	let targets = compile_globs(&options.targets)?;
-	let env = kd_hash::to_hex(&kd_hash::sha256(
-		format!("{VERSION}\0{}\0html-pipeline", loaded.config_hash).as_bytes(),
-	));
-	let pipeline = html::Pipeline::compile(config)?;
-
-	let cache_dir = kd_build::cache_dir(
-		&config.root_dir,
-		options
-			.cache_dir
-			.as_deref()
-			.or(config.build.cache_dir.as_deref()),
-	);
-	let manifest_path = kd_build::manifest_path(&cache_dir);
-	let incremental = options.incremental || config.build.incremental;
-	// The on-disk manifest is read whenever the build is incremental, even with
-	// `force`: a forced partial build must still carry over the entries of the
-	// pages it did not touch. `force` only stops them from being *used* to skip.
-	let on_disk = if incremental {
-		kd_build::Manifest::load(&manifest_path).unwrap_or_default()
-	} else {
-		kd_build::Manifest::default()
-	};
-	let previous = if options.force {
-		kd_build::Manifest::default()
-	} else {
-		on_disk.clone()
-	};
-
-	let jobs = options.jobs.unwrap_or(match config.build.jobs {
-		kd_config::Jobs::Auto => std::thread::available_parallelism()
-			.map(|n| n.get())
-			.unwrap_or(1),
-		kd_config::Jobs::Count(n) => n,
-	});
-
-	// Largest first (LPT): the slow tail of the build stays short.
-	let mut order: Vec<usize> = (0..plan.pages.len()).collect();
-	order.sort_by_key(|&i| std::cmp::Reverse(plan.pages[i].body.as_ref().map_or(0, String::len)));
-	let page_count = plan.pages.len();
-
-	let shared = Arc::new(Shared {
-		plan,
-		previous,
-		fingerprinter: kd_build::Fingerprinter::new(),
-		env,
-		pipeline,
-		targets,
-		input_dir: config.dir.input.clone(),
-		skip_unchanged: options.skip_unchanged || config.build.skip_unchanged,
-		results: Mutex::new((0..page_count).map(|_| None).collect()),
-	});
-	let pool = kd_pool::Pool::new(jobs);
-	pool.scope(|s| {
-		for i in order {
-			let shared = Arc::clone(&shared);
-			s.spawn(move || {
-				let outcome = build_one(&shared, i);
-				shared.results.lock().unwrap_or_else(|e| e.into_inner())[i] = Some(outcome);
-			});
-		}
-	});
-	drop(pool);
-	let shared = Arc::try_unwrap(shared)
-		.ok()
-		.expect("all jobs finished with the pool");
-	let results = shared
-		.results
-		.into_inner()
-		.unwrap_or_else(|e| e.into_inner());
-
-	let mut report = Report {
-		pages: Vec::with_capacity(page_count),
-		warnings: shared.plan.warnings.clone(),
-		elapsed_ms: 0,
-	};
-	// A partial build (targets) keeps the entries it did not touch.
-	let mut next = if shared.targets.is_empty() {
-		kd_build::Manifest::default()
-	} else {
-		on_disk
-	};
-	for outcome in results.into_iter().flatten() {
-		let (result, entry, warnings) = outcome?;
-		report.warnings.extend(warnings);
-		if let Some(entry) = entry {
-			next.entries.insert(result.output_path.clone(), entry);
-		}
-		report.pages.push(result);
-	}
-	if incremental {
-		next.save(&manifest_path)
-			.map_err(|e| format!("cannot write {manifest_path}: {e}"))?;
-	}
-	report.elapsed_ms = started.elapsed().as_millis();
-	if let Some(path) = &config.build.report {
-		if let Some(parent) = std::path::Path::new(path).parent() {
-			fs::create_dir_all(parent)
-				.map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
-		}
-		fs::write(path, report.to_json()).map_err(|e| format!("cannot write {path}: {e}"))?;
-	}
-	Ok(report)
 }
 
 #[cfg(test)]
@@ -1115,7 +942,7 @@ mod tests {
 			},
 		)
 		.unwrap_err();
-		assert!(err.contains("JSX pages need a JavaScript renderer"));
+		assert!(err.contains("JSX pages and layouts need a JavaScript renderer"));
 	}
 
 	#[test]
@@ -1192,6 +1019,233 @@ mod tests {
 			"{failures} of {} cases differ from v2",
 			names.len()
 		);
+	}
+
+	fn prepare_incremental(loaded: &Loaded) -> Prepared {
+		prepare(
+			loaded,
+			&BuildOptions {
+				jobs: Some(1),
+				incremental: true,
+				..Default::default()
+			},
+			"file:///runtime.js",
+		)
+		.unwrap()
+	}
+
+	fn jsx_site(name: &str) -> (Site, Loaded) {
+		let site = Site::new(name);
+		site.write(
+			"src/index.tsx",
+			"import { Box } from './_lib/box';\nexport const meta = { title: 'Home', layout: 'main' } as const;\nexport default () => <Box />;\n",
+		);
+		site.write("src/_lib/box.tsx", "export const Box = () => <p>box</p>;\n");
+		site.write(
+			"src/about.html",
+			"---\ntitle: About\nlayout: main\n---\n<p>about</p>\n",
+		);
+		site.write("src/plain.html", "<p>plain</p>\n");
+		site.write(
+			"layouts/main.tsx",
+			"export default (p: any) => <html><body>{p.content}</body></html>;\n",
+		);
+		site.write("data/nav.json", "{ \"a\": 1 }");
+		let loaded = site.config_raw(
+			r#"{ "dir": { "input": "src", "output": "out" }, "pages": { "ignore": ["_lib/**"], "layouts": { "dir": "layouts" } }, "data": { "dir": "data", "values": { "v": 2 } }, "build": { "cacheDir": ".cache", "incremental": true } }"#,
+		);
+		(site, loaded)
+	}
+
+	#[test]
+	fn jsx_pages_and_pages_with_a_layout_become_render_jobs() {
+		let (site, loaded) = jsx_site("jobs");
+		let prepared = prepare_incremental(&loaded);
+		let jobs: Vec<(&str, bool, bool)> = prepared
+			.jobs()
+			.iter()
+			.map(|j| {
+				(
+					loaded_url(&prepared, j.page),
+					j.main.is_some(),
+					j.layout.is_some(),
+				)
+			})
+			.collect();
+		// `plain.html` has no layout and is not rendered by JavaScript.
+		assert_eq!(jobs, [("/about.html", false, true), ("/", true, true)]);
+		let compiled = format!("{}/node_modules/.cache/kamado-v3/jsx", site.root);
+		assert!(fs::metadata(format!("{compiled}/src/index.tsx.mjs")).is_ok());
+		assert!(fs::metadata(format!("{compiled}/src/_lib/box.tsx.mjs")).is_ok());
+		assert!(fs::metadata(format!("{compiled}/layouts/main.tsx.mjs")).is_ok());
+
+		let context = kd_jsonc::parse(prepared.context_json().unwrap()).unwrap();
+		let pages = context.get("pages").and_then(|p| p.as_array()).unwrap();
+		assert_eq!(pages.len(), 3);
+		assert_eq!(
+			context.get("data").unwrap().to_json(),
+			r#"{"nav":{"a":1},"v":2}"#
+		);
+		let home = pages
+			.iter()
+			.find(|p| p.get("url").and_then(|u| u.as_str()) == Some("/"))
+			.unwrap();
+		assert_eq!(
+			home.get("meta").unwrap().to_json(),
+			r#"{"title":"Home","layout":"main"}"#
+		);
+	}
+
+	fn loaded_url(prepared: &Prepared, page: usize) -> &str {
+		prepared.page_url(page)
+	}
+
+	#[test]
+	fn rendered_html_goes_through_the_html_stages_and_the_closure_is_recorded() {
+		let (site, loaded) = jsx_site("finish");
+		let prepared = prepare_incremental(&loaded);
+		let rendered: Vec<(usize, String)> = prepared
+			.jobs()
+			.iter()
+			.map(|j| (j.page, "<html><body><p>box</p></body></html>".to_owned()))
+			.collect();
+		let report = prepared.finish(rendered).unwrap();
+		assert_eq!(
+			statuses(&report),
+			[
+				("/about.html", "built"),
+				("/", "built"),
+				("/plain.html", "built")
+			]
+		);
+		assert!(
+			site.read("out/index.html")
+				.starts_with("<!DOCTYPE html>\n<html>")
+		);
+		assert_eq!(site.read("out/plain.html"), "<p>plain</p>\n");
+
+		let cache = kd_build::cache_dir(&loaded.config.root_dir, Some(".cache"));
+		let manifest = kd_build::Manifest::load(&kd_build::manifest_path(&cache)).unwrap();
+		let entry = &manifest.entries[&format!("{}/out/index.html", site.root)];
+		for file in ["src/index.tsx", "src/_lib/box.tsx", "layouts/main.tsx"] {
+			assert!(
+				entry.deps.contains_key(&format!("{}/{file}", site.root)),
+				"{file} is a dependency"
+			);
+		}
+
+		// Nothing changed: nothing to render.
+		let again = prepare_incremental(&loaded);
+		assert!(again.jobs().is_empty());
+		let report = again.finish(Vec::new()).unwrap();
+		assert_eq!(
+			statuses(&report),
+			[
+				("/about.html", "cached"),
+				("/", "cached"),
+				("/plain.html", "cached")
+			]
+		);
+	}
+
+	#[test]
+	fn what_a_jsx_page_reads_rebuilds_it() {
+		let (site, loaded) = jsx_site("invalidate");
+		// Builds with a stand-in for the renderer; how many jobs there were.
+		let rebuild = || {
+			let prepared = prepare_incremental(&loaded);
+			let count = prepared.jobs().len();
+			let rendered = prepared
+				.jobs()
+				.iter()
+				.map(|j| (j.page, "<p>x</p>".to_owned()))
+				.collect();
+			prepared.finish(rendered).unwrap();
+			count
+		};
+		let write = |rel: &str, text: &str| {
+			site.write(rel, text);
+			// Make sure the stat of the file differs even on a coarse clock.
+			std::thread::sleep(std::time::Duration::from_millis(5));
+		};
+		// `index.tsx` and `about.html` (it names a layout).
+		assert_eq!(rebuild(), 2);
+		assert_eq!(rebuild(), 0);
+
+		// An imported component: only the page that imports it.
+		write(
+			"src/_lib/box.tsx",
+			"export const Box = () => <p>box 2</p>;\n",
+		);
+		assert_eq!(rebuild(), 1);
+		assert_eq!(rebuild(), 0);
+
+		// The layout: both pages that use it.
+		write(
+			"layouts/main.tsx",
+			"export default (p: any) => <html><body><main>{p.content}</main></body></html>;\n",
+		);
+		assert_eq!(rebuild(), 2);
+
+		// The data every page can read.
+		write("data/nav.json", "{ \"a\": 2 }");
+		assert_eq!(rebuild(), 2);
+
+		// The metadata of any page (nav, breadcrumbs, titleList read it).
+		write("src/plain.html", "---\ntitle: Plain\n---\n<p>plain</p>\n");
+		assert_eq!(rebuild(), 2);
+
+		// The body of a page that JavaScript does not render changes nothing else.
+		write("src/plain.html", "---\ntitle: Plain\n---\n<p>plain 2</p>\n");
+		assert_eq!(rebuild(), 0);
+		assert_eq!(site.read("out/plain.html"), "<p>plain 2</p>\n");
+	}
+
+	#[test]
+	fn a_missing_layout_and_a_path_in_a_layout_name_are_errors() {
+		let site = Site::new("layout-errors");
+		site.write("src/a.html", "---\nlayout: nope\n---\n<p>a</p>\n");
+		let loaded = site.config(r#", "pages": { "layouts": { "dir": "layouts" } }"#);
+		let err = prepare_incremental_result(&loaded).unwrap_err();
+		assert!(err.contains("layout \"nope\" not found"), "{err}");
+
+		site.write("src/a.html", "---\nlayout: ../x\n---\n<p>a</p>\n");
+		let err = prepare_incremental_result(&loaded).unwrap_err();
+		assert!(err.contains("without a path"), "{err}");
+
+		let site2 = Site::new("layout-none");
+		site2.write("src/a.html", "---\nlayout: main\n---\n<p>a</p>\n");
+		let loaded = site2.config("");
+		let err = prepare_incremental_result(&loaded).unwrap_err();
+		assert!(err.contains("pages.layouts.dir is not set"), "{err}");
+	}
+
+	fn prepare_incremental_result(loaded: &Loaded) -> Result<Prepared, String> {
+		prepare(loaded, &BuildOptions::default(), "file:///runtime.js")
+	}
+
+	#[test]
+	fn a_tsx_meta_that_needs_evaluation_stops_the_plan_with_its_position() {
+		let site = Site::new("meta-error");
+		site.write(
+			"src/a.tsx",
+			"const t = 'x';\nexport const meta = { title: t };\nexport default () => <p/>;\n",
+		);
+		let loaded = site.config("");
+		let err = plan(&loaded.config).unwrap_err();
+		assert!(
+			err.contains("a.tsx:2:30: `meta` must be a literal"),
+			"{err}"
+		);
+	}
+
+	#[test]
+	fn the_iso_date_is_correct() {
+		use crate::session::iso_from_secs;
+		assert_eq!(iso_from_secs(0), "1970-01-01T00:00:00.000Z");
+		assert_eq!(iso_from_secs(951_782_400), "2000-02-29T00:00:00.000Z");
+		assert_eq!(iso_from_secs(1_700_000_000), "2023-11-14T22:13:20.000Z");
+		assert_eq!(iso_from_secs(4_102_444_799), "2099-12-31T23:59:59.000Z");
 	}
 
 	fn run_build(loaded: &Loaded) -> Result<Report, String> {
