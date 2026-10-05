@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "kd_build"
+version = "0.0.0"
+dependencies = [
+ "kd_hash",
+ "kd_jsonc",
+]
+
+[[package]]
 name = "kd_glob"
 version = "0.0.0"
 
