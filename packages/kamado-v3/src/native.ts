@@ -20,11 +20,14 @@ export interface Native {
 	build(configPath: string, optionsJson: string): string;
 	/**
 	 * Plans a build and compiles the JSX modules. The result is JSON:
-	 * `{ handle, jobs, context }` (see `Prepared` in `build.ts`).
+	 * `{ handle, jobs, context, scripts }` (see `Prepared` in `build.ts`).
 	 */
 	prepare(configPath: string, optionsJson: string, runtimeUrl: string): string;
-	/** Finishes a prepared build with `[[page, html], ...]`; the result is a report. */
-	finish(handle: string, renderedJson: string): string;
+	/**
+	 * Finishes a prepared build with `{ pages: [[page, html], ...], scripts:
+	 * [{ id, code, inputs }, ...] }`; the result is a report.
+	 */
+	finish(handle: string, resultsJson: string): string;
 	/** Forgets a prepared build that will not be finished. */
 	abort(handle: string): void;
 }

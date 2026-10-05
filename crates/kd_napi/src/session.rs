@@ -28,7 +28,8 @@ pub(crate) fn options_from_json(json: &str) -> Result<kd_core::BuildOptions, Str
 }
 
 /// Plans a build. The result is a JSON object:
-/// `{ "handle": "…", "jobs": [{ "page": 0, "main": "/abs.mjs" | null, "layout": … }], "context": {…} | null }`.
+/// `{ "handle": "…", "jobs": [{ "page": 0, "main": "/abs.mjs" | null, "layout": … }], "context": {…} | null, "scripts": {…} | null }`
+/// (`scripts` is the request for esbuild).
 ///
 /// # Errors
 ///
@@ -59,42 +60,68 @@ pub(crate) fn prepare(
 			.collect(),
 	);
 	let context = prepared.context_json().unwrap_or("null").to_owned();
+	let scripts = prepared.script_request_json().unwrap_or("null").to_owned();
 	let handle = NEXT.fetch_add(1, Ordering::SeqCst);
 	store()
 		.get_or_insert_with(HashMap::new)
 		.insert(handle, Entry { prepared, loaded });
 	Ok(format!(
-		"{{\"handle\":\"{handle}\",\"jobs\":{},\"context\":{context}}}",
+		"{{\"handle\":\"{handle}\",\"jobs\":{},\"context\":{context},\"scripts\":{scripts}}}",
 		jobs.to_json()
 	))
 }
 
-/// Finishes a build with the rendered pages (`[[page, "html"], …]`); the
-/// report as JSON.
+/// Finishes a build with what JavaScript made, as JSON:
+/// `{ "pages": [[page, "html"], …], "scripts": [{ "id", "code", "inputs": […] }, …] }`.
+/// The result is the report as JSON.
 ///
 /// # Errors
 ///
 /// An unknown handle, invalid input, or any error of the build.
-pub(crate) fn finish(handle: &str, rendered_json: &str) -> Result<String, String> {
+pub(crate) fn finish(handle: &str, results_json: &str) -> Result<String, String> {
 	let id: u64 = handle
 		.parse()
 		.map_err(|_| format!("finish: {handle:?} is not a handle"))?;
 	let Some(entry) = store().as_mut().and_then(|s| s.remove(&id)) else {
 		return Err(format!("finish: no prepared build for handle {handle}"));
 	};
-	let value = kd_jsonc::parse(rendered_json).map_err(|e| format!("rendered pages: {e}"))?;
-	let Value::Array(items) = value else {
-		return Err("rendered pages: expected an array".to_owned());
+	let value = kd_jsonc::parse(results_json).map_err(|e| format!("results: {e}"))?;
+	let items = match value.get("pages") {
+		None => &[][..],
+		Some(Value::Array(items)) => items.as_slice(),
+		Some(_) => return Err("results: pages must be an array".to_owned()),
 	};
 	let mut rendered = Vec::with_capacity(items.len());
-	for item in &items {
+	for item in items {
 		let pair = item.as_array().filter(|a| a.len() == 2);
 		let (page, html) = pair
 			.and_then(|a| Some((a[0].as_f64()?, a[1].as_str()?)))
-			.ok_or("rendered pages: each item must be [page, html]")?;
+			.ok_or("results: each page must be [page, html]")?;
 		rendered.push((page as usize, html.to_owned()));
 	}
-	let report = entry.prepared.finish(rendered)?;
+	let script_items = match value.get("scripts") {
+		None => &[][..],
+		Some(Value::Array(items)) => items.as_slice(),
+		Some(_) => return Err("results: scripts must be an array".to_owned()),
+	};
+	let mut scripts = Vec::with_capacity(script_items.len());
+	for item in script_items {
+		let parsed = (|| {
+			let inputs = item
+				.get("inputs")?
+				.as_array()?
+				.iter()
+				.map(|v| v.as_str().map(str::to_owned))
+				.collect::<Option<Vec<_>>>()?;
+			Some(kd_core::ScriptOutput {
+				id: item.get("id")?.as_f64()? as usize,
+				code: item.get("code")?.as_str()?.to_owned(),
+				inputs,
+			})
+		})();
+		scripts.push(parsed.ok_or("results: each script must be { id, code, inputs: [path, …] }")?);
+	}
+	let report = entry.prepared.finish(rendered, scripts)?;
 	kd_core::write_report(&entry.loaded.config, &report)?;
 	Ok(report.to_json())
 }
@@ -162,7 +189,7 @@ mod tests {
 		assert_eq!(jobs[0].get("layout"), Some(&Value::Null));
 		assert!(value.get("context").and_then(|c| c.get("pages")).is_some());
 
-		let report = finish(&handle, r#"[[0, "<p>x</p>"]]"#).unwrap();
+		let report = finish(&handle, r#"{"pages":[[0,"<p>x</p>"]]}"#).unwrap();
 		assert!(report.contains("\"status\":\"built\""));
 		assert_eq!(
 			fs::read_to_string(format!("{root}/out/index.html")).unwrap(),
@@ -170,7 +197,7 @@ mod tests {
 		);
 		// A handle is used once.
 		assert!(
-			finish(&handle, "[]")
+			finish(&handle, "{}")
 				.unwrap_err()
 				.contains("no prepared build")
 		);
@@ -179,9 +206,9 @@ mod tests {
 
 	#[test]
 	fn bad_input_is_reported_not_trusted() {
-		assert!(finish("x", "[]").unwrap_err().contains("not a handle"));
+		assert!(finish("x", "{}").unwrap_err().contains("not a handle"));
 		assert!(
-			finish("999999", "[]")
+			finish("999999", "{}")
 				.unwrap_err()
 				.contains("no prepared build")
 		);

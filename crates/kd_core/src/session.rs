@@ -17,12 +17,24 @@ use std::time::Instant;
 
 use kd_jsonc::Value;
 
+use crate::assets::{self, Asset, AssetKind, ScriptSettings};
+use crate::banner::{self, LocalTime};
 use crate::html;
 use crate::jsx::Modules;
 use crate::{
-	BuildOptions, Loaded, Page, PageKind, PageResult, Plan, Report, Status, compile_globs, plan,
-	write_output,
+	AssetResult, BuildOptions, Loaded, Page, PageKind, PageResult, Plan, Report, Status,
+	compile_globs, plan, write_output,
 };
+
+/// What esbuild produced for one script: the bundle and every file it read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptOutput {
+	/// The index of the script in the request `prepare` made.
+	pub id: usize,
+	pub code: String,
+	/// Absolute paths of the bundled inputs (the dependencies of the output).
+	pub inputs: Vec<String>,
+}
 
 /// Something for JavaScript to render.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +77,8 @@ pub struct Prepared {
 	started: Instant,
 	render_jobs: Vec<RenderJob>,
 	context: Option<String>,
+	/// What esbuild has to build, as JSON (`None` when no script is stale).
+	script_request: Option<String>,
 }
 
 /// Read-only state shared by the pool jobs of the second step.
@@ -72,14 +86,28 @@ struct Shared {
 	plan: Plan,
 	env: String,
 	env_js: String,
+	/// The environment digest of the scripts.
+	env_scripts: String,
 	pipeline: html::Pipeline,
 	targets: Vec<kd_glob::Pattern>,
 	skip_unchanged: bool,
+	assets: Vec<Asset>,
+	asset_decisions: Vec<Decision>,
+	/// Fingerprints the inputs esbuild read; created empty so that nothing is
+	/// remembered from before esbuild ran.
+	fingerprinter: kd_build::Fingerprinter,
+	/// The start of the build: an input modified after it may have been read
+	/// before the edit, so its fingerprint cannot vouch for the output.
+	started_at: (i64, u32),
 	results: Mutex<Vec<Option<Outcome>>>,
+	asset_results: Mutex<Vec<Option<AssetOutcome>>>,
 }
 
 /// A page result, its manifest entry and the warnings it raised.
 type Outcome = Result<(PageResult, Option<kd_build::Entry>, Vec<String>), String>;
+
+/// An asset result and its manifest entry.
+type AssetOutcome = Result<(AssetResult, Option<kd_build::Entry>), String>;
 
 /// The compiled layout (its module) and the fingerprints of its import closure.
 type LayoutModule = (String, BTreeMap<String, kd_build::Dep>);
@@ -310,6 +338,88 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		});
 	}
 
+	// Scripts: esbuild (JavaScript's side) builds the ones that are stale.
+	let started_at = std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.unwrap_or_default();
+	let time = LocalTime {
+		epoch_ms: started_at.as_millis() as i64,
+		offset_minutes: options.tz_offset_minutes,
+	};
+	let version = config.site.package_version.as_deref();
+	let script_banner = config.scripts.banner.as_ref().map(|template| {
+		let template = if options.serving {
+			banner::DEV_BANNER
+		} else {
+			template
+		};
+		banner::for_script(template, time, version)
+	});
+	let script_settings = ScriptSettings::new(config, options.serving, script_banner);
+	let script_settings_json = script_settings.to_json().to_json();
+	let env_scripts = kd_hash::to_hex(&kd_hash::sha256(
+		format!(
+			"{}\0{}\0scripts\0{}\0{script_settings_json}",
+			crate::VERSION,
+			loaded.config_hash,
+			options.esbuild_version.as_deref().unwrap_or_default()
+		)
+		.as_bytes(),
+	));
+	let assets = assets::discover(config, AssetKind::Script)?;
+	{
+		let page_outputs: std::collections::HashSet<&str> = plan
+			.pages
+			.iter()
+			.map(|p| p.file.output_path.as_str())
+			.collect();
+		if let Some(a) = assets
+			.iter()
+			.find(|a| page_outputs.contains(a.output_path.as_str()))
+		{
+			return Err(format!(
+				"{}: its output {} is also the output of a page",
+				a.input_path, a.output_path
+			));
+		}
+	}
+	let mut asset_decisions = Vec::with_capacity(assets.len());
+	let mut script_entries = Vec::new();
+	for (i, asset) in assets.iter().enumerate() {
+		if !targets.is_empty() && !targets.iter().any(|t| t.matches(&asset.rel)) {
+			asset_decisions.push(Decision::Skipped);
+			continue;
+		}
+		if let Some(entry) = previous.entries.get(&asset.output_path)
+			&& let kd_build::Verdict::UpToDate(refreshed) = kd_build::check(
+				entry,
+				&asset.output_path,
+				&asset.input_path,
+				&env_scripts,
+				&fingerprinter,
+			) {
+			asset_decisions.push(Decision::Cached(refreshed));
+			continue;
+		}
+		script_entries.push(Value::Object(vec![
+			("id".to_owned(), Value::Number(i as f64)),
+			("input".to_owned(), Value::String(asset.input_path.clone())),
+			(
+				"output".to_owned(),
+				Value::String(asset.output_path.clone()),
+			),
+		]));
+		asset_decisions.push(Decision::Build { render: None });
+	}
+	let script_request = (!script_entries.is_empty()).then(|| {
+		Value::Object(vec![
+			("root".to_owned(), Value::String(config.root_dir.clone())),
+			("options".to_owned(), script_settings.to_json()),
+			("entries".to_owned(), Value::Array(script_entries)),
+		])
+		.to_json()
+	});
+
 	let context = if render_jobs.is_empty() {
 		None
 	} else {
@@ -326,15 +436,22 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	};
 
 	let page_count = plan.pages.len();
+	let asset_count = assets.len();
 	Ok(Prepared {
 		shared: Arc::new(Shared {
 			plan,
 			env,
 			env_js,
+			env_scripts,
 			pipeline,
 			targets,
 			skip_unchanged: options.skip_unchanged || config.build.skip_unchanged,
+			assets,
+			asset_decisions,
+			fingerprinter: kd_build::Fingerprinter::new(),
+			started_at: (started_at.as_secs() as i64, started_at.subsec_nanos()),
 			results: Mutex::new((0..page_count).map(|_| None).collect()),
+			asset_results: Mutex::new((0..asset_count).map(|_| None).collect()),
 		}),
 		decisions,
 		on_disk,
@@ -344,6 +461,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		started,
 		render_jobs,
 		context,
+		script_request,
 	})
 }
 
@@ -407,15 +525,27 @@ impl Prepared {
 		self.context.as_deref()
 	}
 
+	/// What esbuild has to build, as JSON: `{ root, options, entries: [{ id,
+	/// input, output }] }`. `None` when no script is stale.
+	#[must_use]
+	pub fn script_request_json(&self) -> Option<&str> {
+		self.script_request.as_deref()
+	}
+
 	/// Runs the HTML stages for every page that has to be built, writes the
 	/// outputs and the manifest and returns the report. `rendered` holds the
-	/// HTML JavaScript produced for each job (by page index).
+	/// HTML JavaScript produced for each job (by page index); `scripts` what
+	/// esbuild produced for the request of [`Prepared::script_request_json`].
 	///
 	/// # Errors
 	///
-	/// A message for a missing rendering, any page error (the build stops at
-	/// the first one), or a file that cannot be written.
-	pub fn finish(self, rendered: Vec<(usize, String)>) -> Result<Report, String> {
+	/// A message for a missing rendering or script, any page error (the build
+	/// stops at the first one), or a file that cannot be written.
+	pub fn finish(
+		self,
+		rendered: Vec<(usize, String)>,
+		scripts: Vec<ScriptOutput>,
+	) -> Result<Report, String> {
 		let Prepared {
 			shared,
 			decisions,
@@ -426,7 +556,25 @@ impl Prepared {
 			started,
 			render_jobs,
 			context: _,
+			script_request: _,
 		} = self;
+		let mut script_by_asset: Vec<Option<ScriptOutput>> = vec![None; shared.assets.len()];
+		for output in scripts {
+			let id = output.id;
+			match script_by_asset.get_mut(id) {
+				Some(slot) => *slot = Some(output),
+				None => return Err(format!("a script output for {id}, which does not exist")),
+			}
+		}
+		for (i, decision) in shared.asset_decisions.iter().enumerate() {
+			if matches!(decision, Decision::Build { .. }) && script_by_asset[i].is_none() {
+				return Err(format!(
+					"{}: the script was not built",
+					shared.assets[i].input_path
+				));
+			}
+		}
+		let script_by_asset = Arc::new(script_by_asset);
 		let mut html_by_page: Vec<Option<String>> = vec![None; shared.plan.pages.len()];
 		for (page, html) in rendered {
 			if page >= html_by_page.len() {
@@ -466,6 +614,17 @@ impl Prepared {
 					shared.results.lock().unwrap_or_else(|e| e.into_inner())[i] = Some(outcome);
 				});
 			}
+			for i in 0..shared.assets.len() {
+				let shared = Arc::clone(&shared);
+				let script_by_asset = Arc::clone(&script_by_asset);
+				s.spawn(move || {
+					let outcome = finish_script(&shared, i, script_by_asset[i].as_ref());
+					shared
+						.asset_results
+						.lock()
+						.unwrap_or_else(|e| e.into_inner())[i] = Some(outcome);
+				});
+			}
 		});
 		drop(pool);
 		let shared = Arc::try_unwrap(shared)
@@ -476,8 +635,13 @@ impl Prepared {
 			.into_inner()
 			.unwrap_or_else(|e| e.into_inner());
 
+		let asset_results = shared
+			.asset_results
+			.into_inner()
+			.unwrap_or_else(|e| e.into_inner());
 		let mut report = Report {
 			pages: Vec::with_capacity(page_count),
+			assets: Vec::with_capacity(asset_results.len()),
 			warnings: shared.plan.warnings.clone(),
 			elapsed_ms: 0,
 		};
@@ -494,6 +658,13 @@ impl Prepared {
 				next.entries.insert(result.output_path.clone(), entry);
 			}
 			report.pages.push(result);
+		}
+		for outcome in asset_results.into_iter().flatten() {
+			let (result, entry) = outcome?;
+			if let Some(entry) = entry {
+				next.entries.insert(result.output_path.clone(), entry);
+			}
+			report.assets.push(result);
 		}
 		if incremental {
 			next.save(&manifest_path)
@@ -554,8 +725,50 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 	Ok((result(status), Some(entry), out.warnings))
 }
 
+/// Writes the bundle esbuild made for a script and records what it read.
+fn finish_script(shared: &Shared, i: usize, output: Option<&ScriptOutput>) -> AssetOutcome {
+	let asset = &shared.assets[i];
+	let result = |status| AssetResult {
+		kind: asset.kind,
+		input_path: asset.input_path.clone(),
+		output_path: asset.output_path.clone(),
+		status,
+	};
+	let output = match &shared.asset_decisions[i] {
+		Decision::Virtual | Decision::Skipped => return Ok((result(Status::Skipped), None)),
+		Decision::Cached(entry) => return Ok((result(Status::Cached), Some(entry.clone()))),
+		Decision::Build { .. } => {
+			output.ok_or_else(|| format!("{}: the script was not built", asset.input_path))?
+		}
+	};
+	let bytes = output.code.as_bytes();
+	let status = write_output(&asset.output_path, bytes, shared.skip_unchanged)?;
+	// esbuild reads its inputs on its own, so their fingerprints are taken
+	// afterwards. An input modified since the build began may have been read
+	// before the edit; recording it would let the next build call the output
+	// current, so such an output gets no entry and is rebuilt next time.
+	let mut deps = BTreeMap::new();
+	let mut settled = true;
+	for input in output.inputs.iter().chain([&asset.input_path]) {
+		let dep = shared.fingerprinter.fingerprint(input);
+		if dep.hash != kd_build::MISSING_FILE_HASH
+			&& (dep.mtime_sec, dep.mtime_nsec) >= shared.started_at
+		{
+			settled = false;
+		}
+		deps.insert(input.clone(), dep);
+	}
+	let entry = settled.then(|| kd_build::Entry {
+		input_path: asset.input_path.clone(),
+		env: shared.env_scripts.clone(),
+		output_size: bytes.len() as u64,
+		deps,
+	});
+	Ok((result(status), entry))
+}
+
 /// Runs a build that needs no JavaScript and returns the report. A site with
-/// JSX pages or layouts needs a renderer: use [`prepare`] and
+/// JSX pages, layouts or scripts needs a renderer: use [`prepare`] and
 /// [`Prepared::finish`].
 ///
 /// # Errors
@@ -577,8 +790,14 @@ pub fn build(loaded: &Loaded, options: &BuildOptions) -> Result<Report, String> 
 			prepared.shared.plan.pages[job.page].file.input_path
 		));
 	}
+	if prepared.script_request_json().is_some() {
+		return Err(
+			"scripts need esbuild, which this build does not have; run the build from the JavaScript package"
+				.to_owned(),
+		);
+	}
 	let config = &loaded.config;
-	let report = prepared.finish(Vec::new())?;
+	let report = prepared.finish(Vec::new(), Vec::new())?;
 	write_report(config, &report)?;
 	Ok(report)
 }

@@ -2,6 +2,7 @@ import type { RenderContext } from './props.js';
 
 import { native } from './native.js';
 import { renderJobs, type RenderJob } from './render.js';
+import { buildScripts, ESBUILD_VERSION, type ScriptRequest } from './scripts.js';
 
 /** Build-time switches; every field is optional and defaults to the config. */
 export interface BuildOptions {
@@ -24,9 +25,17 @@ export interface PageResult {
 	readonly meta: Record<string, unknown>;
 }
 
+export interface AssetResult {
+	readonly kind: 'style' | 'script';
+	readonly inputPath: string;
+	readonly outputPath: string;
+	readonly status: PageStatus;
+}
+
 export interface BuildReport {
 	readonly version: 1;
 	readonly pages: readonly PageResult[];
+	readonly assets: readonly AssetResult[];
 	readonly warnings: readonly string[];
 	readonly elapsedMs: number;
 }
@@ -37,6 +46,8 @@ interface Prepared {
 	readonly jobs: readonly RenderJob[];
 	/** `null` when there is nothing to render. */
 	readonly context: RenderContext | null;
+	/** `null` when no script is stale. */
+	readonly scripts: ScriptRequest | null;
 }
 
 /** File URL of the JSX runtime that compiled modules import. */
@@ -65,18 +76,30 @@ export async function build(
 ): Promise<BuildReport> {
 	const core = native();
 	const prepared = JSON.parse(
-		core.prepare(configPath, JSON.stringify(options), RUNTIME_URL),
+		core.prepare(
+			configPath,
+			JSON.stringify({
+				...options,
+				// The banner's dates are local time, which the core cannot tell.
+				tzOffsetMinutes: -new Date().getTimezoneOffset(),
+				esbuildVersion: ESBUILD_VERSION,
+			}),
+			RUNTIME_URL,
+		),
 	) as Prepared;
 	try {
-		const rendered =
+		// Pages render in worker threads while esbuild bundles the scripts.
+		const [pages, scripts] = await Promise.all([
 			prepared.context && prepared.jobs.length > 0
-				? await renderJobs(prepared.jobs, prepared.context, {
+				? renderJobs(prepared.jobs, prepared.context, {
 						runtimeUrl: RUNTIME_URL,
 						parallelism: options.jobs,
 					})
-				: [];
+				: [],
+			prepared.scripts ? buildScripts(prepared.scripts) : [],
+		]);
 		return JSON.parse(
-			core.finish(prepared.handle, JSON.stringify(rendered)),
+			core.finish(prepared.handle, JSON.stringify({ pages, scripts })),
 		) as BuildReport;
 	} catch (error) {
 		core.abort(prepared.handle);

@@ -13,13 +13,14 @@
 use std::collections::BTreeMap;
 use std::fs;
 
+pub mod assets;
 pub mod banner;
 mod data;
 mod html;
 mod jsx;
 mod session;
 
-pub use session::{Prepared, RenderJob, build, prepare, write_report};
+pub use session::{Prepared, RenderJob, ScriptOutput, build, prepare, write_report};
 
 use kd_config::Config;
 use kd_jsonc::Value;
@@ -336,6 +337,15 @@ pub struct BuildOptions {
 	pub jobs: Option<usize>,
 	/// Cache directory override.
 	pub cache_dir: Option<String>,
+	/// The host's local time zone: local time minus UTC, in minutes. The
+	/// banner's `{{date:...}}` is local time, and std has no time zones.
+	pub tz_offset_minutes: i32,
+	/// The version of the esbuild that builds the scripts; a different one
+	/// rebuilds them, because its output may differ.
+	pub esbuild_version: Option<String>,
+	/// A dev server is building: `onServer` source maps are written and the
+	/// banner is the development warning.
+	pub serving: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -373,9 +383,19 @@ pub struct PageResult {
 	pub meta: Meta,
 }
 
+/// A style or script that was built (or skipped).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetResult {
+	pub kind: assets::AssetKind,
+	pub input_path: String,
+	pub output_path: String,
+	pub status: Status,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Report {
 	pub pages: Vec<PageResult>,
+	pub assets: Vec<AssetResult>,
 	pub warnings: Vec<String>,
 	pub elapsed_ms: u128,
 }
@@ -403,9 +423,31 @@ impl Report {
 				])
 			})
 			.collect();
+		let assets = self
+			.assets
+			.iter()
+			.map(|a| {
+				Value::Object(vec![
+					(
+						"kind".to_string(),
+						Value::String(a.kind.as_str().to_string()),
+					),
+					("inputPath".to_string(), Value::String(a.input_path.clone())),
+					(
+						"outputPath".to_string(),
+						Value::String(a.output_path.clone()),
+					),
+					(
+						"status".to_string(),
+						Value::String(a.status.as_str().to_string()),
+					),
+				])
+			})
+			.collect();
 		Value::Object(vec![
 			("version".to_string(), Value::Number(1.0)),
 			("pages".to_string(), Value::Array(pages)),
+			("assets".to_string(), Value::Array(assets)),
 			(
 				"warnings".to_string(),
 				Value::Array(
@@ -1110,7 +1152,7 @@ mod tests {
 			.iter()
 			.map(|j| (j.page, "<html><body><p>box</p></body></html>".to_owned()))
 			.collect();
-		let report = prepared.finish(rendered).unwrap();
+		let report = prepared.finish(rendered, Vec::new()).unwrap();
 		assert_eq!(
 			statuses(&report),
 			[
@@ -1138,7 +1180,7 @@ mod tests {
 		// Nothing changed: nothing to render.
 		let again = prepare_incremental(&loaded);
 		assert!(again.jobs().is_empty());
-		let report = again.finish(Vec::new()).unwrap();
+		let report = again.finish(Vec::new(), Vec::new()).unwrap();
 		assert_eq!(
 			statuses(&report),
 			[
@@ -1161,7 +1203,7 @@ mod tests {
 				.iter()
 				.map(|j| (j.page, "<p>x</p>".to_owned()))
 				.collect();
-			prepared.finish(rendered).unwrap();
+			prepared.finish(rendered, Vec::new()).unwrap();
 			count
 		};
 		let write = |rel: &str, text: &str| {
@@ -1219,6 +1261,181 @@ mod tests {
 		let loaded = site2.config("");
 		let err = prepare_incremental_result(&loaded).unwrap_err();
 		assert!(err.contains("pages.layouts.dir is not set"), "{err}");
+	}
+
+	fn script_site(name: &str) -> (Site, Loaded) {
+		let site = Site::new(name);
+		site.write("src/js/app.ts", "import './util';\n");
+		site.write("src/js/util.ts", "export {};\n");
+		site.write("src/index.html", "<p>x</p>");
+		let loaded =
+			site.config(r#", "scripts": { "banner": "rev. {{year}}", "ignore": ["**/util.ts"] }"#);
+		(site, loaded)
+	}
+
+	fn prepare_scripts(loaded: &Loaded, esbuild: &str) -> Prepared {
+		prepare(
+			loaded,
+			&BuildOptions {
+				jobs: Some(1),
+				incremental: true,
+				esbuild_version: Some(esbuild.to_owned()),
+				..Default::default()
+			},
+			"file:///runtime.js",
+		)
+		.unwrap()
+	}
+
+	fn bundled(site: &Site, code: &str) -> Vec<ScriptOutput> {
+		vec![ScriptOutput {
+			id: 0,
+			code: code.to_owned(),
+			inputs: vec![
+				format!("{}/src/js/app.ts", site.root),
+				format!("{}/src/js/util.ts", site.root),
+			],
+		}]
+	}
+
+	#[test]
+	fn scripts_are_requested_from_esbuild_and_written_from_its_answer() {
+		let (site, loaded) = script_site("scripts-flow");
+		let prepared = prepare_scripts(&loaded, "0.1.0");
+		let request = kd_jsonc::parse(prepared.script_request_json().unwrap()).unwrap();
+		let entries = request.get("entries").and_then(|e| e.as_array()).unwrap();
+		assert_eq!(entries.len(), 1);
+		assert_eq!(entries[0].get("id").and_then(|i| i.as_f64()), Some(0.0));
+		assert!(
+			entries[0]
+				.get("input")
+				.and_then(|i| i.as_str())
+				.unwrap()
+				.ends_with("/src/js/app.ts")
+		);
+		assert!(
+			entries[0]
+				.get("output")
+				.and_then(|i| i.as_str())
+				.unwrap()
+				.ends_with("/out/js/app.js")
+		);
+		let options = request.get("options").unwrap();
+		assert_eq!(
+			options.get("target").and_then(|t| t.as_str()),
+			Some("es2022")
+		);
+		assert_eq!(options.get("sourcemap"), Some(&Value::Bool(false)));
+		let banner = options.get("banner").and_then(|b| b.as_str()).unwrap();
+		assert!(
+			banner.starts_with("/*\nrev. 20") && banner.ends_with("\n*/"),
+			"{banner}"
+		);
+
+		let report = prepared
+			.finish(Vec::new(), bundled(&site, "console.log(1);\n"))
+			.unwrap();
+		assert_eq!(report.assets.len(), 1);
+		assert_eq!(report.assets[0].kind, assets::AssetKind::Script);
+		assert_eq!(report.assets[0].status, Status::Built);
+		assert_eq!(site.read("out/js/app.js"), "console.log(1);\n");
+		assert!(report.to_json().contains(r#""kind":"script""#));
+	}
+
+	#[test]
+	fn a_script_is_rebuilt_when_an_input_or_esbuild_or_the_config_changes() {
+		let (site, loaded) = script_site("scripts-incremental");
+		let first = prepare_scripts(&loaded, "0.1.0");
+		first
+			.finish(Vec::new(), bundled(&site, "console.log(1);\n"))
+			.unwrap();
+
+		// Nothing changed: no request, the entry is reused.
+		let again = prepare_scripts(&loaded, "0.1.0");
+		assert!(again.script_request_json().is_none());
+		let report = again.finish(Vec::new(), Vec::new()).unwrap();
+		assert_eq!(report.assets[0].status, Status::Cached);
+		assert_eq!(site.read("out/js/app.js"), "console.log(1);\n");
+
+		// A file the bundle read (not the entry) changed.
+		site.write("src/js/util.ts", "export const changed = 1;\n");
+		let edited = prepare_scripts(&loaded, "0.1.0");
+		assert!(edited.script_request_json().is_some());
+		edited
+			.finish(Vec::new(), bundled(&site, "console.log(2);\n"))
+			.unwrap();
+		assert!(
+			prepare_scripts(&loaded, "0.1.0")
+				.script_request_json()
+				.is_none()
+		);
+
+		// Another esbuild may print other bytes.
+		assert!(
+			prepare_scripts(&loaded, "0.2.0")
+				.script_request_json()
+				.is_some()
+		);
+
+		// Another config (here the banner) is another environment.
+		let other =
+			site.config(r#", "scripts": { "banner": "rev. changed", "ignore": ["**/util.ts"] }"#);
+		assert!(
+			prepare_scripts(&other, "0.1.0")
+				.script_request_json()
+				.is_some()
+		);
+	}
+
+	#[test]
+	fn an_input_edited_while_the_build_ran_is_not_recorded_as_current() {
+		let (site, loaded) = script_site("scripts-race");
+		let prepared = prepare_scripts(&loaded, "0.1.0");
+		assert!(prepared.script_request_json().is_some());
+		// esbuild read `util.ts`, then the author saved it again.
+		site.write("src/js/util.ts", "export const late = 1;\n");
+		prepared
+			.finish(Vec::new(), bundled(&site, "console.log(1);\n"))
+			.unwrap();
+		assert!(
+			prepare_scripts(&loaded, "0.1.0")
+				.script_request_json()
+				.is_some(),
+			"the next build must build it again"
+		);
+	}
+
+	#[test]
+	fn a_missing_script_output_and_scripts_without_esbuild_are_errors() {
+		let (_site, loaded) = script_site("scripts-errors");
+		let prepared = prepare_scripts(&loaded, "0.1.0");
+		let e = prepared.finish(Vec::new(), Vec::new()).unwrap_err();
+		assert!(
+			e.ends_with("src/js/app.ts: the script was not built"),
+			"{e}"
+		);
+
+		let prepared = prepare_scripts(&loaded, "0.1.0");
+		let unknown = vec![ScriptOutput {
+			id: 9,
+			code: String::new(),
+			inputs: Vec::new(),
+		}];
+		let e = prepared.finish(Vec::new(), unknown).unwrap_err();
+		assert_eq!(e, "a script output for 9, which does not exist");
+
+		let e = build(&loaded, &BuildOptions::default()).unwrap_err();
+		assert!(e.starts_with("scripts need esbuild"), "{e}");
+	}
+
+	#[test]
+	fn a_script_may_not_be_written_over_a_page() {
+		let site = Site::new("scripts-vs-page");
+		site.write("src/a.html", "<p>a</p>");
+		site.write("src/a.ts", "export {};\n");
+		let loaded = site.config(r#", "pages": { "outputExtension": ".js" }"#);
+		let e = prepare(&loaded, &BuildOptions::default(), "file:///runtime.js").unwrap_err();
+		assert!(e.contains("is also the output of a page"), "{e}");
 	}
 
 	fn prepare_incremental_result(loaded: &Loaded) -> Result<Prepared, String> {

@@ -29,6 +29,7 @@ const report: BuildReport = {
 			meta: {},
 		},
 	],
+	assets: [],
 	warnings: [],
 	elapsedMs: 1234,
 };
@@ -71,7 +72,39 @@ describe('summarize', () => {
 
 	test('an empty site reports zero pages without a status list', () => {
 		expect(
-			plain(summarize({ version: 1, pages: [], warnings: [], elapsedMs: 0 }, false)),
+			plain(
+				summarize(
+					{ version: 1, pages: [], assets: [], warnings: [], elapsedMs: 0 },
+					false,
+				),
+			),
 		).toBe('Build completed in 0.00s ()');
+	});
+
+	test('assets are counted with the pages and listed by output path when verbose', () => {
+		const withAssets: BuildReport = {
+			...report,
+			assets: [
+				{
+					kind: 'script',
+					inputPath: '/s/js/app.ts',
+					outputPath: '/o/js/app.js',
+					status: 'built',
+				},
+				{
+					kind: 'style',
+					inputPath: '/s/css/a.css',
+					outputPath: '/o/css/a.css',
+					status: 'cached',
+				},
+			],
+		};
+		expect(plain(summarize(withAssets, false))).toBe(
+			'Build completed in 1.23s (3 built, 2 cached)',
+		);
+		expect(plain(summarize(withAssets, true)).split('\n').slice(3, 5)).toEqual([
+			'  built     /o/js/app.js',
+			'  cached    /o/css/a.css',
+		]);
 	});
 });

@@ -204,11 +204,13 @@ pub fn fill(template: &str, time: LocalTime, version: Option<&str>) -> String {
 }
 
 /// The banner for a JavaScript file: a comment, as v2's `createBanner` made
-/// it (`/*\n<text>\n*/`) unless the template already is one.
+/// it (`/*\n<text>\n*/`) unless the template already starts a comment (`/*`
+/// or `//`). Why wrap: text that is not a comment would break the bundle.
 #[must_use]
 pub fn for_script(template: &str, time: LocalTime, version: Option<&str>) -> String {
 	let text = fill(template, time, version);
-	if text.trim_start().starts_with("/*") {
+	let head = text.trim_start();
+	if head.starts_with("/*") || head.starts_with("//") {
 		text
 	} else {
 		format!("/*\n{text}\n*/")
@@ -317,6 +319,7 @@ mod tests {
 			for_script("/*! kept {{year}} */", T, None),
 			"/*! kept 2023 */"
 		);
+		assert_eq!(for_script("// {{year}}", T, None), "// 2023");
 		assert_eq!(
 			for_style("rev. {{date:YYYY-MM-DD}}", T, None),
 			"/*!\nrev. 2023-11-14\n*/"

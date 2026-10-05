@@ -177,6 +177,18 @@ fn build_options_from_json(json: &str) -> Result<kd_core::BuildOptions, String> 
 		Some(kd_jsonc::Value::String(s)) => Some(s.clone()),
 		Some(_) => return Err("build options: cacheDir must be a string".to_string()),
 	};
+	let tz_offset_minutes = match value.get("tzOffsetMinutes") {
+		None | Some(kd_jsonc::Value::Null) => 0,
+		Some(kd_jsonc::Value::Number(n)) if n.fract() == 0.0 && n.abs() <= 1440.0 => *n as i32,
+		Some(_) => {
+			return Err("build options: tzOffsetMinutes must be an integer of minutes".to_string());
+		}
+	};
+	let esbuild_version = match value.get("esbuildVersion") {
+		None | Some(kd_jsonc::Value::Null) => None,
+		Some(kd_jsonc::Value::String(s)) => Some(s.clone()),
+		Some(_) => return Err("build options: esbuildVersion must be a string".to_string()),
+	};
 	Ok(kd_core::BuildOptions {
 		incremental: b("incremental")?,
 		force: b("force")?,
@@ -184,6 +196,9 @@ fn build_options_from_json(json: &str) -> Result<kd_core::BuildOptions, String> 
 		targets,
 		jobs,
 		cache_dir,
+		tz_offset_minutes,
+		esbuild_version,
+		serving: b("serving")?,
 	})
 }
 
