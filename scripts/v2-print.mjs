@@ -7,9 +7,30 @@
  * `prettierOnly` stops after prettier, to check the layout before the
  * minifier's attribute rewrites are added on top.
  */
+import { minify } from 'html-minifier-terser';
 import { format } from 'prettier';
 
 import { domSerialize } from '../packages/kamado/src/utils/dom.ts';
+
+/**
+ * html-minifier-terser as v2 calls it, without the code minifiers (those are
+ * compared on their own).
+ * @param {string} content - The prettier output
+ * @returns {Promise<string>} The minified HTML
+ */
+export async function v2Minify(content) {
+	return await minify(content, {
+		collapseWhitespace: false,
+		collapseBooleanAttributes: true,
+		removeComments: false,
+		removeRedundantAttributes: true,
+		removeScriptTypeAttributes: true,
+		removeStyleLinkTypeAttributes: true,
+		useShortDoctype: false,
+		minifyCSS: false,
+		minifyJS: false,
+	});
+}
 
 /**
  * @typedef {object} PrintOptions

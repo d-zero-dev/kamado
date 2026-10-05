@@ -84,11 +84,11 @@ fn named_child(page: &Page, parent: NodeId, name: &str) -> Option<NodeId> {
 }
 
 /// Applies the injections that belong to `phase`, in order.
-pub fn apply(page: &mut Page, injects: &[Inject], phase: Phase) {
+pub fn apply<'i>(page: &mut Page, injects: impl IntoIterator<Item = &'i Inject>, phase: Phase) {
 	let Some(root) = page.root else {
 		return;
 	};
-	for inject in injects.iter().filter(|i| i.applies_in(phase)) {
+	for inject in injects.into_iter().filter(|i| i.applies_in(phase)) {
 		let (tag, at_start) = match inject.position {
 			InjectPosition::HeadStart => ("head", true),
 			InjectPosition::HeadEnd => ("head", false),

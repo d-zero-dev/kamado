@@ -9,6 +9,7 @@ mod entities_table;
 pub mod image_sizes;
 pub mod includes;
 pub mod inject;
+pub mod minify;
 pub mod page;
 pub mod parser;
 pub mod pattern;

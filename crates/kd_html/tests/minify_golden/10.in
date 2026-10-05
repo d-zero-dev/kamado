@@ -1,0 +1,3 @@
+<p>a</p>
+<!-- htmlmin:ignore --><p   class="x"   disabled="disabled">  keep  </p><!-- htmlmin:ignore -->
+<p   class="y   z">b</p>

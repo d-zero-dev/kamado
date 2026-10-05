@@ -758,7 +758,11 @@ fn subtree(doc: &Document, node: NodeId) -> Vec<NodeId> {
 ///
 /// A [`RuleError`] when an action cannot be applied (e.g. removing the root
 /// element, or a pattern that ran out of budget).
-pub fn apply(page: &mut Page, rules: &[Rule], ctx: &Context<'_>) -> Result<(), RuleError> {
+pub fn apply<'r>(
+	page: &mut Page,
+	rules: impl IntoIterator<Item = &'r Rule>,
+	ctx: &Context<'_>,
+) -> Result<(), RuleError> {
 	for rule in rules {
 		let matched = rule.selector.select_all(&page.doc);
 		for node in matched {

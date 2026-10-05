@@ -1,0 +1,3 @@
+<img srcset="a.jpg, b.jpg 2x">
+<source srcset="a.webp">
+<div srcset=" a  1x ">x</div>

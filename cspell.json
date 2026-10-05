@@ -6,6 +6,8 @@
 		"crates/kd_html/src/entities_table.rs",
 		// Differential test data: deliberately misspelled tags and names.
 		"crates/kd_html/tests/golden/**",
+		"crates/kd_html/tests/minify_golden/**",
+		"scripts/generate-minify-golden.mjs",
 		"scripts/html-golden-cases.mjs"
 	],
 	// NIST SHA-256 test vectors are long lowercase letter strings, not words.
@@ -21,6 +23,13 @@
 		"ampb",
 		"dedented",
 		"ngsp",
+		"minifiers",
+		"ncname",
+		"qname",
+		"jscript",
+		"alnum",
+		"kdignore",
+		"kdfrag",
 		"srcx",
 		"avifmif",
 		"cgbi",
