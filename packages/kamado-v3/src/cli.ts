@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 /* eslint-disable no-console -- the CLI's job is to print */
-import type { BuildReport } from './build.js';
-
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs, styleText } from 'node:util';
 
 import { build } from './build.js';
+import { summarize } from './summary.js';
 
 const USAGE = `Usage:
   kamado build [globs...] [--incremental] [--force] [--skip-unchanged]
@@ -26,34 +25,6 @@ function resolveConfig(configFlag: string | undefined): string {
 		throw new Error(`config file not found: ${file}`);
 	}
 	return file;
-}
-
-/**
- * Formats the report: one line per page when verbose, warnings, then the
- * totals by status.
- * @param report - The build report
- * @param verbose - Whether to list every page
- */
-function summarize(report: BuildReport, verbose: boolean): string {
-	const counts = new Map<string, number>();
-	for (const page of report.pages) {
-		counts.set(page.status, (counts.get(page.status) ?? 0) + 1);
-	}
-	const parts = [...counts.entries()].map(([status, n]) => `${n} ${status}`);
-	const lines: string[] = [];
-	if (verbose) {
-		for (const page of report.pages) {
-			lines.push(`  ${styleText('dim', page.status.padEnd(9))} ${page.url}`);
-		}
-	}
-	for (const warning of report.warnings) {
-		lines.push(styleText('yellow', `warning: ${warning}`));
-	}
-	lines.push(
-		styleText('green', `Build completed in ${(report.elapsedMs / 1000).toFixed(2)}s`) +
-			` (${parts.join(', ')})`,
-	);
-	return lines.join('\n');
 }
 
 /**
