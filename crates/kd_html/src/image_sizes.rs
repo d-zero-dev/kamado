@@ -74,6 +74,12 @@ fn normalize(path: &str) -> String {
 
 /// The absolute file for `src_path`, or `None` when it leaves `root`.
 fn resolve(root: &str, src_path: &str) -> Option<String> {
+	// Containment is judged on `/`-separated text; a backslash is a separator
+	// to a reader on another platform and NUL ends a path in C APIs, so such
+	// a `src` is not read at all.
+	if src_path.contains(['\\', '\0']) {
+		return None;
+	}
 	let root = normalize(root);
 	// A leading `..` would be clamped by `normalize`; judge the climb on the
 	// segments instead, as `path.relative(root, file).startsWith('..')` does.
@@ -265,7 +271,7 @@ mod tests {
 	#[test]
 	fn paths_that_leave_the_output_directory_are_not_read() {
 		let files = Files::new(&[("/etc/x.svg", SVG_A), ("/x.svg", SVG_A)]);
-		let html = "<img src=\"../x.svg\"><img src=\"/../x.svg\"><img src=\"a/../../x.svg\"><img src=\"../../etc/x.svg\">";
+		let html = "<img src=\"../x.svg\"><img src=\"/../x.svg\"><img src=\"a/../../x.svg\"><img src=\"../../etc/x.svg\"><img src=\"..\\..\\x.svg\"><img src=\"a\\b.svg\">";
 		assert_eq!(run(html, &files, false).unwrap(), html);
 		assert!(
 			files.asked.borrow().is_empty(),

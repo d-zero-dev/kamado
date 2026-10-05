@@ -29,8 +29,14 @@ use crate::dom::{Document, NodeId, NodeKind, ROOT};
 use crate::parser::parse;
 use crate::selector::Selector;
 
-/// How deep includes may nest.
+/// How deep includes may nest: a page may include a file that includes a file
+/// ... [`MAX_DEPTH`] times, and not one more.
 pub const MAX_DEPTH: usize = 16;
+
+/// How many includes one page may expand in total. Nesting and cycle checks
+/// do not bound a file that includes the next one ten times over (ten to the
+/// power of the depth), so the total is bounded too.
+pub const MAX_EXPANSIONS: usize = 10_000;
 
 /// Reads files for the includes. The build implements this to record every
 /// file it is asked for, including the ones that do not exist.
@@ -112,6 +118,8 @@ pub struct Env<'a> {
 pub struct Report {
 	/// Messages for includes that were skipped under [`OnMissing::Warn`].
 	pub warnings: Vec<String>,
+	/// How many includes were read and expanded (nested ones included).
+	pub expansions: usize,
 }
 
 // ----- paths (POSIX strings) -----
@@ -145,6 +153,14 @@ fn within(path: &str, root: &str) -> bool {
 /// Joins `relative` onto `base` (both absolute/normalized) refusing anything
 /// that ends up outside `root`.
 fn confine(base: &str, relative: &str, roots: &[&str], what: &str) -> Result<String, IncludeError> {
+	// Containment is judged on `/`-separated text. A backslash would be a
+	// separator to a reader on another platform, and NUL ends a path in C APIs:
+	// either could make the path the reader opens differ from the one judged.
+	if relative.contains(['\\', '\0']) {
+		return Err(IncludeError(format!(
+			"the include path `{what}` contains a backslash or NUL"
+		)));
+	}
 	let joined = if relative.starts_with('/') {
 		normalize(relative)
 	} else {
@@ -410,20 +426,26 @@ fn expand(
 	stack: &mut Vec<String>,
 	report: &mut Report,
 ) -> Result<(), IncludeError> {
-	if stack.len() > MAX_DEPTH {
+	// The stack holds the page itself as well as the files being expanded.
+	if stack.len() > MAX_DEPTH + 1 {
 		return Err(IncludeError(format!(
 			"includes are nested more than {MAX_DEPTH} levels deep: {}",
 			stack.join(" -> ")
 		)));
 	}
 	for site in find_sites(doc, scope, rules, bge) {
-		// A site whose node was already replaced by an earlier one (an
-		// enclosing container) is gone from the page.
-		if doc.parent(site.target).is_none() && site.target != site.node {
+		// A site that an earlier one removed (it sat inside an element that was
+		// replaced, or inside the container being swapped) is no longer part of
+		// what is being expanded: reading its file would be pointless, and
+		// would fail the page for a file nothing refers to any more.
+		if !attached(doc, site.node, scope) || !attached(doc, site.target, scope) {
 			continue;
 		}
-		if doc.parent(site.node).is_none() {
-			continue;
+		report.expansions += 1;
+		if report.expansions > MAX_EXPANSIONS {
+			return Err(IncludeError(format!(
+				"a page may expand at most {MAX_EXPANSIONS} includes"
+			)));
 		}
 		let rule = &rules[site.rule];
 		let path = resolve(rule, &site, env, current_file)?;
@@ -493,6 +515,18 @@ fn expand(
 		}
 	}
 	Ok(())
+}
+
+/// Whether `node` is still below `scope`.
+fn attached(doc: &Document, node: NodeId, scope: NodeId) -> bool {
+	let mut cursor = node;
+	while let Some(parent) = doc.parent(cursor) {
+		if parent == scope {
+			return true;
+		}
+		cursor = parent;
+	}
+	false
 }
 
 fn remove_site(doc: &mut Document, rule: &Include, site: &Site) {
@@ -833,5 +867,226 @@ mod tests {
 			run("<!--#include virtual=\"/p.html\"-->", &rules, &files).unwrap(),
 			"<?php echo $x; ?><p class=\"<?= $c ?>\">x</p>"
 		);
+	}
+
+	fn chain(len: usize) -> Files {
+		let mut files: Vec<(&'static str, &'static str)> = Vec::new();
+		for i in 0..len {
+			let path: &'static str = Box::leak(format!("/site/src/a/f{i}.html").into_boxed_str());
+			let body: &'static str = if i + 1 == len {
+				"<i>leaf</i>"
+			} else {
+				Box::leak(format!("<!-- @include(f{}.html) -->", i + 1).into_boxed_str())
+			};
+			files.push((path, body));
+		}
+		Files::new(&files)
+	}
+
+	#[test]
+	fn exactly_max_depth_includes_are_allowed_and_one_more_fails() {
+		let rules = [Include::IncludeComment {
+			root: "/site/src".to_owned(),
+		}];
+		assert_eq!(
+			run("<!-- @include(f0.html) -->", &rules, &chain(MAX_DEPTH)).unwrap(),
+			"<i>leaf</i>"
+		);
+		let error = run("<!-- @include(f0.html) -->", &rules, &chain(MAX_DEPTH + 1)).unwrap_err();
+		assert!(error.0.contains("levels deep"), "{error}");
+	}
+
+	#[test]
+	fn a_file_that_includes_the_next_one_many_times_over_hits_the_total_limit() {
+		// Each level includes the next ten times: 10^N expansions without a
+		// cycle and within the depth limit, so only the total can stop it.
+		let mut files: Vec<(&'static str, &'static str)> = Vec::new();
+		for i in 0..8 {
+			let path: &'static str = Box::leak(format!("/site/src/a/f{i}.html").into_boxed_str());
+			let body: &'static str = if i == 7 {
+				"<i></i>"
+			} else {
+				Box::leak(
+					format!("<!-- @include(f{}.html) -->", i + 1)
+						.repeat(10)
+						.into_boxed_str(),
+				)
+			};
+			files.push((path, body));
+		}
+		let files = Files::new(&files);
+		let rules = [Include::IncludeComment {
+			root: "/site/src".to_owned(),
+		}];
+		let error = run("<!-- @include(f0.html) -->", &rules, &files).unwrap_err();
+		assert!(error.0.contains("at most"), "{error}");
+	}
+
+	#[test]
+	fn a_sibling_directory_sharing_the_root_prefix_is_outside() {
+		let files = Files::new(&[("/site/srcx/y.html", "E"), ("/site/dist-evil/y.html", "E")]);
+		let comment = [Include::IncludeComment {
+			root: "/site/src".to_owned(),
+		}];
+		assert!(run("<!-- @include(../../srcx/y.html) -->", &comment, &files).is_err());
+		let ssi = [Include::Ssi { dir: None }];
+		assert!(
+			run(
+				"<!--#include virtual=\"../dist-evil/y.html\"-->",
+				&ssi,
+				&files
+			)
+			.is_err()
+		);
+		let ssi_dir = [Include::Ssi {
+			dir: Some("/www/root".to_owned()),
+		}];
+		assert!(
+			run(
+				"<!--#include virtual=\"/www/root-evil/y.html\"-->",
+				&ssi_dir,
+				&files
+			)
+			.is_err()
+		);
+		assert!(files.reads.borrow().is_empty());
+	}
+
+	#[test]
+	fn the_page_cannot_include_itself() {
+		let files = Files::new(&[("/site/src/a/page.html", "x")]);
+		let rules = [Include::IncludeComment {
+			root: "/site/src".to_owned(),
+		}];
+		let error = run("<!-- @include(page.html) -->", &rules, &files).unwrap_err();
+		assert!(error.0.contains("includes itself"), "{error}");
+	}
+
+	#[test]
+	fn backslashes_and_nul_are_refused_without_reading() {
+		let files = Files::new(&[]);
+		let rules = [Include::IncludeComment {
+			root: "/site/src".to_owned(),
+		}];
+		for bad in ["..\\..\\x.html", "a\\..\\b.html", "a\0b.html"] {
+			let html = format!("<!-- @include({bad}) -->");
+			assert!(run(&html, &rules, &files).is_err(), "{bad:?}");
+		}
+		assert!(files.reads.borrow().is_empty());
+	}
+
+	#[test]
+	fn the_same_file_may_be_included_twice_as_siblings() {
+		let files = Files::new(&[("/site/src/a/x.html", "<i>x</i>")]);
+		let rules = [Include::IncludeComment {
+			root: "/site/src".to_owned(),
+		}];
+		assert_eq!(
+			run(
+				"<!-- @include(x.html) --><!-- @include(x.html) -->",
+				&rules,
+				&files
+			)
+			.unwrap(),
+			"<i>x</i><i>x</i>"
+		);
+	}
+
+	#[test]
+	fn includes_inside_a_replaced_element_are_not_read() {
+		let files = Files::new(&[("/site/src/outer.html", "<b>outer</b>")]);
+		let rules = [
+			Include::Selector {
+				selector: Selector::parse("[data-include]").unwrap(),
+				attr: "data-include".to_owned(),
+				root: "/site/src".to_owned(),
+				pick: None,
+				replace: Replace::Element,
+			},
+			Include::IncludeComment {
+				root: "/site/src".to_owned(),
+			},
+		];
+		// The comment sits inside the element that the first rule replaces; its
+		// file does not exist, and must not be asked for.
+		let html = "<div data-include=\"/outer.html\"><!-- @include(/never.html) --></div>";
+		assert_eq!(run(html, &rules, &files).unwrap(), "<b>outer</b>");
+		assert_eq!(files.reads.borrow().as_slice(), ["/site/src/outer.html"]);
+	}
+
+	#[test]
+	fn burger_editor_missing_imports_remove_the_container() {
+		let files = Files::new(&[]);
+		let rules = [Include::BurgerEditorImport {
+			root: "/site/src".to_owned(),
+		}];
+		let html = "<main><div data-bge-container><div data-bgi=\"import\"><bge-import src=\"/x.html\"></bge-import></div></div><p>k</p></main>";
+		for policy in [OnMissing::Warn, OnMissing::Silent] {
+			let mut doc = parse(html);
+			apply(&mut doc, &rules, &env(&files, policy)).unwrap();
+			assert_eq!(document_html(&doc), "<main><p>k</p></main>");
+		}
+	}
+
+	#[test]
+	fn two_imports_in_one_container_swap_it_once() {
+		let files = Files::new(&[
+			("/site/src/a.html", "<div data-bge-container=\"A\">a</div>"),
+			("/site/src/b.html", "<div data-bge-container=\"B\">b</div>"),
+		]);
+		let rules = [Include::BurgerEditorImport {
+			root: "/site/src".to_owned(),
+		}];
+		let html = "<div data-bge-container><div data-bgi=\"import\"><bge-import src=\"/a.html\"></bge-import><bge-import src=\"/b.html\"></bge-import></div></div>";
+		assert_eq!(
+			run(html, &rules, &files).unwrap(),
+			"<div data-bge-container=\"A\">a</div>"
+		);
+		assert_eq!(files.reads.borrow().as_slice(), ["/site/src/a.html"]);
+	}
+
+	#[test]
+	fn directive_variants() {
+		let files = Files::new(&[("/site/dist/a.html", "A")]);
+		let ssi = [Include::Ssi { dir: None }];
+		assert_eq!(
+			run("<!--#include virtual=\"/a.html\"-->", &ssi, &files).unwrap(),
+			"A"
+		);
+		assert_eq!(
+			run("<!--  #include\tvirtual=\"/a.html\"  -->", &ssi, &files).unwrap(),
+			"A"
+		);
+		for ignored in [
+			"<!--#include virtual=''-->",
+			"<!--#include virtual=\"\"-->",
+			"<!--#include virtual=\"/a.html\" extra-->",
+			"<!--#include virtual='/a.html'-->",
+		] {
+			assert_eq!(run(ignored, &ssi, &files).unwrap(), ignored, "{ignored}");
+		}
+		let files = Files::new(&[("/site/src/a/x.html", "X")]);
+		let comment = [Include::IncludeComment {
+			root: "/site/src".to_owned(),
+		}];
+		assert_eq!(
+			run("<!-- @include( \"x.html\" ) -->", &comment, &files).unwrap(),
+			"X"
+		);
+		assert_eq!(
+			run("<!-- @include('x.html') -->", &comment, &files).unwrap(),
+			"X"
+		);
+		for ignored in [
+			"<!-- @include() -->",
+			"<!-- @include(x.html -->",
+			"<!-- @includes(x.html) -->",
+		] {
+			assert_eq!(
+				run(ignored, &comment, &files).unwrap(),
+				ignored,
+				"{ignored}"
+			);
+		}
 	}
 }

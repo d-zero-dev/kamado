@@ -52,6 +52,13 @@ fn u32_be(b: &[u8], at: usize) -> Result<u32, ImageError> {
 	}
 }
 
+fn u32_le(b: &[u8], at: usize) -> Result<u32, ImageError> {
+	match b.get(at..at + 4) {
+		Some(s) => Ok(u32::from_le_bytes([s[0], s[1], s[2], s[3]])),
+		None => err("the image is cut off"),
+	}
+}
+
 fn u16_le(b: &[u8], at: usize) -> Result<u32, ImageError> {
 	match b.get(at..at + 2) {
 		Some(s) => Ok(u32::from(u16::from_le_bytes([s[0], s[1]]))),
@@ -72,6 +79,29 @@ fn size(width: u64, height: u64) -> Option<Size> {
 		width: w,
 		height: h,
 	})
+}
+
+// ----- GIF and BMP -----
+// Not on the list of extensions `imageSizes` measures, but a file named
+// `.png` that holds one of these was measured by v2, and failing the page
+// for it would be a regression.
+
+fn is_gif(b: &[u8]) -> bool {
+	matches!(b.get(0..6), Some(b"GIF87a" | b"GIF89a"))
+}
+
+fn gif(b: &[u8]) -> Result<Option<Size>, ImageError> {
+	Ok(size(u64::from(u16_le(b, 6)?), u64::from(u16_le(b, 8)?)))
+}
+
+fn is_bmp(b: &[u8]) -> bool {
+	b.get(0..2) == Some(b"BM")
+}
+
+fn bmp(b: &[u8]) -> Result<Option<Size>, ImageError> {
+	let width = u64::from(u32_le(b, 18)?);
+	let height = i64::from(u32_le(b, 22)? as i32).unsigned_abs();
+	Ok(size(width, height))
 }
 
 // ----- PNG -----
@@ -244,7 +274,7 @@ fn heif(b: &[u8]) -> Result<Option<Size>, ImageError> {
 	};
 	let mut largest = first;
 	for &(w, h) in &images[1..] {
-		if w * h > largest.0 * largest.1 {
+		if i128::from(w) * i128::from(h) > i128::from(largest.0) * i128::from(largest.1) {
 			largest = (w, h);
 		}
 	}
@@ -454,6 +484,12 @@ pub fn size_of(bytes: &[u8]) -> Result<Option<Size>, ImageError> {
 	if is_heif(bytes) {
 		return heif(bytes);
 	}
+	if is_gif(bytes) {
+		return gif(bytes);
+	}
+	if is_bmp(bytes) {
+		return bmp(bytes);
+	}
 	if is_svg(bytes) {
 		return svg(bytes);
 	}
@@ -657,5 +693,47 @@ mod tests {
 		assert!(size_of(b"GIF89a").is_err());
 		assert!(size_of(b"plain text").is_err());
 		assert!(size_of(&png_bytes(1, 1)[..10]).is_err());
+	}
+
+	#[test]
+	fn gif_and_bmp_sizes() {
+		let mut g = b"GIF89a".to_vec();
+		g.extend_from_slice(&(120u16).to_le_bytes());
+		g.extend_from_slice(&(80u16).to_le_bytes());
+		assert_eq!(dims(&g), Some((120, 80)));
+		let mut b = vec![b'B', b'M'];
+		b.extend_from_slice(&[0; 16]);
+		b.extend_from_slice(&(64u32).to_le_bytes());
+		b.extend_from_slice(&(-48i32).to_le_bytes());
+		assert_eq!(
+			dims(&b),
+			Some((64, 48)),
+			"a bottom-up BMP stores its height negated"
+		);
+		assert!(size_of(b"GIF89").is_err());
+	}
+
+	#[test]
+	fn avif_with_huge_dimensions_does_not_overflow() {
+		assert_eq!(
+			dims(&avif_bytes(&[(u32::MAX, u32::MAX), (1, 1)])),
+			Some((u32::MAX, u32::MAX))
+		);
+	}
+
+	#[test]
+	fn jpeg_segments_that_run_past_the_input_are_corrupt() {
+		assert!(size_of(&[0xff, 0xd8, 0xff, 0xe0, 0xff, 0xff, 0, 0]).is_err());
+	}
+
+	#[test]
+	fn svg_detection_looks_at_the_first_kilobyte_only() {
+		let mut late = b"<!--".to_vec();
+		late.extend_from_slice(&[b'x'; 1100]);
+		late.extend_from_slice(b"--><svg width=\"2\" height=\"3\"></svg>");
+		assert!(size_of(&late).is_err());
+		let mut bom = vec![0xef, 0xbb, 0xbf];
+		bom.extend_from_slice(b"<svg width=\"2\" height=\"3\"></svg>");
+		assert_eq!(dims(&bom), Some((2, 3)));
 	}
 }

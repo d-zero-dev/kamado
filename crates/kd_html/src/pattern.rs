@@ -17,6 +17,8 @@ use std::cell::Cell;
 const STEP_BUDGET: u64 = 2_000_000;
 const MAX_REPEAT: usize = 1000;
 const MAX_DEPTH: usize = 64;
+/// The longest text a pattern is matched against (attribute names are short).
+const MAX_INPUT_CHARS: usize = 512;
 
 /// A pattern that failed to compile, or a match that ran out of budget.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -391,6 +393,13 @@ impl Pattern {
 	/// A [`PatternError`] when the search exceeded its step budget.
 	pub fn is_match(&self, text: &str) -> Result<bool, PatternError> {
 		let input: Vec<char> = text.chars().collect();
+		// The matcher recurses once per repeated character, so a long input
+		// would exhaust the stack before the step budget notices.
+		if input.len() > MAX_INPUT_CHARS {
+			return Err(PatternError(format!(
+				"the text is longer than the {MAX_INPUT_CHARS} characters a pattern is matched against"
+			)));
+		}
 		let matcher = Matcher {
 			input: &input,
 			steps: Cell::new(0),
@@ -480,5 +489,21 @@ mod tests {
 	fn multibyte_text_is_matched_by_characters() {
 		assert!(is("^.$", "日"));
 		assert!(is("^data-.+$", "data-日本"));
+	}
+
+	#[test]
+	fn text_longer_than_the_limit_is_refused_before_it_can_exhaust_the_stack() {
+		let p = Pattern::new("^[a-z]+$").unwrap();
+		let handle = std::thread::Builder::new()
+			.stack_size(1024 * 1024)
+			.spawn(move || {
+				let at_the_limit = "a".repeat(MAX_INPUT_CHARS);
+				let over = "a".repeat(MAX_INPUT_CHARS + 1);
+				(p.is_match(&at_the_limit), p.is_match(&over).is_err())
+			})
+			.unwrap();
+		let (at_the_limit, over_is_error) = handle.join().unwrap();
+		assert_eq!(at_the_limit, Ok(true));
+		assert!(over_is_error);
 	}
 }

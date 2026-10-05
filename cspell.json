@@ -3,7 +3,10 @@
 	"ignorePaths": [
 		"**/CHANGELOG.md",
 		"**/CODEOWNERS",
-		"crates/kd_html/src/entities_table.rs"
+		"crates/kd_html/src/entities_table.rs",
+		// Differential test data: deliberately misspelled tags and names.
+		"crates/kd_html/tests/golden/**",
+		"scripts/html-golden-cases.mjs"
 	],
 	// NIST SHA-256 test vectors are long lowercase letter strings, not words.
 	// Glob tests use short nonsense paths (abbbc, axxb, acdf, acef) to show
@@ -16,6 +19,7 @@
 		//
 		"amet",
 		"ampb",
+		"srcx",
 		"avifmif",
 		"cgbi",
 		"ftyp",

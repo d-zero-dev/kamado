@@ -12,9 +12,12 @@
 //! Deliberate departures from v2 (each one fixes lost or corrupted content):
 //! - `<?...?>` is kept as a processing-instruction node, verbatim. v2 dropped
 //!   it, which silently deleted server-side includes from migrated pages.
-//! - Text inside `<title>` is raw, like `<textarea>` and `<script>`: v2
-//!   decoded references there and then wrote them back unescaped, turning
-//!   `&lt;` into a literal `<`.
+//! - `<title>` text is decoded like v2 does and printed like v2 does, except
+//!   where v2's output would not read back as the same text: a `&amp;` that
+//!   would turn into a character reference with the text after it
+//!   (`&amp;copy`), and a `&lt;` that would turn into the start of `</title>`,
+//!   stay as written. (v2 decoded them and wrote the result unescaped, which
+//!   changed the title's text, and could end the title early.)
 //!
 //! Everything else, including the quirks that look wrong (`<a href=x/>` has
 //! the value `x/`, a stray `</p>` creates an empty `<p>`, tables get no
@@ -131,7 +134,7 @@ fn is_html_integration_element(name: &str) -> bool {
 }
 
 /// JavaScript's `\s`: used by `classList`, which normalizes `class` values.
-fn is_js_space(c: char) -> bool {
+pub(crate) fn is_js_space(c: char) -> bool {
 	matches!(
 		c,
 		'\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r' | ' ' | '\u{A0}' | '\u{1680}' | '\u{2000}'
@@ -204,6 +207,10 @@ struct Machine<'a> {
 	node: NodeId,
 	owner_svg: Option<NodeId>,
 	pending_doctype: Vec<Doctype>,
+
+	/// The last search for a `?>` (where it started, where it found one):
+	/// `<?a>` repeated would otherwise scan to the end of the input each time.
+	pi_search: Option<(isize, Option<isize>)>,
 }
 
 impl<'a> Machine<'a> {
@@ -228,6 +235,7 @@ impl<'a> Machine<'a> {
 			node: ROOT,
 			owner_svg: None,
 			pending_doctype: Vec::new(),
+			pi_search: None,
 		}
 	}
 
@@ -343,6 +351,38 @@ impl<'a> Machine<'a> {
 		}
 	}
 
+	/// A character reference in `<title>`: decoded, except when the decoded
+	/// text, written unescaped as it is, would read as something else.
+	fn start_title_entity(&mut self) {
+		let entity_start = self.index as usize;
+		let rest = &self.src[entity_start..];
+		let Some((text, consumed)) = entities::decode_one(rest, Context::Text) else {
+			return;
+		};
+		let after = &rest[consumed..];
+		let ambiguous = match text.as_str() {
+			// `&amp;copy` is the text `&copy`; as `&copy` it would be a reference.
+			// No reference name is longer than 32 bytes, so a short look ahead
+			// is all the check needs.
+			"&" => {
+				let mut look = after.len().min(40);
+				while !after.is_char_boundary(look) {
+					look -= 1;
+				}
+				entities::decode_one(&format!("&{}", &after[..look]), Context::Text).is_some()
+			}
+			// `&lt;/title&gt;` must not become a tag that ends the title.
+			"<" => after
+				.as_bytes()
+				.get(..6)
+				.is_some_and(|b| b.eq_ignore_ascii_case(b"/title")),
+			_ => false,
+		};
+		if !ambiguous {
+			self.start_entity(Context::Text);
+		}
+	}
+
 	fn state_special_start_sequence(&mut self, c: u8) {
 		let is_end = self.sequence_index == self.current_sequence.len();
 		let is_match = if is_end {
@@ -378,7 +418,13 @@ impl<'a> Machine<'a> {
 		if (c | 0x20) == self.current_sequence[self.sequence_index] {
 			self.sequence_index += 1;
 		} else if self.sequence_index == 0 {
-			if self.fast_forward_to(b'<') {
+			if self.current_sequence == TITLE_END {
+				// Character references are decoded inside <title> (and nowhere
+				// else in special tags), so there is no jumping ahead.
+				if c == b'&' {
+					self.start_title_entity();
+				}
+			} else if self.fast_forward_to(b'<') {
 				self.sequence_index = 1;
 			}
 		} else {
@@ -621,8 +667,9 @@ impl<'a> Machine<'a> {
 		let _ = c;
 		let start = self.index; // first byte after `<?`
 		let rest = &self.buf[start as usize..];
-		let end = find_subslice(rest, b"?>")
-			.map(|p| start + p as isize + 2) // exclusive end after `?>`
+		let end = self
+			.next_pi_end(start)
+			.map(|p| p + 2) // exclusive end after `?>`
 			.or_else(|| {
 				rest.iter()
 					.position(|&b| b == b'>')
@@ -642,6 +689,24 @@ impl<'a> Machine<'a> {
 				self.index = self.len() - 1;
 			}
 		}
+	}
+
+	/// The position of the first `?>` at or after `start`. The answer to an
+	/// earlier search holds for any later start up to the position it found
+	/// (nothing in between ends in `?>`), and "none" holds for every later one.
+	fn next_pi_end(&mut self, start: isize) -> Option<isize> {
+		if let Some((from, found)) = self.pi_search
+			&& start >= from
+		{
+			match found {
+				None => return None,
+				Some(q) if start <= q => return Some(q),
+				Some(_) => {}
+			}
+		}
+		let found = find_subslice(&self.buf[start as usize..], b"?>").map(|p| start + p as isize);
+		self.pi_search = Some((start, found));
+		found
 	}
 
 	fn state_before_comment(&mut self, c: u8) {
@@ -678,6 +743,9 @@ impl<'a> Machine<'a> {
 
 	fn state_before_special_t(&mut self, c: u8) {
 		let lower = c | 0x20;
+		// The tokenizer does not know about SVG: `<title>` is special here too.
+		// (Its text is then written escaped, because linkedom builds an SVG
+		// `<title>` as an ordinary element: see the serializer.)
 		if lower == TITLE_END[3] {
 			self.start_special(TITLE_END, 4);
 		} else if lower == TEXTAREA_END[3] {
@@ -713,6 +781,11 @@ impl<'a> Machine<'a> {
 			| State::InAttributeValueDq
 			| State::InAttributeValueNq
 			| State::InClosingTagName => {}
+			// A processing instruction that never ends stays what it looked
+			// like: literal text, `<?` included.
+			State::InProcessingInstruction if self.section_start >= 2 => {
+				self.ontext(self.section_start - 2, end);
+			}
 			// A tag that ends in `/` or runs on after its name without a `>`
 			// leaves the section start at -1, and htmlparser2 then slices the
 			// buffer from -1: the last character becomes a text node.
@@ -1164,7 +1237,7 @@ mod tests {
 		);
 		assert_eq!(
 			s("<title>a &amp; b &lt;c&gt;</title>"),
-			"title(#\"a &amp; b &lt;c&gt;\")"
+			"title(#\"a & b <c>\")"
 		);
 		assert_eq!(s("<xmp><b>&amp;</xmp>"), "xmp(#\"<b>&amp;\")");
 		assert_eq!(s("<script>unclosed <b>"), "script(#\"unclosed <b>\")");

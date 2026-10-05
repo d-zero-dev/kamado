@@ -10,7 +10,7 @@
  * ```
  *
  * The generator avoids the constructs on which v3 differs on purpose
- * (`<?...?>`, `<title>`, `<xmp>`), so any difference is a real divergence.
+ * (`<?...?>`, a doctype in the middle), so any difference is a real divergence.
  * The corpus is not committed: it is large and fully determined by the seed.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -89,6 +89,8 @@ const tags = [
 	'g',
 	'circle',
 	'textarea',
+	'title',
+	'xmp',
 	'script',
 	'style',
 	'noscript',

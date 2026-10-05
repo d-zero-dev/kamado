@@ -14,7 +14,7 @@
 //!   insert into the head always have an anchor.
 
 use crate::dom::{Document, NodeId, ROOT};
-use crate::parser::parse;
+use crate::parser::{is_js_space, parse};
 use crate::serialize::{Options, inner_html_with, outer_html_with};
 
 /// A parsed page.
@@ -28,43 +28,35 @@ pub struct Page {
 	pub root: Option<NodeId>,
 }
 
-/// Replaces every `<!-- … --!>` with `<!-- … -->` (the first terminator after
-/// the opener wins, as a non-greedy match would).
+/// `html.replaceAll(/<!--([\s\S]*?)--!>/g, '<!--$1-->')`: from each `<!--`,
+/// up to the nearest `--!>` (whatever lies between, a `-->` included), becomes
+/// a comment that ends in `-->`. Exactly the regex, because v2's output
+/// depends on its quirks; it is a single pass, since the scan for `--!>` never
+/// looks back and a missing `--!>` ends the search for every later opener too.
 fn normalize_comment_ends(html: &str) -> String {
 	let mut out = String::with_capacity(html.len());
-	let mut rest = html;
-	while let Some(open) = rest.find("<!--") {
-		let body_start = open + 4;
-		out.push_str(&rest[..body_start]);
-		let body = &rest[body_start..];
-		let close = match (body.find("-->"), body.find("--!>")) {
-			(Some(a), Some(b)) if b < a => Some((b, true)),
-			(Some(a), _) => Some((a, false)),
-			(None, Some(b)) => Some((b, true)),
-			(None, None) => None,
+	let mut pos = 0;
+	while let Some(open) = html[pos..].find("<!--") {
+		let body = pos + open + 4;
+		let Some(end) = html[body..].find("--!>") else {
+			break;
 		};
-		match close {
-			Some((at, alternate)) => {
-				out.push_str(&body[..at]);
-				out.push_str("-->");
-				rest = &body[at + if alternate { 4 } else { 3 }..];
-			}
-			None => {
-				out.push_str(body);
-				rest = "";
-			}
-		}
+		out.push_str(&html[pos..body + end]);
+		out.push_str("-->");
+		pos = body + end + 4;
 	}
-	out.push_str(rest);
+	out.push_str(&html[pos..]);
 	out
 }
 
-/// Skips leading whitespace and complete comments.
+/// Skips leading whitespace and complete comments. "Whitespace" is
+/// JavaScript's (`trim()` and `\s`): it includes U+FEFF, so a byte order mark
+/// does not hide a document, and it does not include U+0085.
 fn strip_leading_comments(html: &str) -> &str {
-	let mut s = html.trim();
+	let mut s = html.trim_matches(is_js_space);
 	while let Some(after) = s.strip_prefix("<!--") {
 		match after.find("-->") {
-			Some(end) => s = after[end + 3..].trim_start(),
+			Some(end) => s = after[end + 3..].trim_start_matches(is_js_space),
 			None => break,
 		}
 	}
@@ -77,16 +69,13 @@ fn starts_with_ignore_case(s: &str, prefix: &str) -> bool {
 
 fn is_document(stripped: &str) -> bool {
 	if starts_with_ignore_case(stripped, "<!doctype") {
-		return stripped[9..]
-			.chars()
-			.next()
-			.is_some_and(char::is_whitespace);
+		return stripped[9..].chars().next().is_some_and(is_js_space);
 	}
 	starts_with_ignore_case(stripped, "<html")
 		&& stripped[5..]
 			.chars()
 			.next()
-			.is_some_and(|c| c.is_whitespace() || c == '>')
+			.is_some_and(|c| is_js_space(c) || c == '>')
 }
 
 impl Page {
@@ -197,12 +186,77 @@ mod tests {
 	fn the_alternate_comment_terminator_is_normalized() {
 		assert_eq!(rt("<!-- a --!><p>x</p>"), "<!-- a --><p>x</p>");
 		assert_eq!(rt("<!-- a --!> b --> <p>"), "<!-- a --> b --&gt; <p></p>");
-		assert_eq!(rt("<!-- a --> --!> <p>"), "<!-- a --> --!&gt; <p></p>");
+		// The regex looks for `--!>` only: a `-->` in between does not stop it.
+		assert_eq!(rt("<!-- a --> --!> <p>"), "<!-- a --> --&gt; <p></p>");
+		assert_eq!(rt("<!-- a --> b --!> c"), "<!-- a --> b --&gt; c");
+		assert_eq!(rt("<!-- a --> <!-- b --!> c"), "<!-- a --> <!-- b --> c");
+		assert_eq!(rt("<!-- a --!>x<!-- b --!>y"), "<!-- a -->x<!-- b -->y");
+		assert_eq!(rt("<!---!>x"), "<!---!>x-->");
+	}
+
+	#[test]
+	fn many_comments_without_the_alternate_terminator_are_scanned_once() {
+		let html = "<!-- x -->".repeat(100_000);
+		let started = std::time::Instant::now();
+		assert_eq!(Page::parse(&html).serialize().len(), html.len());
+		assert!(
+			started.elapsed().as_secs() < 5,
+			"the normalization must be linear"
+		);
+	}
+
+	#[test]
+	fn a_byte_order_mark_does_not_hide_a_document() {
+		let page = Page::parse("\u{FEFF}<!doctype html><html><body>x</body></html>");
+		assert!(!page.is_fragment);
+		assert_eq!(page.serialize(), "<html><head></head><body>x</body></html>");
+		assert!(!Page::parse("\u{FEFF}<html></html>").is_fragment);
+		// U+0085 is white space to Rust but not to JavaScript.
+		assert!(Page::parse("\u{85}<!doctype html><html></html>").is_fragment);
+	}
+
+	#[test]
+	fn very_deep_nesting_does_not_overflow_the_stack() {
+		let html = "<div>".repeat(50_000) + "x" + &"</div>".repeat(50_000);
+		let handle = std::thread::Builder::new()
+			.stack_size(1 << 20)
+			.spawn(move || Page::parse(&html).serialize().len())
+			.unwrap();
+		assert_eq!(handle.join().unwrap(), 50_000 * "<div></div>".len() + 1);
 	}
 
 	#[test]
 	fn doctype_needs_whitespace_after_it_to_count() {
 		assert!(Page::parse("<!doctypehtml>").is_fragment);
 		assert!(!Page::parse("<!DocType\thtml>").is_fragment);
+	}
+
+	#[test]
+	fn a_processing_instruction_that_never_ends_stays_literal_text() {
+		assert_eq!(rt("<?php echo 1"), "&lt;?php echo 1");
+		assert_eq!(rt("<p>a</p><?php"), "<p>a</p>&lt;?php");
+		// With a `>` but no `?>` it ends at that `>`, like a declaration.
+		assert_eq!(rt("<?xml version=\"1.0\">x"), "<?xml version=\"1.0\">x");
+	}
+
+	#[test]
+	fn many_processing_instructions_without_a_terminator_are_scanned_once() {
+		let html = "<?a>".repeat(100_000);
+		let started = std::time::Instant::now();
+		assert_eq!(Page::parse(&html).serialize().len(), html.len());
+		assert!(
+			started.elapsed().as_secs() < 5,
+			"the `?>` search must not restart each time"
+		);
+	}
+
+	#[test]
+	fn a_terminator_far_away_is_still_found_by_every_instruction_before_it() {
+		assert_eq!(rt("<?a>x<?b>y<?c ?>z"), "<?a>x<?b>y<?c ?>z");
+		assert_eq!(rt("<?a >=> <?b ?>"), "<?a >=> <?b ?>");
+		assert_eq!(
+			rt("<?php echo $a->b; ?>t<?php echo 2 ?>"),
+			"<?php echo $a->b; ?>t<?php echo 2 ?>"
+		);
 	}
 }

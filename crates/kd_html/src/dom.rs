@@ -257,7 +257,23 @@ impl Document {
 	/// the copy is a fragment holder: its children are the copied children,
 	/// and the caller moves them where they belong.
 	pub fn import_subtree(&mut self, from: &Document, node: NodeId) -> NodeId {
-		let copy = match from.kind(node) {
+		let root = self.copy_node(from, node);
+		// Depth-first with an explicit stack: a page may nest as deeply as its
+		// markup does, and recursion would overflow the thread's stack.
+		let mut stack: Vec<(NodeId, NodeId)> = vec![(node, root)];
+		while let Some((source, copy)) = stack.pop() {
+			for child in from.children(source) {
+				let child_copy = self.copy_node(from, child);
+				self.append_child(copy, child_copy);
+				stack.push((child, child_copy));
+			}
+		}
+		root
+	}
+
+	/// A detached copy of one node, without its children.
+	fn copy_node(&mut self, from: &Document, node: NodeId) -> NodeId {
+		match from.kind(node) {
 			NodeKind::Document => {
 				let holder = self.create_element("template");
 				self.nodes[holder as usize].kind = NodeKind::Document;
@@ -268,12 +284,7 @@ impl Document {
 			NodeKind::Comment(c) => self.create_comment(c),
 			NodeKind::Doctype(d) => self.create_doctype(d.clone()),
 			NodeKind::ProcessingInstruction(raw) => self.create_processing_instruction(raw),
-		};
-		for child in from.children(node) {
-			let child_copy = self.import_subtree(from, child);
-			self.append_child(copy, child_copy);
 		}
-		copy
 	}
 
 	/// Inserts `child` as the first child of `parent`.
@@ -321,14 +332,19 @@ impl Document {
 	}
 
 	fn collect_text(&self, id: NodeId, out: &mut String) {
-		match self.kind(id) {
-			NodeKind::Text(t) => out.push_str(t),
-			NodeKind::Element(_) | NodeKind::Document => {
-				for child in self.children(id) {
-					self.collect_text(child, out);
+		let mut stack: Vec<NodeId> = vec![id];
+		while let Some(node) = stack.pop() {
+			match self.kind(node) {
+				NodeKind::Text(t) => out.push_str(t),
+				NodeKind::Element(_) | NodeKind::Document => {
+					let mut child = self.last_child(node);
+					while let Some(c) = child {
+						stack.push(c);
+						child = self.prev_sibling(c);
+					}
 				}
+				_ => {}
 			}
-			_ => {}
 		}
 	}
 

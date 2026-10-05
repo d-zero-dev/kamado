@@ -68,15 +68,16 @@ fn is_serializer_void(name: &str) -> bool {
 }
 
 /// Elements whose content is written as raw text: `script`, `style`,
-/// `textarea`, `title` and `xmp`, unless they were created inside an `<svg>`
-/// (there they are ordinary elements and their text is escaped, as in
-/// linkedom, which builds them as plain SVG elements).
+/// `textarea` and `title`, unless they were created inside an `<svg>` (there
+/// they are ordinary elements and their text is escaped, as in linkedom, which
+/// builds them as plain SVG elements). `xmp` is not one of them: linkedom
+/// escapes its text like any other element's.
 #[must_use]
 pub fn is_raw_text_element(element: &Element) -> bool {
 	!element.svg
 		&& matches!(
 			element.name.as_str(),
-			"script" | "style" | "textarea" | "title" | "xmp"
+			"script" | "style" | "textarea" | "title"
 		)
 }
 
@@ -169,56 +170,114 @@ fn push_attribute(name: &str, value: &str, ent: &Entities, out: &mut String) {
 	out.push('"');
 }
 
-fn push_node(doc: &Document, id: NodeId, parent_raw: bool, ent: &Entities, out: &mut String) {
-	match doc.kind(id) {
-		NodeKind::Document => push_children(doc, id, false, ent, out),
-		NodeKind::Text(t) => {
-			let mut text = String::new();
-			if parent_raw {
-				text.push_str(t);
-			} else {
-				push_escaped_text(t, &mut text);
-			}
-			// The content of script, style and xmp is code or plain text where
-			// a character reference would not be decoded, so it is never
-			// rewritten. title and textarea decode references.
-			if ent.is_none() || (parent_raw && !parent_decodes_references(doc, id)) {
-				out.push_str(&text);
-			} else {
-				out.push_str(&ent.apply(&text));
-			}
-		}
-		NodeKind::Comment(c) => {
-			out.push_str("<!--");
-			out.push_str(&ent.apply(c));
-			out.push_str("-->");
-		}
-		NodeKind::ProcessingInstruction(raw) => out.push_str(raw),
-		NodeKind::Doctype(d) => {
-			out.push_str("<!DOCTYPE ");
-			out.push_str(&d.name);
-			if !d.public_id.is_empty() {
-				out.push_str(" PUBLIC \"");
-				out.push_str(&d.public_id);
-				out.push('"');
-			}
-			if !d.system_id.is_empty() {
-				if d.public_id.is_empty() {
-					out.push_str(" SYSTEM");
-				}
-				out.push_str(" \"");
-				out.push_str(&d.system_id);
-				out.push('"');
-			}
-			out.push('>');
-		}
-		NodeKind::Element(e) => push_element(doc, id, e, ent, out),
+/// A step of the iterative walk: why it is not recursive: a page can nest as
+/// deeply as its markup does (unclosed `<font>`s add up), and recursion would
+/// overflow the stack of a worker thread long before any realistic limit.
+enum Work<'a> {
+	Visit(NodeId),
+	Close(&'a str),
+}
+
+fn push_children_reversed<'a>(doc: &'a Document, id: NodeId, stack: &mut Vec<Work<'a>>) {
+	let mut child = doc.last_child(id);
+	while let Some(c) = child {
+		stack.push(Work::Visit(c));
+		child = doc.prev_sibling(c);
 	}
 }
 
-fn push_children(doc: &Document, id: NodeId, parent_raw: bool, ent: &Entities, out: &mut String) {
-	for child in doc.children(id) {
-		push_node(doc, child, parent_raw, ent, out);
+/// Writes `id` and everything below it. `parent_raw` tells a starting text
+/// node that its parent is a raw-text element.
+fn push_node(doc: &Document, id: NodeId, parent_raw: bool, ent: &Entities, out: &mut String) {
+	let mut stack: Vec<Work<'_>> = vec![Work::Visit(id)];
+	let mut starting = true;
+	while let Some(work) = stack.pop() {
+		let node = match work {
+			Work::Close(name) => {
+				out.push_str("</");
+				out.push_str(name);
+				out.push('>');
+				continue;
+			}
+			Work::Visit(node) => node,
+		};
+		let raw_parent = std::mem::take(&mut starting) && parent_raw;
+		match doc.kind(node) {
+			NodeKind::Document => push_children_reversed(doc, node, &mut stack),
+			NodeKind::Text(t) => {
+				let mut text = String::new();
+				if raw_parent {
+					text.push_str(t);
+				} else {
+					push_escaped_text(t, &mut text);
+				}
+				// The content of script, style and xmp is code or plain text
+				// where a character reference would not be decoded, so it is
+				// never rewritten. title and textarea decode references.
+				if ent.is_none() || (raw_parent && !parent_decodes_references(doc, node)) {
+					out.push_str(&text);
+				} else {
+					out.push_str(&ent.apply(&text));
+				}
+			}
+			NodeKind::Comment(c) => {
+				out.push_str("<!--");
+				out.push_str(&ent.apply(c));
+				out.push_str("-->");
+			}
+			NodeKind::ProcessingInstruction(raw) => out.push_str(raw),
+			NodeKind::Doctype(d) => {
+				out.push_str("<!DOCTYPE ");
+				out.push_str(&d.name);
+				if !d.public_id.is_empty() {
+					out.push_str(" PUBLIC \"");
+					out.push_str(&d.public_id);
+					out.push('"');
+				}
+				if !d.system_id.is_empty() {
+					if d.public_id.is_empty() {
+						out.push_str(" SYSTEM");
+					}
+					out.push_str(" \"");
+					out.push_str(&d.system_id);
+					out.push('"');
+				}
+				out.push('>');
+			}
+			NodeKind::Element(e) => {
+				out.push('<');
+				out.push_str(&e.name);
+				for a in &e.attrs {
+					push_attribute(&a.name, &a.value, ent, out);
+				}
+				if is_raw_text_element(e) {
+					out.push('>');
+					let text = raw_text_content(doc, node);
+					if !ent.is_none() && matches!(e.name.as_str(), "title" | "textarea") {
+						out.push_str(&ent.apply(&text));
+					} else {
+						out.push_str(&text);
+					}
+					out.push_str("</");
+					out.push_str(&e.name);
+					out.push('>');
+				} else if doc.first_child(node).is_none() {
+					if e.svg {
+						out.push_str(" />");
+					} else if is_serializer_void(&e.name) {
+						out.push('>');
+					} else {
+						out.push_str("></");
+						out.push_str(&e.name);
+						out.push('>');
+					}
+				} else {
+					out.push('>');
+					stack.push(Work::Close(&e.name));
+					push_children_reversed(doc, node, &mut stack);
+				}
+			}
+		}
 	}
 }
 
@@ -228,44 +287,6 @@ fn parent_decodes_references(doc: &Document, id: NodeId) -> bool {
 	doc.parent(id)
 		.and_then(|p| doc.element(p))
 		.is_some_and(|p| matches!(p.name.as_str(), "title" | "textarea"))
-}
-
-fn push_element(doc: &Document, id: NodeId, e: &Element, ent: &Entities, out: &mut String) {
-	out.push('<');
-	out.push_str(&e.name);
-	for a in &e.attrs {
-		push_attribute(&a.name, &a.value, ent, out);
-	}
-	if is_raw_text_element(e) {
-		out.push('>');
-		let text = raw_text_content(doc, id);
-		if !ent.is_none() && matches!(e.name.as_str(), "title" | "textarea") {
-			out.push_str(&ent.apply(&text));
-		} else {
-			out.push_str(&text);
-		}
-		out.push_str("</");
-		out.push_str(&e.name);
-		out.push('>');
-		return;
-	}
-	if doc.first_child(id).is_none() {
-		if e.svg {
-			out.push_str(" />");
-		} else if is_serializer_void(&e.name) {
-			out.push('>');
-		} else {
-			out.push_str("></");
-			out.push_str(&e.name);
-			out.push('>');
-		}
-		return;
-	}
-	out.push('>');
-	push_children(doc, id, false, ent, out);
-	out.push_str("</");
-	out.push_str(&e.name);
-	out.push('>');
 }
 
 /// How the serializer writes.
@@ -314,7 +335,9 @@ pub fn inner_html_with(doc: &Document, id: NodeId, options: &Options) -> String 
 	if doc.element(id).is_some_and(is_raw_text_element) {
 		return raw_text_content(doc, id);
 	}
-	push_children(doc, id, false, &options.entities, &mut out);
+	for child in doc.children(id) {
+		push_node(doc, child, false, &options.entities, &mut out);
+	}
 	out
 }
 
@@ -445,11 +468,9 @@ mod tests {
 			rt("<textarea>&lt;b&gt; &amp;</textarea>"),
 			"<textarea>&lt;b&gt; &amp;</textarea>"
 		);
-		assert_eq!(
-			rt("<title>a &amp; b &lt;c&gt;</title>"),
-			"<title>a &amp; b &lt;c&gt;</title>"
-		);
-		assert_eq!(rt("<xmp><b>&amp;</xmp>"), "<xmp><b>&amp;</xmp>");
+		// `<xmp>` is read as raw text but written with the usual escaping, as
+		// linkedom does.
+		assert_eq!(rt("<xmp><b>&amp;</xmp>"), "<xmp>&lt;b&gt;&amp;amp;</xmp>");
 		// An attribute value containing `><` no longer swallows the content.
 		assert_eq!(
 			rt("<script src=\"a>b\" data-x=\"><\">x</script>"),
@@ -533,11 +554,11 @@ mod tests {
 	}
 
 	#[test]
-	fn entities_leave_script_style_and_xmp_alone_but_not_title_or_textarea() {
+	fn entities_leave_script_and_style_alone_but_not_title_textarea_or_xmp() {
 		let src = "<script>var s = \"©\";</script><style>a::after{content:\"©\"}</style><xmp>©</xmp><title>©</title><textarea>©</textarea>";
 		assert_eq!(
 			with_entities(src, Entities::All),
-			"<script>var s = \"©\";</script><style>a::after{content:\"©\"}</style><xmp>©</xmp><title>&copy;</title><textarea>&copy;</textarea>"
+			"<script>var s = \"©\";</script><style>a::after{content:\"©\"}</style><xmp>&copy;</xmp><title>&copy;</title><textarea>&copy;</textarea>"
 		);
 	}
 
@@ -560,6 +581,45 @@ mod tests {
 		assert_eq!(
 			with_entities("<p title='\"é'>x</p>", Entities::All),
 			"<p title=\"&quot;&eacute;\">x</p>"
+		);
+	}
+
+	#[test]
+	fn title_text_is_decoded_and_printed_unescaped_like_v2() {
+		assert_eq!(rt("<title>A &amp; B</title>"), "<title>A & B</title>");
+		assert_eq!(
+			rt("<title>a &lt;c&gt; &quot;q&quot;</title>"),
+			"<title>a <c> \"q\"</title>"
+		);
+		assert_eq!(
+			rt("<title>Q&amp;A &copy; 日本</title>"),
+			"<title>Q&A © 日本</title>"
+		);
+		assert_eq!(rt("<title>a & b</title>"), "<title>a & b</title>");
+	}
+
+	#[test]
+	fn title_references_that_would_change_meaning_stay_as_written() {
+		// `&amp;copy` is the text `&copy`; written raw it would show as a copyright sign.
+		assert_eq!(rt("<title>&amp;copy</title>"), "<title>&amp;copy</title>");
+		assert_eq!(
+			rt("<title>x &amp;lt; y</title>"),
+			"<title>x &amp;lt; y</title>"
+		);
+		assert_eq!(rt("<title>&amp;#65;</title>"), "<title>&amp;#65;</title>");
+		// `&lt;/title&gt;` would otherwise become a tag that ends the title.
+		assert_eq!(
+			rt("<title>a&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;</title>"),
+			"<title>a&lt;/title><script>alert(1)</script></title>"
+		);
+	}
+
+	#[test]
+	fn a_doctype_in_the_middle_of_a_fragment_keeps_the_content_around_it() {
+		// linkedom drops everything except the doctype; that is data loss.
+		assert_eq!(
+			document_html(&parse("<p>a</p><!doctype html><p>b</p>")),
+			"<!DOCTYPE html><p>a</p><p>b</p>"
 		);
 	}
 }

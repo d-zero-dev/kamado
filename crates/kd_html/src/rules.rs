@@ -103,19 +103,47 @@ impl Template {
 			.count()
 	}
 
-	fn render(&self, doc: &Document, node: NodeId, ctx: &Context<'_>, content: &str) -> String {
+	/// Fills the placeholders. With `escape_html` the substituted values
+	/// (never the template's own text) are HTML-escaped: that is for markup
+	/// templates (`wrap`, `insert`), which are parsed after rendering, where an
+	/// attribute value containing `"` or `<` would otherwise break out into
+	/// new attributes or elements. `setAttr` values go straight into an
+	/// attribute and are not escaped.
+	fn render(
+		&self,
+		doc: &Document,
+		node: NodeId,
+		ctx: &Context<'_>,
+		content: &str,
+		escape_html: bool,
+	) -> String {
 		let mut out = String::new();
+		let push_value = |out: &mut String, value: &str| {
+			if escape_html {
+				for c in value.chars() {
+					match c {
+						'&' => out.push_str("&amp;"),
+						'<' => out.push_str("&lt;"),
+						'>' => out.push_str("&gt;"),
+						'"' => out.push_str("&quot;"),
+						other => out.push(other),
+					}
+				}
+			} else {
+				out.push_str(value);
+			}
+		};
 		for part in &self.parts {
 			match part {
 				Part::Text(t) => out.push_str(t),
 				Part::Attr(name) => {
 					if let Some(v) = attr_ignore_case(doc, node, name) {
-						out.push_str(v);
+						push_value(&mut out, v);
 					}
 				}
-				Part::Url => out.push_str(ctx.url),
-				Part::BaseUrl => out.push_str(ctx.base_url),
-				Part::Host => out.push_str(ctx.host),
+				Part::Url => push_value(&mut out, ctx.url),
+				Part::BaseUrl => push_value(&mut out, ctx.base_url),
+				Part::Host => push_value(&mut out, ctx.host),
 				Part::Content => out.push_str(content),
 			}
 		}
@@ -407,13 +435,19 @@ fn resolve_relative(value: &str, page_url: &str) -> String {
 	let split = value.find(['?', '#']).unwrap_or(value.len());
 	let (path, tail) = value.split_at(split);
 	let page_path = &page_url[..page_url.find(['?', '#']).unwrap_or(page_url.len())];
-	let directory = &page_path[..=page_path.rfind('/').unwrap_or(0)];
+	// Everything up to and including the last `/`; a page URL without one
+	// (never produced by the build) is taken to sit at the root.
+	let directory = page_path.rfind('/').map_or("/", |i| &page_path[..=i]);
 	let mut segments: Vec<&str> = Vec::new();
 	let combined = if path.is_empty() {
 		page_path.to_owned()
 	} else {
 		format!("{directory}{path}")
 	};
+	// A reference that ends in `.` or `..` names a directory: it keeps a
+	// trailing slash, as RFC 3986 resolution does.
+	let names_directory =
+		combined.ends_with('/') || combined.ends_with("/.") || combined.ends_with("/..");
 	for segment in combined.split('/') {
 		match segment {
 			"" | "." => {}
@@ -425,7 +459,7 @@ fn resolve_relative(value: &str, page_url: &str) -> String {
 	}
 	let mut out = String::from("/");
 	out.push_str(&segments.join("/"));
-	if combined.ends_with('/') && !segments.is_empty() {
+	if names_directory && !segments.is_empty() {
 		out.push('/');
 	}
 	out.push_str(tail);
@@ -462,6 +496,56 @@ fn rewrite_one(value: &str, to: UrlTarget, origin: &str, page_url: &str) -> Opti
 	}
 }
 
+/// The `srcset` candidates of `value` as `(url_start, url_end)` byte ranges,
+/// found the way the HTML specification's parser does: a URL is a run of
+/// non-white-space; a URL that ends in commas is a candidate without
+/// descriptors, and the commas are separators, not part of the URL; otherwise
+/// the descriptors run to the next comma outside parentheses. This is what
+/// keeps `data:` URIs and `w_100,h_100` style paths whole.
+fn srcset_urls(value: &str) -> Vec<(usize, usize)> {
+	let bytes = value.as_bytes();
+	let is_space = |b: u8| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0c);
+	let mut out = Vec::new();
+	let mut i = 0;
+	while i < bytes.len() {
+		while i < bytes.len() && (is_space(bytes[i]) || bytes[i] == b',') {
+			i += 1;
+		}
+		if i >= bytes.len() {
+			break;
+		}
+		let start = i;
+		while i < bytes.len() && !is_space(bytes[i]) {
+			i += 1;
+		}
+		let mut end = i;
+		let trailing_commas = bytes[start..end]
+			.iter()
+			.rev()
+			.take_while(|&&b| b == b',')
+			.count();
+		if trailing_commas > 0 {
+			end -= trailing_commas;
+		} else {
+			// descriptors: up to a comma that is not inside parentheses
+			let mut depth = 0_i32;
+			while i < bytes.len() {
+				match bytes[i] {
+					b'(' => depth += 1,
+					b')' if depth > 0 => depth -= 1,
+					b',' if depth == 0 => break,
+					_ => {}
+				}
+				i += 1;
+			}
+		}
+		if end > start {
+			out.push((start, end));
+		}
+	}
+	out
+}
+
 fn rewrite_attribute(
 	name: &str,
 	value: &str,
@@ -472,28 +556,19 @@ fn rewrite_attribute(
 	if name != "srcset" {
 		return rewrite_one(value, to, origin, page_url);
 	}
+	let mut out = String::with_capacity(value.len());
+	let mut copied = 0;
 	let mut changed = false;
-	let candidates: Vec<String> = value
-		.split(',')
-		.map(|candidate| {
-			let candidate = candidate.trim();
-			let (url, descriptor) = candidate
-				.split_once(char::is_whitespace)
-				.map_or((candidate, ""), |(u, d)| (u, d.trim()));
-			match rewrite_one(url, to, origin, page_url) {
-				Some(new) => {
-					changed = true;
-					if descriptor.is_empty() {
-						new
-					} else {
-						format!("{new} {descriptor}")
-					}
-				}
-				None => candidate.to_owned(),
-			}
-		})
-		.collect();
-	changed.then(|| candidates.join(", "))
+	for (start, end) in srcset_urls(value) {
+		if let Some(new) = rewrite_one(&value[start..end], to, origin, page_url) {
+			out.push_str(&value[copied..start]);
+			out.push_str(&new);
+			copied = end;
+			changed = true;
+		}
+	}
+	out.push_str(&value[copied..]);
+	changed.then_some(out)
 }
 
 // ----- applying -----
@@ -562,7 +637,7 @@ fn apply_to(
 				return Err(root_error("wrap"));
 			}
 			const MARKER: &str = "<kd-content-marker></kd-content-marker>";
-			let html = template.render(&page.doc, node, ctx, MARKER);
+			let html = template.render(&page.doc, node, ctx, MARKER, true);
 			let nodes = fragment(&mut page.doc, &html);
 			let marker = nodes
 				.iter()
@@ -585,7 +660,7 @@ fn apply_to(
 			page.doc.detach(marker);
 		}
 		Action::SetAttr { name, value } => {
-			let rendered = value.render(&page.doc, node, ctx, "");
+			let rendered = value.render(&page.doc, node, ctx, "", false);
 			set_attribute(&mut page.doc, node, name, &rendered);
 		}
 		Action::RemoveAttr(matcher) => {
@@ -623,7 +698,7 @@ fn apply_to(
 			}
 		}
 		Action::Insert { position, html } => {
-			let rendered = html.render(&page.doc, node, ctx, "");
+			let rendered = html.render(&page.doc, node, ctx, "", true);
 			let nodes = fragment(&mut page.doc, &rendered);
 			match position {
 				Position::Before | Position::After if is_root => return Err(root_error("insert")),
@@ -957,5 +1032,131 @@ mod tests {
 	fn invalid_selectors_are_rejected_when_the_rule_is_built() {
 		assert!(Rule::remove("p:hover", HOST).is_err());
 		assert!(Rule::remove("", HOST).is_err());
+	}
+
+	#[test]
+	fn srcset_keeps_data_uris_and_comma_paths_whole() {
+		let r = [
+			Rule::rewrite_url("img", HOST, UrlTarget::Absolute, "https://example.com", &[])
+				.unwrap(),
+		];
+		assert_eq!(
+			run(
+				"<img srcset=\"data:image/png;base64,AAA 1x, b.png 2x\">",
+				&r
+			),
+			"<img srcset=\"data:image/png;base64,AAA 1x, https://example.com/a/b/b.png 2x\">"
+		);
+		assert_eq!(
+			run("<img srcset=\"/img/w_100,h_100/a.jpg 1x\">", &r),
+			"<img srcset=\"https://example.com/img/w_100,h_100/a.jpg 1x\">"
+		);
+		assert_eq!(
+			run("<img srcset=\"a.png 1x,\">", &r),
+			"<img srcset=\"https://example.com/a/b/a.png 1x,\">"
+		);
+		assert_eq!(
+			run("<img srcset=\" a.png,  b.png 2x ,c.png\">", &r),
+			"<img srcset=\" https://example.com/a/b/a.png,  https://example.com/a/b/b.png 2x ,https://example.com/a/b/c.png\">"
+		);
+	}
+
+	#[test]
+	fn relative_urls_resolve_even_for_odd_page_urls() {
+		let r = [Rule::rewrite_url(
+			"a",
+			HOST,
+			UrlTarget::Absolute,
+			"https://example.com",
+			&["href"],
+		)
+		.unwrap()];
+		for url in ["", "page.html", "日本", "?q", "#h"] {
+			let mut page = Page::parse("<a href=\"x.html\">t</a>");
+			let context = Context {
+				url,
+				base_url: "https://example.com/",
+				host: HOST,
+			};
+			apply(&mut page, &r, &context).unwrap();
+			assert_eq!(
+				page.serialize(),
+				"<a href=\"https://example.com/x.html\">t</a>",
+				"url `{url}`"
+			);
+		}
+		let mut page =
+			Page::parse("<a href=\"a/..\">1</a><a href=\"a/.\">2</a><a href=\"..\">3</a>");
+		let context = Context {
+			url: "/a/b.html",
+			base_url: "https://example.com/",
+			host: HOST,
+		};
+		apply(&mut page, &r, &context).unwrap();
+		assert_eq!(
+			page.serialize(),
+			"<a href=\"https://example.com/a/\">1</a><a href=\"https://example.com/a/a/\">2</a><a href=\"https://example.com/\">3</a>"
+		);
+	}
+
+	#[test]
+	fn attribute_values_do_not_break_out_of_markup_templates() {
+		let r = [Rule::wrap("img", HOST, "<a href=\"{{attr:src}}\">{{content}}</a>").unwrap()];
+		assert_eq!(
+			run("<img src='a\"b onerror=x'>", &r),
+			"<a href=\"a&quot;b onerror=x\"><img src=\"a&quot;b onerror=x\"></a>"
+		);
+		let r = [Rule::insert("p", HOST, Position::After, "<i>{{attr:title}}</i>").unwrap()];
+		assert_eq!(
+			run("<p title='&lt;b&gt;x'>t</p>", &r),
+			"<p title=\"<b>x\">t</p><i>&lt;b&gt;x</i>"
+		);
+		// setAttr writes the value as it is: it is not parsed as markup.
+		let r = [Rule::set_attr("p", HOST, "data-t", "{{attr:title}}").unwrap()];
+		assert_eq!(
+			run("<p title='a&amp;b'>t</p>", &r),
+			"<p title=\"a&b\" data-t=\"a&b\">t</p>"
+		);
+	}
+
+	#[test]
+	fn insert_reaches_the_body_of_a_document_too() {
+		let r = [Rule::insert("body", HOST, Position::Prepend, "<i></i>").unwrap()];
+		assert_eq!(
+			run("<html><head></head><body><p>x</p></body></html>", &r),
+			"<html><head></head><body><i></i><p>x</p></body></html>"
+		);
+	}
+
+	#[test]
+	fn the_root_element_cannot_be_unwrapped_wrapped_or_given_siblings() {
+		let page_html = "<html><body>x</body></html>";
+		let cases = [
+			Rule::unwrap("html", HOST).unwrap(),
+			Rule::wrap("html", HOST, "<div>{{content}}</div>").unwrap(),
+			Rule::insert("html", HOST, Position::Before, "<i></i>").unwrap(),
+		];
+		for rule in cases {
+			let mut page = Page::parse(page_html);
+			assert!(apply(&mut page, &[rule], &ctx()).is_err());
+		}
+	}
+
+	#[test]
+	fn template_syntax_errors_are_reported_when_the_rule_is_built() {
+		assert!(Rule::set_attr("a", HOST, "x", "{{url").is_err());
+		assert!(Rule::set_attr("a", HOST, "x", "{{attr:}}").is_err());
+		assert!(Rule::insert("a", HOST, Position::After, "{{content}}").is_err());
+		assert!(
+			Rule::set_attr("a", HOST, "x", "{{ url }}").is_ok(),
+			"white space inside the braces is trimmed"
+		);
+	}
+
+	#[test]
+	fn a_wrap_whose_content_position_is_swallowed_by_the_parser_is_an_error() {
+		let r = [Rule::wrap("p", HOST, "<textarea>{{content}}</textarea>").unwrap()];
+		let mut page = Page::parse("<p>x</p>");
+		assert!(apply(&mut page, &r, &ctx()).is_err());
 	}
 }

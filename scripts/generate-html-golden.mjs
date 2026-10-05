@@ -12,10 +12,12 @@
  * unit tests in the Rust crate (`<?php ?>`, `<title>` and `<xmp>` raw text,
  * an attribute value containing `><` in a raw-text element's start tag).
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { domSerialize } from '../packages/kamado/src/utils/dom.ts';
+
+import { cases as extraCases } from './html-golden-cases.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const outDir = path.join(root, 'crates', 'kd_html', 'tests', 'golden');
@@ -107,8 +109,15 @@ const cases = {
 };
 
 mkdirSync(outDir, { recursive: true });
+// A removed case must not leave its files behind (the Rust test would still
+// run them), so the directory is rebuilt from scratch.
+for (const file of readdirSync(outDir)) {
+	if (file.endsWith('.in') || file.endsWith('.out')) {
+		rmSync(path.join(outDir, file));
+	}
+}
 let count = 0;
-for (const [name, input] of Object.entries(cases)) {
+for (const [name, input] of Object.entries({ ...extraCases, ...cases })) {
 	const expected = await domSerialize(input, { hook: () => {} });
 	// Not `.html`: the inputs are deliberately broken markup that the HTML
 	// linters and the formatter must not touch.

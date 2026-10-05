@@ -58,8 +58,6 @@ enum Simple {
 	Is(Vec<Complex>),
 	/// `:has()`: relative selectors, each anchored at the element tested.
 	Has(Vec<(Combinator, Complex)>),
-	/// The element a `:has()` is evaluated for; never produced by the parser.
-	Anchor(NodeId),
 	Nth {
 		a: i64,
 		b: i64,
@@ -101,10 +99,15 @@ pub struct Selector {
 	list: Vec<Complex>,
 }
 
+/// How deep `:not()` / `:is()` / `:has()` may nest. Real selectors nest two or
+/// three levels; the limit keeps a hostile string from exhausting the stack.
+const MAX_NESTING: usize = 32;
+
 struct Reader<'a> {
 	src: &'a str,
 	bytes: &'a [u8],
 	pos: usize,
+	depth: usize,
 }
 
 fn is_ident_start(b: u8) -> bool {
@@ -360,7 +363,9 @@ impl<'a> Reader<'a> {
 			"root" => Ok(Simple::Root),
 			"not" | "is" | "where" => {
 				self.expect_open()?;
+				self.enter()?;
 				let list = self.list(true)?;
+				self.depth -= 1;
 				self.pos += 1;
 				Ok(if name == "not" {
 					Simple::Not(list)
@@ -370,6 +375,7 @@ impl<'a> Reader<'a> {
 			}
 			"has" => {
 				self.expect_open()?;
+				self.enter()?;
 				let mut list = Vec::new();
 				loop {
 					self.skip_ws();
@@ -394,6 +400,7 @@ impl<'a> Reader<'a> {
 						_ => return self.err("a `)` is missing"),
 					}
 				}
+				self.depth -= 1;
 				Ok(Simple::Has(list))
 			}
 			"nth-child" | "nth-last-child" | "nth-of-type" | "nth-last-of-type" => {
@@ -445,6 +452,14 @@ impl<'a> Reader<'a> {
 			combinators: vec![],
 		};
 		Simple::Not(vec![not_first, not_last])
+	}
+
+	fn enter(&mut self) -> Result<(), SelectorError> {
+		if self.depth >= MAX_NESTING {
+			return self.err("pseudo-classes are nested too deeply");
+		}
+		self.depth += 1;
+		Ok(())
 	}
 
 	fn expect_open(&mut self) -> Result<(), SelectorError> {
@@ -509,6 +524,7 @@ impl Selector {
 			src: source,
 			bytes: source.as_bytes(),
 			pos: 0,
+			depth: 0,
 		};
 		let list = reader.list(false)?;
 		Ok(Selector { list })
@@ -557,37 +573,46 @@ impl Selector {
 }
 
 fn matches_complex(doc: &Document, node: NodeId, complex: &Complex) -> bool {
-	matches_from(doc, node, complex, complex.compounds.len() - 1)
+	matches_from(doc, node, complex, complex.compounds.len() - 1, None)
 }
 
-fn matches_from(doc: &Document, node: NodeId, complex: &Complex, index: usize) -> bool {
+/// Whether `node` (a candidate for the last compound of `complex`) matches the
+/// chain up to `index`. `anchor` is set when the chain is a relative selector
+/// of `:has()`: its leftmost compound must then relate to the anchor element
+/// through the leading combinator, instead of standing free.
+fn matches_from(
+	doc: &Document,
+	node: NodeId,
+	complex: &Complex,
+	index: usize,
+	anchor: Option<(NodeId, Combinator)>,
+) -> bool {
 	if !matches_compound(doc, node, &complex.compounds[index]) {
 		return false;
 	}
 	if index == 0 {
-		return true;
+		return anchor.is_none_or(|(a, combinator)| related(doc, node, a, combinator));
 	}
+	let previous = |candidate: NodeId| matches_from(doc, candidate, complex, index - 1, anchor);
 	match complex.combinators[index - 1] {
 		Combinator::Child => doc
 			.parent(node)
-			.is_some_and(|p| doc.element(p).is_some() && matches_from(doc, p, complex, index - 1)),
+			.is_some_and(|p| doc.element(p).is_some() && previous(p)),
 		Combinator::Descendant => {
 			let mut up = doc.parent(node);
 			while let Some(p) = up {
-				if doc.element(p).is_some() && matches_from(doc, p, complex, index - 1) {
+				if doc.element(p).is_some() && previous(p) {
 					return true;
 				}
 				up = doc.parent(p);
 			}
 			false
 		}
-		Combinator::Adjacent => {
-			previous_element(doc, node).is_some_and(|p| matches_from(doc, p, complex, index - 1))
-		}
+		Combinator::Adjacent => previous_element(doc, node).is_some_and(previous),
 		Combinator::Sibling => {
 			let mut prev = previous_element(doc, node);
 			while let Some(p) = prev {
-				if matches_from(doc, p, complex, index - 1) {
+				if previous(p) {
 					return true;
 				}
 				prev = previous_element(doc, p);
@@ -597,20 +622,74 @@ fn matches_from(doc: &Document, node: NodeId, complex: &Complex, index: usize) -
 	}
 }
 
-/// All element descendants of `scope` in document order.
-fn descendants(doc: &Document, scope: NodeId) -> Vec<NodeId> {
-	let mut out = Vec::new();
-	let mut stack: Vec<NodeId> = doc.children(scope).collect();
-	stack.reverse();
+/// Whether `node` stands in `combinator` relation to `anchor`:
+/// `anchor <combinator> node`.
+fn related(doc: &Document, node: NodeId, anchor: NodeId, combinator: Combinator) -> bool {
+	match combinator {
+		Combinator::Child => doc.parent(node) == Some(anchor),
+		Combinator::Descendant => {
+			let mut up = doc.parent(node);
+			while let Some(p) = up {
+				if p == anchor {
+					return true;
+				}
+				up = doc.parent(p);
+			}
+			false
+		}
+		Combinator::Adjacent => previous_element(doc, node) == Some(anchor),
+		Combinator::Sibling => {
+			let mut prev = previous_element(doc, node);
+			while let Some(p) = prev {
+				if p == anchor {
+					return true;
+				}
+				prev = previous_element(doc, p);
+			}
+			false
+		}
+	}
+}
+
+/// `:has(<combinator> <relative>)` for `anchor`: whether some element in the
+/// anchor's reach (its subtree, or its following siblings and their subtrees)
+/// matches `relative` and relates to the anchor as the combinator says. Stops
+/// at the first hit and builds no intermediate lists.
+fn has_match(doc: &Document, anchor: NodeId, combinator: Combinator, relative: &Complex) -> bool {
+	let mut stack: Vec<NodeId> = Vec::new();
+	match combinator {
+		Combinator::Descendant | Combinator::Child => {
+			let mut child = doc.last_child(anchor);
+			while let Some(c) = child {
+				stack.push(c);
+				child = doc.prev_sibling(c);
+			}
+		}
+		Combinator::Adjacent | Combinator::Sibling => {
+			let mut sibling = doc.parent(anchor).and_then(|p| doc.last_child(p));
+			while let Some(c) = sibling {
+				if c == anchor {
+					break;
+				}
+				stack.push(c);
+				sibling = doc.prev_sibling(c);
+			}
+		}
+	}
+	let last = relative.compounds.len() - 1;
 	while let Some(node) = stack.pop() {
 		if doc.element(node).is_some() {
-			out.push(node);
+			if matches_from(doc, node, relative, last, Some((anchor, combinator))) {
+				return true;
+			}
+			let mut child = doc.last_child(node);
+			while let Some(c) = child {
+				stack.push(c);
+				child = doc.prev_sibling(c);
+			}
 		}
-		let mut children: Vec<NodeId> = doc.children(node).collect();
-		children.reverse();
-		stack.extend(children);
 	}
-	out
+	false
 }
 
 fn previous_element(doc: &Document, node: NodeId) -> Option<NodeId> {
@@ -670,25 +749,9 @@ fn matches_simple(doc: &Document, node: NodeId, simple: &Simple) -> bool {
 		}
 		Simple::Not(list) => !list.iter().any(|c| matches_complex(doc, node, c)),
 		Simple::Is(list) => list.iter().any(|c| matches_complex(doc, node, c)),
-		Simple::Anchor(anchor) => node == *anchor,
-		Simple::Has(list) => list.iter().any(|(combinator, relative)| {
-			let mut compounds = vec![vec![Simple::Anchor(node)]];
-			compounds.extend(relative.compounds.iter().cloned());
-			let mut combinators = vec![*combinator];
-			combinators.extend(relative.combinators.iter().copied());
-			let anchored = Complex {
-				compounds,
-				combinators,
-			};
-			// A sibling combinator's subject can sit anywhere below the parent.
-			let scope = match combinator {
-				Combinator::Adjacent | Combinator::Sibling => doc.parent(node).unwrap_or(node),
-				_ => node,
-			};
-			descendants(doc, scope)
-				.into_iter()
-				.any(|candidate| matches_complex(doc, candidate, &anchored))
-		}),
+		Simple::Has(list) => list
+			.iter()
+			.any(|(combinator, relative)| has_match(doc, node, *combinator, relative)),
 		Simple::Empty => doc.children(node).all(|c| match doc.kind(c) {
 			NodeKind::Element(_) => false,
 			NodeKind::Text(t) => t.is_empty(),
@@ -706,6 +769,10 @@ fn matches_simple(doc: &Document, node: NodeId, simple: &Simple) -> bool {
 			of_type,
 			from_end,
 		} => {
+			// With a fixed position (`:first-child` is `b = 1`, a = 0) the walk
+			// stops as soon as it has passed it, so `li:first-child` over a long
+			// run of siblings does not count them all for every one of them.
+			let limit = (*a == 0).then_some(*b);
 			let mut position = 1_i64;
 			let mut cursor = if *from_end {
 				next_element(doc, node)
@@ -713,6 +780,9 @@ fn matches_simple(doc: &Document, node: NodeId, simple: &Simple) -> bool {
 				previous_element(doc, node)
 			};
 			while let Some(sibling) = cursor {
+				if limit.is_some_and(|b| position > b) {
+					break;
+				}
 				if !*of_type || doc.element(sibling).is_some_and(|e| e.name == element.name) {
 					position += 1;
 				}
@@ -731,7 +801,10 @@ fn nth_matches(a: i64, b: i64, position: i64) -> bool {
 	if a == 0 {
 		return position == b;
 	}
-	let diff = position - b;
+	// i128: `b` is whatever the author wrote, and `position - b` must not
+	// overflow for `:nth-child(n-9223372036854775808)`.
+	let diff = i128::from(position) - i128::from(b);
+	let a = i128::from(a);
 	diff % a == 0 && diff / a >= 0
 }
 
@@ -825,8 +898,18 @@ mod tests {
 		assert_eq!(texts(html, "li:nth-child(-n+2)"), ["1", "2"]);
 		assert_eq!(texts(html, "li:nth-last-child(1)"), ["4"]);
 		assert_eq!(texts(html, "li:not(:first-child)"), ["2", "3", "4"]);
-		assert_eq!(texts(html, "p:empty").len(), 1);
-		assert_eq!(texts(html, ":is(ul, p) li").len(), 4);
+		assert_eq!(texts(html, "p:empty"), [""]);
+		assert_eq!(
+			texts("<p> </p><p><!--c--></p><p><b></b></p>", "p:empty"),
+			[""]
+		);
+		assert_eq!(
+			texts(
+				"<ul><li>1</li></ul><ol><li>2</li></ol><p><li>3</li></p>",
+				":is(ul, p) li"
+			),
+			["1", "3"]
+		);
 		assert_eq!(texts("<p>a</p>", "p:only-child"), ["a"]);
 		assert_eq!(
 			texts("<p>a</p><p>b</p>", "p:only-child"),
@@ -834,7 +917,8 @@ mod tests {
 		);
 		assert_eq!(texts("<i>1</i><b>2</b><i>3</i>", "i:last-of-type"), ["3"]);
 		assert_eq!(texts("<i>1</i><b>2</b><i>3</i>", "i:first-of-type"), ["1"]);
-		assert_eq!(texts("<html><body>x</body></html>", ":root").len(), 1);
+		assert_eq!(texts("<html><body>x</body></html>", ":root"), ["x"]);
+		assert_eq!(texts("<!-- c -->text<p>a</p><p>b</p>", ":root"), ["a"]);
 		assert_eq!(texts(html, ":where(p) "), ["", "x"]);
 	}
 
@@ -904,5 +988,146 @@ mod tests {
 	fn document_order_is_kept_for_nested_matches() {
 		let html = "<div>a<div>b<div>c</div></div></div>";
 		assert_eq!(texts(html, "div"), ["abc", "bc", "c"]);
+	}
+
+	#[test]
+	fn nth_child_arithmetic_cannot_overflow() {
+		let doc = parse("<p>a</p><p>b</p>");
+		for selector in [
+			"p:nth-child(n-9223372036854775808)",
+			"p:nth-child(-n-9223372036854775808)",
+			"p:nth-child(9223372036854775807n+9223372036854775807)",
+		] {
+			let _ = Selector::parse(selector).unwrap().select_all(&doc);
+		}
+		assert_eq!(
+			texts("<p>a</p><p>b</p><p>c</p>", "p:nth-child(-n+2)"),
+			["a", "b"]
+		);
+		assert_eq!(
+			texts("<p>a</p><p>b</p><p>c</p>", "p:nth-child(n+2)"),
+			["b", "c"]
+		);
+	}
+
+	#[test]
+	fn deeply_nested_pseudo_classes_are_refused() {
+		let ok = format!(
+			"{}a{}",
+			":not(".repeat(MAX_NESTING),
+			")".repeat(MAX_NESTING)
+		);
+		assert!(Selector::parse(&ok).is_ok());
+		let too_deep = format!(
+			"{}a{}",
+			":not(".repeat(MAX_NESTING + 1),
+			")".repeat(MAX_NESTING + 1)
+		);
+		assert!(Selector::parse(&too_deep).is_err());
+		let has = format!(
+			"{}a{}",
+			":has(".repeat(MAX_NESTING + 1),
+			")".repeat(MAX_NESTING + 1)
+		);
+		assert!(Selector::parse(&has).is_err());
+	}
+
+	#[test]
+	fn selectors_over_long_runs_of_siblings_stay_fast() {
+		let html = "<li>x</li>".repeat(20_000);
+		let doc = parse(&html);
+		let started = std::time::Instant::now();
+		assert_eq!(
+			Selector::parse("li:first-child")
+				.unwrap()
+				.select_all(&doc)
+				.len(),
+			1
+		);
+		assert_eq!(
+			Selector::parse("li:last-child")
+				.unwrap()
+				.select_all(&doc)
+				.len(),
+			1
+		);
+		assert_eq!(
+			Selector::parse("li:nth-child(3)")
+				.unwrap()
+				.select_all(&doc)
+				.len(),
+			1
+		);
+		assert!(
+			started.elapsed().as_secs() < 5,
+			"fixed positions must not scan every sibling"
+		);
+	}
+
+	#[test]
+	fn has_over_a_deep_tree_does_not_build_lists_or_overflow() {
+		let html = "<div>".repeat(3_000) + "<span>x</span>" + &"</div>".repeat(3_000);
+		let doc = parse(&html);
+		let started = std::time::Instant::now();
+		assert_eq!(
+			Selector::parse("div:has(span)")
+				.unwrap()
+				.select_all(&doc)
+				.len(),
+			3_000
+		);
+		assert!(started.elapsed().as_secs() < 10);
+	}
+
+	#[test]
+	fn has_with_sibling_combinators_looks_only_forward() {
+		let html = "<i>0</i><h1>a</h1><p>b</p><i>1</i>";
+		assert_eq!(texts(html, "h1:has(+ p)"), ["a"]);
+		assert_eq!(texts(html, "h1:has(~ i)"), ["a"]);
+		assert_eq!(texts(html, "p:has(~ h1)"), Vec::<String>::new());
+		assert_eq!(texts(html, "i:has(+ h1)"), ["0"]);
+		assert_eq!(texts("<div><p>a</p></div><b>x</b>", "div:has(+ b)"), ["a"]);
+	}
+
+	#[test]
+	fn more_pseudo_class_forms() {
+		let html = "<ul><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li></ul>";
+		assert_eq!(texts(html, "li:nth-last-child(2)"), ["4"]);
+		assert_eq!(texts(html, "li:nth-last-child(2n)"), ["2", "4"]);
+		assert_eq!(texts(html, "li:nth-child(n+3)"), ["3", "4", "5"]);
+		assert_eq!(texts(html, "li:nth-child(2n-1)"), ["1", "3", "5"]);
+		assert_eq!(texts(html, "li:nth-child(-2n+7)"), ["1", "3", "5"]);
+		assert_eq!(texts(html, "li:nth-child( 2n + 1 )"), ["1", "3", "5"]);
+		assert_eq!(texts(html, "li:nth-child(0n+3)"), ["3"]);
+		assert_eq!(texts(html, "li:nth-child(+n)"), ["1", "2", "3", "4", "5"]);
+		assert_eq!(
+			texts(
+				"<b>1</b><i>2</i><b>3</b><i>4</i><b>5</b>",
+				"b:nth-of-type(2)"
+			),
+			["3"]
+		);
+		assert_eq!(
+			texts(
+				"<b>1</b><i>2</i><b>3</b><i>4</i><b>5</b>",
+				"b:nth-last-of-type(1)"
+			),
+			["5"]
+		);
+		assert_eq!(
+			texts(html, "li:not(:first-child, :last-child)"),
+			["2", "3", "4"]
+		);
+		assert_eq!(texts("<a>1</a><b>2</b>", ":not(:has(a))").len(), 2);
+		for bad in [
+			":nth-child()",
+			":nth-child(2n+)",
+			":is(",
+			"a)",
+			"a[b~=\"x]",
+			"\\",
+		] {
+			assert!(Selector::parse(bad).is_err(), "`{bad}` should not parse");
+		}
 	}
 }
