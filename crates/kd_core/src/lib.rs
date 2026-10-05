@@ -18,6 +18,7 @@ pub mod banner;
 mod data;
 mod html;
 mod jsx;
+mod minifiers;
 mod session;
 pub mod style_import;
 
@@ -344,6 +345,9 @@ pub struct BuildOptions {
 	/// The version of the esbuild that builds the scripts; a different one
 	/// rebuilds them, because its output may differ.
 	pub esbuild_version: Option<String>,
+	/// The esbuild executable that minifies inline scripts and event
+	/// handlers; without one they are left as they are.
+	pub esbuild_binary: Option<String>,
 	/// A dev server is building: `onServer` source maps are written and the
 	/// banner is the development warning.
 	pub serving: bool,
@@ -1038,12 +1042,15 @@ mod tests {
 		for name in &names {
 			let input = fs::read_to_string(dir.join(format!("{name}.in"))).unwrap();
 			let expected = fs::read_to_string(dir.join(format!("{name}.out"))).unwrap();
-			let actual = match pipeline.process(&html::PageInput {
-				source: &input,
-				url: "/x.html",
-				input_path: "/kd-chain-root/x.html",
-				phase: kd_html::inject::Phase::Build,
-			}) {
+			let actual = match pipeline.process(
+				&html::PageInput {
+					source: &input,
+					url: "/x.html",
+					input_path: "/kd-chain-root/x.html",
+					phase: kd_html::inject::Phase::Build,
+				},
+				&kd_html::minify::NoMinification,
+			) {
 				Ok(out) => out.html,
 				Err(_) => "__ERROR__".to_owned(),
 			};
@@ -1437,6 +1444,44 @@ mod tests {
 		let loaded = site.config(r#", "pages": { "outputExtension": ".js" }"#);
 		let e = prepare(&loaded, &BuildOptions::default(), "file:///runtime.js").unwrap_err();
 		assert!(e.contains("is also the output of a page"), "{e}");
+	}
+
+	#[test]
+	fn code_inside_pages_is_minified_by_esbuild_and_left_alone_without_it() {
+		let site = Site::new("inline-code");
+		site.write(
+			"src/index.html",
+			"<p onclick=\"go( 1 ); return false;\">x</p>\n<script>\n  // note\n  window.a  =  1;\n</script>\n",
+		);
+		let loaded = site.config(r#", "html": { "minify": { "js": true } }"#);
+		let run = |version: &str, binary: Option<String>| {
+			let prepared = prepare(
+				&loaded,
+				&BuildOptions {
+					jobs: Some(1),
+					esbuild_version: Some(version.to_owned()),
+					esbuild_binary: binary,
+					..Default::default()
+				},
+				"file:///runtime.js",
+			)
+			.unwrap();
+			prepared.finish(Vec::new(), Vec::new()).unwrap();
+			site.read("out/index.html")
+		};
+		let minified = run("1", Some(minifiers::esbuild_for_tests()));
+		assert!(
+			minified.contains("<script>window.a=1;</script>"),
+			"{minified}"
+		);
+		assert!(
+			minified.contains(r#"onclick="return go(1),!1""#),
+			"{minified}"
+		);
+
+		// Without esbuild the same page is built, with its code as it was.
+		let plain = run("2", None);
+		assert!(plain.contains("window.a  =  1;"), "{plain}");
 	}
 
 	fn prepare_incremental_result(loaded: &Loaded) -> Result<Prepared, String> {

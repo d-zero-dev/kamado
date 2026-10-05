@@ -21,7 +21,7 @@ use kd_glob::Pattern;
 use kd_html::image_sizes::{self, ImageSizeError, ImageSource};
 use kd_html::includes::{self, Include, OnMissing, Reader, Replace};
 use kd_html::inject::{self, Inject, InjectMode, InjectPosition, Phase};
-use kd_html::minify::{self, NoMinification};
+use kd_html::minify;
 use kd_html::page::Page;
 use kd_html::print;
 use kd_html::rules::{self, Position, Rule, UrlTarget};
@@ -693,7 +693,11 @@ impl Pipeline {
 	///
 	/// A message when a stage fails and `html.onError` is `error` (or when
 	/// the options themselves cannot be applied).
-	pub(crate) fn process(&self, input: &PageInput<'_>) -> Result<PageOutput, String> {
+	pub(crate) fn process(
+		&self,
+		input: &PageInput<'_>,
+		hooks: &dyn minify::Hooks,
+	) -> Result<PageOutput, String> {
 		let e = self.effective(input.url);
 		let recorder = Recorder {
 			deps: RefCell::new(BTreeMap::new()),
@@ -732,7 +736,7 @@ impl Pipeline {
 			}
 		}
 		if let Some(options) = e.minify {
-			match minify::minify(&result, options, &NoMinification) {
+			match minify::minify(&result, options, hooks) {
 				Ok(html) => result = html,
 				Err(error) => failed("minify", error.to_string(), &mut warnings)?,
 			}

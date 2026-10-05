@@ -8,12 +8,40 @@
  * resolution of `node_modules` are its job, and its output is what v2 users
  * already ship.
  */
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import * as esbuild from 'esbuild';
 
 /** The version of esbuild; a different one rebuilds every script. */
 export const ESBUILD_VERSION: string = esbuild.version;
+
+/**
+ * The esbuild executable. The core runs it itself to minify the code inside
+ * pages, so that those pages never wait for a JavaScript thread. It lives in
+ * the platform package of esbuild (`@esbuild/darwin-arm64`, ...); the `bin`
+ * of the `esbuild` package is only a launcher script.
+ * @returns The path, or `undefined` when no executable is installed (the code
+ *   inside pages is then left as it is)
+ * @example
+ * ```ts
+ * const binary = findEsbuildBinary();
+ * // '/site/node_modules/@esbuild/darwin-arm64/bin/esbuild'
+ * ```
+ */
+export function findEsbuildBinary(): string | undefined {
+	const require = createRequire(import.meta.url);
+	try {
+		const fromEsbuild = createRequire(require.resolve('esbuild'));
+		const binary = fromEsbuild.resolve(
+			`@esbuild/${process.platform}-${process.arch}/bin/esbuild`,
+		);
+		return existsSync(binary) ? binary : undefined;
+	} catch {
+		return undefined;
+	}
+}
 
 /** What the core asks for (`scripts` of `prepare`). */
 export interface ScriptRequest {

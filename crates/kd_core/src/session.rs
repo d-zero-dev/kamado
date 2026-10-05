@@ -21,6 +21,7 @@ use crate::assets::{self, Asset, AssetKind, ScriptSettings};
 use crate::banner::{self, LocalTime};
 use crate::html;
 use crate::jsx::Modules;
+use crate::minifiers::Minifiers;
 use crate::{
 	AssetResult, BuildOptions, Loaded, Page, PageKind, PageResult, Plan, Report, Status,
 	compile_globs, plan, write_output,
@@ -89,6 +90,8 @@ struct Shared {
 	/// The environment digest of the scripts.
 	env_scripts: String,
 	pipeline: html::Pipeline,
+	/// Minifies the code inside pages (inline scripts and handlers).
+	minifiers: Minifiers,
 	targets: Vec<kd_glob::Pattern>,
 	skip_unchanged: bool,
 	assets: Vec<Asset>,
@@ -218,8 +221,16 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	let config = &loaded.config;
 	let plan = plan(config)?;
 	let targets = compile_globs(&options.targets)?;
+	// esbuild minifies the code inside pages, so its version is part of what a
+	// page was built with.
 	let env = kd_hash::to_hex(&kd_hash::sha256(
-		format!("{}\0{}\0html-pipeline", crate::VERSION, loaded.config_hash).as_bytes(),
+		format!(
+			"{}\0{}\0html-pipeline\0{}",
+			crate::VERSION,
+			loaded.config_hash,
+			options.esbuild_version.as_deref().unwrap_or_default()
+		)
+		.as_bytes(),
 	));
 	let pipeline = html::Pipeline::compile(config)?;
 	let data = crate::data::load(config)?;
@@ -444,6 +455,11 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 			env_js,
 			env_scripts,
 			pipeline,
+			minifiers: Minifiers::new(
+				options.esbuild_binary.clone(),
+				options.esbuild_version.as_deref().unwrap_or_default(),
+				Some(cache_dir.clone()),
+			),
 			targets,
 			skip_unchanged: options.skip_unchanged || config.build.skip_unchanged,
 			assets,
@@ -696,12 +712,15 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 		Some(html) => html,
 		None => page.body.as_deref().unwrap_or_default(),
 	};
-	let out = shared.pipeline.process(&html::PageInput {
-		source,
-		url: &page.file.url,
-		input_path: &page.file.input_path,
-		phase: kd_html::inject::Phase::Build,
-	})?;
+	let out = shared.pipeline.process(
+		&html::PageInput {
+			source,
+			url: &page.file.url,
+			input_path: &page.file.input_path,
+			phase: kd_html::inject::Phase::Build,
+		},
+		&shared.minifiers,
+	)?;
 	let bytes = out.html.into_bytes();
 	let status = write_output(&page.file.output_path, &bytes, shared.skip_unchanged)?;
 	// The fingerprints were taken when the bytes were read, so an edit made

@@ -1,10 +1,16 @@
+import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
-import { buildScripts, ESBUILD_VERSION, type ScriptRequest } from './scripts.js';
+import {
+	buildScripts,
+	ESBUILD_VERSION,
+	findEsbuildBinary,
+	type ScriptRequest,
+} from './scripts.js';
 
 let root = '';
 
@@ -45,6 +51,17 @@ function request(
 		})),
 	};
 }
+
+describe('findEsbuildBinary', () => {
+	test('finds the executable of the platform package, which the core can run', () => {
+		const binary = findEsbuildBinary();
+
+		expect(binary).toMatch(/node_modules\/@esbuild\/[a-z0-9-]+\/bin\/esbuild$/);
+		expect(execFileSync(binary!, ['--version'], { encoding: 'utf8' }).trim()).toBe(
+			ESBUILD_VERSION,
+		);
+	});
+});
 
 describe('buildScripts', () => {
 	test('exposes the version of esbuild for the cache digest', () => {

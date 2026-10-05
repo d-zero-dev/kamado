@@ -11,6 +11,7 @@ vi.mock('./native.js', () => ({
 }));
 vi.mock('./scripts.js', () => ({
 	ESBUILD_VERSION: '0.0.1-test',
+	findEsbuildBinary: () => '/fake/esbuild',
 	buildScripts: (request: unknown) => buildScripts(request),
 }));
 
@@ -71,6 +72,7 @@ describe('build', () => {
 			cacheDir: '/cache',
 			tzOffsetMinutes: expect.any(Number),
 			esbuildVersion: '0.0.1-test',
+			esbuildBinary: '/fake/esbuild',
 		});
 	});
 
@@ -80,6 +82,7 @@ describe('build', () => {
 		expect(JSON.parse(prepare.mock.calls[0]![1])).toEqual({
 			tzOffsetMinutes: -new Date().getTimezoneOffset(),
 			esbuildVersion: '0.0.1-test',
+			esbuildBinary: '/fake/esbuild',
 		});
 	});
 

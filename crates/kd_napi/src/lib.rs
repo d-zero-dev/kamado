@@ -189,6 +189,11 @@ fn build_options_from_json(json: &str) -> Result<kd_core::BuildOptions, String> 
 		Some(kd_jsonc::Value::String(s)) => Some(s.clone()),
 		Some(_) => return Err("build options: esbuildVersion must be a string".to_string()),
 	};
+	let esbuild_binary = match value.get("esbuildBinary") {
+		None | Some(kd_jsonc::Value::Null) => None,
+		Some(kd_jsonc::Value::String(s)) => Some(s.clone()),
+		Some(_) => return Err("build options: esbuildBinary must be a string".to_string()),
+	};
 	Ok(kd_core::BuildOptions {
 		incremental: b("incremental")?,
 		force: b("force")?,
@@ -198,6 +203,7 @@ fn build_options_from_json(json: &str) -> Result<kd_core::BuildOptions, String> 
 		cache_dir,
 		tz_offset_minutes,
 		esbuild_version,
+		esbuild_binary,
 		serving: b("serving")?,
 	})
 }

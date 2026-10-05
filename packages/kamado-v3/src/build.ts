@@ -2,7 +2,12 @@ import type { RenderContext } from './props.js';
 
 import { native } from './native.js';
 import { renderJobs, type RenderJob } from './render.js';
-import { buildScripts, ESBUILD_VERSION, type ScriptRequest } from './scripts.js';
+import {
+	buildScripts,
+	ESBUILD_VERSION,
+	findEsbuildBinary,
+	type ScriptRequest,
+} from './scripts.js';
 
 /** Build-time switches; every field is optional and defaults to the config. */
 export interface BuildOptions {
@@ -83,6 +88,7 @@ export async function build(
 				// The banner's dates are local time, which the core cannot tell.
 				tzOffsetMinutes: -new Date().getTimezoneOffset(),
 				esbuildVersion: ESBUILD_VERSION,
+				esbuildBinary: findEsbuildBinary(),
 			}),
 			RUNTIME_URL,
 		),
