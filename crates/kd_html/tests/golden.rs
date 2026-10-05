@@ -8,7 +8,9 @@ use std::path::PathBuf;
 use kd_html::page::Page;
 
 fn golden_dir() -> PathBuf {
-	PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("golden")
+	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+		.join("tests")
+		.join("golden")
 }
 
 #[test]
@@ -19,7 +21,11 @@ fn every_case_serializes_to_what_linkedom_produced() {
 		.filter_map(|n| n.strip_suffix(".in").map(str::to_owned))
 		.collect();
 	names.sort();
-	assert!(names.len() >= 40, "the corpus is missing: {} cases", names.len());
+	assert!(
+		names.len() >= 40,
+		"the corpus is missing: {} cases",
+		names.len()
+	);
 
 	let mut failures = Vec::new();
 	for name in &names {
