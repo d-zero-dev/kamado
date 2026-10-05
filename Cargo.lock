@@ -3,7 +3,15 @@
 version = 4
 
 [[package]]
+name = "kd_glob"
+version = "0.0.0"
+
+[[package]]
 name = "kd_hash"
+version = "0.0.0"
+
+[[package]]
+name = "kd_jsonc"
 version = "0.0.0"
 
 [[package]]
@@ -11,4 +19,11 @@ name = "kd_napi"
 version = "0.0.0"
 dependencies = [
  "kd_hash",
+]
+
+[[package]]
+name = "kd_yaml"
+version = "0.0.0"
+dependencies = [
+ "kd_jsonc",
 ]

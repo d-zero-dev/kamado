@@ -2,10 +2,14 @@
 	"import": ["@d-zero/cspell-config"],
 	"ignorePaths": ["**/CHANGELOG.md", "**/CODEOWNERS"],
 	// NIST SHA-256 test vectors are long lowercase letter strings, not words.
-	"ignoreRegExpList": ["/\\b[a-z]{40,}\\b/"],
+	// Glob tests use short nonsense paths (abbbc, axxb, acdf, acef) to show
+	// which alternatives expand; they are inputs, not words.
+	"ignoreRegExpList": ["/\\b[a-z]{40,}\\b/", "/\\b(abbbc|axxb|acdf|acef)\\b/"],
 	"words": [
 		//
 		"amet",
+		"FEFF",
+		"fract",
 		"cdylib",
 		"clippy",
 		"dlsym",
