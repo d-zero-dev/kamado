@@ -6,5 +6,6 @@
 pub mod dom;
 pub mod entities;
 mod entities_table;
+pub mod page;
 pub mod parser;
 pub mod serialize;
