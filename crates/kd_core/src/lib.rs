@@ -19,6 +19,7 @@ mod data;
 mod html;
 mod jsx;
 mod session;
+pub mod style_import;
 
 pub use session::{Prepared, RenderJob, ScriptOutput, build, prepare, write_report};
 
