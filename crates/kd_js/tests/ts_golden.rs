@@ -42,6 +42,7 @@ fn every_snippet_is_erased_like_node_does() {
 				ts: true,
 				elide_imports: false,
 				rewrite: &|_| None,
+				define: &[],
 			},
 		) {
 			Ok(out) => squeeze(&out.code),

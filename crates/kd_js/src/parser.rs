@@ -70,6 +70,7 @@ pub(crate) struct Snap {
 	edits: usize,
 	imports: usize,
 	refs: usize,
+	shorthand: usize,
 	decls: usize,
 }
 
@@ -86,6 +87,8 @@ pub struct Parser<'s> {
 	pub(crate) imports: Vec<ImportRecord>,
 	/// Identifiers used as values (name ranges).
 	pub(crate) refs: Vec<(usize, usize)>,
+	/// Start offsets of the references that are object shorthands (`{ a }`).
+	pub(crate) shorthand: Vec<usize>,
 	pub(crate) decls: Vec<ImportDecl>,
 	pub(crate) info: ModuleInfo,
 	pub(crate) depth: usize,
@@ -110,6 +113,7 @@ pub struct Parsed {
 	pub edits: Vec<Edit>,
 	pub imports: Vec<ImportRecord>,
 	pub refs: Vec<(usize, usize)>,
+	pub shorthand: Vec<usize>,
 	pub decls: Vec<ImportDecl>,
 	pub info: ModuleInfo,
 }
@@ -133,6 +137,7 @@ impl<'s> Parser<'s> {
 			edits: Vec::new(),
 			imports: Vec::new(),
 			refs: Vec::new(),
+			shorthand: Vec::new(),
 			decls: Vec::new(),
 			info: ModuleInfo::default(),
 			depth: 0,
@@ -149,6 +154,7 @@ impl<'s> Parser<'s> {
 			edits: p.edits,
 			imports: p.imports,
 			refs: p.refs,
+			shorthand: p.shorthand,
 			decls: p.decls,
 			info: p.info,
 		})
@@ -241,6 +247,7 @@ impl<'s> Parser<'s> {
 			edits: self.edits.len(),
 			imports: self.imports.len(),
 			refs: self.refs.len(),
+			shorthand: self.shorthand.len(),
 			decls: self.decls.len(),
 		}
 	}
@@ -252,6 +259,7 @@ impl<'s> Parser<'s> {
 		self.edits.truncate(s.edits);
 		self.imports.truncate(s.imports);
 		self.refs.truncate(s.refs);
+		self.shorthand.truncate(s.shorthand);
 		self.decls.truncate(s.decls);
 	}
 

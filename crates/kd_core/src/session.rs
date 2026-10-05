@@ -284,7 +284,12 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 
 	// Decide every page.
 	let fingerprinter = kd_build::Fingerprinter::new();
-	let modules = Modules::new(&config.root_dir, runtime, &config.pages.alias);
+	let modules = Modules::new(
+		&config.root_dir,
+		runtime,
+		&config.pages.alias,
+		&config.pages.define,
+	);
 	let mut decisions = Vec::with_capacity(plan.pages.len());
 	let mut render_jobs = Vec::new();
 	for (i, page) in plan.pages.iter().enumerate() {

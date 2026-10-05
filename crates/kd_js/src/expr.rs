@@ -492,6 +492,7 @@ impl Parser<'_> {
 			return self.unexpected("`:`");
 		}
 		self.push_ref(key);
+		self.shorthand.push(key.start);
 		if self.eat_p("=")? {
 			self.assign()?;
 		}

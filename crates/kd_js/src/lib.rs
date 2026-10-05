@@ -13,6 +13,7 @@
 
 pub mod ast;
 mod codegen;
+mod define;
 mod expr;
 mod jsx;
 mod jsx_entities;
@@ -47,6 +48,9 @@ pub struct Options<'a> {
 	/// Maps a module specifier of the source to the one to write instead
 	/// (`None` keeps it).
 	pub rewrite: &'a dyn Fn(&str) -> Option<String>,
+	/// Global names (`DEBUG`, `process.env.NODE_ENV`) and the expressions that
+	/// replace them; see esbuild's `define`.
+	pub define: &'a [(String, String)],
 }
 
 /// The result of [`compile`].
@@ -76,6 +80,7 @@ pub struct Output {
 ///     ts: true,
 ///     elide_imports: true,
 ///     rewrite: &|_| None,
+///     define: &[],
 /// };
 /// let out = kd_js::compile("export default (p: { n: string }) => <b>{p.n}</b>;", &options).unwrap();
 /// assert!(out.code.contains("__kd_m(\"<b>\" + __kd_c(p.n) + \"</b>\")"));
@@ -85,6 +90,14 @@ pub fn compile(src: &str, options: &Options<'_>) -> Result<Output, SyntaxError> 
 	let parsed = parser::Parser::parse(src, options.jsx, options.ts)?;
 	let mut edits: Vec<Edit> = parsed.edits;
 
+	if !options.define.is_empty() {
+		edits.extend(define::edits(
+			src,
+			&parsed.refs,
+			&parsed.shorthand,
+			options.define,
+		));
+	}
 	if options.ts && options.elide_imports {
 		elide_unused_imports(src, &parsed.decls, &parsed.refs, &mut edits);
 	}
@@ -181,6 +194,7 @@ mod tests {
 				ts: true,
 				elide_imports: true,
 				rewrite: &|_| None,
+				define: &[],
 			},
 		)
 		.unwrap()
@@ -196,6 +210,7 @@ mod tests {
 				ts: true,
 				elide_imports: true,
 				rewrite: &|_| None,
+				define: &[],
 			},
 		)
 		.unwrap_err()
@@ -255,6 +270,7 @@ mod tests {
 				ts: true,
 				elide_imports: true,
 				rewrite: &|s| Some(format!("{s}.mjs")),
+				define: &[],
 			},
 		)
 		.unwrap();

@@ -54,6 +54,7 @@ fn main() {
 					ts,
 					elide_imports: !keep_imports,
 					rewrite: &|_| None,
+					define: &[],
 				},
 			)
 			.map(|o| o.code)

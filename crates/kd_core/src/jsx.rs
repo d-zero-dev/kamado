@@ -40,6 +40,8 @@ pub(crate) struct Modules {
 	runtime: String,
 	/// `(prefix, absolute directory)`, longest prefix first.
 	alias: Vec<(String, String)>,
+	/// `pages.define`: names and the expressions that replace them.
+	define: Vec<(String, String)>,
 	state: Mutex<HashMap<String, Arc<Compiled>>>,
 }
 
@@ -66,13 +68,16 @@ impl Modules {
 		root_dir: &str,
 		runtime: &str,
 		alias: &std::collections::BTreeMap<String, String>,
+		define: &std::collections::BTreeMap<String, String>,
 	) -> Modules {
+		// A relative target is relative to the project directory, not to the
+		// directory the build happens to run in.
 		let mut alias: Vec<(String, String)> = alias
 			.iter()
 			.map(|(k, v)| {
 				(
 					k.trim_end_matches('/').to_owned(),
-					kd_site::path::normalize(v),
+					kd_site::path::join(root_dir, v),
 				)
 			})
 			.collect();
@@ -85,6 +90,7 @@ impl Modules {
 			),
 			runtime: runtime.to_owned(),
 			alias,
+			define: define.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
 			state: Mutex::new(HashMap::new()),
 		}
 	}
@@ -231,6 +237,7 @@ impl Modules {
 				ts: is_ts,
 				elide_imports: is_ts,
 				rewrite: &rewrite,
+				define: &self.define,
 			},
 		)
 		.map_err(|e| format!("{src}:{e}"))?;
@@ -308,6 +315,7 @@ mod tests {
 			&dir.0,
 			"file:///runtime.js",
 			&BTreeMap::from([("@".to_owned(), format!("{}/src/lib", dir.0))]),
+			&BTreeMap::new(),
 		)
 	}
 
@@ -435,5 +443,38 @@ mod tests {
 		std::thread::sleep(std::time::Duration::from_millis(20));
 		modules(&dir).compile(&page).unwrap();
 		assert_eq!(fs::metadata(&out).unwrap().modified().unwrap(), before);
+	}
+
+	#[test]
+	fn a_relative_alias_target_is_relative_to_the_project_and_define_replaces_globals() {
+		let dir = Dir::new("alias-define");
+		dir.write(
+			"src/lib/mode.ts",
+			"export const mode = DEBUG ? 'dev' : 'prod';\n",
+		);
+		let page = dir.write(
+			"src/p.tsx",
+			"import { mode } from '@/mode';\nexport default () => <p>{mode}{process.env.NODE_ENV}</p>;\n",
+		);
+		let modules = Modules::new(
+			&dir.0,
+			"file:///runtime.js",
+			&BTreeMap::from([("@".to_owned(), "./src/lib".to_owned())]),
+			&BTreeMap::from([
+				("DEBUG".to_owned(), "false".to_owned()),
+				(
+					"process.env.NODE_ENV".to_owned(),
+					"\"production\"".to_owned(),
+				),
+			]),
+		);
+
+		let compiled = modules.compile(&page).unwrap();
+
+		assert_eq!(compiled.imports, [format!("{}/src/lib/mode.ts", dir.0)]);
+		let page_js = fs::read_to_string(&compiled.out_path).unwrap();
+		assert!(page_js.contains("\"production\""), "{page_js}");
+		let mode_js = fs::read_to_string(modules.out_path_for(&compiled.imports[0])).unwrap();
+		assert!(mode_js.contains("false ? 'dev' : 'prod'"), "{mode_js}");
 	}
 }
