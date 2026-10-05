@@ -1,0 +1,122 @@
+#!/usr/bin/env node
+/* eslint-disable no-console -- the CLI's job is to print */
+import type { BuildReport } from './build.js';
+
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { parseArgs, styleText } from 'node:util';
+
+import { build } from './build.js';
+
+const USAGE = `Usage:
+  kamado build [globs...] [--incremental] [--force] [--skip-unchanged]
+                          [--jobs <n>] [--cache-dir <dir>] [--config <file>] [--verbose]
+  kamado server           [--config <file>] [--verbose]
+
+The config file defaults to ./kamado.config.jsonc.`;
+
+/**
+ * Resolves the config file: `--config` relative to the cwd, else
+ * `kamado.config.jsonc` in the cwd.
+ * @param configFlag - The `--config` value
+ */
+function resolveConfig(configFlag: string | undefined): string {
+	const file = path.resolve(process.cwd(), configFlag ?? 'kamado.config.jsonc');
+	if (!existsSync(file)) {
+		throw new Error(`config file not found: ${file}`);
+	}
+	return file;
+}
+
+/**
+ * Formats the report: one line per page when verbose, warnings, then the
+ * totals by status.
+ * @param report - The build report
+ * @param verbose - Whether to list every page
+ */
+function summarize(report: BuildReport, verbose: boolean): string {
+	const counts = new Map<string, number>();
+	for (const page of report.pages) {
+		counts.set(page.status, (counts.get(page.status) ?? 0) + 1);
+	}
+	const parts = [...counts.entries()].map(([status, n]) => `${n} ${status}`);
+	const lines: string[] = [];
+	if (verbose) {
+		for (const page of report.pages) {
+			lines.push(`  ${styleText('dim', page.status.padEnd(9))} ${page.url}`);
+		}
+	}
+	for (const warning of report.warnings) {
+		lines.push(styleText('yellow', `warning: ${warning}`));
+	}
+	lines.push(
+		styleText('green', `Build completed in ${(report.elapsedMs / 1000).toFixed(2)}s`) +
+			` (${parts.join(', ')})`,
+	);
+	return lines.join('\n');
+}
+
+/**
+ * Parses the command line and runs the command.
+ * @param argv - Arguments without the node binary and script
+ * @returns The process exit code
+ */
+function main(argv: readonly string[]): number {
+	const { values, positionals } = parseArgs({
+		args: [...argv],
+		allowPositionals: true,
+		options: {
+			config: { type: 'string', short: 'c' },
+			verbose: { type: 'boolean', default: false },
+			incremental: { type: 'boolean', default: false },
+			force: { type: 'boolean', default: false },
+			'skip-unchanged': { type: 'boolean', default: false },
+			jobs: { type: 'string' },
+			'cache-dir': { type: 'string' },
+			help: { type: 'boolean', short: 'h', default: false },
+		},
+	});
+	const [command, ...rest] = positionals;
+	if (values.help || !command) {
+		console.log(USAGE);
+		return values.help ? 0 : 1;
+	}
+	switch (command) {
+		case 'build': {
+			const configPath = resolveConfig(values.config);
+			const jobs = values.jobs === undefined ? undefined : Number(values.jobs);
+			if (jobs !== undefined && (!Number.isInteger(jobs) || jobs < 1)) {
+				throw new Error(`--jobs must be a positive integer: ${values.jobs}`);
+			}
+			const report = build(configPath, {
+				incremental: values.incremental,
+				force: values.force,
+				skipUnchanged: values['skip-unchanged'],
+				targets: rest,
+				jobs,
+				cacheDir:
+					values['cache-dir'] === undefined
+						? undefined
+						: path.resolve(process.cwd(), values['cache-dir']),
+			});
+			console.log(summarize(report, values.verbose));
+			return 0;
+		}
+		case 'server': {
+			throw new Error('kamado server is not available in this build yet');
+		}
+		default: {
+			console.error(styleText(['bold', 'red'], `unknown command: ${command}`));
+			console.log(USAGE);
+			return 1;
+		}
+	}
+}
+
+try {
+	process.exitCode = main(process.argv.slice(2));
+} catch (error) {
+	const message = error instanceof Error ? error.message : String(error);
+	console.error(styleText(['bold', 'red'], message));
+	process.exitCode = 1;
+}

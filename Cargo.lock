@@ -20,6 +20,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kd_core"
+version = "0.0.0"
+dependencies = [
+ "kd_build",
+ "kd_config",
+ "kd_glob",
+ "kd_hash",
+ "kd_jsonc",
+ "kd_pool",
+ "kd_site",
+ "kd_yaml",
+]
+
+[[package]]
 name = "kd_glob"
 version = "0.0.0"
 
@@ -35,7 +49,9 @@ version = "0.0.0"
 name = "kd_napi"
 version = "0.0.0"
 dependencies = [
+ "kd_core",
  "kd_hash",
+ "kd_jsonc",
 ]
 
 [[package]]

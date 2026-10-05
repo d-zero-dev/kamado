@@ -12,4 +12,6 @@ workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
+kd_core = { path = "../kd_core" }
 kd_hash = { path = "../kd_hash" }
+kd_jsonc = { path = "../kd_jsonc" }

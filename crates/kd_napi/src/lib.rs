@@ -59,6 +59,8 @@ struct Api {
 	get_buffer_info:
 		unsafe extern "C" fn(napi_env, napi_value, *mut *mut c_void, *mut usize) -> napi_status,
 	throw_error: unsafe extern "C" fn(napi_env, *const c_char, *const c_char) -> napi_status,
+	get_value_string_utf8:
+		unsafe extern "C" fn(napi_env, napi_value, *mut c_char, usize, *mut usize) -> napi_status,
 }
 
 // Function pointers are plain addresses; the table is immutable after init.
@@ -88,9 +90,132 @@ fn api() -> Option<&'static Api> {
 			get_cb_info: resolve(c"napi_get_cb_info")?,
 			get_buffer_info: resolve(c"napi_get_buffer_info")?,
 			throw_error: resolve(c"napi_throw_error")?,
+			get_value_string_utf8: resolve(c"napi_get_value_string_utf8")?,
 		})
 	})
 	.as_ref()
+}
+
+/// Copies a JS string argument into a Rust `String`. `None` when the value
+/// is not a string.
+unsafe fn string_arg(api: &Api, env: napi_env, value: napi_value) -> Option<String> {
+	let mut len: usize = 0;
+	// SAFETY: a NULL buffer asks only for the length (in bytes, without NUL).
+	let status =
+		unsafe { (api.get_value_string_utf8)(env, value, std::ptr::null_mut(), 0, &mut len) };
+	if status != NAPI_OK {
+		return None;
+	}
+	let mut buf = vec![0u8; len + 1];
+	let mut written: usize = 0;
+	// SAFETY: `buf` has room for `len` bytes plus the NUL terminator.
+	let status = unsafe {
+		(api.get_value_string_utf8)(env, value, buf.as_mut_ptr().cast(), buf.len(), &mut written)
+	};
+	if status != NAPI_OK {
+		return None;
+	}
+	buf.truncate(written);
+	String::from_utf8(buf).ok()
+}
+
+/// Reads up to `N` arguments of the current call.
+unsafe fn args<const N: usize>(
+	api: &Api,
+	env: napi_env,
+	info: napi_callback_info,
+) -> ([napi_value; N], usize) {
+	let mut argc: usize = N;
+	let mut argv: [napi_value; N] = [std::ptr::null_mut(); N];
+	// SAFETY: argv has room for argc entries.
+	let status = unsafe {
+		(api.get_cb_info)(
+			env,
+			info,
+			&mut argc,
+			argv.as_mut_ptr(),
+			std::ptr::null_mut(),
+			std::ptr::null_mut(),
+		)
+	};
+	if status != NAPI_OK {
+		return (argv, 0);
+	}
+	(argv, argc.min(N))
+}
+
+fn build_options_from_json(json: &str) -> Result<kd_core::BuildOptions, String> {
+	let value = kd_jsonc::parse(json).map_err(|e| format!("build options: {e}"))?;
+	let b = |key: &str| -> Result<bool, String> {
+		match value.get(key) {
+			None | Some(kd_jsonc::Value::Null) => Ok(false),
+			Some(kd_jsonc::Value::Bool(v)) => Ok(*v),
+			Some(_) => Err(format!("build options: {key} must be a boolean")),
+		}
+	};
+	let targets = match value.get("targets") {
+		None | Some(kd_jsonc::Value::Null) => Vec::new(),
+		Some(kd_jsonc::Value::Array(items)) => items
+			.iter()
+			.map(|i| {
+				i.as_str()
+					.map(str::to_string)
+					.ok_or_else(|| "build options: targets must be strings".to_string())
+			})
+			.collect::<Result<_, _>>()?,
+		Some(_) => return Err("build options: targets must be an array".to_string()),
+	};
+	let jobs = match value.get("jobs") {
+		None | Some(kd_jsonc::Value::Null) => None,
+		Some(kd_jsonc::Value::Number(n)) if n.fract() == 0.0 && *n >= 1.0 => Some(*n as usize),
+		Some(_) => return Err("build options: jobs must be a positive integer".to_string()),
+	};
+	let cache_dir = match value.get("cacheDir") {
+		None | Some(kd_jsonc::Value::Null) => None,
+		Some(kd_jsonc::Value::String(s)) => Some(s.clone()),
+		Some(_) => return Err("build options: cacheDir must be a string".to_string()),
+	};
+	Ok(kd_core::BuildOptions {
+		incremental: b("incremental")?,
+		force: b("force")?,
+		skip_unchanged: b("skipUnchanged")?,
+		targets,
+		jobs,
+		cache_dir,
+	})
+}
+
+/// `build(configPath, optionsJson)` -> report JSON string. Throws on any
+/// configuration or build error.
+unsafe extern "C" fn build(env: napi_env, info: napi_callback_info) -> napi_value {
+	let Some(api) = api() else {
+		return std::ptr::null_mut();
+	};
+	// SAFETY: env/info belong to this call.
+	let (argv, argc) = unsafe { args::<2>(api, env, info) };
+	let config_path = if argc >= 1 {
+		unsafe { string_arg(api, env, argv[0]) }
+	} else {
+		None
+	};
+	let Some(config_path) = config_path else {
+		return unsafe { throw(api, env, c"build: expected a config path string") };
+	};
+	let options_json = if argc >= 2 {
+		unsafe { string_arg(api, env, argv[1]) }.unwrap_or_else(|| "{}".to_string())
+	} else {
+		"{}".to_string()
+	};
+	let outcome = build_options_from_json(&options_json).and_then(|options| {
+		kd_core::load(&config_path).and_then(|loaded| kd_core::build(&loaded, &options))
+	});
+	match outcome {
+		Ok(report) => unsafe { string(api, env, &report.to_json()) },
+		Err(message) => {
+			let message = std::ffi::CString::new(message.replace('\0', " ")).unwrap_or_default();
+			unsafe { throw(api, env, &message) }
+		}
+	}
 }
 
 /// Throws a JS `Error` and returns the NULL value a callback must return after throwing.
@@ -197,6 +322,7 @@ pub unsafe extern "C" fn napi_register_module_v1(env: napi_env, exports: napi_va
 		export(api, env, exports, c"version", version);
 		export(api, env, exports, c"counter", counter);
 		export(api, env, exports, c"sha256Hex", sha256_hex);
+		export(api, env, exports, c"build", build);
 	}
 	exports
 }

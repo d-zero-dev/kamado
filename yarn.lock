@@ -8565,6 +8565,16 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"kamado-v3@workspace:packages/kamado-v3":
+  version: 0.0.0-use.local
+  resolution: "kamado-v3@workspace:packages/kamado-v3"
+  dependencies:
+    "@types/node": "npm:24.13.6"
+  bin:
+    kamado3: ./dist/cli.js
+  languageName: unknown
+  linkType: soft
+
 "kamado@npm:2.0.0-alpha.17, kamado@workspace:packages/kamado":
   version: 0.0.0-use.local
   resolution: "kamado@workspace:packages/kamado"

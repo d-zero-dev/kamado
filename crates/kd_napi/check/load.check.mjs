@@ -1,5 +1,6 @@
 /**
- * Loads the built addon from the main thread and from workers.
+ * Loads the built addon from the main thread and from workers, and runs a
+ * build through it.
  *
  * Run: `cargo build --release -p kd_napi` then `node --test crates/kd_napi/check/load.check.mjs`.
  * Not named `*.test.*` on purpose so that vitest (`yarn test`) does not pick it up:
@@ -7,7 +8,13 @@
  */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdtempSync } from 'node:fs';
+import {
+	copyFileSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -76,4 +83,57 @@ test('process-wide state is shared between the main thread and workers', async (
 	for (const n of seen) {
 		assert.ok(n > before && n < after, `${n} not in (${before}, ${after})`);
 	}
+});
+
+test('build writes HTML pages and returns a report', () => {
+	const site = mkdtempSync(path.join(tmpdir(), 'kd-site-'));
+	mkdirSync(path.join(site, 'src', 'about'), { recursive: true });
+	writeFileSync(
+		path.join(site, 'kamado.config.jsonc'),
+		'{ "dir": { "input": "src", "output": "out" }, "build": { "cacheDir": ".cache" } }',
+	);
+	writeFileSync(
+		path.join(site, 'src', 'index.html'),
+		'---\ntitle: Home\n---\n<h1>Home</h1>\n',
+	);
+	writeFileSync(path.join(site, 'src', 'about', 'index.html'), '<p>about</p>');
+
+	const report = JSON.parse(
+		addon.build(path.join(site, 'kamado.config.jsonc'), JSON.stringify({ jobs: 2 })),
+	);
+	assert.equal(report.version, 1);
+	assert.deepEqual(
+		report.pages.map((p) => [p.url, p.status]),
+		[
+			['/about/', 'built'],
+			['/', 'built'],
+		],
+	);
+	assert.deepEqual(report.pages[1].meta, { title: 'Home' });
+	assert.equal(
+		readFileSync(path.join(site, 'out', 'index.html'), 'utf8'),
+		'<h1>Home</h1>\n',
+	);
+	assert.equal(
+		readFileSync(path.join(site, 'out', 'about', 'index.html'), 'utf8'),
+		'<p>about</p>',
+	);
+});
+
+test('build throws a JS Error for config problems', () => {
+	assert.throws(
+		() => addon.build('/nonexistent/kamado.config.jsonc', '{}'),
+		/cannot read config/,
+	);
+	assert.throws(() => addon.build(), /expected a config path string/);
+	const site = mkdtempSync(path.join(tmpdir(), 'kd-site-'));
+	writeFileSync(path.join(site, 'kamado.config.jsonc'), '{ "compilers": [] }');
+	assert.throws(
+		() => addon.build(path.join(site, 'kamado.config.jsonc'), '{}'),
+		/compilers: unknown option/,
+	);
+	assert.throws(
+		() => addon.build(path.join(site, 'kamado.config.jsonc'), '{ "jobs": 0 }'),
+		/jobs must be a positive integer/,
+	);
 });

@@ -24,6 +24,18 @@ node --test crates/kd_napi/check/load.check.mjs
 
 `*.check.mjs` は、ネイティブのビルドが必要なので vitest の対象にしていない（`yarn test` では動かない）。
 
+## Node 側のパッケージ（`packages/kamado-v3`）
+
+v2 の `kamado` パッケージと同じワークスペースに置くため、v2 を取り除くまでの間は `kamado-v3` という名前で開発する（公開時に `kamado` に戻す）。中身は CLI、`build()` の薄いラッパー、アドオンの読み込みだけで、ランタイム依存はない。
+
+```sh
+cargo build --release -p kd_napi   # アドオンを先に作る
+yarn build                         # TypeScript をコンパイル
+node packages/kamado-v3/dist/cli.js build --config path/to/kamado.config.jsonc --verbose --incremental
+```
+
+アドオンは `KAMADO_NATIVE_ADDON` で指定したファイル、なければ `target/release`、`target/debug` の順に探す。
+
 ## 比較ハーネスとベンチマーク
 
 ```sh
