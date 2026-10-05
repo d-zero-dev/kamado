@@ -1,0 +1,56 @@
+name: Rust
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+      - v3
+
+jobs:
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macOS-latest
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+        node: [26]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+
+      # The toolchain version is pinned here, not in rust-toolchain.toml: a
+      # toolchain file makes every local `cargo` call reinstall that version.
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.98.1
+          rustc --version
+
+      - name: No external crates
+        run: node scripts/check-rust-no-external-crates.mjs
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --locked --offline --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --offline --workspace
+
+      - name: Build addon
+        run: cargo build --locked --offline --release -p kd_napi
+
+      - name: Load addon from Node (main thread and workers)
+        run: node --test crates/kd_napi/check/load.check.mjs

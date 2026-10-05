@@ -28,3 +28,9 @@ packages/**/.bench/
 # incremental build cache when kept in-tree via `--cache-dir .kamado/cache`
 # (the default location is the OS temp dir; see packages/kamado/README.md)
 .kamado/
+
+# rust
+/target/
+
+# v3 benchmark fixtures
+benchmarks/**/.bench/

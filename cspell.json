@@ -1,11 +1,25 @@
 {
 	"import": ["@d-zero/cspell-config"],
 	"ignorePaths": ["**/CHANGELOG.md", "**/CODEOWNERS"],
+	// NIST SHA-256 test vectors are long lowercase letter strings, not words.
+	"ignoreRegExpList": ["/\\b[a-z]{40,}\\b/"],
 	"words": [
 		//
+		"amet",
+		"cdylib",
+		"clippy",
+		"dlsym",
+		"IHDR",
 		"jsxs",
 		"kamado",
+		"kamadorc",
+		"libc",
+		"libkd",
+		"napi",
+		"RTLD",
+		"rustc",
 		"unstub",
-		"vbscript"
+		"vbscript",
+		"vsha"
 	]
 }
