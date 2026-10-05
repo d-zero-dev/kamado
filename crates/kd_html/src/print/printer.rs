@@ -1035,6 +1035,33 @@ impl Printer<'_> {
 		self.docs.join(LINE, &docs)
 	}
 
+	/// The formatted JSON of a `<script type="application/ld+json">` (or
+	/// `importmap`, `speculationrules`, any type ending in `json`): prettier
+	/// formats it with its JavaScript printer and v2 kept that. `None` for any
+	/// other text and for JSON that is not formatted (see `json`).
+	fn embedded_json(&mut self, id: NodeId) -> Option<DocId> {
+		let n = self.node(id);
+		let parent = self.node(n.parent?);
+		if parent.kind != Kind::Element || parent.full_name() != "script" {
+			return None;
+		}
+		let ty = parent
+			.attrs
+			.iter()
+			.find(|a| a.full_name == "type")?
+			.value
+			.clone()?;
+		if !(ty.ends_with("json") || ty.ends_with("importmap") || ty == "speculationrules") {
+			return None;
+		}
+		let value = n.value.clone();
+		if value.trim_matches(util::is_js_space).is_empty() {
+			return None;
+		}
+		let text = util::trim_preserve_indentation(&value).to_owned();
+		super::json::format(self.docs, &text)
+	}
+
 	/// `replaceEndOfLine(text, replacement)` as the parts of a fill: pieces
 	/// alternating with the replacement.
 	fn replace_eol_parts(&mut self, text: &str, replacement: DocId) -> Vec<DocId> {
@@ -1060,6 +1087,11 @@ impl Printer<'_> {
 			Kind::Text => {
 				let prefix = self.print_opening_tag_prefix(id);
 				let suffix = self.print_closing_tag_suffix(id);
+				if let Some(json) = self.embedded_json(id) {
+					let prefix = self.text(prefix);
+					let suffix = self.text(suffix);
+					return self.concat(vec![BREAK_PARENT, prefix, json, suffix]);
+				}
 				let mut parts = self.text_value_parts(id);
 				let first = parts[0];
 				let prefix = self.text(prefix);

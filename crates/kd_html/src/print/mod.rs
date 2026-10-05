@@ -18,6 +18,7 @@ pub mod angular;
 pub mod ast;
 pub mod doc;
 mod entity_names;
+mod json;
 pub mod preprocess;
 pub mod printer;
 pub mod srcset;

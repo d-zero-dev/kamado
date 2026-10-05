@@ -223,17 +223,17 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 
 ページのコンポーネントは `props` として次を受け取る。
 
-| 名前                        | 内容                                                                                                                                                                                            |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `page`                      | §5 の `page`                                                                                                                                                                                    |
-| `meta`                      | このページのメタ（§4 のマージ後）                                                                                                                                                               |
-| `site`                      | `site.*`                                                                                                                                                                                        |
-| `data`                      | `data.dir` と `data.values` をマージしたオブジェクト（ファイル名がキー）                                                                                                                        |
-| `pages`                     | 全ページの一覧（`page` と `meta`）。**Rust のインデックスを引くアクセサ**で、コピーしない                                                                                                       |
-| `nav(options?)`             | v2 と同じ。`{ ignoreGlobs, baseDepth }`。ツリーのノードは `{ page, meta, children }`。絞り込みと並べ替えは、返ってきた配列を JSX 側で加工する                                                   |
-| `breadcrumbs`               | v2 と同じ。祖先の `index` ページとページ自身。`{ title, href, depth, meta }`。タイトルがなければ `__NO_TITLE__`                                                                                 |
-| `titleList(options?)`       | v2 と同じ。`{ separator, baseURL, prefix, suffix, fallback }`                                                                                                                                   |
-| `formatDate(value, format)` | dayjs のトークンのサブセット（`YYYY YY M MM MMM MMMM D DD d dd ddd dddd H HH h hh m mm s ss SSS A a Z ZZ X x`、`[…]` でエスケープ、英語、ローカルのタイムゾーン）。`value` は文字列・数値・Date |
+| 名前                        | 内容                                                                                                                                                                                                                                                                                                |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `page`                      | §5 の `page`                                                                                                                                                                                                                                                                                        |
+| `meta`                      | このページのメタ（§4 のマージ後）                                                                                                                                                                                                                                                                   |
+| `site`                      | `site.*`                                                                                                                                                                                                                                                                                            |
+| `data`                      | `data.dir` と `data.values` をマージしたオブジェクト（ファイル名がキー）                                                                                                                                                                                                                            |
+| `pages`                     | 全ページの一覧（`page` と `meta`）。**Rust のインデックスを引くアクセサ**で、コピーしない                                                                                                                                                                                                           |
+| `nav(options?)`             | v2 と同じ。`{ ignoreGlobs, baseDepth }`。ツリーのノードは `{ page, meta, children }`。絞り込みと並べ替えは、返ってきた配列を JSX 側で加工する                                                                                                                                                       |
+| `breadcrumbs`               | v2 と同じ。祖先の `index` ページとページ自身。`{ title, href, depth, meta }`。タイトルがなければ `__NO_TITLE__`。起点は `site.baseURL` の**パス部分**（`https://example.com/sub/` なら `/sub/`）で、それより浅い階層は含めない（v2 は値をそのまま数えたので、フル URL を書くと上位 2 階層が欠けた） |
+| `titleList(options?)`       | v2 と同じ。`{ separator, baseURL, prefix, suffix, fallback }`                                                                                                                                                                                                                                       |
+| `formatDate(value, format)` | dayjs のトークンのサブセット（`YYYY YY M MM MMM MMMM D DD d dd ddd dddd H HH h hh m mm s ss SSS A a Z ZZ X x`、`[…]` でエスケープ、英語、ローカルのタイムゾーン）。`value` は文字列・数値・Date                                                                                                     |
 
 レイアウトは追加で `content`（ページの描画結果。`Html`）を受け取る。`meta.layout` に `layouts.dir` 内のファイル名（拡張子なし）を書く。`.html` ページはこれがレイアウトを使う唯一の手段。JSX ページは `<Layout>` を直接合成してもよい。存在しないレイアウト名はエラー。
 
@@ -255,6 +255,8 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 6. `imageSizes`
 7. 印字（`doctype`、`format`、`minify`、`entities`、`lineBreak`）。`<style>` と `style` 属性の CSS は Rust の CSS 圧縮、`<script>` は esbuild（子プロセス、内容のハッシュでキャッシュ）
 8. 書き出し
+
+`<script type="application/ld+json">`（`importmap`、`speculationrules`、`json` で終わる type も同じ）の中身は、v2 と同じく prettier の JSON 整形がそのまま出力に残る（オブジェクトは `{ "a": 1 }` の 1 行、`{` の直後で改行されていれば展開、複数のオブジェクトを持つ配列は展開、数値は `1.50` → `1.5`、文字列は二重引用符、末尾カンマなし）。コメントを含む JSON と JSON として読めない中身は整形せず、書かれたまま出す（prettier も後者はそのまま出す）。
 
 `html.overrides` は、`pages` の glob（出力 URL に対して）に一致するページに限り、`html` の任意のオプションを上書きする。上書きするのは、そのエントリが**書いたオプションだけ**で（`rules` を書けば `rules` 全体が置き換わる）、書かなかったオプションは `html` の値のまま。一致するエントリが複数あれば、書かれた順に適用する。たとえば整形と圧縮を切る、`imageSizes` を切る、といった使い方ができる。エントリの中に `overrides` は書けない。
 
