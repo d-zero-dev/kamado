@@ -152,7 +152,7 @@ pub fn decode(input: &str, context: Context) -> String {
 
 /// Decodes the reference at the start of `rest` (which begins with `&`).
 /// Returns the replacement and the number of bytes consumed.
-fn decode_one(rest: &str, context: Context) -> Option<(String, usize)> {
+pub(crate) fn decode_one(rest: &str, context: Context) -> Option<(String, usize)> {
 	let after = &rest[1..];
 	if let Some(num) = after.strip_prefix('#') {
 		let (digits, radix, prefix_len) = match num.strip_prefix(['x', 'X']) {
