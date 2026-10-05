@@ -76,6 +76,34 @@ const cases = {
 	'json-ld': '<script type="application/ld+json">{"a":"</b>","b":"&amp;"}</script>',
 	'form-controls':
 		'<form><input type=checkbox checked><input type=text value=""><button disabled>b</button></form>',
+	// Where the input ends inside a construct: what survives is decided by the
+	// tokenizer's state at the end, including one quirk (a closing tag that
+	// never sees `>` leaves its last character behind as text).
+	'eof-attr-then-slash': '<p>a</p><a &amp; b</',
+	'eof-self-closing': '<div><a b/',
+	'eof-self-closing-bare': '<div><a/',
+	'eof-unquoted-value': '<div><a b=c/',
+	'eof-closing-tag-name': '<div></a',
+	'eof-closing-tag-space': '<dl></a ',
+	'eof-closing-tag-text': '<dl></a < b',
+	'eof-closing-tag-multibyte': '<dl></a 日本',
+	'eof-comment': '<p>a</p><!-- x',
+	'eof-declaration': '<p>a</p><!x y',
+	'eof-double-quoted': '<div><a b="c',
+	'eof-single-quoted': "<div><a b='",
+	'eof-open-lt': '<p>a</p><',
+	'eof-before-closing': '<p>a</p></',
+	'eof-entity-bare': 'a &',
+	'eof-entity-numeric': 'a &#',
+	'eof-entity-hex': 'a &#x4',
+	'eof-entity-named': 'a &copy',
+	'eof-entity-in-attr': '<a b="&copy',
+	'eof-attribute-name': '<div a=b c',
+	'eof-in-svg': '<svg><path d="M0',
+	'eof-script': '<script>var a = 1;',
+	'eof-style': '<style>a{',
+	'eof-textarea': '<textarea>a &lt; b',
+	'eof-cdata': '<p>a</p><![CDATA[x',
 };
 
 mkdirSync(outDir, { recursive: true });

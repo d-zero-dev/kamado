@@ -67,10 +67,39 @@ fn is_serializer_void(name: &str) -> bool {
 	)
 }
 
-/// Elements whose text children are written without escaping.
+/// Elements whose content is written as raw text: `script`, `style`,
+/// `textarea`, `title` and `xmp`, unless they were created inside an `<svg>`
+/// (there they are ordinary elements and their text is escaped, as in
+/// linkedom, which builds them as plain SVG elements).
 #[must_use]
-pub fn is_raw_text_element(name: &str) -> bool {
-	matches!(name, "script" | "style" | "textarea" | "title" | "xmp")
+pub fn is_raw_text_element(element: &Element) -> bool {
+	!element.svg
+		&& matches!(
+			element.name.as_str(),
+			"script" | "style" | "textarea" | "title" | "xmp"
+		)
+}
+
+/// The text of all descendant text nodes, in order. A raw-text element
+/// prints only this: element children (which only the page glue can add, e.g.
+/// a `<head>` inserted into a root that is a `<style>`) and comments do not
+/// show, as with linkedom's `textContent`-based serialization.
+fn raw_text_content(doc: &Document, id: NodeId) -> String {
+	let mut out = String::new();
+	let mut stack: Vec<NodeId> = doc.children(id).collect();
+	stack.reverse();
+	while let Some(node) = stack.pop() {
+		match doc.kind(node) {
+			NodeKind::Text(t) => out.push_str(t),
+			NodeKind::Element(_) => {
+				let mut children: Vec<NodeId> = doc.children(node).collect();
+				children.reverse();
+				stack.extend(children);
+			}
+			_ => {}
+		}
+	}
+	out
 }
 
 /// Escapes text content: `&`, `<`, `>` and U+00A0.
@@ -207,6 +236,19 @@ fn push_element(doc: &Document, id: NodeId, e: &Element, ent: &Entities, out: &m
 	for a in &e.attrs {
 		push_attribute(&a.name, &a.value, ent, out);
 	}
+	if is_raw_text_element(e) {
+		out.push('>');
+		let text = raw_text_content(doc, id);
+		if !ent.is_none() && matches!(e.name.as_str(), "title" | "textarea") {
+			out.push_str(&ent.apply(&text));
+		} else {
+			out.push_str(&text);
+		}
+		out.push_str("</");
+		out.push_str(&e.name);
+		out.push('>');
+		return;
+	}
 	if doc.first_child(id).is_none() {
 		if e.svg {
 			out.push_str(" />");
@@ -220,7 +262,7 @@ fn push_element(doc: &Document, id: NodeId, e: &Element, ent: &Entities, out: &m
 		return;
 	}
 	out.push('>');
-	push_children(doc, id, is_raw_text_element(&e.name), ent, out);
+	push_children(doc, id, false, ent, out);
 	out.push_str("</");
 	out.push_str(&e.name);
 	out.push('>');
@@ -254,7 +296,7 @@ pub fn outer_html_with(doc: &Document, id: NodeId, options: &Options) -> String 
 	let parent_raw = doc
 		.parent(id)
 		.and_then(|p| doc.element(p))
-		.is_some_and(|p| is_raw_text_element(&p.name));
+		.is_some_and(is_raw_text_element);
 	push_node(doc, id, parent_raw, &options.entities, &mut out);
 	out
 }
@@ -269,10 +311,10 @@ pub fn inner_html(doc: &Document, id: NodeId) -> String {
 #[must_use]
 pub fn inner_html_with(doc: &Document, id: NodeId, options: &Options) -> String {
 	let mut out = String::new();
-	let raw = doc
-		.element(id)
-		.is_some_and(|e| is_raw_text_element(&e.name));
-	push_children(doc, id, raw, &options.entities, &mut out);
+	if doc.element(id).is_some_and(is_raw_text_element) {
+		return raw_text_content(doc, id);
+	}
+	push_children(doc, id, false, &options.entities, &mut out);
 	out
 }
 
@@ -365,6 +407,34 @@ mod tests {
 			"<svg viewBox=\"1\"><path /></svg>"
 		);
 		assert_eq!(rt("<svg></svg>"), "<svg />");
+	}
+
+	#[test]
+	fn raw_text_elements_inside_svg_are_ordinary_elements_whose_text_is_escaped() {
+		assert_eq!(
+			rt("<svg><script>a<b</script><style>p>q{}</style><title>a & b</title></svg>"),
+			"<svg><script>a&lt;b</script><style>p&gt;q{}</style><title>a &amp; b</title></svg>"
+		);
+		assert_eq!(
+			rt("<script>a<b</script><title>a & b</title>"),
+			"<script>a<b</script><title>a & b</title>"
+		);
+	}
+
+	#[test]
+	fn a_raw_text_element_prints_only_its_text() {
+		let mut doc = parse("<style>a{}</style>");
+		let style = doc.first_child(ROOT).unwrap();
+		let head = doc.create_element("head");
+		doc.prepend_child(style, head);
+		let comment = doc.create_comment("c");
+		doc.append_child(style, comment);
+		assert_eq!(
+			document_html(&doc),
+			"<style>a{}</style>",
+			"element children and comments of a raw-text element do not show"
+		);
+		assert_eq!(inner_html(&doc, style), "a{}");
 	}
 
 	#[test]

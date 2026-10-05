@@ -692,11 +692,11 @@ impl<'a> Machine<'a> {
 
 	fn finish(&mut self) {
 		let end = self.len();
-		if self.section_start >= end || self.section_start < 0 {
+		if self.section_start >= end {
 			return;
 		}
 		match self.state {
-			State::InCommentLike => {
+			State::InCommentLike if self.section_start >= 0 => {
 				if self.current_sequence == CDATA_END {
 					self.oncdata(self.section_start, end, 0);
 				} else {
@@ -713,9 +713,22 @@ impl<'a> Machine<'a> {
 			| State::InAttributeValueDq
 			| State::InAttributeValueNq
 			| State::InClosingTagName => {}
+			// A tag that ends in `/` or runs on after its name without a `>`
+			// leaves the section start at -1, and htmlparser2 then slices the
+			// buffer from -1: the last character becomes a text node.
+			// Reproduced because the output has to match v2 byte for byte.
+			_ if self.section_start < 0 => {
+				if let Some(last) = self.src.chars().next_back() {
+					self.append_text(&self.src[self.src.len() - last.len_utf8()..]);
+				}
+			}
 			_ => self.ontext(self.section_start, end),
 		}
-		// Close what is still open.
+		self.close_open_elements();
+	}
+
+	/// Closes what is still open at the end of the input.
+	fn close_open_elements(&mut self) {
 		while !self.stack.is_empty() {
 			self.stack.pop();
 			self.b_close();
