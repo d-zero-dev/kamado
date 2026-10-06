@@ -32,6 +32,16 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
+      # Some tests run the esbuild binary of node_modules (the minification of
+      # inline scripts).
+      - name: Enable Corepack and setup Yarn v4
+        run: |
+          npm install -g corepack
+          corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
       # The toolchain version is pinned here, not in rust-toolchain.toml: a
       # toolchain file makes every local `cargo` call reinstall that version.
       - name: Install Rust toolchain

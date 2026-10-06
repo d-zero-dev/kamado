@@ -119,18 +119,20 @@ pub fn minify_value(property: &str, value: &str, ctx: &DeclContext) -> String {
 	shorten_nothing(&prop, v)
 }
 
-/// `border: none` and `outline: none` are `0` (no style, or no width: no
-/// line), and `background: none` and `background: transparent` are `0 0` (the
-/// initial value of everything but the position, which is `0 0`).
+/// `background: none` and `background: transparent` are `0 0` (the initial
+/// value of everything but the position, which is `0 0`).
+///
+/// Why not `border: none` and `outline: none` as `0`, which clean-css does:
+/// `none` resets the width to `medium` and `0` makes it zero, so a rule that
+/// only sets the style later (`border-style: solid`, `outline-style: solid`
+/// on `:focus`) shows a line with one and none with the other.
 fn shorten_nothing(prop: &str, value: String) -> String {
-	let nothing = value.eq_ignore_ascii_case("none");
 	match strip_vendor(prop) {
-		"border" | "border-top" | "border-right" | "border-bottom" | "border-left" | "outline"
-			if nothing =>
+		"background"
+			if value.eq_ignore_ascii_case("none") || value.eq_ignore_ascii_case("transparent") =>
 		{
-			"0".to_owned()
+			"0 0".to_owned()
 		}
-		"background" if nothing || value.eq_ignore_ascii_case("transparent") => "0 0".to_owned(),
 		_ => value,
 	}
 }

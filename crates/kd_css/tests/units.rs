@@ -323,3 +323,19 @@ fn pathological_nesting_neither_overflows_the_stack_nor_takes_long() {
 		started.elapsed()
 	);
 }
+
+#[test]
+fn a_long_run_of_rules_with_the_same_declarations_is_merged_in_linear_time() {
+	// With the selector list minified again at every step this took seconds
+	// (24 s for 20000 rules in a release build).
+	let count = 20_000;
+	let source: String = (0..count).map(|i| format!(".c{i}{{color:red}}")).collect();
+	let started = std::time::Instant::now();
+	let out = kd_css::minify(&source).unwrap();
+	assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+	// One rule, its selectors sorted like cssnano sorts them.
+	assert!(out.starts_with(".c0,.c1,.c10,.c100,"), "{}", &out[..40]);
+	assert!(out.ends_with("{color:red}"));
+	assert_eq!(out.matches("color:red").count(), 1);
+	assert_eq!(out.matches(',').count(), count - 1);
+}

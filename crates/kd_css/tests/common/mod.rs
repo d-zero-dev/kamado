@@ -56,31 +56,9 @@ pub const DECISIONS: &[Decision] = &[
 		"-x-margin:0",
 		"an unknown vendor prefix makes an unknown property",
 	),
-	// "nothing" written shorter (what clean-css does and cssnano does not)
-	d(
-		"border:none",
-		"border:0",
-		"border:none",
-		"`border: none` is `border: 0`",
-	),
-	d(
-		"border-top:none",
-		"border-top:0",
-		"border-top:none",
-		"`border-top: none` is `border-top: 0`",
-	),
-	d(
-		"outline:none",
-		"outline:0",
-		"outline:none",
-		"`outline: none` is `outline: 0`",
-	),
-	d(
-		"border:medium none",
-		"border:0",
-		"border:none",
-		"a border of nothing but defaults is `border: 0`",
-	),
+	// "nothing" written shorter (what clean-css does and cssnano does not).
+	// `border: none` is not among them: it resets the width to `medium`, which
+	// `0` does not, so a later `border-style` would show a different line.
 	d(
 		"background:none",
 		"background:0 0",

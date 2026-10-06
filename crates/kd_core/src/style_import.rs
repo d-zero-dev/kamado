@@ -78,6 +78,15 @@ struct Context<'a> {
 	stack: Vec<String>,
 	/// `(file, conditions)` pairs that were inlined already.
 	done: BTreeSet<(String, String)>,
+	/// Remote `@import`s in the order met; they go to the top of the bundle.
+	remote: Vec<Remote>,
+}
+
+/// A remote `@import` statement and where it was written.
+struct Remote {
+	statement: String,
+	file: usize,
+	src: usize,
 }
 
 /// The text of one file after its imports were inlined, and where its runs
@@ -107,8 +116,10 @@ pub fn bundle(entry: &str, alias: &[(String, String)]) -> Result<Bundle, String>
 		files: Vec::new(),
 		stack: Vec::new(),
 		done: BTreeSet::new(),
+		remote: Vec::new(),
 	};
-	let piece = inline_file(&mut ctx, entry, true)?;
+	let mut piece = inline_file(&mut ctx, entry, true)?;
+	hoist_remote(&mut piece, &ctx.remote);
 	Ok(Bundle {
 		css: piece.text,
 		deps: ctx.deps,
@@ -124,6 +135,12 @@ fn read(ctx: &mut Context<'_>, path: &str) -> Result<(usize, String), String> {
 		kd_build::read_with_fingerprint(path).map_err(|e| format!("cannot read {path}: {e}"))?;
 	ctx.deps.insert(path.to_owned(), dep);
 	let text = String::from_utf8(bytes).map_err(|_| format!("{path}: file is not valid UTF-8"))?;
+	// A byte order mark is not part of the stylesheet; inlined, it would end up
+	// in front of the first selector of the file and stop it from matching.
+	let text = match text.strip_prefix('\u{feff}') {
+		Some(rest) => rest.to_owned(),
+		None => text,
+	};
 	ctx.files.push(BundledFile {
 		path: path.to_owned(),
 		text: text.clone(),
@@ -165,7 +182,21 @@ fn inline_text(
 		copy(&mut out, &mut segments, last, import.start);
 		last = import.end;
 		if is_remote(&import.uri) {
-			copy(&mut out, &mut segments, import.start, import.end);
+			// An `@import` after a rule is ignored by the browser, so a remote
+			// one met in an inlined file would stop working: it is hoisted.
+			let statement = text[import.start..import.end].trim().to_owned();
+			if !ctx.remote.iter().any(|r| r.statement == statement) {
+				let lead = text[import.start..import.end].len()
+					- text[import.start..import.end].trim_start().len();
+				ctx.remote.push(Remote {
+					statement,
+					file: index,
+					src: import.start + lead,
+				});
+			}
+			// The line break after it goes with it.
+			let after = &text[import.end..];
+			last += after.len() - after.trim_start_matches(['\n', '\r']).len();
 			continue;
 		}
 		let target = resolve(ctx, path, &import.uri)?;
@@ -207,27 +238,30 @@ fn inline_text(
 }
 
 /// The content of an imported file inside the at-rules its import names,
-/// outermost first: `@layer`, `@supports`, `@media`. Returns the text, the
+/// outermost first: `@media`, `@supports`, `@layer` (the nesting postcss-import
+/// writes: a media condition that is false must also hide the layer). Returns the text, the
 /// length of what is put before the content and the length of the content
 /// that is kept (it loses trailing white space).
 fn wrap(import: &Import, content: &str) -> (String, usize, usize) {
 	let kept = content.trim_end();
 	let mut prefix = String::new();
 	let mut wrappers = 0;
+	if let Some(media) = &import.media {
+		prefix.push_str(&format!("@media {media} {{\n"));
+		wrappers += 1;
+	}
+	if let Some(supports) = &import.supports {
+		// `supports(display: grid)` names a condition; the at-rule needs it in
+		// parentheses (`supports(not (x))` becomes `(not (x))`).
+		prefix.push_str(&format!("@supports ({supports}) {{\n"));
+		wrappers += 1;
+	}
 	if let Some(layer) = &import.layer {
 		prefix.push_str(&if layer.is_empty() {
 			"@layer {\n".to_owned()
 		} else {
 			format!("@layer {layer} {{\n")
 		});
-		wrappers += 1;
-	}
-	if let Some(supports) = &import.supports {
-		prefix.push_str(&format!("@supports {supports} {{\n"));
-		wrappers += 1;
-	}
-	if let Some(media) = &import.media {
-		prefix.push_str(&format!("@media {media} {{\n"));
 		wrappers += 1;
 	}
 	let text = format!("{prefix}{kept}\n{}", "}\n".repeat(wrappers));
@@ -237,18 +271,58 @@ fn wrap(import: &Import, content: &str) -> (String, usize, usize) {
 /// A `@charset` of an imported file is dropped: only the entry's counts. The
 /// segments follow the text.
 fn strip_charset(text: &mut String, segments: &mut Vec<Segment>) {
-	let head = text.trim_start();
-	if head.len() < 8 || !head[..8].eq_ignore_ascii_case("@charset") {
-		return;
+	if let Some((from, to)) = charset_range(text) {
+		splice(text, segments, from, to, "");
 	}
-	let Some(end) = head.find(';') else {
-		return;
-	};
+}
+
+/// The range of a leading `@charset` rule with the white space after it.
+fn charset_range(text: &str) -> Option<(usize, usize)> {
+	let head = text.trim_start();
+	// Bytes, not a string slice: the eighth byte may be inside a character.
+	if !head
+		.as_bytes()
+		.get(..8)
+		.is_some_and(|b| b.eq_ignore_ascii_case(b"@charset"))
+	{
+		return None;
+	}
+	let end = head.find(';')?;
 	let from = text.len() - head.len();
 	let after = &head[end + 1..];
-	let to = text.len() - after.trim_start().len();
-	text.replace_range(from..to, "");
+	Some((from, text.len() - after.trim_start().len()))
+}
+
+/// Puts the remote imports first, after a `@charset`.
+fn hoist_remote(piece: &mut Piece, remote: &[Remote]) {
+	if remote.is_empty() {
+		return;
+	}
+	let at = charset_range(&piece.text).map_or(0, |(_, to)| to);
+	let mut block = String::new();
+	let mut hoisted = Vec::with_capacity(remote.len());
+	for r in remote {
+		hoisted.push(Segment {
+			out: at + block.len(),
+			len: r.statement.len(),
+			file: r.file,
+			src: r.src,
+		});
+		block.push_str(&r.statement);
+		block.push('\n');
+	}
+	splice(&mut piece.text, &mut piece.segments, at, at, &block);
+	// The statements are runs of their files like any other, in order.
+	let position = piece.segments.partition_point(|s| s.out < at + block.len());
+	piece.segments.splice(position..position, hoisted);
+}
+
+/// Replaces `from..to` of `text` with `with` and moves the segments along:
+/// what is replaced is covered by none, and a segment that overlaps it is cut.
+fn splice(text: &mut String, segments: &mut Vec<Segment>, from: usize, to: usize, with: &str) {
+	text.replace_range(from..to, with);
 	let removed = to - from;
+	let added = with.len();
 	let mut kept = Vec::with_capacity(segments.len());
 	for seg in segments.drain(..) {
 		let (start, stop) = (seg.out, seg.out + seg.len);
@@ -256,7 +330,7 @@ fn strip_charset(text: &mut String, segments: &mut Vec<Segment>) {
 			kept.push(seg);
 		} else if start >= to {
 			kept.push(Segment {
-				out: start - removed,
+				out: start - removed + added,
 				..seg
 			});
 		} else {
@@ -270,7 +344,7 @@ fn strip_charset(text: &mut String, segments: &mut Vec<Segment>) {
 			}
 			if stop > to {
 				kept.push(Segment {
-					out: from,
+					out: from + added,
 					len: stop - to,
 					src: seg.src + (to - start),
 					..seg
@@ -644,7 +718,7 @@ mod tests {
 		);
 		assert_eq!(
 			css(&dir, "main.css", &[]),
-			"a { color: red }\n\n@layer x {\n@supports display: grid {\n@media screen {\nb { color: blue }\n}\n}\n}\n\nmain { color: green }\n"
+			"a { color: red }\n\n@media screen {\n@supports (display: grid) {\n@layer x {\nb { color: blue }\n}\n}\n}\n\nmain { color: green }\n"
 		);
 	}
 
@@ -725,6 +799,49 @@ mod tests {
 	}
 
 	#[test]
+	fn a_remote_import_in_the_middle_goes_to_the_top_after_the_charset() {
+		let dir = Dir::new("remote-hoist");
+		dir.write("x.css", "a{b:c}\n");
+		dir.write(
+			"main.css",
+			"@charset \"utf-8\";\n@import 'x.css';\n@import url(https://example.com/font.css);\nb{}\n",
+		);
+		assert_eq!(
+			css(&dir, "main.css", &[]),
+			"@charset \"utf-8\";\n@import url(https://example.com/font.css);\na{b:c}\n\nb{}\n"
+		);
+		// The map still points every run at the file it came from.
+		let bundle = bundle(&format!("{}/main.css", dir.0), &[]).unwrap();
+		for seg in &bundle.segments {
+			assert_eq!(
+				bundle.css[seg.out..seg.out + seg.len],
+				bundle.files[seg.file].text[seg.src..seg.src + seg.len]
+			);
+		}
+	}
+
+	#[test]
+	fn a_file_that_starts_with_multibyte_text_is_inlined() {
+		let dir = Dir::new("multibyte");
+		dir.write("a.css", "/* ベース */\n.日本語{color:red}\n");
+		dir.write("b.css", ".日本語{color:blue}\n");
+		dir.write("main.css", "@import 'a.css';\n@import 'b.css';\n");
+		let out = css(&dir, "main.css", &[]);
+		assert!(
+			out.contains("ベース") && out.contains("color:blue"),
+			"{out}"
+		);
+	}
+
+	#[test]
+	fn a_byte_order_mark_is_not_inlined() {
+		let dir = Dir::new("bom");
+		dir.write("a.css", "\u{feff}a{color:red}\n");
+		dir.write("main.css", "\u{feff}@import 'a.css';\nb{}\n");
+		assert_eq!(css(&dir, "main.css", &[]), "a{color:red}\n\nb{}\n");
+	}
+
+	#[test]
 	fn what_was_read_and_what_was_probed_in_vain_are_dependencies() {
 		let dir = Dir::new("deps");
 		dir.write("pkg/node_modules/lib/index.css", "lib{}\n");
@@ -775,7 +892,8 @@ mod tests {
 		// 2 bytes) and the line break the bundler puts after each imported
 		// file (it drops the trailing white space of the file first).
 		let covered: usize = bundle.segments.iter().map(|s| s.len).sum();
-		assert_eq!(bundle.css.len() - covered, 16 + 2 + 1 + 1);
+		// The line break after the hoisted remote import is one more.
+		assert_eq!(bundle.css.len() - covered, 16 + 2 + 1 + 1 + 1);
 		assert!(bundle.segments.iter().any(|s| s.file == 1));
 		assert!(bundle.segments.iter().any(|s| s.file == 2));
 	}

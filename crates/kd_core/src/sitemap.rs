@@ -24,10 +24,16 @@ pub(crate) struct Settings {
 	output_dir: String,
 }
 
+/// The globs match the path inside the output directory, which has no leading
+/// slash; `/draft/**` is how an address is written, so a leading slash is
+/// taken as the root of the output directory rather than matching nothing.
 fn patterns(globs: &[String]) -> Result<Vec<Pattern>, String> {
 	globs
 		.iter()
-		.map(|g| Pattern::new(g).map_err(|e| format!("sitemap: invalid glob {g:?}: {e}")))
+		.map(|g| {
+			Pattern::new(g.trim_start_matches('/'))
+				.map_err(|e| format!("sitemap: invalid glob {g:?}: {e}"))
+		})
 		.collect()
 }
 
@@ -80,6 +86,27 @@ fn escape(text: &str) -> String {
 		.replace('\'', "&apos;")
 }
 
+/// The path of an address as the protocol writes it: bytes that are not
+/// allowed in a URL (spaces, non-ASCII text) become `%XX`, and an existing
+/// `%XX` is kept.
+fn encode_path(path: &str) -> String {
+	let bytes = path.as_bytes();
+	let mut out = String::with_capacity(path.len());
+	for (i, &b) in bytes.iter().enumerate() {
+		let kept = b.is_ascii_alphanumeric()
+			|| b"-._~/!$&'()*+,;=:@".contains(&b)
+			|| (b == b'%'
+				&& bytes.get(i + 1).is_some_and(u8::is_ascii_hexdigit)
+				&& bytes.get(i + 2).is_some_and(u8::is_ascii_hexdigit));
+		if kept {
+			out.push(b as char);
+		} else {
+			out.push_str(&format!("%{b:02X}"));
+		}
+	}
+	out
+}
+
 /// The time a file was last modified, as `YYYY-MM-DDTHH:MM:SSZ`.
 fn mtime_of(path: &str) -> Option<String> {
 	let secs = std::fs::metadata(path)
@@ -111,7 +138,7 @@ pub(crate) fn render(settings: &Settings, pages: &[Page]) -> String {
 		};
 		let mut entry = format!(
 			"<loc>{}</loc>",
-			escape(&format!("{}{}", settings.base, page.file.url))
+			escape(&format!("{}{}", settings.base, encode_path(&page.file.url)))
 		);
 		if let Some(lastmod) = lastmod {
 			entry.push_str(&format!("<lastmod>{}</lastmod>", escape(&lastmod)));
@@ -135,4 +162,25 @@ pub(crate) fn render(settings: &Settings, pages: &[Page]) -> String {
 	}
 	xml.push_str("</urlset>\n");
 	xml
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn text_a_url_cannot_hold_is_percent_encoded_and_encoded_text_is_kept() {
+		assert_eq!(encode_path("/a/b-c_d.html"), "/a/b-c_d.html");
+		assert_eq!(encode_path("/my page/"), "/my%20page/");
+		assert_eq!(encode_path("/日本/"), "/%E6%97%A5%E6%9C%AC/");
+		assert_eq!(encode_path("/a%20b/"), "/a%20b/");
+		assert_eq!(encode_path("/100%/"), "/100%25/");
+	}
+
+	#[test]
+	fn a_glob_with_a_leading_slash_is_relative_to_the_output_directory() {
+		let patterns = patterns(&["/draft/**".to_owned()]).unwrap();
+		assert!(patterns[0].matches("draft/a/index.html"));
+		assert!(!patterns[0].matches("a/draft/index.html"));
+	}
 }

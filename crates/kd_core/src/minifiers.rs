@@ -50,7 +50,17 @@ impl Minifiers {
 	}
 
 	/// The minified form of `text`, from the memo, the disk cache or esbuild.
-	fn cached(&self, kind: &str, text: &str, compute: impl FnOnce(&str) -> String) -> String {
+	///
+	/// `compute` also says whether its answer is final. The code that esbuild
+	/// rejects is final: it stays as written for ever. A failure to run esbuild
+	/// (no process to spawn, a crash) is not, and is only remembered by this
+	/// process: stored, it would keep a snippet unminified in every later build.
+	fn cached(
+		&self,
+		kind: &str,
+		text: &str,
+		compute: impl FnOnce(&str) -> (String, bool),
+	) -> String {
 		let key = self.key(kind, text);
 		if let Some(hit) = self
 			.memo
@@ -67,8 +77,8 @@ impl Minifiers {
 		let result = match file.as_ref().and_then(|f| fs::read_to_string(f).ok()) {
 			Some(stored) => stored,
 			None => {
-				let result = compute(text);
-				if let Some(file) = &file {
+				let (result, final_answer) = compute(text);
+				if let (Some(file), true) = (&file, final_answer) {
 					store(file, &result);
 				}
 				result
@@ -102,9 +112,21 @@ fn store(file: &str, content: &str) {
 	}
 }
 
-/// Minifies a script with `esbuild`. `None` when it cannot be run or rejects
-/// the code.
-fn run_esbuild(binary: &str, code: &str) -> Option<String> {
+/// What running esbuild on a piece of code came to.
+enum Run {
+	Minified(String),
+	/// esbuild ran and refused the code.
+	Rejected,
+	/// esbuild did not run to the end (spawn failure, a broken pipe).
+	Failed,
+}
+
+/// Minifies a script with `esbuild`.
+fn run_esbuild(binary: &str, code: &str) -> Run {
+	run_esbuild_inner(binary, code).unwrap_or(Run::Failed)
+}
+
+fn run_esbuild_inner(binary: &str, code: &str) -> Option<Run> {
 	let mut child = Command::new(binary)
 		.args([
 			"--minify",
@@ -127,34 +149,97 @@ fn run_esbuild(binary: &str, code: &str) -> Option<String> {
 	let output = child.wait_with_output().ok()?;
 	let _ = writer.join();
 	if !output.status.success() {
-		return None;
+		return Some(Run::Rejected);
 	}
-	String::from_utf8(output.stdout).ok()
+	String::from_utf8(output.stdout).ok().map(Run::Minified)
 }
 
 impl Minifiers {
-	fn minify_block(&self, binary: &str, text: &str) -> String {
+	fn minify_block(&self, binary: &str, text: &str) -> (String, bool) {
 		match run_esbuild(binary, text) {
-			Some(out) => out.trim_end_matches('\n').to_owned(),
-			None => text.to_owned(),
+			Run::Minified(out) => (out.trim_end_matches('\n').to_owned(), true),
+			Run::Rejected => (text.to_owned(), true),
+			Run::Failed => (text.to_owned(), false),
 		}
 	}
 
-	fn minify_handler(&self, binary: &str, text: &str) -> String {
+	fn minify_handler(&self, binary: &str, text: &str) -> (String, bool) {
 		// A handler is the body of a function: `return false;` is legal there.
 		let wrapped = format!("{HANDLER_OPEN}{text}\n}}");
-		let Some(out) = run_esbuild(binary, &wrapped) else {
-			return text.to_owned();
+		let out = match run_esbuild(binary, &wrapped) {
+			Run::Minified(out) => out,
+			Run::Rejected => return (text.to_owned(), true),
+			Run::Failed => return (text.to_owned(), false),
 		};
 		let out = out.trim_end_matches('\n');
 		match out
 			.strip_prefix(HANDLER_OPEN)
 			.and_then(|rest| rest.strip_suffix('}'))
 		{
-			Some(body) => body.trim_end_matches(';').to_owned(),
-			None => text.to_owned(),
+			Some(body) => (without_last_semicolon(body), true),
+			None => (text.to_owned(), true),
 		}
 	}
+}
+
+/// Drops the `;` that ends the last statement (an attribute value does not
+/// need it), unless it is the statement: the body of `for(;next(););`,
+/// `if(x);` or `else;` is an empty statement, and without it the code does not
+/// parse. When in doubt the `;` stays; it only costs a byte.
+fn without_last_semicolon(body: &str) -> String {
+	let Some(stripped) = body.strip_suffix(';') else {
+		return body.to_owned();
+	};
+	if ends_with_empty_statement_header(stripped) {
+		return body.to_owned();
+	}
+	stripped.to_owned()
+}
+
+/// Whether `code` ends with a header that needs a statement after it.
+fn ends_with_empty_statement_header(code: &str) -> bool {
+	if code.ends_with(':') || code.ends_with("else") || code.ends_with("do") {
+		return true;
+	}
+	if !code.ends_with(')') {
+		return false;
+	}
+	// The `(` that matches the final `)`, found going forward so that quotes can
+	// be skipped: a parenthesis in a string does not count.
+	let mut open: Vec<usize> = Vec::new();
+	let mut quote: Option<char> = None;
+	let mut escaped = false;
+	for (at, c) in code.char_indices() {
+		if let Some(q) = quote {
+			if escaped {
+				escaped = false;
+			} else if c == '\\' {
+				escaped = true;
+			} else if c == q {
+				quote = None;
+			}
+			continue;
+		}
+		match c {
+			'"' | '\'' | '`' => quote = Some(c),
+			'(' => open.push(at),
+			')' => {
+				let Some(start) = open.pop() else {
+					return true;
+				};
+				if at + 1 == code.len() && open.is_empty() {
+					let before = code[..start].trim_end();
+					let word_start = before
+						.rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '$'))
+						.map_or(0, |i| i + 1);
+					return matches!(&before[word_start..], "for" | "if" | "while" | "with");
+				}
+			}
+			_ => {}
+		}
+	}
+	// Not balanced: not worth a guess.
+	true
 }
 
 impl Hooks for Minifiers {
@@ -187,13 +272,22 @@ impl Hooks for Minifiers {
 #[cfg(test)]
 pub(crate) fn esbuild_for_tests() -> String {
 	let dir = format!("{}/../../node_modules/@esbuild", env!("CARGO_MANIFEST_DIR"));
-	let platform = fs::read_dir(&dir)
-		.unwrap_or_else(|e| panic!("{dir}: {e}; run `yarn install`"))
-		.next()
-		.expect("a platform package of esbuild")
-		.unwrap()
-		.path();
-	format!("{}/bin/esbuild", platform.display())
+	// The package of this machine: several can be installed side by side.
+	let os = match std::env::consts::OS {
+		"macos" => "darwin",
+		other => other,
+	};
+	let arch = match std::env::consts::ARCH {
+		"aarch64" => "arm64",
+		"x86_64" => "x64",
+		other => other,
+	};
+	let platform = format!("{dir}/{os}-{arch}");
+	assert!(
+		fs::metadata(&platform).is_ok(),
+		"{platform} is missing; run `yarn install`"
+	);
+	format!("{platform}/bin/esbuild")
 }
 
 #[cfg(test)]
@@ -235,6 +329,43 @@ mod tests {
 		);
 		assert_eq!(m.js("go( 1 );", true), "go(1)");
 		assert_eq!(m.js("go(", true), "go(");
+	}
+
+	#[test]
+	fn the_semicolon_of_an_empty_statement_stays_in_a_handler() {
+		let m = Minifiers::new(Some(esbuild()), "t", None);
+		assert_eq!(m.js("while(next());", true), "for(;next(););");
+		assert_eq!(m.js("if (a) ; else b()", true), "a||b()");
+		assert_eq!(without_last_semicolon("a();b();"), "a();b()");
+		assert_eq!(without_last_semicolon("for(;n(););"), "for(;n(););");
+		assert_eq!(without_last_semicolon("if(a);"), "if(a);");
+		assert_eq!(without_last_semicolon("x(\")\");"), "x(\")\")");
+	}
+
+	#[test]
+	fn code_that_esbuild_could_not_be_asked_about_is_not_remembered() {
+		let dir = temp("failed");
+		let missing = Minifiers::new(
+			Some("/nonexistent/esbuild".to_owned()),
+			"1",
+			Some(dir.clone()),
+		);
+		assert_eq!(missing.js("a  =  1;", false), "a  =  1;");
+		assert!(
+			fs::read_dir(format!("{dir}/minify"))
+				.is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+				|| fs::read_dir(format!("{dir}/minify"))
+					.unwrap()
+					.next()
+					.is_none(),
+			"a failure to run esbuild is not stored"
+		);
+
+		// What esbuild refuses is final.
+		let real = Minifiers::new(Some(esbuild()), "1", Some(dir.clone()));
+		assert_eq!(real.js("var = ;", false), "var = ;");
+		assert_eq!(fs::read_dir(format!("{dir}/minify")).unwrap().count(), 1);
+		let _ = fs::remove_dir_all(&dir);
 	}
 
 	#[test]

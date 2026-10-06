@@ -260,8 +260,20 @@ pub fn merge_rules(nodes: &mut Vec<Node>) {
 		}
 		out.push(n);
 	}
-	// Same declarations.
+	// Same declarations. The selectors that join the last rule are collected
+	// and written once when the run ends: minifying the growing list at every
+	// step takes time quadratic in the length of the run (tens of thousands of
+	// utility classes with one declaration took more than a minute).
 	let mut merged: Vec<Node> = Vec::with_capacity(out.len());
+	let mut joined: Option<String> = None;
+	let mut last_is_safe = false;
+	let finish = |merged: &mut Vec<Node>, joined: &mut Option<String>| {
+		if let Some(list) = joined.take()
+			&& let Some(Node::Rule(prev)) = merged.last_mut()
+		{
+			prev.selector = minify_selector_list(&list, false);
+		}
+	};
 	for n in out {
 		if let Node::Rule(r) = &n
 			&& let Some(Node::Rule(prev)) = merged.last_mut()
@@ -269,14 +281,18 @@ pub fn merge_rules(nodes: &mut Vec<Node>) {
 			&& only_declarations(r)
 			&& !r.nodes.is_empty()
 			&& same_block(prev, r)
-			&& is_safe_selector_list(&prev.selector)
+			&& last_is_safe
 			&& is_safe_selector_list(&r.selector)
 		{
-			let joined = format!("{},{}", prev.selector, r.selector);
-			prev.selector = minify_selector_list(&joined, false);
+			let list = joined.get_or_insert_with(|| prev.selector.clone());
+			list.push(',');
+			list.push_str(&r.selector);
 			continue;
 		}
+		finish(&mut merged, &mut joined);
+		last_is_safe = matches!(&n, Node::Rule(r) if is_safe_selector_list(&r.selector));
 		merged.push(n);
 	}
+	finish(&mut merged, &mut joined);
 	*nodes = merged;
 }
