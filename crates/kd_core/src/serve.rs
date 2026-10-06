@@ -298,10 +298,20 @@ impl Serve {
 	///
 	/// As [`Serve::request`].
 	pub fn request_as(&self, url_path: &str, renderer_started: bool) -> Result<Served, String> {
-		let Some(decoded) = percent_decode(url_path) else {
+		// The query and the fragment end the path before it is decoded: a
+		// `%3F` in a file name is a character of the name, not the start of a query.
+		let raw = url_path
+			.find(['?', '#'])
+			.map_or(url_path, |i| &url_path[..i]);
+		let Some(decoded) = percent_decode(raw) else {
 			return Ok(Served::NotFound);
 		};
-		let local = kd_site::url_to_local_path(&decoded, ".html");
+		// A backslash separates directories on some systems (and `..%5C` would
+		// climb out of the output directory there); no URL of ours has one.
+		if decoded.contains('\\') {
+			return Ok(Served::NotFound);
+		}
+		let local = kd_site::path_to_local_path(&decoded, ".html");
 		let config = &self.loaded.config;
 		let output_dir = kd_site::path::normalize(&config.dir.output);
 		let path = kd_site::path::join(&output_dir, &local);
@@ -314,8 +324,12 @@ impl Serve {
 		if !renderer_started {
 			st.context_full = true;
 		}
-		self.refresh_data(&mut st)?;
 		if let Some(&index) = st.by_output.get(&path) {
+			// Data is read for pages that JavaScript renders; a data file that
+			// does not parse must not turn every image and stylesheet into a 500.
+			if needs_js(&st.plan.pages[index]) {
+				self.refresh_data(&mut st)?;
+			}
 			return self.page(&mut st, index);
 		}
 		if let Some(&index) = st.asset_by_output.get(&path) {
@@ -576,6 +590,13 @@ impl Serve {
 			},
 		);
 		Ok(out.html)
+	}
+
+	/// Forgets a request whose JavaScript failed (a component threw, esbuild
+	/// refused a script): nothing will be finished, and what the core kept for
+	/// it would stay for ever. An unknown token is ignored.
+	pub fn cancel(&self, token: u64) {
+		self.lock().pending.remove(&token);
 	}
 
 	/// Takes the HTML JavaScript rendered for a [`Render`].
@@ -867,6 +888,45 @@ mod tests {
 		assert_eq!(serve.request("/bad%zz").unwrap(), Served::NotFound);
 		// A directory is not a file.
 		assert_eq!(serve.request("/img/").unwrap(), Served::NotFound);
+		// A backslash is not a separator of ours.
+		assert_eq!(
+			serve.request("/..%5C..%5Csecret.txt").unwrap(),
+			Served::NotFound
+		);
+	}
+
+	#[test]
+	fn an_encoded_question_mark_belongs_to_the_name_and_a_real_one_ends_the_path() {
+		let site = Site::new("question");
+		site.write("src/index.html", "<p>x</p>");
+		site.write("out/a?b.png", "png");
+		let serve = site.serve("");
+
+		assert_eq!(
+			serve.request("/a%3Fb.png").unwrap(),
+			Served::File {
+				path: format!("{}/out/a?b.png", site.root)
+			}
+		);
+		assert_eq!(serve.request("/a?b.png").unwrap(), Served::NotFound);
+		assert_eq!(text(serve.request("/?x=1#top").unwrap()).1, "<p>x</p>\n");
+	}
+
+	#[test]
+	fn data_that_does_not_parse_fails_only_the_pages_that_use_it() {
+		let site = Site::new("bad-data");
+		site.write("src/index.html", "<p>x</p>");
+		site.write("out/logo.svg", "<svg/>");
+		site.write("data/nav.json", "{ \"a\": 1 }");
+		let serve = site.serve(r#", "data": { "dir": "data" }"#);
+		std::thread::sleep(std::time::Duration::from_millis(20));
+		site.write("data/nav.json", "{ not json");
+
+		assert!(matches!(
+			serve.request("/logo.svg").unwrap(),
+			Served::File { .. }
+		));
+		assert_eq!(text(serve.request("/").unwrap()).1, "<p>x</p>\n");
 	}
 
 	#[test]
@@ -1105,6 +1165,21 @@ mod tests {
 		serve
 			.finish_render(fixed.token, "<section>home</section>")
 			.unwrap();
+	}
+
+	#[test]
+	fn a_cancelled_request_is_forgotten() {
+		let (_site, serve) = jsx_site("jsx-cancel");
+		let first = render(serve.request("/").unwrap());
+		serve.cancel(first.token);
+		assert_eq!(
+			serve.finish_render(first.token, "<p/>").unwrap_err(),
+			format!("no page is waiting for token {}", first.token)
+		);
+		// And the page can be asked for again.
+		let again = render(serve.request("/").unwrap());
+		serve.finish_render(again.token, "<p>x</p>").unwrap();
+		serve.cancel(12345);
 	}
 
 	#[test]

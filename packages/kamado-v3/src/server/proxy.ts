@@ -83,6 +83,11 @@ export function setProxyRoutes(
 		const handler = async (ctx: Context) => {
 			const requested = new URL(ctx.req.url);
 			const forwarded = new URL(rewritePath(requested.pathname, rule.rewrite), target);
+			// A rewritten path that starts with `//` is a network-path reference:
+			// `new URL('//host/x', target)` would send the request to `host`.
+			if (forwarded.origin !== target.origin) {
+				return new Response('Bad Request', { status: 400 });
+			}
 			forwarded.search = requested.search;
 			const headers = new Headers(ctx.req.raw.headers);
 			if (rule.changeOrigin === true) {

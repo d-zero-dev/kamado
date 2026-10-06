@@ -10,11 +10,18 @@ const serveFinishRender =
 	vi.fn<(handle: string, token: string, html: string) => string>();
 const serveFinishScript =
 	vi.fn<(handle: string, token: string, output: string) => string>();
+const serveCancel = vi.fn<(handle: string, token: string) => string>();
 const serveClose = vi.fn<(handle: string) => void>();
 const buildScripts = vi.fn<(request: unknown) => Promise<unknown[]>>();
 
 vi.mock('../native.js', () => ({
-	native: () => ({ serveRequest, serveFinishRender, serveFinishScript, serveClose }),
+	native: () => ({
+		serveRequest,
+		serveFinishRender,
+		serveFinishScript,
+		serveCancel,
+		serveClose,
+	}),
 }));
 vi.mock('../scripts.js', () => ({
 	buildScripts: (request: unknown) => buildScripts(request),
@@ -64,6 +71,7 @@ describe('createApp', () => {
 		serveRequest.mockReset();
 		serveFinishRender.mockReset();
 		serveFinishScript.mockReset();
+		serveCancel.mockReset();
 		serveClose.mockReset();
 		buildScripts.mockReset();
 	});
@@ -255,6 +263,8 @@ describe('createApp', () => {
 
 		expect(response.status).toBe(500);
 		expect(await response.text()).toBe('Failed to render /s/a.tsx: boom');
+		// The core is told, or it would keep the request for ever.
+		expect(serveCancel).toHaveBeenCalledExactlyOnceWith('h1', '1');
 		expect(serveFinishRender).not.toHaveBeenCalled();
 	});
 

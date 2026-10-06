@@ -398,6 +398,19 @@ unsafe extern "C" fn serve_finish_script(env: napi_env, info: napi_callback_info
 	}
 }
 
+/// `serveCancel(handle, token)`: the JavaScript behind an answer failed.
+unsafe extern "C" fn serve_cancel(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<2>(
+			env,
+			info,
+			c"serveCancel: expected (handle, token) strings",
+			|[handle, token]| serve::cancel(&handle, &token).map(|()| String::new()),
+		)
+	}
+}
+
 /// `serveClose(handle)`: forgets a dev server.
 unsafe extern "C" fn serve_close(env: napi_env, info: napi_callback_info) -> napi_value {
 	let Some(api) = api() else {
@@ -522,6 +535,7 @@ pub unsafe extern "C" fn napi_register_module_v1(env: napi_env, exports: napi_va
 		export(api, env, exports, c"serveRequest", serve_request);
 		export(api, env, exports, c"serveFinishRender", serve_finish_render);
 		export(api, env, exports, c"serveFinishScript", serve_finish_script);
+		export(api, env, exports, c"serveCancel", serve_cancel);
 		export(api, env, exports, c"serveClose", serve_close);
 	}
 	exports

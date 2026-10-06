@@ -45,6 +45,7 @@ export interface Native {
 	serveFinishRender(handle: string, token: string, html: string): string;
 	/** Takes what esbuild built for a `script` answer; the result is JSON. */
 	serveFinishScript(handle: string, token: string, outputJson: string): string;
+	serveCancel(handle: string, token: string): string;
 	/** Forgets a dev server. */
 	serveClose(handle: string): void;
 }

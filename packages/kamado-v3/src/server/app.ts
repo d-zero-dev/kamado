@@ -123,20 +123,33 @@ export function createApp(
 				} else if (current.update) {
 					renderer.update(current.update);
 				}
-				const html = await renderer.render(current.job);
-				current = JSON.parse(
-					core.serveFinishRender(handle, current.token, html),
-				) as Answer;
+				const { token } = current;
+				let html: string;
+				try {
+					html = await renderer.render(current.job);
+				} catch (error) {
+					// The core keeps what it needs to finish the page until told.
+					core.serveCancel(handle, token);
+					throw error;
+				}
+				current = JSON.parse(core.serveFinishRender(handle, token, html)) as Answer;
 
 				break;
 			}
 			case 'script': {
 				kind = 'script';
-				const [built] = await buildScripts(current.request);
+				const { token } = current;
+				let built: Awaited<ReturnType<typeof buildScripts>>[number] | undefined;
+				try {
+					[built] = await buildScripts(current.request);
+				} catch (error) {
+					core.serveCancel(handle, token);
+					throw error;
+				}
 				current = JSON.parse(
 					core.serveFinishScript(
 						handle,
-						current.token,
+						token,
 						JSON.stringify({ code: built!.code, inputs: built!.inputs }),
 					),
 				) as Answer;

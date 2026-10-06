@@ -164,6 +164,12 @@ pub(crate) fn finish_script(handle: &str, tok: &str, output_json: &str) -> Resul
 	get(handle)?.finish_script(token(tok)?, output).map(answer)
 }
 
+/// Forgets the request behind a `render` or `script` answer that failed.
+pub(crate) fn cancel(handle: &str, tok: &str) -> Result<(), String> {
+	get(handle)?.cancel(token(tok)?);
+	Ok(())
+}
+
 /// Forgets a dev server.
 pub(crate) fn close(handle: &str) {
 	if let Ok(id) = handle.parse::<u64>()

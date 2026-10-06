@@ -301,9 +301,22 @@ pub fn url_to_local_path(url: &str, extension: &str) -> String {
 	if let Some(i) = pathname.find(['?', '#']) {
 		pathname = &pathname[..i];
 	}
-	if pathname.is_empty() {
-		pathname = "/";
-	}
+	path_to_local_path(pathname, extension)
+}
+
+/// The file a path (no scheme, query or fragment, already decoded: `?`, `#`
+/// and `://` are ordinary characters in it) is served from, with the same
+/// rules as [`url_to_local_path`].
+///
+/// # Example
+///
+/// ```
+/// assert_eq!(kd_site::path_to_local_path("/a?b/c", ".html"), "a?b/c.html");
+/// assert_eq!(kd_site::path_to_local_path("/x://h/", ".html"), "x://h/index.html");
+/// ```
+#[must_use]
+pub fn path_to_local_path(pathname: &str, extension: &str) -> String {
+	let pathname = if pathname.is_empty() { "/" } else { pathname };
 	let pathname = pathname.strip_prefix('/').unwrap_or(pathname);
 	if pathname.is_empty() || pathname.ends_with('/') {
 		return format!("{pathname}index{extension}");

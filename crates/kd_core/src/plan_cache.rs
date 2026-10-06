@@ -84,6 +84,31 @@ fn collect<'a>(strings: &mut Strings<'a>, value: &'a Value) {
 	}
 }
 
+/// How deep a value may nest: what `decode` reads, so that `encode` never writes
+/// a cache that every later build would throw away.
+const MAX_DEPTH: usize = 64;
+
+/// Bumped when what the cache holds or means changes without the version of
+/// the crate changing (metadata extraction, the fields kept).
+const FORMAT: u32 = 1;
+
+/// What identifies the writer: a cache from another version or format is
+/// ignored.
+fn stamp() -> String {
+	format!("{}/{FORMAT}", crate::VERSION)
+}
+
+fn too_deep(value: &Value, depth: usize) -> bool {
+	if depth > MAX_DEPTH {
+		return true;
+	}
+	match value {
+		Value::Array(items) => items.iter().any(|v| too_deep(v, depth + 1)),
+		Value::Object(members) => members.iter().any(|(_, v)| too_deep(v, depth + 1)),
+		_ => false,
+	}
+}
+
 fn put_value(out: &mut Vec<u8>, strings: &Strings<'_>, value: &Value) {
 	match value {
 		Value::Null => out.push(0),
@@ -131,6 +156,14 @@ pub(crate) fn encode(cache: &PlanCache) -> Option<Vec<u8>> {
 	pages.sort_by(|a, b| a.0.cmp(b.0));
 	let mut strings = Strings::default();
 	for (path, page) in &pages {
+		if page
+			.in_file
+			.iter()
+			.chain(&page.side)
+			.any(|(_, v)| too_deep(v, 0))
+		{
+			return None;
+		}
 		strings.id(path);
 		strings.id(&page.sidecar);
 		for (k, v) in page.in_file.iter().chain(&page.side) {
@@ -140,9 +173,9 @@ pub(crate) fn encode(cache: &PlanCache) -> Option<Vec<u8>> {
 	}
 	let mut out = Vec::with_capacity(1 << 16);
 	out.extend_from_slice(MAGIC);
-	let version = crate::VERSION.as_bytes();
+	let version = stamp();
 	put(&mut out, version.len() as u64);
-	out.extend_from_slice(version);
+	out.extend_from_slice(version.as_bytes());
 	put(&mut out, strings.order.len() as u64);
 	for s in &strings.order {
 		put(&mut out, s.len() as u64);
@@ -167,7 +200,7 @@ pub(crate) fn encode(cache: &PlanCache) -> Option<Vec<u8>> {
 }
 
 fn read_value(r: &mut Reader<'_>, strings: &[&str], depth: usize) -> Option<Value> {
-	if depth > 64 {
+	if depth > MAX_DEPTH {
 		return None;
 	}
 	let string = |id: u64| {
@@ -225,7 +258,7 @@ pub(crate) fn decode(bytes: &[u8]) -> Option<PlanCache> {
 		return None;
 	}
 	let version_len = usize::try_from(r.varint()?).ok()?;
-	if r.take(version_len)? != crate::VERSION.as_bytes() {
+	if r.take(version_len)? != stamp().as_bytes() {
 		return None;
 	}
 	let count = r.count()?;
@@ -343,6 +376,33 @@ mod tests {
 			decode(&encode(&PlanCache::default()).unwrap()),
 			Some(PlanCache::default())
 		);
+	}
+
+	#[test]
+	fn a_cache_that_decode_would_refuse_for_its_depth_is_not_written() {
+		let mut deep = Value::Null;
+		for _ in 0..=MAX_DEPTH + 1 {
+			deep = Value::Array(vec![deep]);
+		}
+		let mut c = cache(3);
+		c.pages
+			.get_mut("/in/page-1.tsx")
+			.unwrap()
+			.in_file
+			.push(("deep".to_owned(), deep));
+		assert_eq!(encode(&c), None);
+		// The allowed depth round-trips.
+		let mut ok = Value::Null;
+		for _ in 0..MAX_DEPTH - 1 {
+			ok = Value::Array(vec![ok]);
+		}
+		let mut c = cache(3);
+		c.pages
+			.get_mut("/in/page-1.tsx")
+			.unwrap()
+			.in_file
+			.push(("deep".to_owned(), ok));
+		assert_eq!(decode(&encode(&c).unwrap()), Some(c));
 	}
 
 	#[test]

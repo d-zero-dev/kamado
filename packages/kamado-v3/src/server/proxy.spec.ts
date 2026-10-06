@@ -93,6 +93,17 @@ describe('setProxyRoutes', () => {
 		expect(calls[0]!.url).toBe('http://backend.test/v1/users');
 	});
 
+	test('a rewrite that makes the path a network-path reference is refused', async () => {
+		const { app, calls } = setup({
+			'/api': { target: 'http://backend.test', rewrite: { from: '^/api', to: '' } },
+		});
+
+		const response = await app.request('/api//evil.example/x');
+
+		expect(response.status).toBe(400);
+		expect(calls).toEqual([]);
+	});
+
 	test('changeOrigin sends the host and origin of the target', async () => {
 		const { app, calls } = setup({
 			'/api': { target: 'https://backend.test:9000', changeOrigin: true },
