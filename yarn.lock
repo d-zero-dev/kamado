@@ -1476,12 +1476,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@hono/node-server@npm:2.1.1":
-  version: 2.1.1
-  resolution: "@hono/node-server@npm:2.1.1"
+"@hono/node-server@npm:2.1.3":
+  version: 2.1.3
+  resolution: "@hono/node-server@npm:2.1.3"
   peerDependencies:
     hono: ^4
-  checksum: 10c0/7ef810ca647c56d8d9386fd81609e18443b3a5634aa5ecabdf357e7ca724613c535e863c15ded9b7ae89b935a073040fb11e6d59041f3b1c3e153d8ecb699880
+  checksum: 10c0/1b9996f41be620c301f73529928ccb056574fadf822a0979e4925c17cce209583e7f27376ae2308b4e87ab6c1c7501d6f282333c364ed79f21b99b45b47f7ffb
   languageName: node
   linkType: hard
 
@@ -7572,10 +7572,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:4.13.10":
-  version: 4.13.10
-  resolution: "hono@npm:4.13.10"
-  checksum: 10c0/41db2a566634b153f2d1ff5c751ae4d7912d9eb0ca97da40a0c86e81fd91db7adcd9ffd9668c9ca3b1e51297a122907f966d7adde128630272839ae264978b9c
+"hono@npm:4.13.11":
+  version: 4.13.11
+  resolution: "hono@npm:4.13.11"
+  checksum: 10c0/1052fbe5f45d0041828222597247fadb8283147cbf2c1ec930d525393f3bf4e2600f7190c4890c1a9cc97b6e1abd2287fc28ab37ac1988eda079f2b4deac71bb
   languageName: node
   linkType: hard
 
@@ -8572,7 +8572,7 @@ __metadata:
     "@d-zero/dealer": "npm:1.14.0"
     "@d-zero/roar": "npm:2.2.1"
     "@d-zero/shared": "npm:0.23.0"
-    "@hono/node-server": "npm:2.1.1"
+    "@hono/node-server": "npm:2.1.3"
     "@types/node": "npm:24.19.0"
     "@types/picomatch": "npm:4.0.3"
     ansi-colors: "npm:4.1.3"
@@ -8581,7 +8581,7 @@ __metadata:
     dayjs: "npm:1.11.23"
     fast-glob: "npm:3.3.3"
     gray-matter: "npm:4.0.3"
-    hono: "npm:4.13.10"
+    hono: "npm:4.13.11"
     linkedom: "npm:0.18.13"
     open: "npm:11.0.4"
     picomatch: "npm:4.0.7"
