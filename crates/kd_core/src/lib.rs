@@ -21,6 +21,7 @@ mod jsx;
 mod minifiers;
 pub mod serve;
 mod session;
+mod sitemap;
 pub mod style;
 pub mod style_import;
 
@@ -1627,6 +1628,104 @@ mod tests {
 			[
 				"styles.sourcemap: source maps of stylesheets are not generated; the stylesheets are written without one"
 			]
+		);
+	}
+
+	fn sitemap_site(name: &str, extra: &str) -> (Site, Loaded) {
+		let site = Site::new(name);
+		site.write("src/index.html", "<p>home</p>");
+		site.write("src/about/index.html", "<p>about</p>");
+		site.write("src/news.html", "<p>news</p>");
+		site.write("src/draft/index.html", "<p>draft</p>");
+		site.write(
+			"overrides.json",
+			r#"{ "version": 1, "pages": [{ "url": "/about/", "lastmod": "2026-01-02T00:00:00+09:00" }, { "url": "/service/", "virtual": true, "lastmod": "2026-02-03" }] }"#,
+		);
+		let loaded = site.config(&format!(
+			r#", "site": {{ "baseURL": "https://example.com/sub/" }}, "pages": {{ "overrides": "overrides.json" }}, "sitemap": {{ "exclude": ["draft/**"]{extra} }}"#
+		));
+		(site, loaded)
+	}
+
+	#[test]
+	fn the_sitemap_lists_the_planned_pages_with_absolute_urls() {
+		let (site, loaded) = sitemap_site("sitemap", "");
+		build(&loaded, &BuildOptions::default()).unwrap();
+
+		assert_eq!(
+			site.read("out/sitemap.xml"),
+			concat!(
+				"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+				"<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
+				"<url><loc>https://example.com/sub/</loc></url>\n",
+				"<url><loc>https://example.com/sub/about/</loc></url>\n",
+				"<url><loc>https://example.com/sub/news.html</loc></url>\n",
+				"<url><loc>https://example.com/sub/service/</loc></url>\n",
+				"</urlset>\n"
+			)
+		);
+	}
+
+	#[test]
+	fn lastmod_changefreq_and_priority_are_written_when_configured() {
+		let (site, loaded) = sitemap_site(
+			"sitemap-lastmod",
+			r#", "lastmod": "manifest", "changefreq": "weekly", "priority": 0.8"#,
+		);
+		build(&loaded, &BuildOptions::default()).unwrap();
+
+		let xml = site.read("out/sitemap.xml");
+		assert!(
+			xml.contains("<url><loc>https://example.com/sub/about/</loc><lastmod>2026-01-02T00:00:00+09:00</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>"),
+			"{xml}"
+		);
+		assert!(
+			xml.contains(
+				"<loc>https://example.com/sub/service/</loc><lastmod>2026-02-03</lastmod>"
+			),
+			"{xml}"
+		);
+		// A page without an override has no lastmod to give.
+		assert!(
+			xml.contains("<loc>https://example.com/sub/news.html</loc><changefreq>"),
+			"{xml}"
+		);
+	}
+
+	#[test]
+	fn mtime_uses_the_modification_time_of_the_source() {
+		let (site, loaded) = sitemap_site("sitemap-mtime", r#", "lastmod": "mtime""#);
+		build(&loaded, &BuildOptions::default()).unwrap();
+
+		let xml = site.read("out/sitemap.xml");
+		let year = &xml[xml.find("<lastmod>").unwrap() + 9..][..2];
+		assert_eq!(year, "20");
+		assert!(xml.contains("Z</lastmod>"), "{xml}");
+	}
+
+	#[test]
+	fn a_sitemap_needs_an_origin_and_stays_inside_the_output_directory() {
+		let site = Site::new("sitemap-errors");
+		site.write("src/index.html", "<p>x</p>");
+		let loaded = site.config(r#", "sitemap": {}"#);
+		let e = build(&loaded, &BuildOptions::default()).unwrap_err();
+		assert!(e.starts_with("sitemap: addresses need an origin"), "{e}");
+
+		let loaded = site.config(
+			r#", "site": { "host": "example.com" }, "sitemap": { "output": "../sitemap.xml" }"#,
+		);
+		let e = build(&loaded, &BuildOptions::default()).unwrap_err();
+		assert!(
+			e.contains("must be a file inside the output directory"),
+			"{e}"
+		);
+
+		// A host alone is enough: it is served over https.
+		let loaded = site.config(r#", "site": { "host": "example.com" }, "sitemap": {}"#);
+		build(&loaded, &BuildOptions::default()).unwrap();
+		assert!(
+			site.read("out/sitemap.xml")
+				.contains("<loc>https://example.com/</loc>")
 		);
 	}
 

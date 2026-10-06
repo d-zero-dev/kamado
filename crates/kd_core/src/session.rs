@@ -22,6 +22,7 @@ use crate::banner::{self, LocalTime};
 use crate::html;
 use crate::jsx::Modules;
 use crate::minifiers::Minifiers;
+use crate::sitemap;
 use crate::style::{self, StyleSettings};
 use crate::{
 	AssetResult, BuildOptions, Loaded, Page, PageKind, PageResult, Plan, Report, Status,
@@ -99,6 +100,7 @@ struct Shared {
 	targets: Vec<kd_glob::Pattern>,
 	skip_unchanged: bool,
 	assets: Vec<Asset>,
+	sitemap: Option<sitemap::Settings>,
 	asset_decisions: Vec<Decision>,
 	/// Fingerprints the inputs esbuild read; created empty so that nothing is
 	/// remembered from before esbuild ran.
@@ -260,6 +262,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	let targets = compile_globs(&options.targets)?;
 	let env = page_env(loaded, options);
 	let pipeline = html::Pipeline::compile(config)?;
+	let sitemap = crate::sitemap::settings(config)?;
 	let data = crate::data::load(config)?;
 
 	let any_js = plan.pages.iter().any(needs_js);
@@ -523,6 +526,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 			targets,
 			skip_unchanged: options.skip_unchanged || config.build.skip_unchanged,
 			assets,
+			sitemap,
 			asset_decisions,
 			fingerprinter: kd_build::Fingerprinter::new(),
 			started_at: (started_at.as_secs() as i64, started_at.subsec_nanos()),
@@ -744,6 +748,10 @@ impl Prepared {
 				next.entries.insert(result.output_path.clone(), entry);
 			}
 			report.assets.push(result);
+		}
+		if let Some(settings) = &shared.sitemap {
+			let xml = sitemap::render(settings, &shared.plan.pages);
+			write_output(&settings.output_path, xml.as_bytes(), shared.skip_unchanged)?;
 		}
 		if incremental {
 			next.save(&manifest_path)
