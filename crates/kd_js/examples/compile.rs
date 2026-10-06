@@ -2,7 +2,11 @@
 //! `scripts/`: reads one path per line from standard input and writes one JSON
 //! object per line (`{"path": ..., "code": ...}` or `{"path": ..., "error":
 //! ...}`). The kind of file comes from its extension; `KD_JS_KEEP_IMPORTS=1`
-//! keeps unused imports (what Node's type stripping does).
+//! keeps unused imports (what Node's type stripping does). With
+//! `KD_JS_FUNCTION=1` the files are compiled as functions of a chunk
+//! (`kd_js::compile_function`): the object has `function` (the code) and
+//! `modules` (the specifiers it takes) instead of `code`, or `code` as usual
+//! with `"fallback": true` for a file that cannot be a function.
 
 use std::io::{BufRead, Write};
 
@@ -25,6 +29,7 @@ fn json_string(text: &str) -> String {
 }
 
 fn main() {
+	let function = std::env::var("KD_JS_FUNCTION").is_ok();
 	let keep_imports = std::env::var("KD_JS_KEEP_IMPORTS").is_ok();
 	let runtime =
 		std::env::var("KD_JS_RUNTIME").unwrap_or_else(|_| "file:///runtime.js".to_owned());
@@ -44,6 +49,57 @@ fn main() {
 		} else {
 			(false, false)
 		};
+		if function && let Ok(src) = std::fs::read_to_string(&path) {
+			let options = kd_js::Options {
+				runtime: &runtime,
+				jsx,
+				ts,
+				elide_imports: !keep_imports,
+				rewrite: &|_| None,
+				define: &[],
+			};
+			match kd_js::compile_function(&src, &options) {
+				Ok(Some(out)) => {
+					let modules: Vec<String> = out
+						.modules
+						.iter()
+						.map(|m| format!("[{},{}]", json_string(&m.specifier), m.json))
+						.collect();
+					writeln!(
+						stdout,
+						"{{\"path\":{},\"function\":{},\"modules\":[{}]}}",
+						json_string(&path),
+						json_string(&out.code),
+						modules.join(",")
+					)
+					.expect("write to standard output");
+					continue;
+				}
+				Ok(None) => {
+					let code = kd_js::compile(&src, &options)
+						.map(|o| o.code)
+						.unwrap_or_default();
+					writeln!(
+						stdout,
+						"{{\"path\":{},\"code\":{},\"fallback\":true}}",
+						json_string(&path),
+						json_string(&code)
+					)
+					.expect("write to standard output");
+					continue;
+				}
+				Err(e) => {
+					writeln!(
+						stdout,
+						"{{\"path\":{},\"error\":{}}}",
+						json_string(&path),
+						json_string(&e.to_string())
+					)
+					.expect("write to standard output");
+					continue;
+				}
+			}
+		}
 		let result = match std::fs::read_to_string(&path) {
 			Err(e) => Err(format!("cannot read: {e}")),
 			Ok(src) => kd_js::compile(

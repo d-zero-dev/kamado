@@ -8,7 +8,12 @@
  * cargo build --release --offline -p kd_js --example compile
  * node scripts/check-kd-js-jsx.mjs            # the hand-written cases
  * node scripts/check-kd-js-jsx.mjs fuzz 2000 1  # random components
+ * KD_JS_FUNCTION=1 node scripts/check-kd-js-jsx.mjs fuzz 2000 1  # as functions of a chunk
  * ```
+ *
+ * With `KD_JS_FUNCTION=1` each case is compiled by `kd_js::compile_function` and
+ * run as a page of a chunk, which is how a build renders pages; a case that
+ * cannot be a function (the compiler says so) is compiled as a module.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -103,9 +108,26 @@ for (const [i, c] of cases.entries()) {
 	} else {
 		try {
 			const outFile = path.join(work, `case${i}.mjs`);
-			writeFileSync(outFile, result.code);
-			const mod = await import(pathToFileURL(outFile).href);
-			actual = render(mod.default, c.props ?? {});
+			if (result.function === undefined) {
+				writeFileSync(outFile, result.code);
+				const mod = await import(pathToFileURL(outFile).href);
+				actual = render(mod.default, c.props ?? {});
+			} else {
+				// The chunk: the runtime, the namespaces the page takes, one function.
+				const names = result.modules.map((_, n) => `__kd_n${n}`);
+				const lines = [
+					`import { m as __kd_m, c as __kd_c, a as __kd_a, el as __kd_el, k as __kd_k } from ${JSON.stringify(runtime)};`,
+					...result.modules.map(
+						([specifier, json], n) =>
+							`import * as ${names[n]} from ${JSON.stringify(specifier)}${json ? ' with { type: "json" }' : ''};`,
+					),
+					`export const pages = [() => (${result.function})([${names.join(', ')}])];`,
+				];
+				writeFileSync(outFile, lines.join('\n'));
+				const mod = await import(pathToFileURL(outFile).href);
+				const exports = await mod.pages[0]();
+				actual = render(exports.default, c.props ?? {});
+			}
 		} catch (error) {
 			actual = `__ERROR__ ${String(error.message).split('\n')[0]}`;
 		}

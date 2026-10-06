@@ -70,3 +70,22 @@ node benchmarks/v3/compare-outputs.ts <baselineDir> <candidateDir> --json=report
 比較の判定は `benchmarks/v3/compare-trees.ts` に書いてある。`.css` / `.js` / `.map` はサイズが増えないことを、それ以外はバイト一致を求める。
 
 v2 の `yarn bench` は、10 万ページ級では生成器がファイルを一斉に開いて `EMFILE` になる（macOS の上限は約 6 万）。v2 の基準値は 5 万ページまでで取る。
+
+## JSX コンパイラの検証
+
+`kd_js` が出力する JS を、esbuild と React 19 の `renderToStaticMarkup`（v2 の jsx-compiler がやっていたこと）と比べる。ビルドはページを「チャンクの関数」としてコンパイルするので、その形（`KD_JS_FUNCTION=1`）でも同じ比較をする。
+
+```sh
+cargo build --release --offline -p kd_js --example compile
+node scripts/check-kd-js-jsx.mjs                 # 手書きのケース
+node scripts/check-kd-js-jsx.mjs fuzz 3000 7     # ランダムなコンポーネント
+KD_JS_FUNCTION=1 node scripts/check-kd-js-jsx.mjs fuzz 3000 7   # 関数形式
+```
+
+`KD_PAGE_CHUNKS=0` を付けると `build` もチャンクを使わずに、ページを 1 ファイルのモジュールとして書き出す。出力が同じことを比べるときに使う。
+
+## 性能の見方
+
+`KD_TIMING=1 KAMADO_TIMING=1 node packages/kamado-v3/dist/cli.js build ...` で、段階ごとの時間（Rust 側と JS 側）が標準エラーに出る。`sample`（macOS）や `perf`（Linux）で見るときは、`strip = "symbols"` を外したビルド（`CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p kd_napi --target-dir <別の場所>`）を `KAMADO_NATIVE_ADDON` で指す。HTML 段だけの時間は `cargo run --release -p kd_html --example stage_bench -- <出力ディレクトリ>`。
+
+ページごとの時間の大半は、`open` やファイルの作成に費やされる環境がある（開発に使っている macOS では `open` が 70〜200µs）。ファイルの数を減らすことが、CPU の最適化より効く。
