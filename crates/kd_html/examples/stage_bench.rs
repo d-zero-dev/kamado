@@ -7,6 +7,14 @@
 use std::fs;
 use std::time::Instant;
 
+// The allocator of the addon: with the system's, `malloc` and `free` are about
+// half of what a profile shows, which is not what a build sees.
+#[path = "../../kd_napi/src/alloc.rs"]
+mod alloc;
+
+#[global_allocator]
+static ALLOCATOR: alloc::PoolAlloc = alloc::PoolAlloc;
+
 use kd_html::minify::{self, NoMinification};
 use kd_html::print;
 
