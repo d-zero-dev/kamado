@@ -16,6 +16,38 @@ const USAGE = `Usage:
 The config file defaults to ./kamado.config.jsonc.`;
 
 /**
+ * A progress line on the terminal's error stream, rewritten in place (and
+ * nothing at all when that is not a terminal, so that logs stay clean).
+ */
+function progressLine(): {
+	readonly update: (done: number, total: number) => void;
+	readonly clear: () => void;
+} {
+	if (!process.stderr.isTTY) {
+		return { update: () => {}, clear: () => {} };
+	}
+	let last = 0;
+	let shown = false;
+	return {
+		update(done, total) {
+			const now = performance.now();
+			// Ten times a second is plenty, and the last count always shows.
+			if (done < total && now - last < 100) {
+				return;
+			}
+			last = now;
+			shown = true;
+			process.stderr.write(`\r${styleText('dim', `Rendering ${done}/${total}`)}`);
+		},
+		clear() {
+			if (shown) {
+				process.stderr.write('\r\u001B[K');
+			}
+		},
+	};
+}
+
+/**
  * Resolves the config file: `--config` relative to the cwd, else
  * `kamado.config.jsonc` in the cwd.
  * @param configFlag - The `--config` value
@@ -60,7 +92,9 @@ async function main(argv: readonly string[]): Promise<number> {
 			if (jobs !== undefined && (!Number.isInteger(jobs) || jobs < 1)) {
 				throw new Error(`--jobs must be a positive integer: ${values.jobs}`);
 			}
+			const progress = progressLine();
 			const report = await build(configPath, {
+				onProgress: progress.update,
 				incremental: values.incremental,
 				force: values.force,
 				skipUnchanged: values['skip-unchanged'],
@@ -71,6 +105,7 @@ async function main(argv: readonly string[]): Promise<number> {
 						? undefined
 						: path.resolve(process.cwd(), values['cache-dir']),
 			});
+			progress.clear();
 			console.log(summarize(report, values.verbose));
 			return 0;
 		}

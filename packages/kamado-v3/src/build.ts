@@ -1,7 +1,8 @@
 import type { RenderContext } from './props.js';
-import type { Rendered, renderJobs, type RenderJob } from './render.js';
+import type { Rendered, RenderJob } from './render.js';
 
 import { native } from './native.js';
+import { renderJobs } from './render.js';
 import { RUNTIME_URL } from './runtime-url.js';
 import {
 	buildScripts,
@@ -42,6 +43,11 @@ export interface BuildOptions {
 	readonly targets?: readonly string[];
 	readonly jobs?: number;
 	readonly cacheDir?: string;
+	/**
+	 * Called as pages are rendered with the number done and the number to
+	 * render (not part of the options the core is given).
+	 */
+	readonly onProgress?: (done: number, total: number) => void;
 }
 
 export type PageStatus = 'built' | 'cached' | 'unchanged' | 'skipped' | 'virtual';
@@ -111,11 +117,12 @@ export async function build(
 			);
 		}
 	};
+	const { onProgress, ...coreOptions } = options;
 	const prepared = JSON.parse(
 		core.prepare(
 			configPath,
 			JSON.stringify({
-				...options,
+				...coreOptions,
 				// The banner's dates are local time, which the core cannot tell.
 				tzOffsetMinutes: -new Date().getTimezoneOffset(),
 				esbuildVersion: ESBUILD_VERSION,
@@ -128,12 +135,17 @@ export async function build(
 	try {
 		// Pages render in worker threads while esbuild bundles the scripts. The
 		// HTML goes to the core as each batch is done, not after the last one.
+		let done = 0;
 		const [, scripts] = await Promise.all([
 			prepared.context && prepared.jobs.length > 0
 				? renderJobs(prepared.jobs, prepared.context, {
 						runtimeUrl: RUNTIME_URL,
 						parallelism: options.jobs,
-						onRendered: (rendered) => core.feed(prepared.handle, frames(rendered)),
+						onRendered: (rendered) => {
+							core.feed(prepared.handle, frames(rendered));
+							done += rendered.length;
+							onProgress?.(done, prepared.jobs.length);
+						},
 					})
 				: [],
 			prepared.scripts ? buildScripts(prepared.scripts) : [],

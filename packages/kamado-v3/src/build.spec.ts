@@ -5,14 +5,25 @@ const prepare =
 const finish = vi.fn<(handle: string, resultsJson: string) => string>();
 const abort = vi.fn<(handle: string) => void>();
 const feed = vi.fn<(handle: string, frames: Buffer) => void>();
-const renderJobs = vi.fn<(...args: unknown[]) => Promise<unknown[]>>();
+const renderJobs =
+	vi.fn<
+		(
+			jobs: unknown,
+			context: unknown,
+			options: { onRendered: (rendered: [number, string][]) => void },
+		) => Promise<unknown[]>
+	>();
 const buildScripts = vi.fn<(request: unknown) => Promise<unknown[]>>();
 
 vi.mock('./native.js', () => ({
 	native: () => ({ prepare, finish, abort, feed }),
 }));
 vi.mock('./render.js', () => ({
-	renderJobs: (...args: unknown[]) => renderJobs(...args),
+	renderJobs: (
+		jobs: unknown,
+		context: unknown,
+		options: { onRendered: (rendered: [number, string][]) => void },
+	) => renderJobs(jobs, context, options),
 }));
 vi.mock('./scripts.js', () => ({
 	ESBUILD_VERSION: '0.0.1-test',
@@ -133,15 +144,13 @@ describe('build', () => {
 				scripts: null,
 			}),
 		);
-		renderJobs.mockImplementation(
-			(_jobs, _context, options: { onRendered: (r: [number, string][]) => void }) => {
-				options.onRendered([
-					[3, '<p>é</p>'],
-					[258, ''],
-				]);
-				return Promise.resolve([]);
-			},
-		);
+		renderJobs.mockImplementation((_jobs, _context, options) => {
+			options.onRendered([
+				[3, '<p>é</p>'],
+				[258, ''],
+			]);
+			return Promise.resolve([]);
+		});
 
 		await build('/site/kamado.config.jsonc');
 
@@ -168,6 +177,40 @@ describe('build', () => {
 			0,
 		]);
 		expect(finish).toHaveBeenCalledExactlyOnceWith('7', '{"scripts":[]}');
+	});
+
+	test('progress is reported as pages are rendered and is not given to the core', async () => {
+		prepare.mockReturnValue(
+			JSON.stringify({
+				handle: '7',
+				jobs: [
+					{ page: 0, main: '/m.mjs', layout: null, content: null },
+					{ page: 1, main: '/m.mjs', layout: null, content: null },
+					{ page: 2, main: '/m.mjs', layout: null, content: null },
+				],
+				context: { pages: [] },
+				scripts: null,
+			}),
+		);
+		renderJobs.mockImplementation((_jobs, _context, options) => {
+			options.onRendered([[0, 'a']]);
+			options.onRendered([
+				[1, 'b'],
+				[2, 'c'],
+			]);
+			return Promise.resolve([]);
+		});
+		const progress: [number, number][] = [];
+
+		await build('/site/kamado.config.jsonc', {
+			onProgress: (done, total) => progress.push([done, total]),
+		});
+
+		expect(progress).toEqual([
+			[1, 3],
+			[3, 3],
+		]);
+		expect(JSON.parse(prepare.mock.calls[0]![1])).not.toHaveProperty('onProgress');
 	});
 
 	test('a script that fails to build releases the prepared build', async () => {
