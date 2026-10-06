@@ -331,13 +331,17 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 
 ## 10. CSS と JS
 
-- `styles`: CSS Syntax 3 のトークナイザとパーサ、`@import` の展開（alias は `prefix/`、`url()` と文字列の両方、メディア条件は `@media` で包む、リモート URL は残す、同じファイルの重複は除く、循環は検出）、安全な圧縮（cssnano の既定のうち、空白・コメント（`/*!` は残す）・空ルール・文字列・数値・色・`url()`・フォント値・セレクタの正規化・重複の削除）。`calc` の定数畳み込み、`mergeLonghand`、`mergeRules`、`reduceInitial`、`svgo` は対象外。**サイズは cssnano の出力の +3% 以内、gzip 後は +1% 以内**を目標にする。
-- `scripts`: esbuild（固定バージョン）。`alias` / `define` / `minify` / `sourcemap` / `banner`。出力は v2 とバイト一致。
+- `styles`: CSS Syntax 3 のトークナイザとパーサ、`@import` の展開（alias は `prefix/`、`url()` と文字列の両方、メディア条件は `@media` で包む、リモート URL は残す、同じファイルの重複は除く、循環は検出）、安全な圧縮（cssnano の既定のうち、空白・コメント（`/*!` は残す）・空ルール・文字列・数値・色・`url()`・フォント値・セレクタの正規化・重複の削除）。`calc` の定数畳み込みと、隣接する同一ブロックのルールの結合も行う。`mergeLonghand`（長手の結合）、非隣接ルールの結合、`reduceInitial`、`svgo` は対象外。custom property と未知のプロパティの値は加工しない（ブラウザの解釈が変わりうるものは、サイズより安全を優先して縮めない）。**サイズは cssnano の出力の +3% 以内、gzip 後は +1% 以内**を目標にし、実在の CSS 21 件で 100.28%（gzip 99.97%）、2 回圧縮しても結果は変わらない。cssnano との意図した差は `crates/kd_css/tests/common/mod.rs` の `DECISIONS` に両側の出力つきで記録する。
+  - `<style>` 要素・`style` 属性・`media` 属性も同じ圧縮器を通す（HTML 後処理の一部）。
+  - `sourcemap`: `true`、または `onServer` で開発サーバー経由のとき、末尾に inline の source map（`/*# sourceMappingURL=data:application/json;base64,… */`）を付ける。ルールと宣言の単位で、`@import` で取り込んだ元のファイルを指す（トークン単位ではない）。
+- `scripts`: esbuild（固定バージョン）。`alias` / `define` / `target`（既定 `es2022`）/ `minify` / `sourcemap` / `banner`。esbuild は JavaScript 側で `bundle: true` として呼び、どのファイルを読んだかをコアに返して差分ビルドの依存にする。v2 は `target` と `define` を渡さないので、既定の `es2022` と esnext で出力が違う構文を使うコードでは v2 と一致しない（`scripts.target` に `esnext` を指定すれば揃う）。
+- HTML 内の `<script>` の中身とイベントハンドラ属性は、コアが esbuild の実行ファイルを子プロセスとして直接呼んで圧縮する（JavaScript のスレッドを経由しない）。同じ内容は 1 回だけ圧縮し、結果はキャッシュディレクトリに残す（キー: esbuild のバージョンと内容）。esbuild が読めないコードはそのまま残す。結果は terser（v2）と同一ではないが意味は同じ。esbuild の実行ファイルが見つからないときは圧縮しない。
 
 ## 11. 差分ビルド
 
-- manifest: v2 と同じ場所（`<os.tmpdir()>/kamado/<basename>-<hash>/`、`--cache-dir` で上書き）。形式は version 2。
-- 各入力と依存の指紋は `(size, mtime_ns)` を先に比較し、変わったときだけ SHA-256 を取る（`--force` で全て再計算）。ハッシュが一致すれば（early cutoff）再ビルドしない。
+- manifest: v2 と同じ場所（`<os.tmpdir()>/kamado/<basename>-<hash>/`、`--cache-dir` で上書き）。形式は**バイナリ**（`build-manifest.bin`、version 3）。文字列と（パス、指紋）の組を 1 回だけ書き、エントリは番号で参照する。末尾の SHA-256 で切り詰めや破損を検出し、読めなければ全ビルド。10 万ページでも数十 MB に収まる（JSON では数百 MB になる）。内容を見たいときは `Manifest::to_json`。
+- plan cache（`plan-cache.bin`、同じディレクトリ）: ページごとに、ファイルと sidecar の指紋とメタを覚える。ファイルの size と mtime が記録と同じなら、読まず・ハッシュせず・パースせずにキャッシュのメタを使う（本文はそのページをビルドするときに読む）。何も変わらない差分ビルドは、ファイルごとに stat だけで終わる。`--force` は使わない。
+- 各入力と依存の指紋は `(size, mtime_ns)` を先に比較し、変わったときだけ SHA-256 を取る（`--force` で全て再計算）。ハッシュが一致すれば（early cutoff）再ビルドしない。同じ依存（レイアウトやコンポーネント）の stat は 1 ビルドで 1 回だけ。ビルド中に変更された入力は（読んだあとに書き換えられた可能性があるので）manifest に「最新」として記録せず、次のビルドでやり直す。
 - 環境ダイジェスト: 設定ファイルの内容、kamado のバージョン、`pages.overrides`、ページごとに「読んだメタのフィールド」の値。
 - 依存ゼロのファイルはスキップしない（v2 と同じ）。manifest の version 不一致・破損は全ビルド。
 
@@ -345,7 +349,10 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 
 - hono。`/` → `index.html`、末尾 `/` → `index.html`、拡張子なし → `.html`。出力ディレクトリ外は 403。マップにない場合は出力ディレクトリから静的配信、なければ 404、コンパイルの失敗は 500（本文はエラーメッセージ）。
 - MIME は一般的な拡張子の表を持つ。プロキシ: 最長一致、`rewrite`、`changeOrigin`、Node の `fetch`（TLS は Node）、リダイレクトは手動、ネットワークエラーは 502。
-- ファイル監視とライブリロードは**持たない**（v2 と同じ）。リクエストごとに依存の stat を確認し、変更がなければ前回の出力を返す。
+- ファイル監視とライブリロードは**持たない**（v2 と同じ）。リクエストごとに依存の stat を確認し、変更がなければメモリの出力を返す（何も書き出さない）。
+- コアはサイトを起動時に 1 回だけ計画し、リクエストを「本文」「出力ディレクトリのファイル」「JavaScript に描画を頼む」「esbuild にビルドを頼む」のどれかに振り分ける。JSX ページの描画は専用のワーカー 1 つが行う。Node はモジュールをアンロードできないので、**コンポーネント（またはそれが import するファイル）が変わったら、ワーカーを作り直して全コンテキストを渡す**（古いワーカーは受け持ちを終えてから止まる）。メタだけが変わったときは、変わったページの差分を渡す。
+- 起動後に気づかないもの（再起動が必要）: ページファイルの追加と削除、`outputPathField` による出力先の変更、`pages.overrides`・設定ファイル・`html.*` の変更。**他のページ**のメタの変更は、そのページ自身のファイルが変わるか、そのページが要求されるまで、ナビゲーションなどに反映されない。
+- スタイルは `styles.sourcemap: "onServer"`（既定）で inline の source map つき、バナーは開発中の警告。スクリプトも同様（esbuild は JavaScript 側で呼ぶ）。
 
 ## 13. CLI
 
@@ -369,7 +376,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 
 ## 15. sitemap
 
-`sitemap.output` に XML を書く。対象は `include` の glob（出力ディレクトリ基準、既定 `**/*.html`）から `exclude` を除いたもの。`index.html` は末尾スラッシュの URL。`lastmod`: `"manifest"` は `pages.overrides` の値、`"mtime"` はファイルの更新時刻、`"none"` は出力しない。URL の起点は `site.baseURL`。
+`sitemap.output` に XML を書く。対象は `include` の glob（出力ディレクトリ基準、既定 `**/*.html`）から `exclude` を除いたもの。`index.html` は末尾スラッシュの URL。`lastmod`: `"manifest"` は `pages.overrides` の値、`"mtime"` はファイルの更新時刻、`"none"` は出力しない。URL の起点は `site.baseURL`（`https://example.com/sub/` のように完全な URL）、なければ `https://<site.host>`。どちらもなければ設定エラー。`output` は出力ディレクトリの中でなければならない。仮想ページ（`pages.overrides`）も載り、`lastmod: "mtime"` は入力ファイルの更新時刻（仮想ページは出さない）。差分ビルドや `targets` を指定したビルドでも、計画の全ページから毎回書く。
 
 ## 16. 並列モデルと純粋性
 
