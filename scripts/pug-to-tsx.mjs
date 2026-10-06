@@ -3,8 +3,14 @@
  * A first pass of Pug to TSX for a migration to kamado v3 (docs/v3/MIGRATION.md).
  *
  * ```sh
- * node scripts/pug-to-tsx.mjs <project> <out> [libs dir, default <project>/__assets/_libs]
+ * node scripts/pug-to-tsx.mjs <project> <out> [libs dir, default <project>/__assets/_libs] [--pretty]
  * ```
+ *
+ * `--pretty` writes out the white space that Pug's `pretty` puts between tags
+ * (a line break before a tag that is not inline and before the closing tag of
+ * one with a block inside). `extends` / `block` become a layout component with
+ * a `slots` prop (`block append` / `prepend` are not converted). Pages are
+ * written in the order of the template (`<html static>`).
  *
  * Converts every `.pug` under `<project>/__assets` to a component (`.tsx`, same
  * paths under `<out>/__assets`). `include` becomes a component that receives the
@@ -198,7 +204,6 @@ function canInline(nodes) {
 			(k.type === 'Tag' && PUG_INLINE.has(k.name)),
 	);
 }
-const skipped = [];
 const queue = [];
 
 /**
@@ -342,14 +347,27 @@ function componentText(ctx, name, body, exported, params) {
 /**
  *
  * @param ctx
+ * @param {...any} contexts
  */
-function importLines(ctx) {
+function importLines(...contexts) {
+	// One line for each module, whatever the number of components in the file.
+	const rt = new Set();
+	const imports = new Map();
+	const named = new Map();
+	for (const ctx of contexts) {
+		for (const n of ctx.rt) rt.add(n);
+		for (const [name, spec] of ctx.imports) imports.set(name, spec);
+		for (const [spec, names] of ctx.named) {
+			const set = named.get(spec) ?? new Set();
+			for (const n of names) set.add(n);
+			named.set(spec, set);
+		}
+	}
 	const head = ["import type { PageProps } from 'kamado-v3';"];
-	if (ctx.rt.size > 0)
-		head.push(`import { ${[...ctx.rt].join(', ')} } from 'kamado-v3/jsx';`);
-	for (const [name, spec] of ctx.imports) head.push(`import ${name} from '${spec}';`);
-	for (const [spec, names] of ctx.named)
-		head.push(`import { ${names.join(', ')} } from '${spec}';`);
+	if (rt.size > 0) head.push(`import { ${[...rt].join(', ')} } from 'kamado-v3/jsx';`);
+	for (const [name, spec] of imports) head.push(`import ${name} from '${spec}';`);
+	for (const [spec, names] of named)
+		head.push(`import { ${[...names].join(', ')} } from '${spec}';`);
 	return head;
 }
 
@@ -372,7 +390,7 @@ function convertFile(file) {
 		text = convertChild(file, ast, extended);
 	} else if (defs.length > 0) {
 		// A file of mixins: one exported component per mixin.
-		const head = new Set();
+		const contexts = [];
 		const parts = [];
 		for (const def of defs) {
 			const params = mixinParams(def.args);
@@ -383,10 +401,10 @@ function convertFile(file) {
 				else ctx.declared.add(p.name);
 			}
 			const body = block(def.block.nodes, ctx, 1);
-			for (const l of importLines(ctx)) head.add(l);
+			contexts.push(ctx);
 			parts.push(componentText(ctx, component(def.name), body, 'export', params));
 		}
-		text = [...head].join('\n') + '\n\n' + parts.join('\n\n') + '\n';
+		text = importLines(...contexts).join('\n') + '\n\n' + parts.join('\n\n') + '\n';
 	} else {
 		const ctx = newContext(file);
 		const body = block(ast.nodes, ctx, 1);
@@ -398,7 +416,7 @@ function convertFile(file) {
 		text =
 			importLines(ctx).join('\n') +
 			'\n\n' +
-			(fragmentPage ? 'export const meta = { static: true };\n\n' : '') +
+			(fragmentPage ? 'export const meta = { kdStatic: true };\n\n' : '') +
 			componentText(ctx, pascal(file), body, 'export default', []) +
 			'\n';
 	}
@@ -416,9 +434,13 @@ function convertFile(file) {
  */
 function convertChild(file, ast, extended) {
 	const ctx = newContext(file);
-	const parent = extended.file.path.startsWith('/')
-		? path.join(libs, extended.file.path)
-		: path.resolve(path.dirname(file), extended.file.path);
+	// Pug adds `.pug` to a path without an extension.
+	const named = path.extname(extended.file.path)
+		? extended.file.path
+		: `${extended.file.path}.pug`;
+	const parent = named.startsWith('/')
+		? path.join(libs, named)
+		: path.resolve(path.dirname(file), named);
 	convertFile(parent);
 	const parentName = pascal(parent);
 	const toOut = (f) =>
@@ -437,7 +459,7 @@ function convertChild(file, ast, extended) {
 			params: mixinParams(def.args),
 		});
 	}
-	const head = new Set();
+	const contexts = [ctx];
 	const parts = [];
 	for (const def of defs) {
 		const params = mixinParams(def.args);
@@ -448,22 +470,32 @@ function convertChild(file, ast, extended) {
 			else mixCtx.declared.add(p.name);
 		}
 		const body = block(def.block.nodes, mixCtx, 1);
-		for (const l of importLines(mixCtx)) head.add(l);
+		contexts.push(mixCtx);
 		parts.push(componentText(mixCtx, component(def.name), body, '', params).trim());
 	}
 
 	const blocks = ast.nodes.filter((n) => n.type === 'NamedBlock');
+	for (const b of blocks) {
+		if (b.mode && b.mode !== 'replace') {
+			// The layout would have to show its own default and then the page's.
+			throw new Error(
+				`block ${b.mode} ${b.name} in ${file} is not converted: write it by hand`,
+			);
+		}
+	}
 	for (const v of blocks.filter((n) => n.name === 'vars')) children(v.nodes, ctx, 0);
 	const given = [...ctx.declared];
 	const slots = [];
 	for (const n of blocks.filter((b) => b.name !== 'vars')) {
-		slots.push(`\t\t\t${n.name}: (\n${block(n.nodes, ctx, 4)}\n\t\t\t)`);
+		slots.push(`\t\t\t${JSON.stringify(n.name)}: (\n${block(n.nodes, ctx, 4)}\n\t\t\t)`);
 	}
 	const body = `\t\t<${parentName} {...props}${given.length > 0 ? ` {...{ ${given.join(', ')} }}` : ''} slots={{\n${slots.join(',\n')},\n\t\t}} />`;
-	for (const l of importLines(ctx)) head.add(l);
+	// A fragment of slots is evaluated before the layout's `<html static>` is
+	// reached, so the page says it is static itself.
 	return (
-		[...head].join('\n') +
+		importLines(...contexts).join('\n') +
 		'\n\n' +
+		'export const meta = { kdStatic: true };\n\n' +
 		parts.join('\n\n') +
 		(parts.length > 0 ? '\n\n' : '') +
 		componentText(ctx, pascal(file), body, 'export default', []) +
@@ -515,7 +547,6 @@ function children(nodes, ctx, depth) {
 		const n = nodes[i];
 		if (n.type === 'Code' && !n.buffer && ctx.nesting === 0) {
 			// Pug code is visible to the rest of the template: it goes to the top.
-			for (const d of declaredBy(n.val)) ctx.declared.add(d);
 			ctx.hoisted.push(useStmt(n.val, ctx));
 			continue;
 		}
@@ -525,13 +556,13 @@ function children(nodes, ctx, depth) {
 			let j = i;
 			while (j < nodes.length && nodes[j].type === 'Code' && !nodes[j].buffer) {
 				stmts.push(nodes[j].val);
-				for (const d of declaredBy(nodes[j].val)) ctx.declared.add(d);
 				j++;
 			}
-			const rest = children(nodes.slice(j), ctx, depth + 2);
+			// What they declare is known to the rest once they were read.
 			const stmtCode = stmts
 				.map((s) => `${indent(depth + 1)}${useStmt(s, ctx)}`)
 				.join('\n');
+			const rest = children(nodes.slice(j), ctx, depth + 2);
 			const inner = `${indent(depth + 2)}<>\n${rest.join('\n')}\n${indent(depth + 2)}</>`;
 			out.push(
 				`${indent(depth)}{(() => {\n${stmtCode}\n${indent(depth + 1)}return (\n${inner}\n${indent(depth + 1)});\n${indent(depth)}})()}`,
@@ -547,13 +578,32 @@ function children(nodes, ctx, depth) {
 /**
  *
  * @param stmt
+ * @param ctx
+ * @param pattern
  */
-function declaredBy(stmt) {
-	const names = [];
-	const re = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g;
-	let m;
-	while ((m = re.exec(stmt))) names.push(m[1]);
-	return names;
+function bindingNames(pattern) {
+	switch (pattern.type) {
+		case 'Identifier': {
+			return [pattern.name];
+		}
+		case 'ObjectPattern': {
+			return pattern.properties.flatMap((p) =>
+				bindingNames(p.type === 'RestElement' ? p.argument : p.value),
+			);
+		}
+		case 'ArrayPattern': {
+			return pattern.elements.filter(Boolean).flatMap((p) => bindingNames(p));
+		}
+		case 'AssignmentPattern': {
+			return bindingNames(pattern.left);
+		}
+		case 'RestElement': {
+			return bindingNames(pattern.argument);
+		}
+		default: {
+			return [];
+		}
+	}
 }
 
 /**
@@ -570,17 +620,31 @@ function useStmt(stmt, ctx) {
 		throw new Error(`cannot parse statement: ${mapped}: ${error.message}`);
 	}
 	// The initialisers (and expression statements) are what reads variables; a
-	// name declared earlier in the same code block is not a free one.
+	// name declared earlier is not a free one. What this declares is registered
+	// here, after its own initialiser was read.
 	const local = [...ctx.declared];
 	const declare = [];
-	const read = (node) => {
-		for (const n of free(mapped.slice(node.start, node.end), local)) ctx.used.add(n);
+	const read = (node, own = []) => {
+		for (const n of free(mapped.slice(node.start, node.end), local)) {
+			// `var title = title || "x"` would take the value a page passes, which a
+			// local of the same name hides.
+			if (own.includes(n)) {
+				throw new Error(
+					`${n} is read in the code that declares it (${mapped.slice(0, 80)}): write it by hand`,
+				);
+			}
+			ctx.used.add(n);
+		}
 	};
 	for (const node of program.body) {
 		if (node.type === 'VariableDeclaration') {
 			for (const d of node.declarations) {
-				if (d.init) read(d.init);
-				if (d.id.type === 'Identifier') local.push(d.id.name);
+				const names = bindingNames(d.id);
+				if (d.init) read(d.init, names);
+				for (const n of names) {
+					local.push(n);
+					ctx.declared.add(n);
+				}
 			}
 		} else if (node.type === 'ExpressionStatement') {
 			const e = node.expression;
@@ -590,13 +654,19 @@ function useStmt(stmt, ctx) {
 				!local.includes(e.left.name)
 			) {
 				// Pug code may assign a variable it never declared: it becomes a local.
-				read(e.right);
+				read(e.right, [e.left.name]);
 				declare.push(e.left.name);
 				local.push(e.left.name);
 				ctx.declared.add(e.left.name);
 			} else {
 				read(e);
 			}
+		} else {
+			// An `if`, a loop or a function would be left with free variables that
+			// nothing looked at.
+			throw new Error(
+				`cannot convert a ${node.type} in code: ${mapped.slice(node.start, node.start + 80)}`,
+			);
 		}
 	}
 	const prefix = declare.map((n) => `let ${n}: any;`).join(' ');
@@ -660,28 +730,11 @@ function attrsOf(tag, ctx) {
 			);
 			continue;
 		}
-		if (name === 'style' && isString) {
-			// React wants an object: `a-b: c; --d: e` is `{ aB: "c", "--d": "e" }`.
-			const pairs = strValue
-				.split(';')
-				.map((d) => d.trim())
-				.filter(Boolean)
-				.map((d) => {
-					const at = d.indexOf(':');
-					const key = d.slice(0, at).trim();
-					const value = d.slice(at + 1).trim();
-					const camel = key.startsWith('--')
-						? JSON.stringify(key)
-						: key.replaceAll(/-([a-z])/g, (_, c) => c.toUpperCase());
-					return `${camel}: ${JSON.stringify(value)}`;
-				});
-			out.push(`style={{ ${pairs.join(', ')} }}`);
-			continue;
-		}
-		if (name === 'style' && !isString && val !== true) {
-			// CSS text built at run time (a template literal, a variable).
+		if (name === 'style' && val !== true) {
+			// CSS text (a string, a template literal, a variable): the runtime reads
+			// it, `;` inside `url(...)` and quotes included.
 			ctx.rt.add('styleOf');
-			out.push(`style={styleOf(${use(val, ctx)})}`);
+			out.push(`style={styleOf(${isString ? JSON.stringify(strValue) : use(val, ctx)})}`);
 			continue;
 		}
 		const prop = propOf.get(name.toLowerCase()) ?? name;
@@ -698,7 +751,7 @@ function attrsOf(tag, ctx) {
 		} else if (/^(?:data|aria)-/i.test(name)) {
 			// Pug leaves out an attribute whose value is false; React writes "false".
 			const v = use(val, ctx);
-			out.push(`${prop}={(${v}) === false ? undefined : (${v})}`);
+			out.push(`${prop}={((v) => (v === false ? undefined : v))(${v})}`);
 		} else {
 			out.push(`${prop}={${use(val, ctx)}}`);
 		}
@@ -769,7 +822,7 @@ function node(n, ctx, depth) {
 				lead.length > 0 &&
 				!canInline(kids) &&
 				// Text-only elements: the white space is not part of their text.
-				!['script', 'style', 'title', 'option', 'textarea'].includes(n.name);
+				!['script', 'style', 'title', 'option', 'textarea', 'pre'].includes(n.name);
 			if (VOID.has(n.name) && kids.length === 0) return [...lead, `${pad}<${open} />`];
 			if (kids.length === 0) return [...lead, `${pad}<${open}></${n.name}>`];
 			// A sole unescaped value or raw text block.
@@ -820,7 +873,9 @@ function node(n, ctx, depth) {
 				return [];
 			}
 			const inner = block(n.nodes, ctx, depth + 1);
-			return [`${pad}{(props as any).slots?.${n.name} ?? (\n${inner}\n${pad})}`];
+			return [
+				`${pad}{(props as any).slots?.[${JSON.stringify(n.name)}] ?? (\n${inner}\n${pad})}`,
+			];
 		}
 		case 'InterpolatedTag': {
 			// `#{tag}`: a component whose type is the string in a variable; the
@@ -873,7 +928,7 @@ function node(n, ctx, depth) {
 			return [`${pad}{${obj}.map((${added.join(', ')}) => (\n${inner}\n${pad}))}`];
 		}
 		case 'Include': {
-			const p = n.file.path;
+			const p = path.extname(n.file.path) ? n.file.path : `${n.file.path}.pug`;
 			const abs = p.startsWith('/')
 				? path.join(libs, p)
 				: path.resolve(path.dirname(ctx.file), p);
@@ -975,5 +1030,4 @@ function walkDir(dir, fn) {
 walkDir(path.join(srcRoot, '__assets'), (f) => {
 	if (f.endsWith('.pug') && !f.includes('/mixin/meta-example')) convertFile(f);
 });
-console.log([...converted].length - skipped.length, 'files converted');
-for (const f of skipped) console.log('skipped (extends / block, write by hand):', f);
+console.log([...converted].length, 'files converted');

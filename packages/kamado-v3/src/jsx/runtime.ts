@@ -33,8 +33,9 @@
  * elements. `img` matters because React preloads every non-lazy image into
  * the head; a constant `m("<img ...>")` cannot register that, use
  * `preloadImage()` next to it or `el("img", ...)`.
- * - Parents whose children's rendering depends on the parent (`select`, `svg`,
- * `foreignObject`, `noscript`, `picture`) take their children as a thunk
+ * - Parents whose children's rendering depends on the parent (`html`, `head`,
+ * `select`, `svg`, `foreignObject`, `noscript`, `picture`) take their children
+ * as a thunk
  * `() => children`, which `el()` calls with the parent's context installed.
  * - `title`, `textarea`, `option`, `script` and `style` want plain string or
  * number children, as React does. A `Markup` child is taken as already escaped
@@ -52,6 +53,15 @@
  * called; React renders nothing for a function child.
  * - `Markup` children of `title` / `textarea` / `option` are not escaped again
  * (React would print `[object Object]` for an element child there).
+ * - A page written in the order of its template: `<html static>` (or a page
+ * whose meta has `kdStatic: true`, for a fragment with no `<html>`) hoists
+ * nothing into the head, writes the attributes of `form` / `input` / `button`
+ * in the order they were given, and writes a string value of an `on*` prop
+ * (`onclick="..."`) as an attribute. `<head hoist={false}>` alone keeps the
+ * order of the head. Outside this mode every `on*` prop is dropped, as React
+ * does (a prop that comes from data must not become script).
+ * - `styleOf()` turns CSS text into the `style` object; `html()` writes raw
+ * markup next to other children.
  * - Left out: Suspense, context, hooks, class components, portals, refs, `use`,
  * lazy, memo, forwardRef, thenable children, React element children and
  * `defaultProps`.
@@ -416,10 +426,9 @@ function classifyProp(prop: string): AttrEntry {
 	const c0 = prop.charCodeAt(0);
 	const c1 = prop.charCodeAt(1);
 	if (prop.length > 2 && (c0 === 111 || c0 === 79) && (c1 === 110 || c1 === 78)) {
-		// An event handler (`onClick`, `onload`, ...). React drops them all. A
-		// static page may carry an inline handler as text (`onclick="..."`), which
-		// the pages of a site converted from templates do, so a string is written
-		// as it is and anything else is dropped.
+		// An event handler (`onClick`, `onload`, ...). React drops them all; only a
+		// page in `static` mode (written like its template) writes a string as the
+		// attribute `onclick="..."`, see `writeAttr`.
 		kind = EVENT_STRING;
 	} else if (isAttributeNameSafe(prop)) {
 		const prefix = prop.slice(0, 5).toLowerCase();
@@ -543,7 +552,9 @@ function writeAttr(entry: AttrEntry, value: unknown): string {
 	const type = typeof value;
 	switch (entry.kind) {
 		case EVENT_STRING: {
-			return type === 'string' ? ' ' + entry.name + '="' + escapeValue(value) + '"' : '';
+			return type === 'string' && scope.plain
+				? ' ' + entry.name + '="' + escapeValue(value) + '"'
+				: '';
 		}
 		case STRING: {
 			if (type === 'function' || type === 'symbol' || type === 'boolean') {
@@ -611,7 +622,7 @@ function writeAttr(entry: AttrEntry, value: unknown): string {
  * One attribute from a React prop name and a runtime value, as React renders
  * that prop on a host element: attribute renames (`className`, `htmlFor`,
  * SVG camelCase), boolean / overloaded / numeric kinds, URL sanitising, `style`
- * objects, event handlers and reserved props omitted, `data-` / `aria-` kept
+ * objects, reserved props omitted, event handlers omitted (except a string in a static page), `data-` / `aria-` kept
  * as strings. `dangerouslySetInnerHTML`, `children` and `key` are never
  * written. A single `Map` lookup on the hot path.
  * @param prop - The React prop name
@@ -1885,9 +1896,7 @@ export function el(tag: string, props: Props | null, children?: unknown): Markup
 			return new Markup(textarea(info, p, ch));
 		}
 		case T_INPUT: {
-			return new Markup(
-				scope.plain ? selfClosing(info, 'input', p, ch) : input(info, p, ch),
-			);
+			return new Markup(scope.plain ? plainInput(p) : input(info, p, ch));
 		}
 		case T_BUTTON: {
 			return new Markup(scope.plain ? generic(info, p, ch) : button(info, p, ch));
@@ -2026,6 +2035,35 @@ export function el(tag: string, props: Props | null, children?: unknown): Markup
 			return new Markup(generic(info, p, ch));
 		}
 	}
+}
+
+/**
+ * An `<input>` in a static page: the attributes in the order they were given.
+ * `defaultValue` and `defaultChecked` are the `value` and `checked` of a
+ * template, and stay where they were written.
+ * @param props - The props
+ * @returns The element
+ */
+function plainInput(props: Props): string {
+	let out = '<input';
+	for (const key of Object.keys(props)) {
+		const value = props[key];
+		if (value == null || key === 'children' || key === 'key' || key === 'ref') {
+			continue;
+		}
+		if (key === 'value' || key === 'defaultValue') {
+			if (typeof value === 'string' || typeof value === 'number') {
+				out += ' value="' + escapeValue(value) + '"';
+			}
+		} else if (key === 'checked' || key === 'defaultChecked') {
+			if (value) {
+				out += ' checked=""';
+			}
+		} else {
+			out += a(key, value);
+		}
+	}
+	return out + '/>';
 }
 
 /**
@@ -2414,7 +2452,7 @@ export function render<P extends Props>(
 	// A page that says `static` in its meta is written like `<html static>`, which
 	// a page that is only a fragment (no `<html>`) has no element for.
 	const meta = (props as Props).meta as Props | null | undefined;
-	scope = meta != null && meta.static === true ? STATIC_SCOPE : ROOT_SCOPE;
+	scope = meta != null && meta.kdStatic === true ? STATIC_SCOPE : ROOT_SCOPE;
 	try {
 		const root = c(component(props));
 		if (

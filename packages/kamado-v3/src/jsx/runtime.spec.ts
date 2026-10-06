@@ -1268,11 +1268,11 @@ describe('a', () => {
 		],
 		['href', true, ''],
 		['onClick', noop, ''],
-		['onClick', 'x', ' onClick="x"'],
+		['onClick', 'x', ''],
 		['onClick', 1, ''],
-		['onload', 'x', ' onload="x"'],
+		['onload', 'x', ''],
 		['on', 'x', ' on="x"'],
-		['one', 'x', ' one="x"'],
+		['one', 'x', ''],
 		['key', 'x', ''],
 		['ref', noop, ''],
 		['children', 'x', ''],
@@ -1338,8 +1338,6 @@ describe('a', () => {
 		];
 		const mismatches: string[] = [];
 		for (const prop of tableProps()) {
-			// A string value of an `on*` prop is a deliberate deviation.
-			if (/^on/i.test(prop) && prop.length > 2) continue;
 			for (const value of values) {
 				const expected = react(e('div', { [prop]: value }));
 				const actual = outcome(() => `<div${a(prop, value)}></div>`);
@@ -1728,16 +1726,28 @@ describe('deliberate deviations from React', () => {
 		);
 	});
 
-	test('an event handler written as a string is an attribute and a function is dropped (React drops both)', () => {
-		const text = (): E => e('a', { href: '/a', oncontextmenu: 'return false;' }, 'x');
-		expect(ours(text())).toEqual({
-			html: '<a href="/a" oncontextmenu="return false;">x</a>',
-		});
-		expect((react(text()) as { html: string }).html).not.toContain('oncontextmenu');
+	test('an event handler written as a string is an attribute only in a static page; anything else is dropped (React drops all)', () => {
+		const link = (): Markup =>
+			el('a', { href: '/a', oncontextmenu: 'return false;', onClick: noop }, 'x');
+		// Not static: a prop that came from data must not become script.
+		expect(render(link, {})).toBe('<a href="/a">x</a>');
+		expect(render(link, { meta: { kdStatic: true } })).toBe(
+			'<a href="/a" oncontextmenu="return false;">x</a>',
+		);
+		expect(
+			render((): Markup => el('html', { static: true }, () => link()), {}),
+		).toContain('<a href="/a" oncontextmenu="return false;">x</a>');
+		expect(
+			(react(e('a', { href: '/a', oncontextmenu: 'x' }, 'x')) as { html: string }).html,
+		).not.toContain('oncontextmenu');
+	});
 
-		const fn = (): E => e('button', { onClick: noop }, 'x');
-		expect(ours(fn())).toEqual({ html: '<button>x</button>' });
-		expect(react(fn())).toEqual({ html: '<button>x</button>' });
+	test('a static page keeps defaultValue and defaultChecked of an input as value and checked', () => {
+		const input = (): Markup =>
+			el('input', { type: 'text', defaultValue: 'v', defaultChecked: true });
+		expect(render(input, { meta: { kdStatic: true } })).toBe(
+			'<input type="text" value="v" checked=""/>',
+		);
 	});
 
 	const staticHead = (): Markup[] => [
@@ -1776,7 +1786,7 @@ describe('deliberate deviations from React', () => {
 	test('a page whose meta says static is written like <html static> (a fragment has no html element)', () => {
 		const page = (): Markup =>
 			el('div', null, () => [staticBody(), el('title', null, 'T')]);
-		expect(render(page, { meta: { static: true } })).toBe(
+		expect(render(page, { meta: { kdStatic: true } })).toBe(
 			'<div><form action="/s" class="f"><input type="text" name="q" class="i"/></form><title>T</title></div>',
 		);
 	});

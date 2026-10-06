@@ -145,16 +145,17 @@ export default ({ page, meta, data }: PageProps) => (
 - **`<option selected>`** は React が無視する。`<select defaultValue="...">` に書く。
 - **`<link media="all">`** は空にならず `all` のまま出る（v2 と同じ）。
 - **JSX に書けない属性名**（絵文字など、`⚠️="..."` のような印）は React が出力しない。静的なマークアップなら `html.inject` に HTML 文字列として書く。
-- **React 19 は `<img>` ごとに `<link rel="preload" as="image">` を `<head>` に足す**（Pug では出ない）。要らなければ `html.rules` で消す: `{ "selector": "link[rel=preload][as=image]", "action": "remove" }`。
+- **React 19 は `<img>` ごとに `<link rel="preload" as="image">` を `<head>` に足す**（Pug では出ない）。`<html static>` のページでは出ない。それ以外のページで要らなければ `html.rules` で消す: `{ "selector": "link[rel=preload][as=image]", "action": "remove" }`。
 - **Pug の `pretty`**（`createCompileHooks` の既定は `true`）は、インラインでないタグの前と、ブロックを含むタグの閉じタグの前に改行を入れる。これは空白として出力に残り、インライン要素の隣では見た目も変わる。変換スクリプトに `--pretty` を付けると、同じ規則で `{"\n"}` を書き出す（付けなければ空白は入らない）。v2 の出力と揃えるなら `--pretty`、`pretty: false` の基準と比べるなら付けない。
-- **Pug の出力順をそのまま保つ**: 変換スクリプトは `<html static>` を出す。React の持ち上げ（`<head>` の `async` な `script` が `title` の前に出る）と、`form` / `input` / `button` の属性の並べ替え（`action` と `name` が後ろへ）をやめ、書いた順で出す。`<html>` を持たないページ（フラグメント）には `export const meta = { static: true }` を出す。
-- **`on*` 属性の文字列**（`oncontextmenu="return false;"`）はそのまま出る（React は捨てるが、v3 の `jsx` は文字列に限って出す）。
+- **Pug の出力順をそのまま保つ**: 変換スクリプトは `<html static>` を出す。React の持ち上げ（`<head>` の `async` な `script` が `title` の前に出る）と、`form` / `input` / `button` の属性の並べ替え（`action` と `name` が後ろへ）をやめ、書いた順で出す。`<html>` を持たないページ（フラグメント）には `export const meta = { kdStatic: true }` を出す。
+- **`on*` 属性の文字列**（`oncontextmenu="return false;"`）は、`<html static>`（`kdStatic` のページ）の中でだけ出る。React と同じく、ふだんは `on*` をすべて捨てる（データ由来の props が実行可能な属性にならないように）。
 - **`style` を CSS の文字列で渡す**（`style=\`anchor-name: ${x}\``）は、`kamado-v3/jsx`の`styleOf()` を通してオブジェクトにする。
 - **`data-*` / `aria-*` に `false`**: Pug は属性を出さず、React は `"false"` と書く。変換スクリプトは `false` を `undefined` にして出す。
 - **`if (x)` が `0` を返す式**: Pug は何も出さず、JSX の `x && <b/>` は `0` を出す。変換スクリプトは `!!` を付ける。
 - **未宣言の変数への代入**（`- isHome = false`）は、変換スクリプトが `let` を足す。
 - **`#{tag}`（動的なタグ名）** は大文字の変数に入れたコンポーネントとして書く（文字列の型を `k()` が受け取る）。
 - **`extends` / `block`**: レイアウトは `slots` の props を受け取るコンポーネント、ページは `slots={{ content: (...) }}` を渡す。`block vars` の `var opts = ...` は props の既定値と、ページから渡す値になる。
+- **変換スクリプトが止まるもの**: `block append` / `block prepend`、コード中の `if` / ループ / 関数宣言、自分自身を読む宣言（`var title = title || "x"`）。止まったら手で書く。`--pretty` は `pre` / `textarea` の中の字下げを再現しないので、その中身は出力を見て確かめる。
 - **`//` のコメント**（Pug が HTML コメントにする）は JSX に書けないので消える。
 - **データ**: `data.yml` と `blocks.js` のようなファイルは、Pug ではファイル名がそのまま変数（`data`、`blocks`）だった。v3 では `data.<ファイル名>`（`data.data`、`data.blocks`）。`.js` のデータは文字列を返すだけなら、中身の HTML をそのままデータのディレクトリに置く（`blocks.html`）。
 - **レイアウトの指定**は拡張子なし（`"layout": "sub.pug"` → `"sub"`）。
