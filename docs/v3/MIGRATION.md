@@ -122,6 +122,19 @@ export default ({ page, meta, data }: PageProps) => (
 - `breadcrumbs` の起点は `site.baseURL` の**パス部分**（`https://example.com/sub/` なら `/sub/`）。v2 は値をそのまま数えたので、フル URL を書くと上位 2 階層が欠けていた（出力が変わる）。
 - YAML の日付（`date: 2026-01-02`）は**文字列のまま**渡る（v2 は front matter だけ `Date`）。`formatDate()` に渡せば同じ表示になる。
 
+### 3.4 変換スクリプトと、変換で見つかった注意点
+
+`node scripts/pug-to-tsx.mjs <project> <out>` は、`__assets` の `.pug` をコンポーネント（`.tsx`）に直す。`include` はコンポーネントの呼び出し（include する側の props とスコープの変数を渡す）、`each` は `map`、`if` は `&&` / `?:`、`pkg.production.*` は `site.*`、`filters.date` は `formatDate` になる。表現できないもの（テキスト中の生の HTML、唯一の子でない `!{}`）は止まるので、手で直す。出力は必ず読む。実案件（Pug のスキャフォールド）で試して見つかった点:
+
+- **属性名は React の綴り**: `charset` → `charSet`、`itemprop` → `itemProp`、`itemtype` → `itemType`、`itemid` → `itemID`。小文字のままだと、`<meta charset>` は先頭に置かれず、`<meta itemprop>`（パンくずの `position`）が `<head>` に持ち上げられる。
+- **`&nbsp;` などの実体参照は、そのままテキストに書く**（`{"&nbsp;"}` と文字列にすると `&amp;nbsp;` になる）。
+- **JSX に書けない属性名**（絵文字など、`⚠️="..."` のような印）は React が出力しない。静的なマークアップなら `html.inject` に HTML 文字列として書く。
+- **React 19 は `<img>` ごとに `<link rel="preload" as="image">` を `<head>` に足す**（Pug では出ない）。要らなければ `html.rules` で消す: `{ "selector": "link[rel=preload][as=image]", "action": "remove" }`。
+- **Pug の `pretty`** は要素の間に空白を入れる（v2 の既定は `true` かもしれない）。インライン要素の中のブロックの整形が JSX と変わるので、比較の基準にするときは `pretty: false` で出す。
+- **データ**: `data.yml` と `blocks.js` のようなファイルは、Pug ではファイル名がそのまま変数（`data`、`blocks`）だった。v3 では `data.<ファイル名>`（`data.data`、`data.blocks`）。`.js` のデータは文字列を返すだけなら、中身の HTML をそのままデータのディレクトリに置く（`blocks.html`）。
+- **レイアウトの指定**は拡張子なし（`"layout": "sub.pug"` → `"sub"`）。
+- `scripts.files` は、ページ以外の入力に合わせて絞っておくと意図が明確になる（`"js/**/*.ts"` など）。`alias` の相対パスは `__assets/_libs` のように `.` なしでも、プロジェクトにあるパスならパスとして扱う。
+
 ## 4. データ
 
 - `globalData.dir` の `.json` / `.yml` / `.yaml`（v2 は `.yaml` を無視）と、文字列として読む `.html` / `.txt` が使える。キーはファイル名（拡張子なし）。
@@ -220,6 +233,8 @@ yarn kamado build --incremental        # そのページだけ built
 | CSS の圧縮結果（cssnano と同じ意味で、バイトは違いうる。サイズは近い）                | §10  |
 | `<script>` の圧縮結果（terser と esbuild）                                            | §10  |
 | prettier の幅（入力ごとから統一へ）                                                   | #15  |
+| HTML のコメント（JSX には書けない）。`<head>` 内の並び（React 19 の持ち上げ）         | §7.1 |
+| フォームの属性の並び（`action` と `method` は React が最後に出す）                    | §7.1 |
 
 ## 11. 困ったとき
 

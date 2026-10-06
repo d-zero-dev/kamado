@@ -150,9 +150,11 @@ pub struct ScriptSettings {
 }
 
 /// An alias target that starts with `.` or `/` is a path (resolved against the
-/// project root); anything else is a package name for esbuild to resolve.
+/// project root), and so is one that names a file or directory of the project
+/// (`__assets/_libs`); anything else is a package name for esbuild to resolve.
 fn resolve_alias_target(root: &str, target: &str) -> String {
-	if target.starts_with('.') || target.starts_with('/') {
+	let in_project = || std::path::Path::new(root).join(target).exists();
+	if target.starts_with('.') || target.starts_with('/') || in_project() {
 		kd_site::path::join(root, target)
 	} else {
 		target.to_owned()
@@ -305,10 +307,12 @@ mod tests {
 		let root = site("alias");
 		let c = config(
 			&root,
-			r#", "scripts": { "alias": { "@": "./src/js", "lodash": "lodash-es" }, "sourcemap": "onServer" }"#,
+			r#", "scripts": { "alias": { "@": "./src/js", "lib": "src/js/lib", "lodash": "lodash-es" }, "sourcemap": "onServer" }"#,
 		);
 		let build = ScriptSettings::new(&c, false, None);
 		assert_eq!(build.alias["@"], format!("{root}/src/js"));
+		// A path of the project without the leading dot is a path too.
+		assert_eq!(build.alias["lib"], format!("{root}/src/js/lib"));
 		assert_eq!(build.alias["lodash"], "lodash-es");
 		assert!(!build.sourcemap);
 		assert!(ScriptSettings::new(&c, true, Some("/* b */".to_owned())).sourcemap);
