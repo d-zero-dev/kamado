@@ -498,6 +498,21 @@ pub(crate) fn plan_cached(
 			}
 		}
 	}
+	if let Some(path) = &config.pages.overrides {
+		// The file lists the pages in the order they are shown in (navigation,
+		// `pages`): its pages come first in its order, the others follow. The
+		// sort is stable.
+		let text = fs::read_to_string(path)
+			.map_err(|e| format!("cannot read pages.overrides {path}: {e}"))?;
+		let overrides = Overrides::parse(&text).map_err(|e| format!("{path}: {e}"))?;
+		let rank: std::collections::HashMap<&str, usize> = overrides
+			.order
+			.iter()
+			.enumerate()
+			.map(|(i, u)| (u.as_str(), i))
+			.collect();
+		pages.sort_by_key(|p| rank.get(p.file.url.as_str()).copied().unwrap_or(usize::MAX));
+	}
 	let changed =
 		!all_hit && (misses > 0 || cache.is_none_or(|c| c.pages.len() != learned.pages.len()));
 	Ok((
@@ -926,7 +941,8 @@ mod tests {
 		let loaded = site.config(r#", "pages": { "overrides": "pages.json" }"#);
 		let plan = plan(&loaded.config).unwrap();
 		let urls: Vec<&str> = plan.pages.iter().map(|p| p.file.url.as_str()).collect();
-		assert_eq!(urls, ["/about/", "/", "/service/"]);
+		// The pages of the file come first, in its order.
+		assert_eq!(urls, ["/about/", "/service/", "/"]);
 
 		let home = plan.pages.iter().find(|p| p.file.url == "/").unwrap();
 		assert_eq!(
@@ -1342,7 +1358,7 @@ mod tests {
 		.unwrap();
 		assert_eq!(
 			statuses(&report),
-			[("/a.html", "built"), ("/v/", "virtual")]
+			[("/v/", "virtual"), ("/a.html", "built")]
 		);
 		assert!(!std::path::Path::new(&format!("{}/out/v/index.html", site.root)).exists());
 	}

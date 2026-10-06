@@ -24,6 +24,7 @@ mod property_table;
 
 pub mod calc;
 pub mod color;
+mod custom_media;
 pub mod fonts;
 mod merge;
 mod minify;

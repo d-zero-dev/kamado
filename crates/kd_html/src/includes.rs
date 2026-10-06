@@ -408,6 +408,31 @@ fn picked_nodes(
 		.collect())
 }
 
+/// Every `[data-bge-container]` of the imported file, in document order (v2
+/// took all of them, not the first). One inside another stays in the outer one.
+fn burger_nodes(doc: &mut Document, source: &Document, picked: &Selector) -> Vec<NodeId> {
+	let all = picked.select_all(source);
+	let mut taken: Vec<NodeId> = Vec::new();
+	for &n in &all {
+		let mut up = source.parent(n);
+		let mut inside = false;
+		while let Some(p) = up {
+			if taken.contains(&p) {
+				inside = true;
+				break;
+			}
+			up = source.parent(p);
+		}
+		if !inside {
+			taken.push(n);
+		}
+	}
+	taken
+		.into_iter()
+		.map(|n| doc.import_subtree(source, n))
+		.collect()
+}
+
 fn splice(doc: &mut Document, at: NodeId, nodes: &[NodeId]) {
 	for &n in nodes {
 		doc.insert_before(at, n);
@@ -479,9 +504,7 @@ fn expand(
 		};
 		let source = parse(&text);
 		let nodes = match rule {
-			Include::BurgerEditorImport { .. } => {
-				picked_nodes(doc, &source, Some(&bge.picked), true)?
-			}
+			Include::BurgerEditorImport { .. } => burger_nodes(doc, &source, &bge.picked),
 			Include::Selector { pick, replace, .. } => {
 				picked_nodes(doc, &source, pick.as_ref(), *replace == Replace::Element)?
 			}
@@ -1012,6 +1035,24 @@ mod tests {
 		let html = "<div data-include=\"/outer.html\"><!-- @include(/never.html) --></div>";
 		assert_eq!(run(html, &rules, &files).unwrap(), "<b>outer</b>");
 		assert_eq!(files.reads.borrow().as_slice(), ["/site/src/outer.html"]);
+	}
+
+	#[test]
+	fn burger_editor_import_takes_every_container_of_the_file() {
+		let files = Files::new(&[(
+			"/site/src/b.html",
+			"<div data-bge-container=\"1\">one</div><div data-bge-container=\"2\">two<div data-bge-container=\"2a\">in</div></div><div data-bge-container=\"3\">three</div>",
+		)]);
+		let rules = [Include::BurgerEditorImport {
+			root: "/site/src".to_owned(),
+		}];
+		let html = "<main><div data-bge-container=\"old\"><div data-bgi=\"import\"><bge-import src=\"/b.html\"></bge-import></div></div></main>";
+		let mut doc = parse(html);
+		apply(&mut doc, &rules, &env(&files, OnMissing::Silent)).unwrap();
+		assert_eq!(
+			document_html(&doc),
+			"<main><div data-bge-container=\"1\">one</div><div data-bge-container=\"2\">two<div data-bge-container=\"2a\">in</div></div><div data-bge-container=\"3\">three</div></main>"
+		);
 	}
 
 	#[test]

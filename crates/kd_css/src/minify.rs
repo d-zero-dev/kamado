@@ -462,6 +462,7 @@ pub fn minify_stylesheet_marked(
 		});
 	}
 	let mut nodes = sheet.nodes;
+	crate::custom_media::resolve(&mut nodes);
 	let mut m = Minifier {
 		selectors: HashMap::new(),
 	};
