@@ -439,6 +439,15 @@ fn normalize_charset(nodes: &mut Vec<Node>) {
 /// assert_eq!(kd_css::minify(css).unwrap(), "a{color:red;margin:0}/*! kept */");
 /// ```
 pub fn minify_stylesheet(source: &str) -> Result<String, Error> {
+	minify_stylesheet_marked(source, None)
+}
+
+/// Like [`minify_stylesheet`]; when `marks` is given, it receives where every
+/// rule, at-rule and declaration of the output came from.
+pub fn minify_stylesheet_marked(
+	source: &str,
+	marks: Option<&mut Vec<crate::print::Mark>>,
+) -> Result<String, Error> {
 	check_size(source)?;
 	let sheet = parse_stylesheet(source);
 	if let Some(offset) = sheet.too_deep {
@@ -469,7 +478,10 @@ pub fn minify_stylesheet(source: &str) -> Result<String, Error> {
 	// Merged rules may repeat a declaration.
 	dedupe(&mut nodes);
 	let mut out = String::with_capacity(source.len() / 2);
-	crate::print::print_nodes(&nodes, &mut out);
+	match marks {
+		Some(marks) => crate::print::print_nodes_marked(&nodes, &mut out, marks),
+		None => crate::print::print_nodes(&nodes, &mut out),
+	}
 	Ok(out)
 }
 

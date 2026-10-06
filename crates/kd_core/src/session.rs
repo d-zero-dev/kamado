@@ -258,7 +258,7 @@ pub(crate) fn site_json(config: &kd_config::Config) -> Value {
 pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result<Prepared, String> {
 	let started = Instant::now();
 	let config = &loaded.config;
-	let mut plan = plan(config)?;
+	let plan = plan(config)?;
 	let targets = compile_globs(&options.targets)?;
 	let env = page_env(loaded, options);
 	let pipeline = html::Pipeline::compile(config)?;
@@ -412,7 +412,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		};
 		banner::for_style(template, time, version)
 	});
-	let style_settings = StyleSettings::new(config, style_banner);
+	let style_settings = StyleSettings::new(config, style_banner, options.serving);
 	let env_styles = kd_hash::to_hex(&kd_hash::sha256(
 		format!(
 			"{}\0{}\0styles\0{:?}",
@@ -424,14 +424,6 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	));
 	let mut assets = assets::discover(config, AssetKind::Style)?;
 	assets.extend(assets::discover(config, AssetKind::Script)?);
-	if assets.iter().any(|a| a.kind == AssetKind::Style)
-		&& assets::sourcemap_enabled(config.styles.sourcemap, options.serving)
-	{
-		plan.warnings.push(
-			"styles.sourcemap: source maps of stylesheets are not generated; the stylesheets are written without one"
-				.to_owned(),
-		);
-	}
 	{
 		let page_outputs: std::collections::HashSet<&str> = plan
 			.pages
@@ -868,7 +860,11 @@ fn finish_asset(shared: &Shared, i: usize, script: Option<&ScriptOutput>) -> Ass
 			(script_build(shared, asset, output), &shared.env_scripts)
 		}
 		AssetKind::Style => {
-			let style = style::build(&asset.input_path, &shared.style_settings)?;
+			let style = style::build(
+				&asset.input_path,
+				&asset.output_path,
+				&shared.style_settings,
+			)?;
 			// The files were fingerprinted as they were read.
 			(
 				AssetBuild {

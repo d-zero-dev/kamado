@@ -22,6 +22,7 @@ mod minifiers;
 pub mod serve;
 mod session;
 mod sitemap;
+pub mod sourcemap;
 pub mod style;
 pub mod style_import;
 
@@ -1610,25 +1611,24 @@ mod tests {
 	}
 
 	#[test]
-	fn a_requested_stylesheet_sourcemap_is_reported_as_not_generated() {
-		let (_site, loaded) = style_site("styles-sourcemap");
-		let loaded = Loaded {
-			config: kd_config::Config {
-				styles: kd_config::Styles {
-					sourcemap: kd_config::Sourcemap::On,
-					..loaded.config.styles.clone()
-				},
-				..loaded.config.clone()
-			},
-			..loaded
-		};
-		let report = build(&loaded, &BuildOptions::default()).unwrap();
-		assert_eq!(
-			report.warnings,
-			[
-				"styles.sourcemap: source maps of stylesheets are not generated; the stylesheets are written without one"
-			]
+	fn a_stylesheet_gets_an_inline_source_map_only_when_asked_for() {
+		let (site, loaded) = style_site("styles-sourcemap");
+		build(&loaded, &BuildOptions::default()).unwrap();
+		assert!(
+			!site.read("out/css/main.css").contains("sourceMappingURL"),
+			"onServer is the default: no map in a build"
 		);
+
+		let with_map = site.config(r#", "styles": { "banner": "", "sourcemap": true }"#);
+		build(&with_map, &BuildOptions::default()).unwrap();
+		let css = site.read("out/css/main.css");
+		assert!(
+			css.starts_with(
+				"a{color:#fff}b{margin:0}\n/*# sourceMappingURL=data:application/json;base64,"
+			),
+			"{css}"
+		);
+		assert!(css.ends_with(" */"), "{css}");
 	}
 
 	fn sitemap_site(name: &str, extra: &str) -> (Site, Loaded) {

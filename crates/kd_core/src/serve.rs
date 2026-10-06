@@ -631,10 +631,8 @@ impl Serve {
 		}
 		match asset.kind {
 			AssetKind::Style => {
-				let mut settings = StyleSettings::new(config, rendered_banner);
-				// Source maps of stylesheets are not generated.
-				settings.minify = config.styles.minify;
-				let built = style::build(&asset.input_path, &settings)?;
+				let settings = StyleSettings::new(config, rendered_banner, true);
+				let built = style::build(&asset.input_path, &asset.output_path, &settings)?;
 				st.asset_cache.insert(
 					index,
 					Cached {
@@ -869,11 +867,19 @@ mod tests {
 		let (content_type, css) = text(serve.request("/css/main.css").unwrap());
 		assert_eq!(content_type, "text/css");
 		assert!(css.starts_with("/*!\n🚧"), "{css}");
-		assert!(css.ends_with("*/a{color:#fff}b{margin:0}"), "{css}");
+		assert!(
+			css.contains(
+				"*/a{color:#fff}b{margin:0}\n/*# sourceMappingURL=data:application/json;base64,"
+			),
+			"{css}"
+		);
 
 		site.write("src/css/base.css", "a { color : black }");
 		let (_, css) = text(serve.request("/css/main.css").unwrap());
-		assert!(css.ends_with("*/a{color:#000}b{margin:0}"), "{css}");
+		assert!(
+			css.contains("*/a{color:#000}b{margin:0}\n/*# sourceMappingURL"),
+			"{css}"
+		);
 	}
 
 	#[test]

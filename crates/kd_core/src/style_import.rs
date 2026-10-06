@@ -22,6 +22,25 @@ use std::fs;
 
 use kd_build::Dep;
 
+/// A run of the bundled text that was copied from a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Segment {
+	/// Byte offset in the bundled text.
+	pub out: usize,
+	pub len: usize,
+	/// Index into [`Bundle::files`].
+	pub file: usize,
+	/// Byte offset in that file's text.
+	pub src: usize,
+}
+
+/// A file that went into the bundle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundledFile {
+	pub path: String,
+	pub text: String,
+}
+
 /// The bundled stylesheet and the files it was read from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bundle {
@@ -29,6 +48,11 @@ pub struct Bundle {
 	/// Fingerprints of every file read, and of every candidate that was probed
 	/// and does not exist.
 	pub deps: BTreeMap<String, Dep>,
+	/// The files that went into `css`, the entry first.
+	pub files: Vec<BundledFile>,
+	/// Which run of `css` came from where, in order; text the bundler added
+	/// (the at-rules that wrap a conditional import) is in no segment.
+	pub segments: Vec<Segment>,
 }
 
 /// An `@import` statement in the preamble of a file.
@@ -49,10 +73,18 @@ struct Context<'a> {
 	/// the import starts with `prefix/`.
 	alias: &'a [(String, String)],
 	deps: BTreeMap<String, Dep>,
+	files: Vec<BundledFile>,
 	/// Files being inlined right now (cycle guard).
 	stack: Vec<String>,
 	/// `(file, conditions)` pairs that were inlined already.
 	done: BTreeSet<(String, String)>,
+}
+
+/// The text of one file after its imports were inlined, and where its runs
+/// came from.
+struct Piece {
+	text: String,
+	segments: Vec<Segment>,
 }
 
 /// Inlines the imports of `entry`.
@@ -72,27 +104,37 @@ pub fn bundle(entry: &str, alias: &[(String, String)]) -> Result<Bundle, String>
 	let mut ctx = Context {
 		alias,
 		deps: BTreeMap::new(),
+		files: Vec::new(),
 		stack: Vec::new(),
 		done: BTreeSet::new(),
 	};
-	let css = inline_file(&mut ctx, entry, true)?;
+	let piece = inline_file(&mut ctx, entry, true)?;
 	Ok(Bundle {
-		css,
+		css: piece.text,
 		deps: ctx.deps,
+		files: ctx.files,
+		segments: piece.segments,
 	})
 }
 
-fn read(ctx: &mut Context<'_>, path: &str) -> Result<String, String> {
+/// Reads a file, records its fingerprint and keeps its text; the index of the
+/// file in `ctx.files` and the text.
+fn read(ctx: &mut Context<'_>, path: &str) -> Result<(usize, String), String> {
 	let (bytes, dep) =
 		kd_build::read_with_fingerprint(path).map_err(|e| format!("cannot read {path}: {e}"))?;
 	ctx.deps.insert(path.to_owned(), dep);
-	String::from_utf8(bytes).map_err(|_| format!("{path}: file is not valid UTF-8"))
+	let text = String::from_utf8(bytes).map_err(|_| format!("{path}: file is not valid UTF-8"))?;
+	ctx.files.push(BundledFile {
+		path: path.to_owned(),
+		text: text.clone(),
+	});
+	Ok((ctx.files.len() - 1, text))
 }
 
-fn inline_file(ctx: &mut Context<'_>, path: &str, is_entry: bool) -> Result<String, String> {
-	let text = read(ctx, path)?;
+fn inline_file(ctx: &mut Context<'_>, path: &str, is_entry: bool) -> Result<Piece, String> {
+	let (index, text) = read(ctx, path)?;
 	ctx.stack.push(path.to_owned());
-	let result = inline_text(ctx, path, &text, is_entry);
+	let result = inline_text(ctx, path, index, &text, is_entry);
 	ctx.stack.pop();
 	result
 }
@@ -100,17 +142,30 @@ fn inline_file(ctx: &mut Context<'_>, path: &str, is_entry: bool) -> Result<Stri
 fn inline_text(
 	ctx: &mut Context<'_>,
 	path: &str,
+	index: usize,
 	text: &str,
 	is_entry: bool,
-) -> Result<String, String> {
+) -> Result<Piece, String> {
 	let imports = scan_imports(text);
 	let mut out = String::with_capacity(text.len());
+	let mut segments = Vec::new();
+	let copy = |out: &mut String, segments: &mut Vec<Segment>, from: usize, to: usize| {
+		if to > from {
+			segments.push(Segment {
+				out: out.len(),
+				len: to - from,
+				file: index,
+				src: from,
+			});
+			out.push_str(&text[from..to]);
+		}
+	};
 	let mut last = 0;
 	for import in &imports {
-		out.push_str(&text[last..import.start]);
+		copy(&mut out, &mut segments, last, import.start);
 		last = import.end;
 		if is_remote(&import.uri) {
-			out.push_str(&text[import.start..import.end]);
+			copy(&mut out, &mut segments, import.start, import.end);
 			continue;
 		}
 		let target = resolve(ctx, path, &import.uri)?;
@@ -128,46 +183,102 @@ fn inline_text(
 			continue;
 		}
 		let inner = inline_file(ctx, &target, false)?;
-		out.push_str(&wrap(import, &inner));
+		let (wrapped, prefix, kept) = wrap(import, &inner.text);
+		let base = out.len() + prefix;
+		for seg in inner.segments {
+			if seg.out < kept {
+				segments.push(Segment {
+					out: base + seg.out,
+					len: seg.len.min(kept - seg.out),
+					..seg
+				});
+			}
+		}
+		out.push_str(&wrapped);
 	}
-	out.push_str(&text[last..]);
+	copy(&mut out, &mut segments, last, text.len());
 	if !is_entry {
-		out = strip_charset(&out);
+		strip_charset(&mut out, &mut segments);
 	}
-	Ok(out)
+	Ok(Piece {
+		text: out,
+		segments,
+	})
 }
 
 /// The content of an imported file inside the at-rules its import names,
-/// outermost first: `@layer`, `@supports`, `@media`.
-fn wrap(import: &Import, content: &str) -> String {
-	let mut s = content.trim_end().to_owned();
-	s.push('\n');
-	if let Some(media) = &import.media {
-		s = format!("@media {media} {{\n{s}}}\n");
+/// outermost first: `@layer`, `@supports`, `@media`. Returns the text, the
+/// length of what is put before the content and the length of the content
+/// that is kept (it loses trailing white space).
+fn wrap(import: &Import, content: &str) -> (String, usize, usize) {
+	let kept = content.trim_end();
+	let mut prefix = String::new();
+	let mut wrappers = 0;
+	if let Some(layer) = &import.layer {
+		prefix.push_str(&if layer.is_empty() {
+			"@layer {\n".to_owned()
+		} else {
+			format!("@layer {layer} {{\n")
+		});
+		wrappers += 1;
 	}
 	if let Some(supports) = &import.supports {
-		s = format!("@supports {supports} {{\n{s}}}\n");
+		prefix.push_str(&format!("@supports {supports} {{\n"));
+		wrappers += 1;
 	}
-	if let Some(layer) = &import.layer {
-		s = if layer.is_empty() {
-			format!("@layer {{\n{s}}}\n")
-		} else {
-			format!("@layer {layer} {{\n{s}}}\n")
-		};
+	if let Some(media) = &import.media {
+		prefix.push_str(&format!("@media {media} {{\n"));
+		wrappers += 1;
 	}
-	s
+	let text = format!("{prefix}{kept}\n{}", "}\n".repeat(wrappers));
+	(text, prefix.len(), kept.len())
 }
 
-/// A `@charset` of an imported file is dropped: only the entry's counts.
-fn strip_charset(text: &str) -> String {
+/// A `@charset` of an imported file is dropped: only the entry's counts. The
+/// segments follow the text.
+fn strip_charset(text: &mut String, segments: &mut Vec<Segment>) {
 	let head = text.trim_start();
-	if head.len() >= 8 && head[..8].eq_ignore_ascii_case("@charset") {
-		let skipped = text.len() - head.len();
-		if let Some(end) = head.find(';') {
-			return format!("{}{}", &text[..skipped], head[end + 1..].trim_start());
+	if head.len() < 8 || !head[..8].eq_ignore_ascii_case("@charset") {
+		return;
+	}
+	let Some(end) = head.find(';') else {
+		return;
+	};
+	let from = text.len() - head.len();
+	let after = &head[end + 1..];
+	let to = text.len() - after.trim_start().len();
+	text.replace_range(from..to, "");
+	let removed = to - from;
+	let mut kept = Vec::with_capacity(segments.len());
+	for seg in segments.drain(..) {
+		let (start, stop) = (seg.out, seg.out + seg.len);
+		if stop <= from {
+			kept.push(seg);
+		} else if start >= to {
+			kept.push(Segment {
+				out: start - removed,
+				..seg
+			});
+		} else {
+			// The segment overlaps the removed range: keep what is left of
+			// each side.
+			if start < from {
+				kept.push(Segment {
+					len: from - start,
+					..seg
+				});
+			}
+			if stop > to {
+				kept.push(Segment {
+					out: from,
+					len: stop - to,
+					src: seg.src + (to - start),
+					..seg
+				});
+			}
 		}
 	}
-	text.to_owned()
+	*segments = kept;
 }
 
 fn is_remote(uri: &str) -> bool {
@@ -634,6 +745,39 @@ mod tests {
 		);
 		assert_eq!(bundle.deps[&format!("{}/pkg/lib", dir.0)], Dep::missing());
 		assert_ne!(bundle.deps[&entry], Dep::missing());
+	}
+
+	#[test]
+	fn every_segment_is_a_copy_of_a_run_of_its_file() {
+		let dir = Dir::new("segments");
+		dir.write(
+			"a.css",
+			"@charset \"utf-8\";\n/* あ */ a { color : red }\n\n",
+		);
+		dir.write("b.css", "b { margin : 0 }\n");
+		let entry = dir.write(
+			"main.css",
+			"@import 'a.css' screen;\n@import 'b.css';\n@import url(https://example.com/x.css);\nmain { top : 0 }\n",
+		);
+
+		let bundle = bundle(&entry, &[]).unwrap();
+
+		assert_eq!(bundle.files.len(), 3);
+		assert_eq!(bundle.files[0].path, entry);
+		for seg in &bundle.segments {
+			assert_eq!(
+				&bundle.css[seg.out..seg.out + seg.len],
+				&bundle.files[seg.file].text[seg.src..seg.src + seg.len],
+				"{seg:?}"
+			);
+		}
+		// What is in no segment: the at-rule the media condition adds (16 and
+		// 2 bytes) and the line break the bundler puts after each imported
+		// file (it drops the trailing white space of the file first).
+		let covered: usize = bundle.segments.iter().map(|s| s.len).sum();
+		assert_eq!(bundle.css.len() - covered, 16 + 2 + 1 + 1);
+		assert!(bundle.segments.iter().any(|s| s.file == 1));
+		assert!(bundle.segments.iter().any(|s| s.file == 2));
 	}
 
 	#[test]

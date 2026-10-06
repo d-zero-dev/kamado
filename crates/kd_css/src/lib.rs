@@ -53,6 +53,24 @@ pub fn minify(source: &str) -> Result<String, Error> {
 	minify::minify_stylesheet(source)
 }
 
+/// Like [`minify`], and also tells where every rule, at-rule and declaration
+/// of the output started in `source` (byte offsets, in output order): the raw
+/// material of a source map.
+///
+/// # Example
+///
+/// ```
+/// let (css, marks) = kd_css::minify_with_marks("a { color : white }\nb { margin : 0px }").unwrap();
+/// assert_eq!(css, "a{color:#fff}b{margin:0}");
+/// assert_eq!((marks[0].out, marks[0].src), (0, 0));
+/// assert_eq!((marks[2].out, marks[2].src), (13, 20));
+/// ```
+pub fn minify_with_marks(source: &str) -> Result<(String, Vec<print::Mark>), Error> {
+	let mut marks = Vec::new();
+	let css = minify::minify_stylesheet_marked(source, Some(&mut marks))?;
+	Ok((css, marks))
+}
+
 /// Minifies the declarations of a `style` attribute (`color: red;  margin :
 /// 0px`), which have no braces.
 ///

@@ -4,12 +4,18 @@
 //!
 //! The banner is an important comment (`/*! ... */`) so that minification
 //! keeps it.
+//!
+//! A source map, when asked for, is appended as an inline comment. It maps
+//! every rule and declaration of the output to its place in the file it was
+//! written in, through the bundler's record of where each run of the bundle
+//! came from. Granularity is the rule and the declaration, not the token.
 
 use std::collections::BTreeMap;
 
 use kd_build::Dep;
 
-use crate::style_import;
+use crate::sourcemap::{self, Point, Source};
+use crate::style_import::{self, Bundle};
 
 /// What every stylesheet of a build shares.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,13 +25,16 @@ pub struct StyleSettings {
 	/// The banner comment, or `None` when disabled.
 	pub banner: Option<String>,
 	pub minify: bool,
+	/// Append an inline source map.
+	pub sourcemap: bool,
 }
 
 impl StyleSettings {
 	/// Reads the settings from the config; `banner` is the already rendered
 	/// banner. A relative alias target is relative to the project directory.
+	/// `serving` turns on source maps set to `onServer`.
 	#[must_use]
-	pub fn new(config: &kd_config::Config, banner: Option<String>) -> StyleSettings {
+	pub fn new(config: &kd_config::Config, banner: Option<String>, serving: bool) -> StyleSettings {
 		let s = &config.styles;
 		StyleSettings {
 			alias: s
@@ -40,6 +49,7 @@ impl StyleSettings {
 				.collect(),
 			banner,
 			minify: s.minify,
+			sourcemap: crate::assets::sourcemap_enabled(s.sourcemap, serving),
 		}
 	}
 }
@@ -53,7 +63,8 @@ pub struct Built {
 	pub deps: BTreeMap<String, Dep>,
 }
 
-/// Builds the stylesheet `input`.
+/// Builds the stylesheet `input`, which is written to `output` (that is where
+/// the paths in a source map start from).
 ///
 /// # Errors
 ///
@@ -67,25 +78,83 @@ pub struct Built {
 ///     alias: Vec::new(),
 ///     banner: Some("/*! rev. 2026-01-01 */".to_owned()),
 ///     minify: true,
+///     sourcemap: false,
 /// };
-/// let built = kd_core::style::build("/site/src/css/main.css", &settings).unwrap();
+/// let built = kd_core::style::build("/site/src/css/main.css", "/site/out/css/main.css", &settings).unwrap();
 /// assert!(built.css.starts_with("/*! rev. 2026-01-01 */"));
 /// ```
-pub fn build(input: &str, settings: &StyleSettings) -> Result<Built, String> {
+pub fn build(input: &str, output: &str, settings: &StyleSettings) -> Result<Built, String> {
 	let bundle = style_import::bundle(input, &settings.alias)?;
-	let source = match &settings.banner {
-		Some(banner) if !banner.is_empty() => format!("{banner}\n{}", bundle.css),
-		_ => bundle.css,
+	let prefix = match &settings.banner {
+		Some(banner) if !banner.is_empty() => format!("{banner}\n"),
+		_ => String::new(),
 	};
-	let css = if settings.minify {
-		kd_css::minify(&source).map_err(|e| format!("{input}: {e}"))?
+	let source = format!("{prefix}{}", bundle.css);
+	let (mut css, marks) = if settings.minify {
+		if settings.sourcemap {
+			kd_css::minify_with_marks(&source).map_err(|e| format!("{input}: {e}"))?
+		} else {
+			(
+				kd_css::minify(&source).map_err(|e| format!("{input}: {e}"))?,
+				Vec::new(),
+			)
+		}
 	} else {
-		source
+		// Not minified: the output is the source, so every line maps to itself.
+		let marks = std::iter::once(0)
+			.chain(source.match_indices('\n').map(|(i, _)| i + 1))
+			.filter(|&o| o < source.len())
+			.map(|o| kd_css::print::Mark { out: o, src: o })
+			.collect();
+		(source.clone(), marks)
 	};
+	if settings.sourcemap {
+		let map = map_of(&css, output, &bundle, prefix.len(), &marks);
+		css.push('\n');
+		css.push_str(&sourcemap::inline_css_comment(&map));
+	}
 	Ok(Built {
 		css,
 		deps: bundle.deps,
 	})
+}
+
+/// The source map of `css`, whose marks refer to the bundle behind a banner
+/// of `prefix` bytes.
+fn map_of(
+	css: &str,
+	output: &str,
+	bundle: &Bundle,
+	prefix: usize,
+	marks: &[kd_css::print::Mark],
+) -> String {
+	let out_dir = kd_site::path::dirname(output);
+	let sources: Vec<Source> = bundle
+		.files
+		.iter()
+		.map(|f| Source {
+			path: kd_site::path::relative(&out_dir, &f.path),
+			text: f.text.clone(),
+		})
+		.collect();
+	let points: Vec<Point> = marks
+		.iter()
+		.filter_map(|m| {
+			// The banner is in no file.
+			let at = m.src.checked_sub(prefix)?;
+			let i = bundle
+				.segments
+				.partition_point(|s| s.out <= at)
+				.checked_sub(1)?;
+			let seg = bundle.segments[i];
+			(at < seg.out + seg.len).then_some(Point {
+				generated: m.out,
+				source: seg.file,
+				offset: seg.src + (at - seg.out),
+			})
+		})
+		.collect();
+	sourcemap::build(kd_site::path::basename(output), css, &sources, &points)
 }
 
 #[cfg(test)]
@@ -131,9 +200,10 @@ mod tests {
 			alias: Vec::new(),
 			banner: Some("/*!\nrev. 2026-01-02\n*/".to_owned()),
 			minify: true,
+			sourcemap: false,
 		};
 
-		let built = build(&main, &settings).unwrap();
+		let built = build(&main, &format!("{}/out/main.css", dir.0), &settings).unwrap();
 
 		assert_eq!(
 			built.css,
@@ -151,12 +221,103 @@ mod tests {
 			alias: Vec::new(),
 			banner: None,
 			minify: false,
+			sourcemap: false,
 		};
 
 		assert_eq!(
-			build(&main, &settings).unwrap().css,
+			build(&main, &format!("{}/out/main.css", dir.0), &settings)
+				.unwrap()
+				.css,
 			"a  { color : white }\n"
 		);
+	}
+
+	/// The map of a built stylesheet, decoded.
+	fn inline_map(css: &str) -> String {
+		let marker = "/*# sourceMappingURL=data:application/json;base64,";
+		let encoded = css[css.find(marker).unwrap() + marker.len()..]
+			.trim_end()
+			.trim_end_matches("*/")
+			.trim_end();
+		let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+		let mut bytes = Vec::new();
+		let mut bits = 0u32;
+		let mut count = 0;
+		for c in encoded.bytes().filter(|&b| b != b'=') {
+			bits = (bits << 6) | table.iter().position(|&t| t == c).unwrap() as u32;
+			count += 6;
+			if count >= 8 {
+				count -= 8;
+				bytes.push((bits >> count) as u8);
+				bits &= (1 << count) - 1;
+			}
+		}
+		String::from_utf8(bytes).unwrap()
+	}
+
+	#[test]
+	fn the_source_map_points_each_rule_and_declaration_at_the_file_it_was_written_in() {
+		let dir = Dir::new("map");
+		dir.write("base.css", "a { color : white }\n");
+		let main = dir.write("main.css", "@import 'base.css';\nb {\n  margin : 0px\n}\n");
+		let output = format!("{}/out/css/main.css", dir.0);
+		let settings = StyleSettings {
+			alias: Vec::new(),
+			banner: None,
+			minify: true,
+			sourcemap: true,
+		};
+
+		let built = build(&main, &output, &settings).unwrap();
+
+		// Generated: `a{color:#fff}b{margin:0}` on the first line.
+		assert!(
+			built.css.starts_with("a{color:#fff}b{margin:0}\n"),
+			"{}",
+			built.css
+		);
+		let map = inline_map(&built.css);
+		let value = kd_jsonc::parse(&map).unwrap();
+		assert_eq!(value.get("file").and_then(|f| f.as_str()), Some("main.css"));
+		let sources: Vec<&str> = value
+			.get("sources")
+			.and_then(|s| s.as_array())
+			.unwrap()
+			.iter()
+			.filter_map(|s| s.as_str())
+			.collect();
+		assert_eq!(sources, ["../../main.css", "../../base.css"]);
+		// (generated column, source, line, column): `a` rule and `color` in
+		// base.css; `b` rule and `margin` in main.css.
+		let points: Vec<_> = crate::sourcemap::decode(&map)
+			.into_iter()
+			.map(|(_, c, s, l, sc)| (c, s, l, sc))
+			.collect();
+		assert_eq!(
+			points,
+			[(0, 1, 0, 0), (2, 1, 0, 4), (13, 0, 1, 0), (15, 0, 2, 2)]
+		);
+	}
+
+	#[test]
+	fn without_minify_every_line_maps_to_itself_behind_the_banner() {
+		let dir = Dir::new("map-plain");
+		let main = dir.write("main.css", "a {\n  b: c\n}\n");
+		let settings = StyleSettings {
+			alias: Vec::new(),
+			banner: Some("/*! x */".to_owned()),
+			minify: false,
+			sourcemap: true,
+		};
+
+		let built = build(&main, &format!("{}/main.out.css", dir.0), &settings).unwrap();
+
+		let points: Vec<_> = crate::sourcemap::decode(&inline_map(&built.css))
+			.into_iter()
+			.map(|(gl, gc, _, sl, sc)| (gl, gc, sl, sc))
+			.collect();
+		// Generated line 0 is the banner; lines 1-3 are the three source lines.
+		assert_eq!(points, [(1, 0, 0, 0), (2, 0, 1, 0), (3, 0, 2, 0)]);
 	}
 
 	#[test]
@@ -167,9 +328,10 @@ mod tests {
 			alias: Vec::new(),
 			banner: None,
 			minify: true,
+			sourcemap: false,
 		};
 
-		let e = build(&main, &settings).unwrap_err();
+		let e = build(&main, &format!("{}/out/main.css", dir.0), &settings).unwrap_err();
 
 		assert!(e.starts_with(&format!("{main}: cannot resolve")), "{e}");
 	}
