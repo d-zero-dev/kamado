@@ -101,6 +101,10 @@ enum Pending {
 		index: usize,
 		/// The fingerprints of the modules the render uses.
 		deps: BTreeMap<String, kd_build::Dep>,
+		/// The environment when the render was requested. Metadata or data
+		/// may change while the worker renders; the result belongs to the
+		/// environment it was rendered in, so a later request sees it stale.
+		env: String,
 	},
 	Script {
 		index: usize,
@@ -368,7 +372,7 @@ impl Serve {
 		// the page names a layout.
 		let page = &st.plan.pages[index];
 		if !needs_js(page) {
-			let body = self.process(st, index, None, &BTreeMap::new())?;
+			let body = self.process(st, index, None, &BTreeMap::new(), None)?;
 			return Ok(Served::Text {
 				content_type: "text/html",
 				body,
@@ -377,9 +381,13 @@ impl Serve {
 
 		let config = &self.loaded.config;
 		let mut deps = BTreeMap::new();
-		let mut changed = false;
+		// Why the epoch moves at once rather than after the compile: refresh
+		// forgets a stale module, so a compile error that returns early would
+		// otherwise lose the change and the renderer would keep the old module.
 		let main = if page.kind == PageKind::Tsx {
-			changed |= self.modules.refresh(&page.file.input_path);
+			if self.modules.refresh(&page.file.input_path) {
+				st.code_epoch += 1;
+			}
 			let compiled = self.modules.compile_closure(&page.file.input_path)?;
 			if !compiled.has_default_export {
 				return Err(format!(
@@ -394,7 +402,9 @@ impl Serve {
 		};
 		let layout = if layout_name(page).is_some() {
 			// A layout's modules may have changed too.
-			changed |= self.refresh_layout(config, page);
+			if self.refresh_layout(config, page) {
+				st.code_epoch += 1;
+			}
 			match layout_module(config, &self.modules, page, true)? {
 				Some((out, closure)) => {
 					deps.extend(closure);
@@ -405,9 +415,6 @@ impl Serve {
 		} else {
 			None
 		};
-		if changed {
-			st.code_epoch += 1;
-		}
 		let restart = st.code_epoch != st.renderer_code_epoch;
 		let job = RenderJob {
 			page: index,
@@ -424,7 +431,8 @@ impl Serve {
 			st.renderer_code_epoch = st.code_epoch;
 		}
 		let token = self.token();
-		st.pending.insert(token, Pending::Page { index, deps });
+		let env = self.env_js(st);
+		st.pending.insert(token, Pending::Page { index, deps, env });
 		Ok(Served::Render(Render {
 			token,
 			job,
@@ -531,6 +539,7 @@ impl Serve {
 		index: usize,
 		rendered: Option<&str>,
 		render_deps: &BTreeMap<String, kd_build::Dep>,
+		requested_env: Option<String>,
 	) -> Result<String, String> {
 		let page = &st.plan.pages[index];
 		let source = rendered.unwrap_or_else(|| page.body.as_deref().unwrap_or_default());
@@ -546,7 +555,9 @@ impl Serve {
 		let mut deps = page.deps.clone();
 		deps.extend(render_deps.clone());
 		deps.extend(out.deps);
-		let env = if needs_js(page) {
+		let env = if let Some(env) = requested_env {
+			env
+		} else if needs_js(page) {
 			self.env_js(st)
 		} else {
 			self.env.clone()
@@ -574,10 +585,10 @@ impl Serve {
 	/// An unknown token, or the message of a failing HTML stage.
 	pub fn finish_render(&self, token: u64, html: &str) -> Result<Served, String> {
 		let mut st = self.lock();
-		let Some(Pending::Page { index, deps }) = st.pending.remove(&token) else {
+		let Some(Pending::Page { index, deps, env }) = st.pending.remove(&token) else {
 			return Err(format!("no page is waiting for token {token}"));
 		};
-		let body = self.process(&mut st, index, Some(html), &deps)?;
+		let body = self.process(&mut st, index, Some(html), &deps, Some(env))?;
 		Ok(Served::Text {
 			content_type: "text/html",
 			body,
@@ -1071,6 +1082,29 @@ mod tests {
 		site.write("src/index.tsx", "export default () => <p>fixed</p>;\n");
 		let ok = render(serve.request("/").unwrap());
 		serve.finish_render(ok.token, "<p>fixed</p>").unwrap();
+	}
+
+	#[test]
+	fn a_component_fixed_after_a_syntax_error_still_restarts_the_renderer() {
+		let (site, serve) = jsx_site("jsx-error-restart");
+		let first = render(serve.request("/").unwrap());
+		serve.finish_render(first.token, "<div>home</div>").unwrap();
+
+		site.write("src/_lib/box.tsx", "export const Box = () => <p>;\n");
+		assert!(serve.request("/").is_err());
+
+		site.write(
+			"src/_lib/box.tsx",
+			"export const Box = (p: any) => <section>{p.children}</section>;\n",
+		);
+		let fixed = render(serve.request("/").unwrap());
+		assert!(
+			fixed.restart,
+			"the renderer still holds the module from before the error"
+		);
+		serve
+			.finish_render(fixed.token, "<section>home</section>")
+			.unwrap();
 	}
 
 	#[test]

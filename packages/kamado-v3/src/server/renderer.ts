@@ -97,7 +97,7 @@ export class ServeRenderer {
 			}
 			this.#stopWhenDone(slot);
 		});
-		worker.on('error', (error) => {
+		const lose = (error: Error) => {
 			for (const entry of slot.waiting.values()) {
 				entry.reject(error);
 			}
@@ -105,7 +105,11 @@ export class ServeRenderer {
 			if (this.#slot === slot) {
 				this.#slot = undefined;
 			}
-		});
+		};
+		worker.on('error', lose);
+		// A worker that exits without an error (process.exit() in a component,
+		// the memory limit) would leave its renders waiting for ever.
+		worker.on('exit', () => lose(new Error('the render worker exited')));
 		this.#slot = slot;
 	}
 

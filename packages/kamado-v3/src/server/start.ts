@@ -109,15 +109,19 @@ export async function start(
 
 	const server = serve({ fetch: app.fetch, hostname: host, port });
 	await new Promise<void>((resolve, reject) => {
-		server.once('listening', () => resolve());
-		server.once('error', (error: NodeJS.ErrnoException) => {
+		const onError = (error: NodeJS.ErrnoException) => {
 			void close();
 			reject(
 				error.code === 'EADDRINUSE'
 					? new Error(`port ${port} is already in use (devServer.port)`, { cause: error })
 					: error,
 			);
+		};
+		server.once('listening', () => {
+			server.off('error', onError);
+			resolve();
 		});
+		server.once('error', onError);
 	});
 
 	const location = new URL(startPath, `http://${host}:${port}`).toString();

@@ -39,7 +39,7 @@ export function normalizeRule(rule: string | ProxyRule): ProxyRule {
  * rewritePath('/api/users', { from: '^/api', to: '' }); // '/users'
  * ```
  */
-export function rewritePath(pathname: string, rewrite: ProxyRule['rewrite']): string {
+export function rewritePath(pathname: string, rewrite?: ProxyRule['rewrite']): string {
 	return rewrite ? pathname.replace(new RegExp(rewrite.from), rewrite.to) : pathname;
 }
 
