@@ -1,4 +1,4 @@
-import type { ServeDescription, createApp, type RequestLog  } from './app.js';
+import type { ServeDescription, createApp, type RequestLog } from './app.js';
 
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -9,7 +9,6 @@ import { serve } from '@hono/node-server';
 import { native } from '../native.js';
 import { RUNTIME_URL } from '../runtime-url.js';
 import { ESBUILD_VERSION, findEsbuildBinary } from '../scripts.js';
-
 
 /** Options of {@link start}. */
 export interface StartOptions {

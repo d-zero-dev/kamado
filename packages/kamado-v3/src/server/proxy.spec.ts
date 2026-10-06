@@ -48,7 +48,8 @@ describe('hasBody', () => {
  */
 function setup(
 	proxy: Parameters<typeof setProxyRoutes>[1],
-	respond: () => Response | Promise<Response> = () => new Response('from target', { status: 200 }),
+	respond: () => Response | Promise<Response> = () =>
+		new Response('from target', { status: 200 }),
 ) {
 	const calls: { url: string; init: RequestInit }[] = [];
 	const fakeFetch = vi.fn((url: string | URL | Request, init?: RequestInit) => {
@@ -67,7 +68,9 @@ describe('setProxyRoutes', () => {
 		const response = await app.request('/api/users?page=2');
 
 		expect(await response.text()).toBe('from target');
-		expect(calls.map((c) => c.url)).toEqual(['http://backend.test:8080/api/users?page=2']);
+		expect(calls.map((c) => c.url)).toEqual([
+			'http://backend.test:8080/api/users?page=2',
+		]);
 	});
 
 	test('the prefix itself is forwarded too, and other paths are not', async () => {
@@ -95,7 +98,9 @@ describe('setProxyRoutes', () => {
 			'/api': { target: 'https://backend.test:9000', changeOrigin: true },
 		});
 
-		await app.request('http://localhost:3000/api/x', { headers: { host: 'localhost:3000' } });
+		await app.request('http://localhost:3000/api/x', {
+			headers: { host: 'localhost:3000' },
+		});
 
 		const headers = new Headers(calls[0]!.init.headers);
 		expect(headers.get('host')).toBe('backend.test:9000');
@@ -151,7 +156,9 @@ describe('setProxyRoutes', () => {
 	test('an invalid target or rewrite fails at setup and names the prefix', () => {
 		expect(() => setup({ '/api': 'not a url' })).toThrow(/^devServer\.proxy\.\/api: /);
 		expect(() =>
-			setup({ '/api': { target: 'http://backend.test', rewrite: { from: '(', to: '' } } }),
+			setup({
+				'/api': { target: 'http://backend.test', rewrite: { from: '(', to: '' } },
+			}),
 		).toThrow(/^devServer\.proxy\.\/api: /);
 	});
 });

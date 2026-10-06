@@ -31,26 +31,22 @@ interface Slot {
  */
 export class ServeRenderer {
 	#nextId = 1;
-readonly #runtimeUrl: string;
+	readonly #runtimeUrl: string;
 	#slot: Slot | undefined;
-	
 
 	/** Whether a worker is running (it has a context). */
-get started(): boolean {
+	get started(): boolean {
 		return this.#slot !== undefined;
 	}
-/**
- * @param runtimeUrl - File URL of the JSX runtime
- */
+	/**
+	 * @param runtimeUrl - File URL of the JSX runtime
+	 */
 	constructor(runtimeUrl: string) {
 		this.#runtimeUrl = runtimeUrl;
 	}
 
-	
-	
-
 	/** Stops the worker and whatever it still owes. */
-async close(): Promise<void> {
+	async close(): Promise<void> {
 		const slot = this.#slot;
 		this.#slot = undefined;
 		if (slot) {
@@ -61,13 +57,13 @@ async close(): Promise<void> {
 			await slot.worker.terminate();
 		}
 	}
-/**
- * Renders one job.
- * @param job - What the core asked for
- * @returns The HTML of the page
- * @throws {Error} with the message of the failure in the worker
- */
-render(job: RenderJob): Promise<string> {
+	/**
+	 * Renders one job.
+	 * @param job - What the core asked for
+	 * @returns The HTML of the page
+	 * @throws {Error} with the message of the failure in the worker
+	 */
+	render(job: RenderJob): Promise<string> {
 		const slot = this.#slot;
 		if (!slot) {
 			return Promise.reject(new Error('the renderer was not started'));
@@ -78,11 +74,11 @@ render(job: RenderJob): Promise<string> {
 			slot.worker.postMessage({ type: 'render', id, job });
 		});
 	}
-/**
- * Starts a fresh worker with the whole context; the one that ran so far
- * finishes its renders and stops.
- * @param context - Site, data and the page list
- */
+	/**
+	 * Starts a fresh worker with the whole context; the one that ran so far
+	 * finishes its renders and stops.
+	 * @param context - Site, data and the page list
+	 */
 	start(context: RenderContext): void {
 		if (this.#slot) {
 			this.#retire(this.#slot);
@@ -120,12 +116,6 @@ render(job: RenderJob): Promise<string> {
 	update(update: ContextUpdate): void {
 		this.#slot?.worker.postMessage({ type: 'update', update });
 	}
-
-	
-	
-
-	
-	
 
 	#retire(slot: Slot): void {
 		slot.retired = true;

@@ -64,7 +64,10 @@ export interface RequestLog {
 }
 
 /** What the app needs of a renderer (see `ServeRenderer`). */
-export type Renderer = Pick<ServeRenderer, 'close' | 'render' | 'start' | 'started' | 'update'>;
+export type Renderer = Pick<
+	ServeRenderer,
+	'close' | 'render' | 'start' | 'started' | 'update'
+>;
 
 /** Options of {@link createApp}. */
 export interface AppOptions {
@@ -110,42 +113,42 @@ export function createApp(
 		) as Answer;
 		let kind = 'file';
 		switch (current.kind) {
-		case 'render': {
-			kind = 'page';
-			// The context or its update is sent before the job, in the order the
-			// core produced them: concurrent requests must not reorder them. The
-			// core sends the whole context whenever the renderer has to start.
-			if (current.context) {
-				renderer.start(current.context);
-			} else if (current.update) {
-				renderer.update(current.update);
+			case 'render': {
+				kind = 'page';
+				// The context or its update is sent before the job, in the order the
+				// core produced them: concurrent requests must not reorder them. The
+				// core sends the whole context whenever the renderer has to start.
+				if (current.context) {
+					renderer.start(current.context);
+				} else if (current.update) {
+					renderer.update(current.update);
+				}
+				const html = await renderer.render(current.job);
+				current = JSON.parse(
+					core.serveFinishRender(handle, current.token, html),
+				) as Answer;
+
+				break;
 			}
-			const html = await renderer.render(current.job);
-			current = JSON.parse(
-				core.serveFinishRender(handle, current.token, html),
-			) as Answer;
-		
-		break;
-		}
-		case 'script': {
-			kind = 'script';
-			const [built] = await buildScripts(current.request);
-			current = JSON.parse(
-				core.serveFinishScript(
-					handle,
-					current.token,
-					JSON.stringify({ code: built!.code, inputs: built!.inputs }),
-				),
-			) as Answer;
-		
-		break;
-		}
-		case 'text': {
-			kind = current.contentType === 'text/css' ? 'style' : 'page';
-		
-		break;
-		}
-		// No default
+			case 'script': {
+				kind = 'script';
+				const [built] = await buildScripts(current.request);
+				current = JSON.parse(
+					core.serveFinishScript(
+						handle,
+						current.token,
+						JSON.stringify({ code: built!.code, inputs: built!.inputs }),
+					),
+				) as Answer;
+
+				break;
+			}
+			case 'text': {
+				kind = current.contentType === 'text/css' ? 'style' : 'page';
+
+				break;
+			}
+			// No default
 		}
 		return { answer: current, kind };
 	};

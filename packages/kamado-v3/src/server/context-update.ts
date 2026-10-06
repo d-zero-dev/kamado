@@ -20,7 +20,10 @@ export interface ContextUpdate {
  * const next = applyUpdate(context, { pages: [[3, page]], data: null });
  * ```
  */
-export function applyUpdate(context: RenderContext, update: ContextUpdate): RenderContext {
+export function applyUpdate(
+	context: RenderContext,
+	update: ContextUpdate,
+): RenderContext {
 	const pages = [...context.pages];
 	for (const [index, page] of update.pages) {
 		pages[index] = page;

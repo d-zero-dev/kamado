@@ -6,8 +6,10 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 const serveRequest =
 	vi.fn<(handle: string, urlPath: string, rendererStarted: '0' | '1') => string>();
-const serveFinishRender = vi.fn<(handle: string, token: string, html: string) => string>();
-const serveFinishScript = vi.fn<(handle: string, token: string, output: string) => string>();
+const serveFinishRender =
+	vi.fn<(handle: string, token: string, html: string) => string>();
+const serveFinishScript =
+	vi.fn<(handle: string, token: string, output: string) => string>();
 const serveClose = vi.fn<(handle: string) => void>();
 const buildScripts = vi.fn<(request: unknown) => Promise<unknown[]>>();
 
@@ -142,7 +144,11 @@ describe('createApp', () => {
 
 		expect(await response.text()).toBe('<p>done</p>\n');
 		expect(renderer.calls).toEqual(['start {"pages":[]}', 'render 3']);
-		expect(serveFinishRender).toHaveBeenCalledExactlyOnceWith('h1', '5', '<p>rendered</p>');
+		expect(serveFinishRender).toHaveBeenCalledExactlyOnceWith(
+			'h1',
+			'5',
+			'<p>rendered</p>',
+		);
 		// The next request tells the core the renderer is there.
 		serveRequest.mockReturnValue(JSON.stringify({ kind: 'notFound' }));
 		await app.request('/other');
@@ -168,7 +174,9 @@ describe('createApp', () => {
 
 		serveRequest.mockReturnValueOnce(render({ context: { pages: [1] }, restart: true }));
 		await app.request('/a');
-		serveRequest.mockReturnValueOnce(render({ update: { pages: [[0, 'p']], data: null } }));
+		serveRequest.mockReturnValueOnce(
+			render({ update: { pages: [[0, 'p']], data: null } }),
+		);
 		await app.request('/b');
 		serveRequest.mockReturnValueOnce(render({ restart: true, context: { pages: [2] } }));
 		await app.request('/c');

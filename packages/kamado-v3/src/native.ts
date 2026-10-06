@@ -40,7 +40,7 @@ export interface Native {
 	 * `rendererStarted` is `"0"` when the caller lost the renderer, so the
 	 * core sends the whole context again.
 	 */
-	serveRequest(handle: string, urlPath: string, rendererStarted: "1" | "0"): string;
+	serveRequest(handle: string, urlPath: string, rendererStarted: '1' | '0'): string;
 	/** Takes the HTML rendered for a `render` answer; the result is JSON. */
 	serveFinishRender(handle: string, token: string, html: string): string;
 	/** Takes what esbuild built for a `script` answer; the result is JSON. */
