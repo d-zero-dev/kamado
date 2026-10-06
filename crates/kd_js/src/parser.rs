@@ -7,7 +7,10 @@
 
 use std::collections::HashSet;
 
-use crate::ast::{Edit, EditKind, ImportBinding, ImportDecl, ImportKind, ImportRecord, ModuleInfo};
+use crate::ast::{
+	BindingKind, DefaultExport, Edit, EditKind, ImportBinding, ImportDecl, ImportKind,
+	ImportRecord, ModuleInfo,
+};
 use crate::lexer::{Kind, Lexer, SyntaxError, Token};
 
 pub(crate) type R<T> = Result<T, SyntaxError>;
@@ -1137,6 +1140,8 @@ impl<'s> Parser<'s> {
 				return self.err("`import x = require()` is not supported (use `import`)");
 			}
 			bindings.push(ImportBinding {
+				kind: BindingKind::Default,
+				imported: Some("default".to_owned()),
 				local: self.text(t).to_owned(),
 				start: t.start,
 				end: t.end,
@@ -1152,6 +1157,8 @@ impl<'s> Parser<'s> {
 			self.expect_kw("as")?;
 			let t = self.binding_ident()?;
 			bindings.push(ImportBinding {
+				kind: BindingKind::Namespace,
+				imported: None,
 				local: self.text(t).to_owned(),
 				start: t.start,
 				end: t.end,
@@ -1200,6 +1207,12 @@ impl<'s> Parser<'s> {
 					self.erase(spec_start, end);
 				} else {
 					bindings.push(ImportBinding {
+						kind: BindingKind::Named,
+						imported: Some(if imported.kind == Kind::Str {
+							self.string_value(imported)
+						} else {
+							self.text(imported).to_owned()
+						}),
 						local: self.text(local).to_owned(),
 						start: spec_start,
 						end: spec_end,
@@ -1223,6 +1236,7 @@ impl<'s> Parser<'s> {
 			start,
 			end: self.prev_end,
 			bindings,
+			record: self.imports.len() - 1,
 		});
 		Ok(())
 	}
@@ -1258,20 +1272,43 @@ impl<'s> Parser<'s> {
 		self.advance()
 	}
 
+	/// The name that follows `function` / `async function` / `class` at the
+	/// current token, when there is one (an anonymous default export has none).
+	fn declared_name(&mut self) -> R<Option<String>> {
+		let save = self.snapshot();
+		if self.is_kw("async") {
+			self.advance()?;
+		}
+		self.advance()?;
+		if self.is_p("*") {
+			self.advance()?;
+		}
+		let name = if self.tok.kind == Kind::Ident && !self.is_kw("extends") {
+			Some(self.text(self.tok).to_owned())
+		} else {
+			None
+		};
+		self.restore(save);
+		Ok(name)
+	}
+
 	fn export_declaration(&mut self) -> R<()> {
 		let start = self.tok.start;
 		self.advance()?;
+		let keyword_end = self.prev_end;
 		if self.tok.kind == Kind::Punct && self.tok.punct == "=" {
 			return self.err("`export =` is not supported (use `export default`)");
 		}
 		if self.is_kw("default") {
 			self.advance()?;
+			let default_end = self.prev_end;
 			self.info.has_default_export = true;
 			if self.is_kw("function")
 				|| (self.is_kw("async") && {
 					let next = self.peek()?;
 					next.kind == Kind::Ident && self.text(next) == "function" && !next.nl_before
 				}) {
+				let name = self.declared_name()?;
 				let is_async = self.is_kw("async");
 				if is_async {
 					self.advance()?;
@@ -1279,11 +1316,28 @@ impl<'s> Parser<'s> {
 				let had_body = self.function_rest(false)?;
 				if !had_body {
 					self.erase(start, self.prev_end);
+				} else {
+					self.info.default_export = Some(DefaultExport {
+						start,
+						end: default_end,
+						stmt_end: self.prev_end,
+						name,
+						is_declaration: true,
+					});
 				}
 				return Ok(());
 			}
 			if self.is_kw("class") {
-				return self.class(false);
+				let name = self.declared_name()?;
+				self.class(false)?;
+				self.info.default_export = Some(DefaultExport {
+					start,
+					end: default_end,
+					stmt_end: self.prev_end,
+					name,
+					is_declaration: true,
+				});
+				return Ok(());
 			}
 			if self.ts && self.is_kw("abstract") {
 				let next = self.peek()?;
@@ -1301,7 +1355,15 @@ impl<'s> Parser<'s> {
 				return Ok(());
 			}
 			self.assign()?;
-			return self.semicolon();
+			self.semicolon()?;
+			self.info.default_export = Some(DefaultExport {
+				start,
+				end: default_end,
+				stmt_end: self.prev_end,
+				name: None,
+				is_declaration: false,
+			});
+			return Ok(());
 		}
 		if self.is_p("*") {
 			self.advance()?;
@@ -1310,6 +1372,7 @@ impl<'s> Parser<'s> {
 			}
 			self.expect_kw("from")?;
 			self.module_specifier(ImportKind::ExportFrom)?;
+			self.info.reexports = true;
 			return self.semicolon();
 		}
 		if self.is_p("{") {
@@ -1350,6 +1413,7 @@ impl<'s> Parser<'s> {
 			let s = self.tok.start;
 			self.advance()?;
 			self.erase(s, self.tok.start);
+			self.info.export_keywords.push((start, keyword_end));
 			return self.class(true);
 		}
 		// `export const meta = { ... }` is remembered for the host.
@@ -1358,6 +1422,7 @@ impl<'s> Parser<'s> {
 			next.kind == Kind::Ident && self.text(next) == "meta"
 		};
 		if is_meta {
+			self.info.export_keywords.push((start, keyword_end));
 			self.advance()?;
 			self.binding_ident()?;
 			if self.ts && self.is_p(":") {
@@ -1381,10 +1446,22 @@ impl<'s> Parser<'s> {
 		}
 		match self.tok.kind {
 			Kind::Ident => match self.cur() {
-				"const" | "let" | "var" => self.var_statement(),
-				"function" => self.function_declaration(false, Some(start)),
-				"async" => self.function_declaration(true, Some(start)),
-				"class" => self.class(true),
+				"const" | "let" | "var" => {
+					self.info.export_keywords.push((start, keyword_end));
+					self.var_statement()
+				}
+				"function" => {
+					self.info.export_keywords.push((start, keyword_end));
+					self.function_declaration(false, Some(start))
+				}
+				"async" => {
+					self.info.export_keywords.push((start, keyword_end));
+					self.function_declaration(true, Some(start))
+				}
+				"class" => {
+					self.info.export_keywords.push((start, keyword_end));
+					self.class(true)
+				}
 				_ => self.unexpected("a declaration"),
 			},
 			_ => self.unexpected("a declaration"),
@@ -1427,8 +1504,10 @@ impl<'s> Parser<'s> {
 			}
 		}
 		self.advance()?;
-		if self.eat_kw("from")? {
+		let reexport = self.eat_kw("from")?;
+		if reexport {
 			self.module_specifier(ImportKind::ExportFrom)?;
+			self.info.reexports = true;
 		} else {
 			for t in locals {
 				if t.kind == Kind::Ident {
@@ -1436,8 +1515,11 @@ impl<'s> Parser<'s> {
 				}
 			}
 		}
-		let _ = start;
-		self.semicolon()
+		self.semicolon()?;
+		if !reexport {
+			self.info.export_clauses.push((start, self.prev_end));
+		}
+		Ok(())
 	}
 
 	fn export_clause_erased(&mut self) -> R<()> {

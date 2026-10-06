@@ -35,6 +35,22 @@ pub(crate) struct Compiled {
 	/// one of them changes what the import means, so they are dependencies.
 	pub missing: Vec<String>,
 	pub has_default_export: bool,
+	/// `out_path` exists. A page compiled as a function (see
+	/// [`Modules::compile_page_code`]) has none: nobody imports a page, and
+	/// one that is imported is compiled again as a module.
+	pub file_written: bool,
+}
+
+/// How a page is compiled for rendering in a build.
+pub(crate) enum PageCode {
+	/// A function, to be put into a chunk with others (see `kd_js::compile_function`).
+	Function {
+		code: String,
+		modules: Vec<kd_js::ModuleRef>,
+		compiled: Arc<Compiled>,
+	},
+	/// A module file, which the renderer imports.
+	Module(Arc<Compiled>),
 }
 
 /// The compiler of one build: a cache of compiled modules.
@@ -52,6 +68,20 @@ pub(crate) struct Modules {
 	prefetched: Mutex<HashMap<String, (String, kd_build::Dep)>>,
 }
 
+/// A file URL for an absolute path, with what a URL cannot hold escaped.
+pub(crate) fn file_url(path: &str) -> String {
+	let mut url = String::with_capacity(path.len() + 8);
+	url.push_str("file://");
+	for &b in path.as_bytes() {
+		if b.is_ascii_alphanumeric() || b"-._~/".contains(&b) {
+			url.push(b as char);
+		} else {
+			url.push_str(&format!("%{b:02X}"));
+		}
+	}
+	url
+}
+
 fn is_file(path: &str) -> bool {
 	fs::metadata(path).is_ok_and(|m| m.is_file())
 }
@@ -62,7 +92,7 @@ fn is_file(path: &str) -> bool {
 /// whether the file has these bytes (opening it to read) before creating it
 /// doubles the number of opens, which is what a file system with a slow
 /// `open` spends its time on. A file that exists is read and compared.
-fn write_if_changed(path: &str, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_if_changed(path: &str, bytes: &[u8]) -> Result<(), String> {
 	use std::io::{ErrorKind, Write};
 	// Modules are compiled on several threads, and two that share an import
 	// write the same file with the same bytes; that is harmless because nobody
@@ -212,7 +242,7 @@ impl Modules {
 	/// A message with `path:line:column` for a syntax error, or the import
 	/// that cannot be resolved.
 	pub(crate) fn compile(&self, src: &str) -> Result<Arc<Compiled>, String> {
-		self.compile_walk(src, false)
+		self.compile_walk(src, false, None)
 	}
 
 	/// Like [`Modules::compile`], but also follows the imports of modules that
@@ -220,10 +250,17 @@ impl Modules {
 	/// cache; after [`Modules::refresh`] some module of a cached closure may be
 	/// missing, and only a walk through the cached modules finds it.
 	pub(crate) fn compile_closure(&self, src: &str) -> Result<Arc<Compiled>, String> {
-		self.compile_walk(src, true)
+		self.compile_walk(src, true, None)
 	}
 
-	fn compile_walk(&self, src: &str, through_cached: bool) -> Result<Arc<Compiled>, String> {
+	/// Compiles `src` and what it imports. `preset` is the entry when it was
+	/// compiled already (as a function): only its imports are walked.
+	fn compile_walk(
+		&self,
+		src: &str,
+		through_cached: bool,
+		preset: Option<Arc<Compiled>>,
+	) -> Result<Arc<Compiled>, String> {
 		let mut queue = vec![src.to_owned()];
 		let mut visited: HashSet<String> = HashSet::new();
 		let mut entry: Option<Arc<Compiled>> = None;
@@ -233,6 +270,12 @@ impl Modules {
 		// table and see an incomplete closure, so a page would miss a
 		// dependency and stay stale after the dependency changes.
 		let mut fresh: HashMap<String, Arc<Compiled>> = HashMap::new();
+		if let Some(preset) = preset {
+			queue = preset.imports.clone();
+			visited.insert(src.to_owned());
+			fresh.insert(src.to_owned(), Arc::clone(&preset));
+			entry = Some(preset);
+		}
 		while let Some(next) = queue.pop() {
 			if !visited.insert(next.clone()) {
 				continue;
@@ -241,6 +284,8 @@ impl Modules {
 				Some(done) => Some(done.clone()),
 				None => self.lock().get(&next).cloned(),
 			};
+			// A page that was compiled as a function has no file to import.
+			let cached = cached.filter(|done| done.file_written);
 			let compiled = match cached {
 				Some(done) => {
 					if through_cached {
@@ -289,41 +334,15 @@ impl Modules {
 				imports: Vec::new(),
 				missing: Vec::new(),
 				has_default_export: true,
+				file_written: true,
 			});
 		}
 		let text =
 			String::from_utf8(bytes).map_err(|_| format!("{src}: file is not valid UTF-8"))?;
-		let from_dir = kd_site::path::dirname(src);
-		let out_dir = kd_site::path::dirname(&out_path);
 		let imports: RefCell<Vec<String>> = RefCell::new(Vec::new());
 		let missing: RefCell<Vec<String>> = RefCell::new(Vec::new());
 		let errors: RefCell<Vec<String>> = RefCell::new(Vec::new());
-		let rewrite = |specifier: &str| -> Option<String> {
-			match self.resolve(&from_dir, specifier) {
-				Err(e) => {
-					errors.borrow_mut().push(format!("{src}: {e}"));
-					None
-				}
-				Ok(None) => None,
-				Ok(Some((path, tried))) => {
-					if !CODE_EXTENSIONS.iter().any(|e| path.ends_with(e)) {
-						errors.borrow_mut().push(format!(
-							"{src}: {specifier:?} is not a TypeScript, JavaScript or JSON file; only those can be imported"
-						));
-						return None;
-					}
-					let target = self.out_path_for(&path);
-					imports.borrow_mut().push(path);
-					missing.borrow_mut().extend(tried);
-					let rel = kd_site::path::relative(&out_dir, &target);
-					Some(if rel.starts_with('.') {
-						rel
-					} else {
-						format!("./{rel}")
-					})
-				}
-			}
-		};
+		let rewrite = self.rewriter(src, &out_path, false, &imports, &missing, &errors);
 		let is_ts = src.ends_with(".ts") || src.ends_with(".tsx") || src.ends_with(".mts");
 		let output = kd_js::compile(
 			&text,
@@ -337,6 +356,7 @@ impl Modules {
 			},
 		)
 		.map_err(|e| format!("{src}:{e}"))?;
+		drop(rewrite);
 		if let Some(first) = errors.into_inner().into_iter().next() {
 			return Err(first);
 		}
@@ -360,6 +380,140 @@ impl Modules {
 					.collect()
 			},
 			has_default_export: output.has_default_export,
+			file_written: true,
+		})
+	}
+
+	/// The file URL of the JSX runtime.
+	pub(crate) fn runtime(&self) -> &str {
+		&self.runtime
+	}
+
+	/// Where the chunks of pages are written.
+	pub(crate) fn chunk_dir(&self) -> String {
+		format!("{}/__chunks__", self.out_dir)
+	}
+
+	/// What `rewrite` writes for the specifiers of `src`: where the module they
+	/// name will be, relative to `out_path` (or, with `absolute`, as a file
+	/// URL, for code that does not live next to its imports). What it resolves
+	/// goes into `imports`, the candidates it did not find into `missing` and
+	/// what it cannot resolve into `errors`.
+	fn rewriter<'a>(
+		&'a self,
+		src: &'a str,
+		out_path: &'a str,
+		absolute: bool,
+		imports: &'a RefCell<Vec<String>>,
+		missing: &'a RefCell<Vec<String>>,
+		errors: &'a RefCell<Vec<String>>,
+	) -> impl Fn(&str) -> Option<String> + 'a {
+		let from_dir = kd_site::path::dirname(src);
+		let out_dir = kd_site::path::dirname(out_path);
+		move |specifier: &str| -> Option<String> {
+			match self.resolve(&from_dir, specifier) {
+				Err(e) => {
+					errors.borrow_mut().push(format!("{src}: {e}"));
+					None
+				}
+				Ok(None) => None,
+				Ok(Some((path, tried))) => {
+					if !CODE_EXTENSIONS.iter().any(|e| path.ends_with(e)) {
+						errors.borrow_mut().push(format!(
+							"{src}: {specifier:?} is not a TypeScript, JavaScript or JSON file; only those can be imported"
+						));
+						return None;
+					}
+					let target = self.out_path_for(&path);
+					imports.borrow_mut().push(path);
+					missing.borrow_mut().extend(tried);
+					if absolute {
+						return Some(file_url(&target));
+					}
+					let rel = kd_site::path::relative(&out_dir, &target);
+					Some(if rel.starts_with('.') {
+						rel
+					} else {
+						format!("./{rel}")
+					})
+				}
+			}
+		}
+	}
+
+	/// Compiles a page for rendering in a build: as a function when it can be
+	/// one, else as a module. The modules it imports are compiled as files.
+	///
+	/// Why: a page compiled to its own file is created by the compiler and then
+	/// opened, read, resolved and linked by Node, and for tens of thousands of
+	/// pages those file operations are most of the time the build takes; a
+	/// function costs a call (see `kd_js::compile_function`).
+	pub(crate) fn compile_page_code(&self, src: &str) -> Result<PageCode, String> {
+		if !(src.ends_with(".tsx") || src.ends_with(".jsx")) {
+			return self.compile(src).map(PageCode::Module);
+		}
+		let prefetched = self
+			.prefetched
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.remove(src);
+		let (text, dep) = match prefetched {
+			Some(read) => read,
+			None => {
+				let (bytes, dep) = kd_build::read_with_fingerprint(src)
+					.map_err(|e| format!("cannot read {src}: {e}"))?;
+				let text = String::from_utf8(bytes)
+					.map_err(|_| format!("{src}: file is not valid UTF-8"))?;
+				(text, dep)
+			}
+		};
+		let out_path = self.out_path_for(src);
+		let imports: RefCell<Vec<String>> = RefCell::new(Vec::new());
+		let missing: RefCell<Vec<String>> = RefCell::new(Vec::new());
+		let errors: RefCell<Vec<String>> = RefCell::new(Vec::new());
+		let rewrite = self.rewriter(src, &out_path, true, &imports, &missing, &errors);
+		let compiled = kd_js::compile_function(
+			&text,
+			&kd_js::Options {
+				runtime: &self.runtime,
+				jsx: true,
+				ts: src.ends_with(".tsx"),
+				elide_imports: src.ends_with(".tsx"),
+				rewrite: &rewrite,
+				define: &self.define,
+			},
+		)
+		.map_err(|e| format!("{src}:{e}"))?;
+		drop(rewrite);
+		if let Some(first) = errors.into_inner().into_iter().next() {
+			return Err(first);
+		}
+		let Some(function) = compiled else {
+			// Not expressible as a function: compile it as a module (from the text
+			// that was read).
+			self.prefetch(src, text, dep);
+			return self.compile(src).map(PageCode::Module);
+		};
+		let dedupe = |paths: Vec<String>| {
+			let mut seen = HashSet::new();
+			paths
+				.into_iter()
+				.filter(|p| seen.insert(p.clone()))
+				.collect::<Vec<_>>()
+		};
+		let entry = Arc::new(Compiled {
+			out_path,
+			dep,
+			imports: dedupe(imports.into_inner()),
+			missing: dedupe(missing.into_inner()),
+			has_default_export: function.has_default_export,
+			file_written: false,
+		});
+		let compiled = self.compile_walk(src, false, Some(Arc::clone(&entry)))?;
+		Ok(PageCode::Function {
+			code: function.code,
+			modules: function.modules,
+			compiled,
 		})
 	}
 

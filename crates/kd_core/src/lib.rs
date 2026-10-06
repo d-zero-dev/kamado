@@ -1456,7 +1456,20 @@ mod tests {
 		// `plain.html` has no layout and is not rendered by JavaScript.
 		assert_eq!(jobs, [("/about.html", false, true), ("/", true, true)]);
 		let compiled = format!("{}/node_modules/.cache/kamado-v3/jsx", site.root);
-		assert!(fs::metadata(format!("{compiled}/src/index.tsx.mjs")).is_ok());
+		// A page of a build is a function in a chunk, not a file of its own; the
+		// components it imports are files.
+		assert!(fs::metadata(format!("{compiled}/src/index.tsx.mjs")).is_err());
+		let home_job = prepared.jobs().iter().find(|j| j.main.is_some()).unwrap();
+		assert_eq!(home_job.entry, Some(0));
+		let chunk_path = home_job.main.as_deref().unwrap();
+		assert!(
+			chunk_path.starts_with(&format!("{compiled}/__chunks__/")),
+			"{chunk_path}"
+		);
+		let chunk = fs::read_to_string(chunk_path).unwrap();
+		assert!(chunk.contains("export const pages = ["), "{chunk}");
+		assert!(chunk.contains("async (__kd_mods) =>"), "{chunk}");
+		assert!(chunk.contains("src/_lib/box.tsx.mjs"), "{chunk}");
 		assert!(fs::metadata(format!("{compiled}/src/_lib/box.tsx.mjs")).is_ok());
 		assert!(fs::metadata(format!("{compiled}/layouts/main.tsx.mjs")).is_ok());
 
@@ -1475,6 +1488,86 @@ mod tests {
 			home.get("meta").unwrap().to_json(),
 			r#"{"title":"Home","layout":"main"}"#
 		);
+	}
+
+	#[test]
+	fn chunks_of_an_earlier_build_are_removed_when_the_pages_to_render_change() {
+		let (site, loaded) = jsx_site("chunks-prune");
+		let chunk_dir = format!("{}/node_modules/.cache/kamado-v3/jsx/__chunks__", site.root);
+		let chunks = || fs::read_dir(&chunk_dir).unwrap().count();
+		let render = |prepared: Prepared| {
+			let rendered = prepared
+				.jobs()
+				.iter()
+				.map(|j| (j.page, "<p>x</p>".to_owned()))
+				.collect();
+			prepared.finish(rendered, Vec::new()).unwrap();
+		};
+		render(prepare_incremental(&loaded));
+		assert_eq!(chunks(), 1);
+		let first = fs::read_dir(&chunk_dir)
+			.unwrap()
+			.next()
+			.unwrap()
+			.unwrap()
+			.file_name();
+
+		// A page changes: the next build compiles only it, into a chunk of its
+		// own, and the first chunk (the same pages, other code) is of no use.
+		std::thread::sleep(std::time::Duration::from_millis(20));
+		site.write(
+			"src/index.tsx",
+			"import { Box } from './_lib/box';\nexport const meta = { title: 'Home', layout: 'main' } as const;\nexport default () => <Box n={2} />;\n",
+		);
+		render(prepare_incremental(&loaded));
+		assert_eq!(chunks(), 1);
+		assert_ne!(
+			fs::read_dir(&chunk_dir)
+				.unwrap()
+				.next()
+				.unwrap()
+				.unwrap()
+				.file_name(),
+			first
+		);
+
+		// Nothing to render: the chunks stay as they are.
+		render(prepare_incremental(&loaded));
+		assert_eq!(chunks(), 1);
+	}
+
+	#[test]
+	fn a_page_that_cannot_be_a_function_is_a_module_file_next_to_the_chunks() {
+		let (site, loaded) = jsx_site("jobs-fallback");
+		// `import.meta` means something only in a module of its own.
+		site.write(
+			"src/index.tsx",
+			"export const meta = { title: 'Home', layout: 'main' } as const;\nexport default () => <p>{import.meta.url}</p>;\n",
+		);
+		site.write("src/other.tsx", "export default () => <p>other</p>;\n");
+		let prepared = prepare_incremental(&loaded);
+		let compiled = format!("{}/node_modules/.cache/kamado-v3/jsx", site.root);
+
+		let by_url = |url: &str| {
+			prepared
+				.jobs()
+				.iter()
+				.find(|j| loaded_url(&prepared, j.page) == url)
+				.unwrap()
+		};
+		let index = by_url("/");
+		assert_eq!(index.entry, None);
+		assert_eq!(
+			index.main.as_deref(),
+			Some(format!("{compiled}/src/index.tsx.mjs").as_str())
+		);
+		assert!(fs::metadata(format!("{compiled}/src/index.tsx.mjs")).is_ok());
+		// The other pages are still in a chunk; the chunk holds only them.
+		let other = by_url("/other.html");
+		assert!(other.entry.is_some());
+		let chunk = fs::read_to_string(other.main.as_deref().unwrap()).unwrap();
+		assert!(chunk.contains("<p>other</p>"));
+		assert!(!chunk.contains("import.meta"));
 	}
 
 	fn loaded_url(prepared: &Prepared, page: usize) -> &str {

@@ -93,9 +93,23 @@ pub struct ImportRecord {
 	pub attributes: bool,
 }
 
+/// What an import binding takes from the module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindingKind {
+	/// `import x from "m"`: the `default` export.
+	Default,
+	/// `import * as x from "m"`: the namespace.
+	Namespace,
+	/// `import { a as x } from "m"`: the export `a`.
+	Named,
+}
+
 /// One binding of an import declaration.
 #[derive(Debug, Clone)]
 pub struct ImportBinding {
+	pub kind: BindingKind,
+	/// The name the module exports it as (named bindings).
+	pub imported: Option<String>,
 	pub local: String,
 	/// The range of the whole specifier (`a`, `a as b`; for `default` and
 	/// namespace imports the identifier itself).
@@ -113,6 +127,23 @@ pub struct ImportDecl {
 	pub start: usize,
 	pub end: usize,
 	pub bindings: Vec<ImportBinding>,
+	/// The index of the declaration's specifier in the list of imports.
+	pub record: usize,
+}
+
+/// `export default ...`.
+#[derive(Debug, Clone)]
+pub struct DefaultExport {
+	/// The range of `export default`.
+	pub start: usize,
+	pub end: usize,
+	/// The end of the statement.
+	pub stmt_end: usize,
+	/// The name a function or class declaration gives itself (`export default
+	/// function Page() {}`); anything else is an expression.
+	pub name: Option<String>,
+	/// A function or class (a declaration, which needs no `;` after it).
+	pub is_declaration: bool,
 }
 
 /// Facts about the module that the host needs.
@@ -122,4 +153,14 @@ pub struct ModuleInfo {
 	/// expression, a trailing `as const` or `satisfies T` included).
 	pub meta: Option<(usize, usize)>,
 	pub has_default_export: bool,
+	/// Where `export default` is (only when something is exported).
+	pub default_export: Option<DefaultExport>,
+	/// The `export` keywords in front of declarations (`export const a`).
+	pub export_keywords: Vec<(usize, usize)>,
+	/// Whole `export { a, b as c };` statements (without `from`).
+	pub export_clauses: Vec<(usize, usize)>,
+	/// `export * from` or `export { a } from`.
+	pub reexports: bool,
+	/// `import.meta` is used.
+	pub import_meta: bool,
 }

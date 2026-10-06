@@ -10,7 +10,7 @@
 //! A site without JSX pages and layouts has no jobs, and [`build`] does both
 //! steps at once.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -46,8 +46,11 @@ pub struct RenderJob {
 	/// The index of the page in the page list.
 	pub page: usize,
 	/// The compiled module of the page (`None` for an `.html` page: its body
-	/// is the content).
+	/// is the content). With `entry` it is a chunk, which holds several pages.
 	pub main: Option<String>,
+	/// The position of the page in the chunk `main` names (`pages[entry]` is a
+	/// function that gives the page's exports).
+	pub entry: Option<usize>,
 	/// The compiled module of the layout the page names, if any.
 	pub layout: Option<String>,
 	/// The body of an `.html` page: the content its layout wraps.
@@ -212,6 +215,8 @@ pub(crate) fn layout_module(
 /// fingerprints of everything either imports.
 struct Compiled {
 	main: Option<String>,
+	/// The position of the page in the chunk `main` names, if it is one.
+	entry: Option<usize>,
 	layout: Option<String>,
 	deps: BTreeMap<String, kd_build::Dep>,
 }
@@ -242,7 +247,187 @@ fn compile_page(
 		}
 		None => None,
 	};
-	Ok(Compiled { main, layout, deps })
+	Ok(Compiled {
+		main,
+		entry: None,
+		layout,
+		deps,
+	})
+}
+
+/// How many pages one chunk file holds. A chunk is imported by one worker, so
+/// it is also the number of jobs the render workers take at a time (see
+/// `RENDER_BATCH` in `render.ts`); more per file means fewer files to create
+/// and load, fewer per file spreads the pages over the workers better.
+pub(crate) const CHUNK_PAGES: usize = 64;
+
+/// The code of a page that is to be a function of a chunk, and the modules it
+/// takes.
+struct PageFunction {
+	code: String,
+	modules: Vec<kd_js::ModuleRef>,
+}
+
+/// Compiles the pages of `group` and puts the ones that can be functions into
+/// one chunk file. Returns the results in the order of the group, and the
+/// name of the chunk written (if any).
+fn compile_group(
+	config: &kd_config::Config,
+	modules: &Modules,
+	plan: &Plan,
+	group: &[usize],
+) -> (Vec<Result<Compiled, String>>, Option<String>) {
+	let mut results: Vec<Result<Compiled, String>> = Vec::with_capacity(group.len());
+	let mut functions: Vec<PageFunction> = Vec::new();
+	// The result each function belongs to, to give it its place in the chunk.
+	let mut owners: Vec<usize> = Vec::new();
+	for &i in group {
+		let page = &plan.pages[i];
+		let result = (|| {
+			let mut deps = BTreeMap::new();
+			let mut main = None;
+			let mut function = None;
+			if page.kind == PageKind::Tsx {
+				let path = &page.file.input_path;
+				match modules.compile_page_code(path)? {
+					crate::jsx::PageCode::Function {
+						code,
+						modules: refs,
+						compiled,
+					} => {
+						if !compiled.has_default_export {
+							return Err(format!(
+								"{path}: a page must `export default` a component"
+							));
+						}
+						function = Some(PageFunction {
+							code,
+							modules: refs,
+						});
+					}
+					crate::jsx::PageCode::Module(compiled) => {
+						if !compiled.has_default_export {
+							return Err(format!(
+								"{path}: a page must `export default` a component"
+							));
+						}
+						main = Some(compiled.out_path.clone());
+					}
+				}
+				deps.extend(modules.closure(path));
+			}
+			let layout = match layout_module(config, modules, page, false)? {
+				Some((out, closure)) => {
+					deps.extend(closure);
+					Some(out)
+				}
+				None => None,
+			};
+			Ok((
+				Compiled {
+					main,
+					entry: None,
+					layout,
+					deps,
+				},
+				function,
+			))
+		})();
+		match result {
+			Ok((compiled, function)) => {
+				if let Some(function) = function {
+					owners.push(results.len());
+					functions.push(function);
+				}
+				results.push(Ok(compiled));
+			}
+			Err(e) => results.push(Err(e)),
+		}
+	}
+	if functions.is_empty() {
+		return (results, None);
+	}
+	let text = chunk_text(modules.runtime(), &functions);
+	let name = kd_hash::to_hex(&kd_hash::sha256(text.as_bytes()))[..24].to_owned();
+	let path = format!("{}/{name}.mjs", modules.chunk_dir());
+	if let Err(e) = crate::jsx::write_if_changed(&path, text.as_bytes()) {
+		// Every page that depends on the chunk fails with the reason.
+		for &owner in &owners {
+			results[owner] = Err(e.clone());
+		}
+		return (results, None);
+	}
+	for (entry, &owner) in owners.iter().enumerate() {
+		if let Ok(compiled) = &mut results[owner] {
+			compiled.main = Some(path.clone());
+			compiled.entry = Some(entry);
+		}
+	}
+	(results, Some(name))
+}
+
+/// Removes the chunk files of earlier builds that this one does not use: a
+/// chunk holds the pages that were compiled together, so a build that compiles
+/// other pages writes other chunks and the old ones are of no use.
+fn prune_chunks(dir: &str, used: &HashSet<String>) {
+	let Ok(entries) = fs::read_dir(dir) else {
+		return;
+	};
+	for entry in entries.flatten() {
+		let name = entry.file_name();
+		let Some(stem) = name.to_str().and_then(|n| n.strip_suffix(".mjs")) else {
+			continue;
+		};
+		if !used.contains(stem) {
+			let _ = fs::remove_file(entry.path());
+		}
+	}
+}
+
+/// The module of a chunk: the runtime and the modules the pages import are
+/// imported once, and `pages[i]` runs the i-th page.
+fn chunk_text(runtime: &str, functions: &[PageFunction]) -> String {
+	let mut unique: Vec<&kd_js::ModuleRef> = Vec::new();
+	let mut index: HashMap<(&str, bool), usize> = HashMap::new();
+	for f in functions {
+		for m in &f.modules {
+			index
+				.entry((m.specifier.as_str(), m.json))
+				.or_insert_with(|| {
+					unique.push(m);
+					unique.len() - 1
+				});
+		}
+	}
+	let mut text =
+		String::with_capacity(functions.iter().map(|f| f.code.len() + 64).sum::<usize>() + 1024);
+	text.push_str(&format!(
+		"import {{ {} }} from {};\n",
+		kd_js::RUNTIME_NAMES,
+		kd_js::strings::quote(runtime)
+	));
+	for (i, m) in unique.iter().enumerate() {
+		let attributes = if m.json {
+			" with { type: \"json\" }"
+		} else {
+			""
+		};
+		text.push_str(&format!(
+			"import * as __kd_n{i} from {}{attributes};\n",
+			kd_js::strings::quote(&m.specifier)
+		));
+	}
+	text.push_str("export const pages = [\n");
+	for f in functions {
+		let args: Vec<String> = f
+			.modules
+			.iter()
+			.map(|m| format!("__kd_n{}", index[&(m.specifier.as_str(), m.json)]))
+			.collect();
+		text.push_str(&format!("() => ({})([{}]),\n", f.code, args.join(", ")));
+	}
+	text.push_str("];\n");
+	text
 }
 
 /// The environment digest of pages that JavaScript renders: they read the
@@ -456,10 +641,26 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 			modules.prefetch(&page.file.input_path, text, dep.clone());
 		}
 	}
-	let mut compiled = parallel::map(&to_compile, jobs, |&i| {
-		compile_page(config, &modules, &plan.pages[i])
-	})
-	.into_iter();
+	// A build puts its pages into chunk files (see `Modules::compile_page_code`);
+	// the dev server renders one page at a time from the files of its modules.
+	// `KD_PAGE_CHUNKS=0` turns chunks off, to compare the two.
+	let chunked = !options.serving && std::env::var_os("KD_PAGE_CHUNKS").is_none_or(|v| v != "0");
+	let compiled: Vec<Result<Compiled, String>> = if chunked {
+		let groups: Vec<&[usize]> = to_compile.chunks(CHUNK_PAGES).collect();
+		let done = parallel::map(&groups, jobs, |group| {
+			compile_group(config, &modules, &plan, group)
+		});
+		if !done.is_empty() {
+			let used: HashSet<String> = done.iter().filter_map(|(_, name)| name.clone()).collect();
+			prune_chunks(&modules.chunk_dir(), &used);
+		}
+		done.into_iter().flat_map(|(results, _)| results).collect()
+	} else {
+		parallel::map(&to_compile, jobs, |&i| {
+			compile_page(config, &modules, &plan.pages[i])
+		})
+	};
+	let mut compiled = compiled.into_iter();
 	let mut decisions = Vec::with_capacity(plan.pages.len());
 	let mut render_jobs = Vec::new();
 	for (i, (page, first)) in plan.pages.iter().zip(first).enumerate() {
@@ -469,8 +670,12 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 			First::Compile => {
 				// The errors come in page order, as they did when pages were
 				// compiled one after the other.
-				let Compiled { main, layout, deps } =
-					compiled.next().expect("one result per page to compile")?;
+				let Compiled {
+					main,
+					entry,
+					layout,
+					deps,
+				} = compiled.next().expect("one result per page to compile")?;
 				render_jobs.push(RenderJob {
 					page: i,
 					content: if main.is_none() {
@@ -479,6 +684,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 						None
 					},
 					main,
+					entry,
 					layout,
 				});
 				decisions.push(Decision::Build {

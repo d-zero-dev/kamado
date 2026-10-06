@@ -379,6 +379,7 @@ impl Parser<'_> {
 		self.advance()?;
 		if self.is_p(".") {
 			self.advance()?;
+			self.info.import_meta = true;
 			return self.property_name();
 		}
 		self.expect_p("(")?;

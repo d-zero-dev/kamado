@@ -438,6 +438,7 @@ impl Serve {
 				None
 			},
 			main,
+			entry: None,
 			layout,
 		};
 		let (context, update) = self.context_for(st, restart);

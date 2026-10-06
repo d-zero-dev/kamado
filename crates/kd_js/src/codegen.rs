@@ -67,7 +67,8 @@ const LAZY_CHILDREN: [&str; 6] = [
 	"foreignObject",
 ];
 
-const IMPORT_NAMES: &str = "m as __kd_m, c as __kd_c, a as __kd_a, el as __kd_el, k as __kd_k";
+pub(crate) const IMPORT_NAMES: &str =
+	"m as __kd_m, c as __kd_c, a as __kd_a, el as __kd_el, k as __kd_k";
 
 pub(crate) struct Applier<'a> {
 	pub src: &'a str,
@@ -123,6 +124,11 @@ impl<'a> Applier<'a> {
 			cache: HashMap::new(),
 			uses_runtime: false,
 		}
+	}
+
+	/// The hoisted constants, on one line.
+	pub(crate) fn hoisted_constants(&self) -> String {
+		self.hoisted.join(" ")
 	}
 
 	/// `import { ... } from "<runtime>";` and the hoisted constants, on one

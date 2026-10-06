@@ -17,8 +17,13 @@ import { createProps, type RenderContext } from './props.js';
 export interface RenderJob {
 	/** Index into `context.pages`. */
 	readonly page: number;
-	/** The compiled module of the page (`null` for an `.html` page). */
+	/**
+	 * The compiled module of the page (`null` for an `.html` page). With
+	 * `entry` it is a chunk that holds several pages.
+	 */
 	readonly main: string | null;
+	/** The position of the page in the chunk `main` (`pages[entry]()` gives its exports). */
+	readonly entry?: number | null;
 	/** The compiled module of the layout, if the page names one. */
 	readonly layout: string | null;
 	/** The body of an `.html` page: what its layout wraps. */
@@ -33,6 +38,38 @@ type Render = (component: Component, props: Record<string, unknown>) => string;
 
 interface RuntimeModule {
 	readonly render: Render;
+}
+
+/** The pages of a chunk: each one a function that gives the exports of the page. */
+type Chunk = readonly (() => Promise<{ default?: unknown }>)[];
+
+/** Chunks are loaded once per worker; a chunk holds the pages of a batch of jobs. */
+const chunks = new Map<string, Promise<Chunk>>();
+
+/**
+ * Loads the default export (the component) of a page: a function of a chunk
+ * or a compiled module.
+ * @param job - What the core asked for
+ */
+async function loadPage(job: RenderJob & { readonly main: string }): Promise<Component> {
+	if (job.entry === undefined || job.entry === null) {
+		return await loadComponent(job.main, 'a page');
+	}
+	let chunk = chunks.get(job.main);
+	if (!chunk) {
+		chunk = import(pathToFileURL(job.main).href).then((m: { pages: Chunk }) => m.pages);
+		chunks.set(job.main, chunk);
+	}
+	const pages = await chunk;
+	const run = pages[job.entry];
+	if (!run) {
+		throw new Error(`the chunk ${job.main} has no page ${job.entry}`);
+	}
+	const exports = await run();
+	if (typeof exports.default !== 'function') {
+		throw new TypeError(`a page must export a component as default: ${job.main}`);
+	}
+	return exports.default as Component;
 }
 
 /**
@@ -71,7 +108,7 @@ export async function createRenderer(
 		try {
 			let html: string;
 			if (job.main) {
-				const main = await loadComponent(job.main, 'a page');
+				const main = await loadPage({ ...job, main: job.main });
 				html = render(main, createProps(context, job.page));
 			} else {
 				html = job.content ?? '';
@@ -107,6 +144,13 @@ export interface RenderOptions {
 	readonly chunk?: number;
 }
 
+/**
+ * Jobs per message to a worker. The core puts this many consecutive pages into
+ * one chunk file (`CHUNK_PAGES` in `kd_core::session`), so a worker loads one
+ * file per message.
+ */
+const RENDER_BATCH = 64;
+
 /** Fewer jobs than this are rendered in the main thread: workers cost more to start. */
 const INLINE_BELOW = 24;
 
@@ -135,8 +179,9 @@ export async function renderJobs(
 		}
 		return out;
 	}
-	const workerCount = Math.min(parallelism, Math.ceil(jobs.length / 8));
-	const chunk = options.chunk ?? 16;
+	const chunk = options.chunk ?? RENDER_BATCH;
+	// A batch is the unit of work: no more workers than batches.
+	const workerCount = Math.min(parallelism, Math.ceil(jobs.length / chunk));
 	return await new Promise<Rendered[]>((resolve, reject) => {
 		const results: Rendered[] = [];
 		const workers: Worker[] = [];

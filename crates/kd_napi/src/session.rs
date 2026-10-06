@@ -53,6 +53,10 @@ pub(crate) fn prepare(
 				Value::Object(vec![
 					("page".to_owned(), Value::Number(j.page as f64)),
 					("main".to_owned(), opt(&j.main)),
+					(
+						"entry".to_owned(),
+						j.entry.map_or(Value::Null, |n| Value::Number(n as f64)),
+					),
 					("layout".to_owned(), opt(&j.layout)),
 					("content".to_owned(), opt(&j.content)),
 				])
@@ -179,13 +183,15 @@ mod tests {
 		let jobs = value.get("jobs").and_then(|j| j.as_array()).unwrap();
 		assert_eq!(jobs.len(), 1);
 		assert_eq!(jobs[0].get("page").and_then(Value::as_f64), Some(0.0));
+		// The page is the first function of a chunk file.
 		assert!(
 			jobs[0]
 				.get("main")
 				.and_then(|m| m.as_str())
 				.unwrap()
-				.ends_with("/src/index.tsx.mjs")
+				.contains("/__chunks__/")
 		);
+		assert_eq!(jobs[0].get("entry").and_then(Value::as_f64), Some(0.0));
 		assert_eq!(jobs[0].get("layout"), Some(&Value::Null));
 		assert!(value.get("context").and_then(|c| c.get("pages")).is_some());
 
