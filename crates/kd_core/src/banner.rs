@@ -213,7 +213,9 @@ pub fn for_script(template: &str, time: LocalTime, version: Option<&str>) -> Str
 	if head.starts_with("/*") || head.starts_with("//") {
 		text
 	} else {
-		format!("/*\n{text}\n*/")
+		// An embedded `*/` would close the comment early and leave the rest of
+		// the text in the bundle as code.
+		format!("/*\n{}\n*/", text.replace("*/", "* /"))
 	}
 }
 
@@ -320,6 +322,8 @@ mod tests {
 			"/*! kept 2023 */"
 		);
 		assert_eq!(for_script("// {{year}}", T, None), "// 2023");
+		// Text that is not a comment cannot close the comment it is wrapped in.
+		assert_eq!(for_script("a */ b()", T, None), "/*\na * / b()\n*/");
 		assert_eq!(
 			for_style("rev. {{date:YYYY-MM-DD}}", T, None),
 			"/*!\nrev. 2023-11-14\n*/"

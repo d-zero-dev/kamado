@@ -127,6 +127,15 @@ export async function buildScripts(request: ScriptRequest): Promise<ScriptOutput
 			if (!file) {
 				throw new Error(`esbuild produced no output for ${entry.input}`);
 			}
+			const dropped = result.outputFiles.filter((o) => o !== file);
+			if (dropped.length > 0) {
+				// eslint-disable-next-line no-console
+				console.warn(
+					`${entry.input}: not written (a script is one file): ${dropped
+						.map((o) => path.relative(root, o.path))
+						.join(', ')}`,
+				);
+			}
 			results[i] = {
 				id: entry.id,
 				code: file.text,

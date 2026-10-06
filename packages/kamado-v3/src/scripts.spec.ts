@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import {
 	buildScripts,
@@ -132,6 +132,25 @@ describe('buildScripts', () => {
 		expect(outs.map((o) => o.id)).toEqual([0, 1, 2, 3]);
 		// esbuild prints string literals with double quotes.
 		expect(outs.map((o) => /"([a-d]\.ts)"/.exec(o.code)?.[1])).toEqual(names);
+	});
+
+	test('what esbuild writes besides the script is reported as not written', async () => {
+		await writeFile(path.join(root, 'src', 'a.css'), 'a { color: red }\n');
+		await writeFile(
+			path.join(root, 'src', 'page.ts'),
+			"import './a.css';\nconsole.log(1);\n",
+		);
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+		const [out] = await buildScripts(request(['page.ts']));
+
+		expect(out!.code).toContain('console.log(1)');
+		expect(warn).toHaveBeenCalledExactlyOnceWith(
+			expect.stringMatching(
+				/page\.ts: not written \(a script is one file\): .*page\.css/,
+			),
+		);
+		warn.mockRestore();
 	});
 
 	test('a script that cannot be resolved fails with the message of esbuild', async () => {
