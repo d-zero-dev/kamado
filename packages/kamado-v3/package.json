@@ -22,7 +22,8 @@
 		"dev": "tsc --watch --project tsconfig.build.json"
 	},
 	"files": [
-		"dist"
+		"dist",
+		"schema.json"
 	],
 	"dependencies": {
 		"@hono/node-server": "2.1.1",
