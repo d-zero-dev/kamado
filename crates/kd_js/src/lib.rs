@@ -479,6 +479,16 @@ mod tests {
 	}
 
 	#[test]
+	fn the_children_of_html_and_head_are_a_thunk_so_that_their_scope_is_seen() {
+		// `<html static>` and `<head hoist={false}>` change how what is inside is
+		// written, so the runtime must call the children after it set that up.
+		let out =
+			tsx("const x = <html static><head hoist={false}><title>{t}</title></head></html>;");
+		assert!(out.contains("__kd_el(\"html\", { \"static\": true }, () => "));
+		assert!(out.contains("__kd_el(\"head\", { \"hoist\": false }, () => "));
+	}
+
+	#[test]
 	fn dynamic_parts_become_one_concatenation() {
 		let out = tsx("const x = <div title={u} id=\"i\">{t}</div>;");
 		assert!(out.contains(

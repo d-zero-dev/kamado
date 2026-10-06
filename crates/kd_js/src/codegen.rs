@@ -58,7 +58,9 @@ const RUNTIME_TAGS_MORE: [&str; 3] = ["input", "form", "button"];
 /// Elements whose children the runtime wants lazily (state set by the
 /// parent, a form control's value, the picture scope or the SVG namespace,
 /// is visible while the children are evaluated).
-const LAZY_CHILDREN: [&str; 6] = [
+const LAZY_CHILDREN: [&str; 8] = [
+	"html",
+	"head",
 	"select",
 	"optgroup",
 	"picture",

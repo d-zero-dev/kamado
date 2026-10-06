@@ -76,6 +76,9 @@ import {
 	VOID_ELEMENTS,
 } from './attr-table.js';
 
+/** The kind of an `on*` prop: written when it is a string, dropped otherwise. */
+const EVENT_STRING = 1000;
+
 type Props = Record<string, unknown>;
 
 /**
@@ -118,6 +121,82 @@ const EMPTY_PROPS: Props = {};
  */
 export function m(html: string): Markup {
 	return new Markup(html);
+}
+
+/**
+ * A `style` value written as CSS text, as the object `style` takes. An object
+ * is returned as it is; `null`, `undefined` and `false` mean no style.
+ * @param value - `"a-b: c; --d: e"`, an object, or nothing
+ * @returns The style object, or `undefined`
+ * @example
+ * ```tsx
+ * import { styleOf } from 'kamado-v3/jsx';
+ *
+ * const Box = ({ anchor }) => <div style={styleOf(`anchor-name: ${anchor}`)} />;
+ * ```
+ */
+export function styleOf(value: unknown): Record<string, unknown> | undefined {
+	if (value == null || value === false || value === '') {
+		return undefined;
+	}
+	if (typeof value !== 'string') {
+		return value as Record<string, unknown>;
+	}
+	const style: Record<string, unknown> = {};
+	let depth = 0;
+	let quote = '';
+	let start = 0;
+	const put = (declaration: string): void => {
+		const at = declaration.indexOf(':');
+		if (at === -1) {
+			return;
+		}
+		const key = declaration.slice(0, at).trim();
+		const text = declaration.slice(at + 1).trim();
+		if (!key) {
+			return;
+		}
+		style[
+			key.startsWith('--')
+				? key
+				: key.replaceAll(/-([a-z])/g, (_, c: string) => c.toUpperCase())
+		] = text;
+	};
+	for (let i = 0; i < value.length; i++) {
+		const ch = value[i]!;
+		if (quote) {
+			if (ch === '\\') {
+				i++;
+			} else if (ch === quote) {
+				quote = '';
+			}
+			continue;
+		}
+		switch (ch) {
+			case '"':
+			case "'": {
+				quote = ch;
+				break;
+			}
+			case '(': {
+				depth++;
+				break;
+			}
+			case ')': {
+				depth = Math.max(0, depth - 1);
+				break;
+			}
+			case ';': {
+				if (depth === 0) {
+					put(value.slice(start, i));
+					start = i + 1;
+				}
+				break;
+			}
+		}
+	}
+	put(value.slice(start));
+	return style;
 }
 
 /**
@@ -337,8 +416,11 @@ function classifyProp(prop: string): AttrEntry {
 	const c0 = prop.charCodeAt(0);
 	const c1 = prop.charCodeAt(1);
 	if (prop.length > 2 && (c0 === 111 || c0 === 79) && (c1 === 110 || c1 === 78)) {
-		// An event handler (`onClick`, `onload`, ...).
-		kind = RESERVED;
+		// An event handler (`onClick`, `onload`, ...). React drops them all. A
+		// static page may carry an inline handler as text (`onclick="..."`), which
+		// the pages of a site converted from templates do, so a string is written
+		// as it is and anything else is dropped.
+		kind = EVENT_STRING;
 	} else if (isAttributeNameSafe(prop)) {
 		const prefix = prop.slice(0, 5).toLowerCase();
 		// `data-` and `aria-` keep boolean values as the strings "true"/"false".
@@ -460,6 +542,9 @@ function isNotANumber(value: unknown): boolean {
 function writeAttr(entry: AttrEntry, value: unknown): string {
 	const type = typeof value;
 	switch (entry.kind) {
+		case EVENT_STRING: {
+			return type === 'string' ? ' ' + entry.name + '="' + escapeValue(value) + '"' : '';
+		}
 		case STRING: {
 			if (type === 'function' || type === 'symbol' || type === 'boolean') {
 				return '';
@@ -603,11 +688,21 @@ interface Scope {
 	readonly svg: boolean;
 	readonly noscript: boolean;
 	readonly picture: boolean;
+	/** Inside `<html static>`: form controls keep the order of their attributes. */
+	readonly plain: boolean;
 	/** The enclosing `<select>`'s `value` / `defaultValue`. */
 	readonly selected: unknown;
 }
 
-const ROOT_SCOPE: Scope = { svg: false, noscript: false, picture: false, selected: null };
+const ROOT_SCOPE: Scope = {
+	svg: false,
+	noscript: false,
+	picture: false,
+	plain: false,
+	selected: null,
+};
+/** The scope of `<html static>`: nothing is hoisted and form controls keep their order. */
+const STATIC_SCOPE: Scope = { ...ROOT_SCOPE, noscript: true, plain: true };
 let scope: Scope = ROOT_SCOPE;
 
 /**
@@ -627,6 +722,21 @@ function childScope(tag: string, props: Props): Scope {
 		case 'noscript': {
 			return scope.noscript ? scope : { ...scope, noscript: true };
 		}
+		case 'html': {
+			// `<html static>`: a template's own order. Nothing is hoisted into the
+			// head and form controls write their attributes as they were written.
+			return props.static === true && !scope.plain
+				? { ...scope, noscript: true, plain: true }
+				: scope;
+		}
+		case 'head': {
+			// `<head hoist={false}>`: the children keep the order they are written in
+			// (a template has them in the order its author chose), which is what
+			// the scope of a `noscript` does to `title`, `meta`, `link` and `script`.
+			return props.hoist === false && !scope.noscript
+				? { ...scope, noscript: true }
+				: scope;
+		}
 		case 'picture': {
 			return scope.picture ? scope : { ...scope, picture: true };
 		}
@@ -635,6 +745,7 @@ function childScope(tag: string, props: Props): Scope {
 				svg: false,
 				noscript: scope.noscript,
 				picture: scope.picture,
+				plain: scope.plain,
 				selected: props.value == null ? props.defaultValue : props.value,
 			};
 		}
@@ -1774,13 +1885,15 @@ export function el(tag: string, props: Props | null, children?: unknown): Markup
 			return new Markup(textarea(info, p, ch));
 		}
 		case T_INPUT: {
-			return new Markup(input(info, p, ch));
+			return new Markup(
+				scope.plain ? selfClosing(info, 'input', p, ch) : input(info, p, ch),
+			);
 		}
 		case T_BUTTON: {
-			return new Markup(button(info, p, ch));
+			return new Markup(scope.plain ? generic(info, p, ch) : button(info, p, ch));
 		}
 		case T_FORM: {
-			return new Markup(form(info, p, ch));
+			return new Markup(scope.plain ? generic(info, p, ch) : form(info, p, ch));
 		}
 		case T_MENUITEM: {
 			if (ch != null || p.dangerouslySetInnerHTML != null) {
@@ -1875,12 +1988,12 @@ export function el(tag: string, props: Props | null, children?: unknown): Markup
 		}
 		case T_HEAD: {
 			if (rc === null) {
-				return new Markup(generic(info, p, ch));
+				return new Markup(generic(info, withoutHoist(p), ch));
 			}
 			if (rc.headStart !== null) {
 				throw new Error('The `<head>` tag may only be rendered once.');
 			}
-			const start = plainAttrs(info.start, p) + '>';
+			const start = plainAttrs(info.start, withoutHoist(p)) + '>';
 			const inner = innerHTMLProp;
 			rc.headStart = inner == null ? start : start + innerHtml(inner, ch);
 			return new Markup(MARK + '[' + c(ch) + MARK + ']');
@@ -1904,7 +2017,7 @@ export function el(tag: string, props: Props | null, children?: unknown): Markup
 			if (rc.htmlStart !== null) {
 				throw new Error('The `<html>` tag may only be rendered once.');
 			}
-			const start = plainAttrs(info.start, p) + '>';
+			const start = plainAttrs(info.start, withoutHoist(p)) + '>';
 			const inner = innerHTMLProp;
 			rc.htmlStart = inner == null ? start : start + innerHtml(inner, ch);
 			return new Markup(c(ch));
@@ -1913,6 +2026,21 @@ export function el(tag: string, props: Props | null, children?: unknown): Markup
 			return new Markup(generic(info, p, ch));
 		}
 	}
+}
+
+/**
+ * The props of a `<head>` or `<html>` without `hoist` and `static`, which are for the runtime.
+ * @param props - The props
+ * @returns The props, the same object when there is no `hoist`
+ */
+function withoutHoist(props: Props): Props {
+	if (!('hoist' in props) && !('static' in props)) {
+		return props;
+	}
+	const rest = { ...props };
+	delete rest.hoist;
+	delete rest.static;
+	return rest;
 }
 
 /**
@@ -2283,7 +2411,10 @@ export function render<P extends Props>(
 	const previousScope = scope;
 	const context = new RenderContext();
 	rc = context;
-	scope = ROOT_SCOPE;
+	// A page that says `static` in its meta is written like `<html static>`, which
+	// a page that is only a fragment (no `<html>`) has no element for.
+	const meta = (props as Props).meta as Props | null | undefined;
+	scope = meta != null && meta.static === true ? STATIC_SCOPE : ROOT_SCOPE;
 	try {
 		const root = c(component(props));
 		if (

@@ -198,6 +198,7 @@ YAML のサブセット: ブロック / フローのマップとシーケンス�
 
 - `url` が既存ページに一致すれば `meta` を上書き、一致しなければ `virtual: true` が必要（なければエラー）。
 - 仮想ページは出力しない。`pages` / `nav()` / `breadcrumbs` / `titleList()` のインデックスにだけ加わる。
+- **並び順**: ファイルに書いたページ（既存・仮想とも）が、書いた順で `pages` の先頭に並び、書かなかったページが（辞書順のまま）その後に続く。`nav()` は並べ替えをしないので、この順がナビゲーションの表示順になる（v2 の `pageList()` の返り値の順）。
 - ファイルが存在しない・不正な JSON はビルドエラー。`version` が未知なら拒否。
 
 ## 7. JSX
@@ -211,6 +212,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 - 属性: `className` → `class`、`htmlFor` → `for`、`style` はオブジェクト → `prop: value;` 形式（ケバブケース、数値には React と同じ unitless の表に従い `px` を付ける）、真偽値は属性の有無、`null` / `undefined` / `false` は出さない、`dangerouslySetInnerHTML={{ __html }}` は生で出す。`key` と `ref` は無視する。関数値（`onClick` 等）は**警告して無視**する。
 - 空要素（`br` `img` `input` `meta` `link` `hr` 等）は閉じタグを出さない。`<script>` と `<style>` の子はエスケープしない。
 - JSX の空白の規則は React / TypeScript の `jsx` 変換と同じ（行頭行末の空白と改行の除去、空行の除去、`{" "}` で明示）。
+- **React との意図した違い**: ①属性 `on*` の**文字列**はそのまま属性として出す（React は全部捨てる。テンプレートから移した静的なページは `onclick="..."` を持つ）。関数は捨てる。②`<html static>`（または、`<html>` を持たないページの `meta.static: true`）は、テンプレートの書いた順を保つモード。`<head>` の `title` / `meta` / `link` / `script` を持ち上げず（`<head hoist={false}>` ならこれだけ）、`form` / `input` / `button` の属性を書いた順で出す。`html` と `head` の子はこの目的で遅延評価（thunk）にコンパイルされる。③`styleOf(text)`（`kamado-v3/jsx`）は CSS 文字列を `style` のオブジェクトにする。
 - **描画結果の文字列は、そのまま出力されず、Rust の HTML 後処理（再パース → 融合印字）を通る**。したがって、エスケープの細かい形（`&#x27;` と `&#39;` など）は後処理で正規化され、出力に影響しない。
 
 **コンパイル結果の置き場**: `build` は、ページ（TSX）を 1 ファイル 1 モジュールとして書き出さず、**連続する 64 ページを 1 つの「チャンク」ファイル（`node_modules/.cache/kamado-v3/jsx/__chunks__/<hash>.mjs`）の関数**にまとめる。チャンクは runtime とページが import するモジュールを 1 回だけ import し、`pages[i]()` がそのページの export（`default`）を返す。ページが import するコンポーネントやレイアウトは、従来どおり 1 モジュール 1 ファイルで、全ページで共有する。
@@ -304,7 +306,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 { "preset": "ssi" }
 { "preset": "ssi", "dir": "/home/www/document_root/" }
 { "preset": "includeComment", "root": "_libs" }
-{ "preset": "burgerEditorImport" }
+{ "preset": "burgerEditorImport", "root": "." }
 { "selector": "[data-include]", "attr": "data-include", "root": "_libs", "pick": "section", "replace": "element" }
 ```
 
@@ -316,7 +318,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 - 汎用ルール（`selector`）: `attr` の値が取り込むファイルのパス（`/` 始まりは `root` 基準、それ以外は取り込み元のファイル基準）。`pick` は取り込んだファイルの中から使う部分（セレクタの最初の一致。省略すると全体）。`replace` は `element`（一致した要素を置き換える）か `children`（一致した要素の子を置き換える）。
 - `preset: "ssi"`: `<!--#include virtual="..." -->`。起点は出力ディレクトリ（v2 と同じ）。`dir` を指定すると、本番サーバーのドキュメントルートを出力ディレクトリに対応づける（v2 の `dir` と同じ）。
 - `preset: "includeComment"`: `<!-- @include(PATH) -->`。PATH が `<documentRoot>/` で始まれば入力ディレクトリ基準、`/` で始まれば `root` 基準、それ以外は取り込み元のファイル基準。**取り込み先もパイプライン全体を通す**（取り込んだ先の include も再帰的に展開する。v2 は最初の 1 つしか展開しなかった）。
-- `preset: "burgerEditorImport"`: `[data-bge-container] [data-bgi=import] bge-import` の `src` を読み、取り込んだファイルの `[data-bge-container]` で、外側の container を置き換える。`src` は `/` 始まりのみ（相対パスはエラー）。
+- `preset: "burgerEditorImport"`: `[data-bge-container] [data-bgi=import] bge-import` の `src` を読み、取り込んだファイルの**すべての** `[data-bge-container]`（文書順。ほかの container に入っているものはその中に残る）で、外側の container を置き換える（v2 の `importBlock` と同じ）。`src` は `/` 始まりで、`root` 基準。相対パスはエラー。
 
 ### 9.3 `html.inject`
 

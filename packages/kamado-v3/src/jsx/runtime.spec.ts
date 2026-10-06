@@ -14,6 +14,7 @@ import {
 	Markup,
 	preloadImage,
 	render,
+	styleOf,
 } from './runtime.js';
 
 // ---------------------------------------------------------------------------
@@ -236,7 +237,6 @@ const PROP_SETS: Props[] = [
 		},
 	},
 	{ onClick: noop },
-	{ onclick: 'alert(1)' },
 	{ href: '/a?b=1&c=2' },
 	{ href: '' },
 	{ src: '' },
@@ -1268,10 +1268,11 @@ describe('a', () => {
 		],
 		['href', true, ''],
 		['onClick', noop, ''],
-		['onClick', 'x', ''],
-		['onload', 'x', ''],
+		['onClick', 'x', ' onClick="x"'],
+		['onClick', 1, ''],
+		['onload', 'x', ' onload="x"'],
 		['on', 'x', ' on="x"'],
-		['one', 'x', ''],
+		['one', 'x', ' one="x"'],
 		['key', 'x', ''],
 		['ref', noop, ''],
 		['children', 'x', ''],
@@ -1337,6 +1338,8 @@ describe('a', () => {
 		];
 		const mismatches: string[] = [];
 		for (const prop of tableProps()) {
+			// A string value of an `on*` prop is a deliberate deviation.
+			if (/^on/i.test(prop) && prop.length > 2) continue;
 			for (const value of values) {
 				const expected = react(e('div', { [prop]: value }));
 				const actual = outcome(() => `<div${a(prop, value)}></div>`);
@@ -1725,6 +1728,71 @@ describe('deliberate deviations from React', () => {
 		);
 	});
 
+	test('an event handler written as a string is an attribute and a function is dropped (React drops both)', () => {
+		const text = (): E => e('a', { href: '/a', oncontextmenu: 'return false;' }, 'x');
+		expect(ours(text())).toEqual({
+			html: '<a href="/a" oncontextmenu="return false;">x</a>',
+		});
+		expect((react(text()) as { html: string }).html).not.toContain('oncontextmenu');
+
+		const fn = (): E => e('button', { onClick: noop }, 'x');
+		expect(ours(fn())).toEqual({ html: '<button>x</button>' });
+		expect(react(fn())).toEqual({ html: '<button>x</button>' });
+	});
+
+	const staticHead = (): Markup[] => [
+		el('script', { src: '/a.js', async: true }),
+		el('title', null, 'T'),
+		el('meta', { name: 'x', content: 'y' }),
+	];
+	const staticBody = (): Markup =>
+		el('form', { action: '/s', className: 'f' }, () =>
+			el('input', { type: 'text', name: 'q', className: 'i' }),
+		);
+
+	test('<html static> keeps the order of the head and of the attributes of form controls (React hoists and reorders)', () => {
+		const page = (): Markup =>
+			el('html', { static: true }, () => [
+				el('head', null, () => staticHead()),
+				el('body', null, () => staticBody()),
+			]);
+		const out = render(page, {});
+		expect(out).toBe(
+			'<html><head><script src="/a.js" async=""></script><title>T</title><meta name="x" content="y"/></head><body><form action="/s" class="f"><input type="text" name="q" class="i"/></form></body></html>',
+		);
+		const plain = render(
+			(): Markup =>
+				el('html', null, () => [
+					el('head', null, () => staticHead()),
+					el('body', null, () => staticBody()),
+				]),
+			{},
+		);
+		// React's order: the async script first, `name` after the other attributes.
+		expect(plain.indexOf('<script')).toBeLessThan(plain.indexOf('<title>'));
+		expect(plain).toContain('<input type="text" class="i" name="q"/>');
+	});
+
+	test('a page whose meta says static is written like <html static> (a fragment has no html element)', () => {
+		const page = (): Markup =>
+			el('div', null, () => [staticBody(), el('title', null, 'T')]);
+		expect(render(page, { meta: { static: true } })).toBe(
+			'<div><form action="/s" class="f"><input type="text" name="q" class="i"/></form><title>T</title></div>',
+		);
+	});
+
+	test('<head hoist={false}> alone keeps the order of what is in the head', () => {
+		const page = (): Markup =>
+			el('html', null, () => [
+				el('head', { hoist: false }, () => staticHead()),
+				el('body', null, 'x'),
+			]);
+		const out = render(page, {});
+		expect(out.indexOf('<title>')).toBeLessThan(out.indexOf('<meta name="x"'));
+		expect(out.indexOf('<script src="/a.js"')).toBeLessThan(out.indexOf('<title>'));
+		expect(out).not.toContain('hoist');
+	});
+
 	test('head / body / html nested in another element are still the document singletons (React renders them in place)', () => {
 		const tree = (): E =>
 			e('div', null, e('head', null, e('title', null, 't')), e('body', null, 'x'));
@@ -1771,6 +1839,34 @@ describe('deliberate deviations from React', () => {
 	test('a Markup that leaves a position marker is only meaningful inside render', () => {
 		const stray = render(() => el('title', null, 'x'), {});
 		expect(stray).toBe('<title>x</title>');
+	});
+});
+
+describe('styleOf', () => {
+	test('CSS text becomes a style object (custom properties and url() with a semicolon kept)', () => {
+		expect(styleOf('anchor-name: --a; --Gap: 1px;color:red')).toEqual({
+			anchorName: '--a',
+			'--Gap': '1px',
+			color: 'red',
+		});
+		expect(styleOf('background: url("data:image/png;base64,AA=="); top: 0')).toEqual({
+			background: 'url("data:image/png;base64,AA==")',
+			top: '0',
+		});
+	});
+
+	test('an object is kept and nothing is no style', () => {
+		const object = { color: 'red' };
+		expect(styleOf(object)).toBe(object);
+		expect(styleOf(null)).toBeUndefined();
+		expect(styleOf(false)).toBeUndefined();
+		expect(styleOf('')).toBeUndefined();
+	});
+
+	test('it renders as the attribute of an element', () => {
+		expect(el('div', { style: styleOf('anchor-name: --a') }).html).toBe(
+			'<div style="anchor-name:--a"></div>',
+		);
 	});
 });
 

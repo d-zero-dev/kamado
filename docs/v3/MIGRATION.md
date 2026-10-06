@@ -43,6 +43,7 @@ v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは `p
 | `devServer: { port, host, open, startPath }`                  | 同じ名前                                                                                                  |
 | `devServer.proxy[prefix].pathRewrite: (p) => ...`             | `rewrite: { from: "^/api", to: "" }`（`from` は正規表現）                                                 |
 | `onBeforeBuild` / `onAfterBuild`                              | §7                                                                                                        |
+| `pageList(fn)`（スプレッドシート由来など）                    | `pages.overrides`（prebuild が JSON に書く。§2.1）                                                        |
 
 例:
 
@@ -63,6 +64,18 @@ v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは `p
 ```
 
 **未知のキーはエラー**です。エラーメッセージのパス（`pages.files` など）を見て直します。
+
+### 2.1 `pageList` と、それにぶら下がる設定
+
+v2 の `pageList()` と `transformBreadcrumbItem` / `filterNavigationNode` を使う構成は、次のように置き換える。
+
+- **一覧は prebuild で JSON にする**（`pages.overrides`、RFC §6）。`meta` には**シートに値があるキーだけ**を書く。`null` を書くと、ページ自身の front matter の同じキーを隠す（v2 は一覧のメタをナビゲーション用にだけ使い、ページ自身の変数は front matter から取った）。ファイルに書いたページが、書いた順で `pages` の先頭に並び、`nav()` の表示順になる。
+- **一覧にないページ**: v2 は一覧に載らないページを `nav()` と `breadcrumbs` に出さなかった。v3 は常にすべてのページを索引に入れる。ナビゲーションから隠すなら、そのページに `{ "url": "/x/", "meta": { "navHidden": true } }` を書く。ページのタイトル（`<title>` とパンくず）は v3 では自分の front matter の値になる（v2 は一覧になければサイト名）。
+- **`transformBreadcrumbItem`** はコンポーネントに書く（`link.href` を `link.meta.realHref ?? link.href` に）。**`filterNavigationNode`** は `nav()` の結果を再帰で絞るヘルパーを書く（子から先に絞り、`keep(node)` が偽なら捨てる）。
+- **`<!-- @include(...) -->` のコメントを出力する transform** は `html.includes` の `includeComment`（`root` は `/` 始まりの基準ディレクトリ）に、**BurgerEditor の `importBlock`** は `burgerEditorImport`（`root` は入力ディレクトリ）に、`data-bgi-ver` を消す正規表現は `html.rules` の `removeAttr` に、`©` などを実体参照にする transform は `html.entities` に置き換える。`manipulateDOM` が全ページから要素を消していたなら `html.rules` の `remove`。
+- **Pug のページだけ幅 90**: `.html` は prettier の設定が 100000、`.pug` は 90 だったので、Pug だったページの出力 URL を `html.overrides` に並べて `{ "format": { "printWidth": 90 } }` にする。幅の計測は、属性を圧縮した後の長さで行う（v2 は圧縮前）。
+- **別のコンパイラ設定が同じファイルを別の transform で処理していたとき**（サブサイトだけ `manipulateDOM` と include を外していた、など）は `html.overrides` の `pages` に URL の glob を書いて、`includes` / `rules` を `[]` にする。
+- **ビルド出力を `include` していた Pug**（出力の `header.html` を別の Pug が読む）は、v3 では出力の順序に依存させず、元のコンポーネントを直接呼ぶ。
 
 ## 3. ページ: Pug → JSX
 
@@ -133,7 +146,16 @@ export default ({ page, meta, data }: PageProps) => (
 - **`<link media="all">`** は空にならず `all` のまま出る（v2 と同じ）。
 - **JSX に書けない属性名**（絵文字など、`⚠️="..."` のような印）は React が出力しない。静的なマークアップなら `html.inject` に HTML 文字列として書く。
 - **React 19 は `<img>` ごとに `<link rel="preload" as="image">` を `<head>` に足す**（Pug では出ない）。要らなければ `html.rules` で消す: `{ "selector": "link[rel=preload][as=image]", "action": "remove" }`。
-- **Pug の `pretty`** は要素の間に空白を入れる（v2 の既定は `true` かもしれない）。インライン要素の中のブロックの整形が JSX と変わるので、比較の基準にするときは `pretty: false` で出す。
+- **Pug の `pretty`**（`createCompileHooks` の既定は `true`）は、インラインでないタグの前と、ブロックを含むタグの閉じタグの前に改行を入れる。これは空白として出力に残り、インライン要素の隣では見た目も変わる。変換スクリプトに `--pretty` を付けると、同じ規則で `{"\n"}` を書き出す（付けなければ空白は入らない）。v2 の出力と揃えるなら `--pretty`、`pretty: false` の基準と比べるなら付けない。
+- **Pug の出力順をそのまま保つ**: 変換スクリプトは `<html static>` を出す。React の持ち上げ（`<head>` の `async` な `script` が `title` の前に出る）と、`form` / `input` / `button` の属性の並べ替え（`action` と `name` が後ろへ）をやめ、書いた順で出す。`<html>` を持たないページ（フラグメント）には `export const meta = { static: true }` を出す。
+- **`on*` 属性の文字列**（`oncontextmenu="return false;"`）はそのまま出る（React は捨てるが、v3 の `jsx` は文字列に限って出す）。
+- **`style` を CSS の文字列で渡す**（`style=\`anchor-name: ${x}\``）は、`kamado-v3/jsx`の`styleOf()` を通してオブジェクトにする。
+- **`data-*` / `aria-*` に `false`**: Pug は属性を出さず、React は `"false"` と書く。変換スクリプトは `false` を `undefined` にして出す。
+- **`if (x)` が `0` を返す式**: Pug は何も出さず、JSX の `x && <b/>` は `0` を出す。変換スクリプトは `!!` を付ける。
+- **未宣言の変数への代入**（`- isHome = false`）は、変換スクリプトが `let` を足す。
+- **`#{tag}`（動的なタグ名）** は大文字の変数に入れたコンポーネントとして書く（文字列の型を `k()` が受け取る）。
+- **`extends` / `block`**: レイアウトは `slots` の props を受け取るコンポーネント、ページは `slots={{ content: (...) }}` を渡す。`block vars` の `var opts = ...` は props の既定値と、ページから渡す値になる。
+- **`//` のコメント**（Pug が HTML コメントにする）は JSX に書けないので消える。
 - **データ**: `data.yml` と `blocks.js` のようなファイルは、Pug ではファイル名がそのまま変数（`data`、`blocks`）だった。v3 では `data.<ファイル名>`（`data.data`、`data.blocks`）。`.js` のデータは文字列を返すだけなら、中身の HTML をそのままデータのディレクトリに置く（`blocks.html`）。
 - **レイアウトの指定**は拡張子なし（`"layout": "sub.pug"` → `"sub"`）。
 - `scripts.files` は、ページ以外の入力に合わせて絞っておくと意図が明確になる（`"js/**/*.ts"` など）。`alias` の相対パスは `__assets/_libs` のように `.` なしでも、プロジェクトにあるパスならパスとして扱う。
@@ -170,6 +192,7 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
 
 - スタイル（`styles.files`、既定 `**/*.css`）は v3 が自前で処理します（`@import` の展開、alias、圧縮、バナー、source map）。**postcss.config のプラグインは使えません**。autoprefixer などが要るなら、npm scripts で別に処理してから kamado に渡します。
 - `@import` の解決: alias（`@/x.css`）、importing ファイルからの相対パス、`node_modules`（パッケージの `style` → `.css` の `main` → `index.css`）の順。
+- **PostCSS のプラグインのうち、`@custom-media` は組み込み**です（D-ZERO の `@d-zero/postcss-config` の `postcss-custom-media`）。定義はどのファイルにあっても使え、定義は出力から消え、`@media (--name)` が定義の条件に置き換わります（`and` で並べた条件、リストの定義、ネストした `@media` も）。未定義の名前と `not (--x)` は置き換えません。**ほかのプラグイン**（autoprefixer、`postcss-extend-rule`、`postcss-base64`、`postcss-math` / `postcss-calc`、`postcss-color-mod-function`、`postcss-clip-path-polyfill`）は使えません。案件の CSS がそれらを使っているかは、`@extend`、`base64(`、`color-mod(`、`math(` を検索して確かめます。autoprefixer だけは、最新ブラウザ向けの browserslist なら足すプレフィックスが数個（`-webkit-box-decoration-break` など）なので、書いておけば済みます。
 - postcss-import と同じ扱い: `@import` のあとに書いた `@layer a, b;`（順序の宣言）は、取り込んだ内容より前、バナーより前に移る。取り込んだファイルの `@charset` は先頭に 1 つだけ残り、値が違えばエラーになる。
 - スクリプト（`scripts.files`、既定 `**/*.{js,ts,jsx,tsx,mjs,cjs}`）は esbuild（`bundle: true`）です。`alias` / `define` / `target`（既定 `es2022`）/ `minify` / `sourcemap` / `banner` が使えます。**`pages.files` に一致するファイルはスクリプトとして扱いません**（`.tsx` はページ）。
 - **v2 と出力を揃えたいとき**: v2 は esbuild に `target` を渡さない（esnext）。構文が `es2022` で変わるコードでは `"scripts": { "target": "esnext" }` にする。

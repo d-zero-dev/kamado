@@ -23,7 +23,9 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'n
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-const [srcRoot, outRoot, libsArg] = process.argv.slice(2);
+const [srcRoot, outRoot, libsArg] = process.argv
+	.slice(2)
+	.filter((a) => !a.startsWith('--'));
 if (!srcRoot || !outRoot) {
 	console.error('usage: node scripts/pug-to-tsx.mjs <project> <out> [libs dir]');
 	process.exit(1);
@@ -144,6 +146,59 @@ function mapExpr(expr) {
 }
 
 const converted = new Map();
+// `--pretty`: write out the white space that Pug's `pretty` option puts into pages.
+const PRETTY = process.argv.includes('--pretty');
+const PUG_INLINE = new Set([
+	'a',
+	'abbr',
+	'acronym',
+	'b',
+	'br',
+	'code',
+	'em',
+	'font',
+	'i',
+	'img',
+	'ins',
+	'kbd',
+	'map',
+	'samp',
+	'small',
+	'span',
+	'strong',
+	'sub',
+	'sup',
+]);
+
+/**
+ * Whether the expression is one string literal (and not `"a" + b`).
+ * @param source
+ */
+function isStringLiteral(source) {
+	try {
+		const node = acorn.parseExpressionAt(source, 0, { ecmaVersion: 'latest' });
+		return (
+			node.type === 'Literal' &&
+			typeof node.value === 'string' &&
+			node.end === source.length
+		);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * pug-code-gen's `tagCanInline`: only text without a line break and inline tags inside.
+ * @param nodes
+ */
+function canInline(nodes) {
+	return nodes.every(
+		(k) =>
+			(k.type === 'Text' && !/\n/.test(k.val)) ||
+			(k.type === 'Tag' && PUG_INLINE.has(k.name)),
+	);
+}
+const skipped = [];
 const queue = [];
 
 /**
@@ -180,7 +235,11 @@ function jsxText(text) {
  * @param name
  */
 function component(name) {
-	return name[0].toUpperCase() + name.slice(1);
+	// `c-header` is `CHeader`.
+	return name
+		.split(/[-_]/)
+		.map((s) => (s ? s[0].toUpperCase() + s.slice(1) : s))
+		.join('');
 }
 
 /**
@@ -193,6 +252,7 @@ function newContext(file) {
 		declared: new Set(),
 		used: new Set(),
 		imports: new Map(),
+		rt: new Set(),
 		named: new Map(),
 		mixins: new Map(),
 		scope: [],
@@ -209,11 +269,34 @@ function mixinParams(args) {
 	if (!args || !args.trim()) return [];
 	const source = `(${args}) => 0`;
 	const ast = acorn.parseExpressionAt(source, 0, { ecmaVersion: 'latest' });
-	return ast.params.map((p) =>
-		p.type === 'AssignmentPattern'
+	return ast.params.map((p) => {
+		const target = p.type === 'AssignmentPattern' ? p.left : p;
+		if (target.type === 'ObjectPattern') {
+			// `{ lang = "ja" } = {}`: the call passes an object whose keys are props.
+			return {
+				name: undefined,
+				pattern: source.slice(target.start, target.end),
+				names: patternNames(target),
+			};
+		}
+		return p.type === 'AssignmentPattern'
 			? { name: p.left.name, init: source.slice(p.right.start, p.right.end) }
-			: { name: p.name },
-	);
+			: { name: p.name };
+	});
+}
+
+/**
+ * The names an object pattern declares.
+ * @param pattern
+ */
+function patternNames(pattern) {
+	const names = [];
+	for (const prop of pattern.properties) {
+		const v = prop.type === 'RestElement' ? prop.argument : prop.value;
+		const target = v.type === 'AssignmentPattern' ? v.left : v;
+		if (target.type === 'Identifier') names.push(target.name);
+	}
+	return names;
 }
 
 /**
@@ -232,9 +315,13 @@ function componentText(ctx, name, body, exported, params) {
 	const lines = [
 		`${exported} function ${name}(props: PageProps & Record<string, any>) {`,
 	];
-	if (params.length > 0) {
-		const list = params.map((p) => (p.init ? `${p.name} = ${p.init}` : p.name));
+	const plain = params.filter((p) => !p.pattern);
+	if (plain.length > 0) {
+		const list = plain.map((p) => (p.init ? `${p.name} = ${p.init}` : p.name));
 		lines.push(`\tconst { ${list.join(', ')} } = props as any;`);
+	}
+	for (const p of params.filter((q) => q.pattern)) {
+		lines.push(`\tconst ${p.pattern} = props as any;`);
 	}
 	if (fromProps.length > 0)
 		lines.push(`\tconst { ${fromProps.join(', ')} } = props as any;`);
@@ -258,7 +345,8 @@ function componentText(ctx, name, body, exported, params) {
  */
 function importLines(ctx) {
 	const head = ["import type { PageProps } from 'kamado-v3';"];
-	if (ctx.html) head.push("import { html } from 'kamado-v3/jsx';");
+	if (ctx.rt.size > 0)
+		head.push(`import { ${[...ctx.rt].join(', ')} } from 'kamado-v3/jsx';`);
 	for (const [name, spec] of ctx.imports) head.push(`import ${name} from '${spec}';`);
 	for (const [spec, names] of ctx.named)
 		head.push(`import { ${names.join(', ')} } from '${spec}';`);
@@ -278,8 +366,11 @@ function convertFile(file) {
 	const rel = path.relative(path.join(srcRoot, '__assets'), file);
 	const outFile = path.join(outRoot, '__assets', rel.replace(/\.pug$/, '.tsx'));
 	const defs = ast.nodes.filter((n) => n.type === 'Mixin' && !n.call);
+	const extended = ast.nodes.find((n) => n.type === 'Extends');
 	let text;
-	if (defs.length > 0) {
+	if (extended) {
+		text = convertChild(file, ast, extended);
+	} else if (defs.length > 0) {
 		// A file of mixins: one exported component per mixin.
 		const head = new Set();
 		const parts = [];
@@ -287,7 +378,10 @@ function convertFile(file) {
 			const params = mixinParams(def.args);
 			info.mixins.push({ name: component(def.name), params });
 			const ctx = newContext(file);
-			for (const p of params) ctx.declared.add(p.name);
+			for (const p of params) {
+				if (p.pattern) for (const n of p.names) ctx.declared.add(n);
+				else ctx.declared.add(p.name);
+			}
 			const body = block(def.block.nodes, ctx, 1);
 			for (const l of importLines(ctx)) head.add(l);
 			parts.push(componentText(ctx, component(def.name), body, 'export', params));
@@ -296,15 +390,85 @@ function convertFile(file) {
 	} else {
 		const ctx = newContext(file);
 		const body = block(ast.nodes, ctx, 1);
+		// A page that is a fragment has no `<html static>` to say it is written in
+		// the order of the template: its meta says so.
+		const fragmentPage =
+			file.includes(`${path.sep}htdocs${path.sep}`) &&
+			!ast.nodes.some((n) => n.type === 'Tag' && n.name === 'html');
 		text =
 			importLines(ctx).join('\n') +
 			'\n\n' +
+			(fragmentPage ? 'export const meta = { static: true };\n\n' : '') +
 			componentText(ctx, pascal(file), body, 'export default', []) +
 			'\n';
 	}
 	mkdirSync(path.dirname(outFile), { recursive: true });
 	writeFileSync(outFile, text);
 	return info;
+}
+
+/**
+ * A page that `extends` a layout: the layout component receives the code of the
+ * `vars` block as props and every other block as an element in `slots`.
+ * @param file
+ * @param ast
+ * @param extended
+ */
+function convertChild(file, ast, extended) {
+	const ctx = newContext(file);
+	const parent = extended.file.path.startsWith('/')
+		? path.join(libs, extended.file.path)
+		: path.resolve(path.dirname(file), extended.file.path);
+	convertFile(parent);
+	const parentName = pascal(parent);
+	const toOut = (f) =>
+		path.join(outRoot, '__assets', path.relative(path.join(srcRoot, '__assets'), f));
+	let spec = path
+		.relative(path.dirname(toOut(file)), toOut(parent))
+		.replace(/\.pug$/, '.tsx');
+	if (!spec.startsWith('.')) spec = `./${spec}`;
+	ctx.imports.set(parentName, spec);
+
+	// Mixins written in the page are components of the same module.
+	const defs = ast.nodes.filter((n) => n.type === 'Mixin' && !n.call);
+	for (const def of defs) {
+		ctx.mixins.set(component(def.name), {
+			name: component(def.name),
+			params: mixinParams(def.args),
+		});
+	}
+	const head = new Set();
+	const parts = [];
+	for (const def of defs) {
+		const params = mixinParams(def.args);
+		const mixCtx = newContext(file);
+		mixCtx.mixins = ctx.mixins;
+		for (const p of params) {
+			if (p.pattern) for (const n of p.names) mixCtx.declared.add(n);
+			else mixCtx.declared.add(p.name);
+		}
+		const body = block(def.block.nodes, mixCtx, 1);
+		for (const l of importLines(mixCtx)) head.add(l);
+		parts.push(componentText(mixCtx, component(def.name), body, '', params).trim());
+	}
+
+	const blocks = ast.nodes.filter((n) => n.type === 'NamedBlock');
+	for (const v of blocks.filter((n) => n.name === 'vars')) children(v.nodes, ctx, 0);
+	const given = [...ctx.declared];
+	const slots = [];
+	for (const n of blocks.filter((b) => b.name !== 'vars')) {
+		slots.push(`\t\t\t${n.name}: (\n${block(n.nodes, ctx, 4)}\n\t\t\t)`);
+	}
+	const body = `\t\t<${parentName} {...props}${given.length > 0 ? ` {...{ ${given.join(', ')} }}` : ''} slots={{\n${slots.join(',\n')},\n\t\t}} />`;
+	for (const l of importLines(ctx)) head.add(l);
+	return (
+		[...head].join('\n') +
+		'\n\n' +
+		parts.join('\n\n') +
+		(parts.length > 0 ? '\n\n' : '') +
+		componentText(ctx, pascal(file), body, 'export default', []) +
+		'\n'
+	);
 }
 
 /**
@@ -334,7 +498,8 @@ function use(expr, ctx) {
  */
 function block(nodes, ctx, depth) {
 	const parts = children(nodes, ctx, depth);
-	if (parts.length === 1 && !parts[0].startsWith(indent(depth) + '{')) return parts[0];
+	// One element stands for itself; text and expressions need a fragment.
+	if (parts.length === 1 && parts[0].trimStart().startsWith('<')) return parts[0];
 	return `${indent(depth)}<>\n${parts.join('\n')}\n${indent(depth)}</>`;
 }
 
@@ -398,12 +563,45 @@ function declaredBy(stmt) {
  */
 function useStmt(stmt, ctx) {
 	const mapped = mapExpr(stmt);
-	// Everything after `=` is an expression to analyse.
-	const eq = mapped.indexOf('=');
-	if (eq > 0)
-		for (const n of free(mapped.slice(eq + 1).replace(/;\s*$/, ''), [...ctx.declared]))
-			ctx.used.add(n);
-	return mapped.endsWith(';') ? mapped : `${mapped};`;
+	let program;
+	try {
+		program = acorn.parse(mapped, { ecmaVersion: 'latest' });
+	} catch (error) {
+		throw new Error(`cannot parse statement: ${mapped}: ${error.message}`);
+	}
+	// The initialisers (and expression statements) are what reads variables; a
+	// name declared earlier in the same code block is not a free one.
+	const local = [...ctx.declared];
+	const declare = [];
+	const read = (node) => {
+		for (const n of free(mapped.slice(node.start, node.end), local)) ctx.used.add(n);
+	};
+	for (const node of program.body) {
+		if (node.type === 'VariableDeclaration') {
+			for (const d of node.declarations) {
+				if (d.init) read(d.init);
+				if (d.id.type === 'Identifier') local.push(d.id.name);
+			}
+		} else if (node.type === 'ExpressionStatement') {
+			const e = node.expression;
+			if (
+				e.type === 'AssignmentExpression' &&
+				e.left.type === 'Identifier' &&
+				!local.includes(e.left.name)
+			) {
+				// Pug code may assign a variable it never declared: it becomes a local.
+				read(e.right);
+				declare.push(e.left.name);
+				local.push(e.left.name);
+				ctx.declared.add(e.left.name);
+			} else {
+				read(e);
+			}
+		}
+	}
+	const prefix = declare.map((n) => `let ${n}: any;`).join(' ');
+	const text = mapped.endsWith(';') || mapped.endsWith('}') ? mapped : `${mapped};`;
+	return prefix ? `${prefix} ${text}` : text;
 }
 
 /**
@@ -446,8 +644,7 @@ function attrsOf(tag, ctx) {
 	for (const a of tag.attrs) {
 		const name = a.name;
 		const val = a.val;
-		const isString =
-			typeof val === 'string' && /^(["'])[\s\S]*\1$/.test(val) && !/\$\{/.test(val);
+		const isString = typeof val === 'string' && isStringLiteral(val);
 		const strValue = isString
 			? val.slice(1, -1).replaceAll(/\\(["'\\])/g, '$1')
 			: undefined;
@@ -463,6 +660,30 @@ function attrsOf(tag, ctx) {
 			);
 			continue;
 		}
+		if (name === 'style' && isString) {
+			// React wants an object: `a-b: c; --d: e` is `{ aB: "c", "--d": "e" }`.
+			const pairs = strValue
+				.split(';')
+				.map((d) => d.trim())
+				.filter(Boolean)
+				.map((d) => {
+					const at = d.indexOf(':');
+					const key = d.slice(0, at).trim();
+					const value = d.slice(at + 1).trim();
+					const camel = key.startsWith('--')
+						? JSON.stringify(key)
+						: key.replaceAll(/-([a-z])/g, (_, c) => c.toUpperCase());
+					return `${camel}: ${JSON.stringify(value)}`;
+				});
+			out.push(`style={{ ${pairs.join(', ')} }}`);
+			continue;
+		}
+		if (name === 'style' && !isString && val !== true) {
+			// CSS text built at run time (a template literal, a variable).
+			ctx.rt.add('styleOf');
+			out.push(`style={styleOf(${use(val, ctx)})}`);
+			continue;
+		}
 		const prop = propOf.get(name.toLowerCase()) ?? name;
 		const kind = kindOf.get(prop);
 		if (val === true) {
@@ -474,6 +695,10 @@ function attrsOf(tag, ctx) {
 					? `${prop}={${JSON.stringify(strValue)}}`
 					: `${prop}="${strValue}"`,
 			);
+		} else if (/^(?:data|aria)-/i.test(name)) {
+			// Pug leaves out an attribute whose value is false; React writes "false".
+			const v = use(val, ctx);
+			out.push(`${prop}={(${v}) === false ? undefined : (${v})}`);
 		} else {
 			out.push(`${prop}={${use(val, ctx)}}`);
 		}
@@ -515,7 +740,7 @@ function node(n, ctx, depth) {
 			const expr = use(n.val, ctx);
 			if (!n.mustEscape) {
 				// Raw HTML next to other children: the helper of kamado-v3/jsx.
-				ctx.html = true;
+				ctx.rt.add('html');
 				return [`${pad}{html(${expr})}`];
 			}
 			return [`${pad}{${expr}}`];
@@ -531,10 +756,22 @@ function node(n, ctx, depth) {
 				const at = attrs.findIndex((a) => a === 'selected' || a.startsWith('selected='));
 				if (at !== -1) attrs.splice(at, 1);
 			}
+			// Pug writes a page in the order it was written: nothing moves into the
+			// head and form controls keep the order of their attributes.
+			if (n.name === 'html') attrs.push('static');
 			const open = attrs.length > 0 ? `${n.name} ${attrs.join(' ')}` : n.name;
 			const kids = n.block ? n.block.nodes : [];
-			if (VOID.has(n.name) && kids.length === 0) return [`${pad}<${open} />`];
-			if (kids.length === 0) return [`${pad}<${open}></${n.name}>`];
+			// Pug's `pretty` writes a line break before every tag that is not inline
+			// and before the closing tag of one with a block inside; it is white space
+			// that survives into the page, so it is written out.
+			const lead = PRETTY && !ctx.pre && !PUG_INLINE.has(n.name) ? [`${pad}{"\\n"}`] : [];
+			const tail =
+				lead.length > 0 &&
+				!canInline(kids) &&
+				// Text-only elements: the white space is not part of their text.
+				!['script', 'style', 'title', 'option', 'textarea'].includes(n.name);
+			if (VOID.has(n.name) && kids.length === 0) return [...lead, `${pad}<${open} />`];
+			if (kids.length === 0) return [...lead, `${pad}<${open}></${n.name}>`];
 			// A sole unescaped value or raw text block.
 			if (
 				kids.length === 1 &&
@@ -543,18 +780,63 @@ function node(n, ctx, depth) {
 				!kids[0].mustEscape
 			) {
 				return [
+					...lead,
 					`${pad}<${open} dangerouslySetInnerHTML={{ __html: ${use(kids[0].val, ctx)} }} />`,
 				];
 			}
 			if (n.name === 'style' || n.name === 'script') {
 				if (kids.every((k) => k.type === 'Text')) {
 					return [
+						...lead,
 						`${pad}<${open} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(kids.map((k) => k.val).join('\n'))} }} />`,
 					];
 				}
 			}
+			const sensitive = n.name === 'pre' || n.name === 'textarea';
+			if (sensitive) ctx.pre = (ctx.pre ?? 0) + 1;
 			const parts = children(kids, ctx, depth + 1);
-			return [`${pad}<${open}>`, ...parts, `${pad}</${n.name}>`];
+			if (sensitive) ctx.pre -= 1;
+			if (tail) parts.push(`${indent(depth + 1)}{"\\n"}`);
+			return [...lead, `${pad}<${open}>`, ...parts, `${pad}</${n.name}>`];
+		}
+		case 'NamedBlock': {
+			// In a layout: a block of code gives defaults for what a page passes, any
+			// other block is what the page puts in `slots`, or the default.
+			if (n.nodes.length > 0 && n.nodes.every((k) => k.type === 'Code' && !k.buffer)) {
+				for (const k of n.nodes) {
+					const mapped = mapExpr(k.val);
+					const program = acorn.parse(mapped, { ecmaVersion: 'latest' });
+					for (const st of program.body) {
+						if (st.type !== 'VariableDeclaration') continue;
+						for (const d of st.declarations) {
+							const init = d.init
+								? use(mapped.slice(d.init.start, d.init.end), ctx)
+								: 'undefined';
+							ctx.declared.add(d.id.name);
+							ctx.hoisted.push(`const { ${d.id.name} = ${init} } = props as any;`);
+						}
+					}
+				}
+				return [];
+			}
+			const inner = block(n.nodes, ctx, depth + 1);
+			return [`${pad}{(props as any).slots?.${n.name} ?? (\n${inner}\n${pad})}`];
+		}
+		case 'InterpolatedTag': {
+			// `#{tag}`: a component whose type is the string in a variable; the
+			// runtime accepts a string type as React does.
+			const expr = use(n.expr, ctx);
+			const inner = node({ ...n, type: 'Tag', name: 'DynTag' }, ctx, depth + 2);
+			return [
+				`${pad}{(() => {`,
+				`${pad}\tconst DynTag: any = ${expr};`,
+				`${pad}\treturn (`,
+				`${pad}\t<>`,
+				...inner,
+				`${pad}\t</>`,
+				`${pad}\t);`,
+				`${pad}})()}`,
+			];
 		}
 		case 'Conditional': {
 			const test = '(' + use(n.test, ctx) + ')';
@@ -562,7 +844,8 @@ function node(n, ctx, depth) {
 			const cons = block(n.consequent.nodes, ctx, depth + 1);
 			if (!n.alternate) {
 				ctx.nesting--;
-				return [`${pad}{${test} && (\n${cons}\n${pad})}`];
+				// `!!`: a Pug `if` prints nothing for `0`, while `0 && x` is `0` in JSX.
+				return [`${pad}{!!${test} && (\n${cons}\n${pad})}`];
 			}
 			// `else if` is another conditional: its expression, without the braces
 			// that would make it a child.
@@ -642,7 +925,7 @@ function node(n, ctx, depth) {
 			const abs = p.startsWith('/')
 				? path.join(libs, p)
 				: path.resolve(path.dirname(ctx.file), p);
-			ctx.html = true;
+			ctx.rt.add('html');
 			const dataDir = path.join(libs, 'data') + path.sep;
 			if (abs.startsWith(dataDir)) {
 				const key = path.basename(abs, path.extname(abs));
@@ -665,7 +948,9 @@ function node(n, ctx, depth) {
 			);
 			const passed = [
 				...locals.map((l) => `${l}={${l}}`),
-				...given.map((g, i) => `${mixin.params[i].name}={${g}}`),
+				...given.map((g, i) =>
+					mixin.params[i].pattern ? `{...(${g})}` : `${mixin.params[i].name}={${g}}`,
+				),
 			].join(' ');
 			return [`${pad}<${mixin.name} {...props}${passed ? ' ' + passed : ''} />`];
 		}
@@ -690,4 +975,5 @@ function walkDir(dir, fn) {
 walkDir(path.join(srcRoot, '__assets'), (f) => {
 	if (f.endsWith('.pug') && !f.includes('/mixin/meta-example')) convertFile(f);
 });
-console.log([...converted].length, 'files converted');
+console.log([...converted].length - skipped.length, 'files converted');
+for (const f of skipped) console.log('skipped (extends / block, write by hand):', f);
