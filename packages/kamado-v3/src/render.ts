@@ -142,6 +142,12 @@ export interface RenderOptions {
 	readonly parallelism?: number;
 	/** Jobs per message to a worker. */
 	readonly chunk?: number;
+	/**
+	 * Called with the pages of each batch as soon as it is rendered. When it is
+	 * given, `renderJobs` keeps nothing and returns an empty list: a site of
+	 * tens of thousands of pages is not held in memory twice.
+	 */
+	readonly onRendered?: (rendered: readonly Rendered[]) => void;
 }
 
 /**
@@ -176,6 +182,10 @@ export async function renderJobs(
 		const out: Rendered[] = [];
 		for (const job of jobs) {
 			out.push(await renderOne(job));
+		}
+		if (options.onRendered) {
+			options.onRendered(out);
+			return [];
 		}
 		return out;
 	}
@@ -229,7 +239,11 @@ export async function renderJobs(
 						return;
 					}
 					if (message.results) {
-						results.push(...message.results);
+						if (options.onRendered) {
+							options.onRendered(message.results);
+						} else {
+							results.push(...message.results);
+						}
 					}
 					dispatch(worker);
 				},

@@ -1,7 +1,7 @@
 import type { RenderContext } from './props.js';
+import type { Rendered, renderJobs, type RenderJob } from './render.js';
 
 import { native } from './native.js';
-import { renderJobs, type RenderJob } from './render.js';
 import { RUNTIME_URL } from './runtime-url.js';
 import {
 	buildScripts,
@@ -9,6 +9,29 @@ import {
 	findEsbuildBinary,
 	type ScriptRequest,
 } from './scripts.js';
+
+/**
+ * The frames `feed` takes: a little-endian `u32` page, a `u32` byte length
+ * and the UTF-8 bytes of the HTML, for each page.
+ * @param rendered - Pages and their HTML
+ */
+function frames(rendered: readonly Rendered[]): Buffer {
+	const lengths = rendered.map(([, html]) => Buffer.byteLength(html, 'utf8'));
+	let size = 0;
+	for (const length of lengths) {
+		size += 8 + length;
+	}
+	const buffer = Buffer.allocUnsafe(size);
+	let at = 0;
+	for (const [i, [page, html]] of rendered.entries()) {
+		const length = lengths[i]!;
+		buffer.writeUInt32LE(page, at);
+		buffer.writeUInt32LE(length, at + 4);
+		buffer.write(html, at + 8, length, 'utf8');
+		at += 8 + length;
+	}
+	return buffer;
+}
 
 /** Build-time switches; every field is optional and defaults to the config. */
 export interface BuildOptions {
@@ -103,18 +126,20 @@ export async function build(
 	) as Prepared;
 	lap(`prepared (${prepared.jobs.length} jobs)`);
 	try {
-		// Pages render in worker threads while esbuild bundles the scripts.
-		const [pages, scripts] = await Promise.all([
+		// Pages render in worker threads while esbuild bundles the scripts. The
+		// HTML goes to the core as each batch is done, not after the last one.
+		const [, scripts] = await Promise.all([
 			prepared.context && prepared.jobs.length > 0
 				? renderJobs(prepared.jobs, prepared.context, {
 						runtimeUrl: RUNTIME_URL,
 						parallelism: options.jobs,
+						onRendered: (rendered) => core.feed(prepared.handle, frames(rendered)),
 					})
 				: [],
 			prepared.scripts ? buildScripts(prepared.scripts) : [],
 		]);
 		lap('rendered');
-		const results = JSON.stringify({ pages, scripts });
+		const results = JSON.stringify({ scripts });
 		lap('serialized');
 		const report = JSON.parse(core.finish(prepared.handle, results)) as BuildReport;
 		lap('finished');

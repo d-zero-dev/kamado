@@ -1017,6 +1017,7 @@ impl Prepared {
 		});
 
 		let pool = kd_pool::Pool::new(jobs);
+		let mut lap_at = Instant::now();
 		pool.scope(|s| {
 			for i in order {
 				let shared = Arc::clone(&shared);
@@ -1039,7 +1040,9 @@ impl Prepared {
 				});
 			}
 		});
+		lap(&mut lap_at, "finish: pages and assets");
 		drop(pool);
+		lap(&mut lap_at, "finish: pool stopped");
 		let shared = Arc::try_unwrap(shared)
 			.ok()
 			.expect("all jobs finished with the pool");
@@ -1137,6 +1140,7 @@ impl Prepared {
 			}
 			report.assets.push(result);
 		}
+		lap(&mut lap_at, "finish: report assembled");
 		if let Some(settings) = &shared.sitemap {
 			let xml = sitemap::render(settings, &shared.plan.pages);
 			write_output(&settings.output_path, xml.as_bytes(), shared.skip_unchanged)?;
@@ -1146,6 +1150,7 @@ impl Prepared {
 			next.save(&manifest_path)
 				.map_err(|e| format!("cannot write {manifest_path}: {e}"))?;
 		}
+		lap(&mut lap_at, "finish: sitemap and manifest");
 		report.elapsed_ms = started.elapsed().as_millis();
 		Ok(report)
 	}

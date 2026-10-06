@@ -15,6 +15,8 @@ static NEXT: AtomicU64 = AtomicU64::new(1);
 struct Entry {
 	prepared: kd_core::Prepared,
 	loaded: kd_core::Loaded,
+	/// HTML handed over with `feed`, until `finish`.
+	rendered: Vec<(usize, String)>,
 }
 
 static STORE: Mutex<Option<HashMap<u64, Entry>>> = Mutex::new(None);
@@ -66,13 +68,52 @@ pub(crate) fn prepare(
 	let context = prepared.context_json().unwrap_or("null").to_owned();
 	let scripts = prepared.script_request_json().unwrap_or("null").to_owned();
 	let handle = NEXT.fetch_add(1, Ordering::SeqCst);
-	store()
-		.get_or_insert_with(HashMap::new)
-		.insert(handle, Entry { prepared, loaded });
+	store().get_or_insert_with(HashMap::new).insert(
+		handle,
+		Entry {
+			prepared,
+			loaded,
+			rendered: Vec::new(),
+		},
+	);
 	Ok(format!(
 		"{{\"handle\":\"{handle}\",\"jobs\":{},\"context\":{context},\"scripts\":{scripts}}}",
 		jobs.to_json()
 	))
+}
+
+/// Takes HTML that JavaScript rendered: frames of a little-endian `u32` page
+/// index, a `u32` byte length and that many bytes of UTF-8.
+///
+/// # Errors
+///
+/// An unknown handle, a frame that is cut short, or text that is not UTF-8.
+pub(crate) fn feed(handle: &str, mut bytes: &[u8]) -> Result<(), String> {
+	let id: u64 = handle
+		.parse()
+		.map_err(|_| format!("feed: {handle:?} is not a handle"))?;
+	// Decoded before the table is locked: the work is the copying.
+	let mut pages = Vec::new();
+	while !bytes.is_empty() {
+		let (head, rest) = bytes
+			.split_first_chunk::<8>()
+			.ok_or("feed: a frame is cut short")?;
+		let page = u32::from_le_bytes([head[0], head[1], head[2], head[3]]) as usize;
+		let len = u32::from_le_bytes([head[4], head[5], head[6], head[7]]) as usize;
+		if rest.len() < len {
+			return Err("feed: a frame is cut short".to_owned());
+		}
+		let (text, rest) = rest.split_at(len);
+		let html = String::from_utf8(text.to_vec()).map_err(|_| "feed: page is not UTF-8")?;
+		pages.push((page, html));
+		bytes = rest;
+	}
+	let mut store = store();
+	let Some(entry) = store.as_mut().and_then(|s| s.get_mut(&id)) else {
+		return Err(format!("feed: no prepared build for handle {handle}"));
+	};
+	entry.rendered.extend(pages);
+	Ok(())
 }
 
 /// Finishes a build with what JavaScript made, as JSON:
@@ -86,7 +127,7 @@ pub(crate) fn finish(handle: &str, results_json: &str) -> Result<String, String>
 	let id: u64 = handle
 		.parse()
 		.map_err(|_| format!("finish: {handle:?} is not a handle"))?;
-	let Some(entry) = store().as_mut().and_then(|s| s.remove(&id)) else {
+	let Some(mut entry) = store().as_mut().and_then(|s| s.remove(&id)) else {
 		return Err(format!("finish: no prepared build for handle {handle}"));
 	};
 	let value = kd_jsonc::parse(results_json).map_err(|e| format!("results: {e}"))?;
@@ -95,7 +136,9 @@ pub(crate) fn finish(handle: &str, results_json: &str) -> Result<String, String>
 		Some(Value::Array(items)) => items.as_slice(),
 		Some(_) => return Err("results: pages must be an array".to_owned()),
 	};
-	let mut rendered = Vec::with_capacity(items.len());
+	// What `feed` took, then what the JSON carries.
+	let mut rendered = std::mem::take(&mut entry.rendered);
+	rendered.reserve(items.len());
 	for item in items {
 		let pair = item.as_array().filter(|a| a.len() == 2);
 		let (page, html) = pair
@@ -208,6 +251,83 @@ mod tests {
 				.contains("no prepared build")
 		);
 		let _ = fs::remove_dir_all(&root);
+	}
+
+	fn frame(page: u32, html: &str) -> Vec<u8> {
+		let mut out = page.to_le_bytes().to_vec();
+		out.extend_from_slice(&(html.len() as u32).to_le_bytes());
+		out.extend_from_slice(html.as_bytes());
+		out
+	}
+
+	#[test]
+	fn html_fed_in_frames_is_what_finish_writes() {
+		let root = site("feed");
+		fs::write(
+			format!("{root}/src/a.tsx"),
+			"export default () => <p>a</p>;\n",
+		)
+		.unwrap();
+		fs::write(
+			format!("{root}/src/b.tsx"),
+			"export default () => <p>b</p>;\n",
+		)
+		.unwrap();
+		fs::write(
+			format!("{root}/kamado.config.jsonc"),
+			r#"{ "dir": { "input": "src", "output": "out" }, "build": { "cacheDir": ".cache" } }"#,
+		)
+		.unwrap();
+		let prepared = prepare(
+			&format!("{root}/kamado.config.jsonc"),
+			"{}",
+			"file:///runtime.js",
+		)
+		.unwrap();
+		let handle = kd_jsonc::parse(&prepared)
+			.unwrap()
+			.get("handle")
+			.and_then(|h| h.as_str())
+			.unwrap()
+			.to_owned();
+
+		// Two calls, as two workers would make them; the text is not ASCII.
+		feed(&handle, &frame(1, "<p>b é</p>")).unwrap();
+		feed(&handle, &frame(0, "<p>a</p>")).unwrap();
+
+		let report = finish(&handle, r#"{"scripts":[]}"#).unwrap();
+		assert!(report.contains("\"status\":\"built\""));
+		assert_eq!(
+			fs::read_to_string(format!("{root}/out/a.html")).unwrap(),
+			"<p>a</p>\n"
+		);
+		assert_eq!(
+			fs::read_to_string(format!("{root}/out/b.html")).unwrap(),
+			"<p>b é</p>\n"
+		);
+		let _ = fs::remove_dir_all(&root);
+	}
+
+	#[test]
+	fn frames_that_are_cut_short_or_not_text_are_refused() {
+		assert!(feed("x", &[]).unwrap_err().contains("not a handle"));
+		assert!(
+			feed("999999", &frame(0, "x"))
+				.unwrap_err()
+				.contains("no prepared build")
+		);
+		let mut cut = frame(0, "abc");
+		cut.truncate(10);
+		assert!(feed("999999", &cut).unwrap_err().contains("cut short"));
+		assert!(
+			feed("999999", &[1, 0, 0])
+				.unwrap_err()
+				.contains("cut short")
+		);
+		let mut bad = frame(0, "ab");
+		let last = bad.len() - 1;
+		bad[last] = 0xff;
+		assert!(feed("999999", &bad).unwrap_err().contains("not UTF-8"));
 	}
 
 	#[test]

@@ -28,6 +28,11 @@ export interface Native {
 	 * [{ id, code, inputs }, ...] }`; the result is a report.
 	 */
 	finish(handle: string, resultsJson: string): string;
+	/**
+	 * Hands over rendered HTML before `finish`, as frames of a little-endian
+	 * `u32` page index, a `u32` byte length and the UTF-8 bytes.
+	 */
+	feed(handle: string, frames: Buffer): void;
 	/** Forgets a prepared build that will not be finished. */
 	abort(handle: string): void;
 	/**

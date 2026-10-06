@@ -358,6 +358,43 @@ unsafe extern "C" fn serve_open(env: napi_env, info: napi_callback_info) -> napi
 	}
 }
 
+/// `feed(handle, buffer)`: HTML that JavaScript rendered, as frames of a
+/// little-endian `u32` page, a `u32` length and that many bytes of UTF-8. The
+/// pages are kept until `finish`; handing them over while the other workers
+/// still render takes the cost of moving them (and of JSON, which has to
+/// escape every quote and line break) out of the time after the last page.
+unsafe extern "C" fn feed(env: napi_env, info: napi_callback_info) -> napi_value {
+	let Some(api) = api() else {
+		return std::ptr::null_mut();
+	};
+	// SAFETY: env/info belong to this call.
+	let (argv, argc) = unsafe { args::<2>(api, env, info) };
+	if argc < 2 {
+		return unsafe { throw(api, env, c"feed: expected (handle, buffer)") };
+	}
+	// SAFETY: argv[0] is an argument handle valid for this call.
+	let Some(handle) = (unsafe { string_arg(api, env, argv[0]) }) else {
+		return unsafe { throw(api, env, c"feed: the handle must be a string") };
+	};
+	let mut data: *mut c_void = std::ptr::null_mut();
+	let mut len: usize = 0;
+	// SAFETY: argv[1] is a value handle valid for this call.
+	if unsafe { (api.get_buffer_info)(env, argv[1], &mut data, &mut len) } != NAPI_OK {
+		return unsafe { throw(api, env, c"feed: the second argument must be a Buffer") };
+	}
+	let bytes: &[u8] = if len == 0 {
+		&[]
+	} else {
+		// SAFETY: Node guarantees `data` points at `len` readable bytes while the
+		// Buffer handle is alive, which spans this call.
+		unsafe { std::slice::from_raw_parts(data.cast::<u8>(), len) }
+	};
+	match session::feed(&handle, bytes) {
+		Ok(()) => std::ptr::null_mut(),
+		Err(message) => unsafe { throw_message(api, env, message) },
+	}
+}
+
 /// `serveRequest(handle, urlPath, rendererStarted)` -> JSON answer
 /// (`rendererStarted` is `"1"` or `"0"`).
 unsafe extern "C" fn serve_request(env: napi_env, info: napi_callback_info) -> napi_value {
@@ -529,6 +566,7 @@ pub unsafe extern "C" fn napi_register_module_v1(env: napi_env, exports: napi_va
 		export(api, env, exports, c"sha256Hex", sha256_hex);
 		export(api, env, exports, c"build", build);
 		export(api, env, exports, c"prepare", prepare);
+		export(api, env, exports, c"feed", feed);
 		export(api, env, exports, c"finish", finish);
 		export(api, env, exports, c"abort", abort);
 		export(api, env, exports, c"serveOpen", serve_open);
