@@ -178,6 +178,7 @@ pub(crate) fn layout_module(
 			"{input}: meta.layout {name:?} must be a file name in {dir}, without a path"
 		));
 	}
+	let mut tried = Vec::new();
 	for ext in [".tsx", ".jsx"] {
 		let path = format!("{}/{name}{ext}", dir.trim_end_matches('/'));
 		if fs::metadata(&path).is_ok_and(|m| m.is_file()) {
@@ -191,8 +192,16 @@ pub(crate) fn layout_module(
 					"{path}: a layout must `export default` a component"
 				));
 			}
-			return Ok(Some((compiled.out_path.clone(), modules.closure(&path))));
+			let mut closure = modules.closure(&path);
+			// `.tsx` wins over `.jsx`: creating the one that lost changes the layout.
+			for earlier in tried {
+				closure
+					.entry(earlier)
+					.or_insert_with(kd_build::Dep::missing);
+			}
+			return Ok(Some((compiled.out_path.clone(), closure)));
 		}
+		tried.push(path);
 	}
 	Err(format!(
 		"{input}: layout {name:?} not found (looked for {dir}/{name}.tsx and .jsx)"
@@ -822,6 +831,36 @@ impl Prepared {
 			.asset_results
 			.into_inner()
 			.unwrap_or_else(|e| e.into_inner());
+		// A failure stops the build, but the pages that did finish have written
+		// their outputs. Their old manifest entries would claim the bytes that
+		// are no longer there: put the source back as it was and the entry
+		// matches again while the output still has the newer bytes. They are
+		// dropped from the manifest, so the next build writes them again.
+		let failed = results.iter().flatten().any(Result::is_err)
+			|| asset_results.iter().flatten().any(Result::is_err);
+		if failed {
+			if incremental {
+				let mut stale = on_disk;
+				for (result, _, _) in results.iter().flatten().flatten() {
+					if matches!(result.status, Status::Built | Status::Unchanged) {
+						stale.entries.remove(&result.output_path);
+					}
+				}
+				for (result, _) in asset_results.iter().flatten().flatten() {
+					if matches!(result.status, Status::Built | Status::Unchanged) {
+						stale.entries.remove(&result.output_path);
+					}
+				}
+				// Best effort: the build's own error is what the caller needs.
+				let _ = stale.save(&manifest_path);
+			}
+			let error = results
+				.into_iter()
+				.flatten()
+				.find_map(Result::err)
+				.or_else(|| asset_results.into_iter().flatten().find_map(Result::err));
+			return Err(error.expect("a failure was found above"));
+		}
 		let mut report = Report {
 			pages: Vec::with_capacity(page_count),
 			assets: Vec::with_capacity(asset_results.len()),

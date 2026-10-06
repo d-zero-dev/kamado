@@ -1577,6 +1577,19 @@ mod tests {
 		write("src/plain.html", "---\ntitle: Plain\n---\n<p>plain 2</p>\n");
 		assert_eq!(rebuild(), 0);
 		assert_eq!(site.read("out/plain.html"), "<p>plain 2</p>\n");
+
+		// An import resolved to `helper.ts`: a `helper.tsx` that appears later
+		// takes precedence, so the page that imports it is built again.
+		write("lib/helper.ts", "export const h: number = 1;\n");
+		write(
+			"src/index.tsx",
+			"import { Box } from './_lib/box';\nimport { h } from '../lib/helper';\nexport const meta = { title: 'Home', layout: 'main' } as const;\nexport default () => <Box n={h} />;\n",
+		);
+		assert_eq!(rebuild(), 1);
+		assert_eq!(rebuild(), 0);
+		write("lib/helper.tsx", "export const h: number = 2;\n");
+		assert_eq!(rebuild(), 1);
+		assert_eq!(rebuild(), 0);
 	}
 
 	#[test]
@@ -2391,6 +2404,40 @@ mod tests {
 				"<header>h</header>\n<img src=\"/s.svg\" width=\"8\" height=\"6\">\n"
 			);
 		}
+	}
+
+	#[test]
+	fn a_failed_build_does_not_leave_entries_for_the_outputs_it_rewrote() {
+		let site = Site::new("failed-finish");
+		let a = site.write("src/a.html", "<p>A1</p>");
+		let b = site.write("src/b.html", "<p>b</p>");
+		let loaded = site.config(r#", "html": { "onError": "error" }"#);
+		let opts = BuildOptions {
+			incremental: true,
+			jobs: Some(2),
+			..Default::default()
+		};
+		build(&loaded, &opts).unwrap();
+
+		// a.html changes to text of the same size, and b.html cannot be built.
+		std::thread::sleep(std::time::Duration::from_millis(20));
+		fs::write(&a, "<p>A2</p>").unwrap();
+		fs::write(&b, "<p title=\"&unknown;\">b</p>").unwrap();
+		assert!(build(&loaded, &opts).is_err());
+		assert_eq!(site.read("out/a.html"), "<p>A2</p>\n");
+
+		// Back to the text the manifest remembers: the output still has A2, so
+		// the page has to be built again rather than found up to date.
+		std::thread::sleep(std::time::Duration::from_millis(20));
+		fs::write(&a, "<p>A1</p>").unwrap();
+		fs::write(&b, "<p>b</p>").unwrap();
+		let report = build(&loaded, &opts).unwrap();
+		// b.html never got an output of the failed text, so its entry is right.
+		assert_eq!(
+			statuses(&report),
+			[("/a.html", "built"), ("/b.html", "cached")]
+		);
+		assert_eq!(site.read("out/a.html"), "<p>A1</p>\n");
 	}
 
 	#[test]

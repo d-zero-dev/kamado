@@ -30,6 +30,10 @@ pub(crate) struct Compiled {
 	pub dep: kd_build::Dep,
 	/// The local files this one imports (absolute source paths).
 	pub imports: Vec<String>,
+	/// Files that were looked for and not found before the ones imports
+	/// resolved to (`./card` found as `card.ts` was not `card.tsx`). Creating
+	/// one of them changes what the import means, so they are dependencies.
+	pub missing: Vec<String>,
 	pub has_default_export: bool,
 }
 
@@ -114,7 +118,13 @@ impl Modules {
 
 	/// The source file a specifier written in `from_dir` names, or `None`
 	/// for anything that is not a local file (npm packages, `node:`, URLs).
-	fn resolve(&self, from_dir: &str, specifier: &str) -> Result<Option<String>, String> {
+	///
+	/// The second value lists the candidates tried before the one found.
+	fn resolve(
+		&self,
+		from_dir: &str,
+		specifier: &str,
+	) -> Result<Option<(String, Vec<String>)>, String> {
 		let alias = self.alias.iter().find(|(prefix, _)| {
 			specifier == prefix
 				|| specifier
@@ -132,7 +142,7 @@ impl Modules {
 		};
 		let base = base.trim_end_matches('/').to_owned();
 		if is_file(&base) {
-			return Ok(Some(base));
+			return Ok(Some((base, Vec::new())));
 		}
 		// An extensionless import, and `./x.js` that means `x.ts`.
 		let stem = base
@@ -147,16 +157,17 @@ impl Modules {
 			candidates.extend([".tsx", ".ts", ".mts"].iter().map(|e| format!("{stem}{e}")));
 		}
 		candidates.extend(CODE_EXTENSIONS.iter().map(|e| format!("{base}/index{e}")));
-		candidates
-			.into_iter()
-			.find(|c| is_file(c))
-			.map(Some)
-			.ok_or_else(|| {
-				format!(
-					"cannot find {specifier:?} (looked for {base} and with the extensions {})",
-					CODE_EXTENSIONS.join(", ")
-				)
-			})
+		let mut missing = vec![base.clone()];
+		for candidate in candidates {
+			if is_file(&candidate) {
+				return Ok(Some((candidate, missing)));
+			}
+			missing.push(candidate);
+		}
+		Err(format!(
+			"cannot find {specifier:?} (looked for {base} and with the extensions {})",
+			CODE_EXTENSIONS.join(", ")
+		))
 	}
 
 	/// Compiles `src` and everything it imports; the entry's result.
@@ -233,6 +244,7 @@ impl Modules {
 				out_path,
 				dep,
 				imports: Vec::new(),
+				missing: Vec::new(),
 				has_default_export: true,
 			});
 		}
@@ -241,6 +253,7 @@ impl Modules {
 		let from_dir = kd_site::path::dirname(src);
 		let out_dir = kd_site::path::dirname(&out_path);
 		let imports: RefCell<Vec<String>> = RefCell::new(Vec::new());
+		let missing: RefCell<Vec<String>> = RefCell::new(Vec::new());
 		let errors: RefCell<Vec<String>> = RefCell::new(Vec::new());
 		let rewrite = |specifier: &str| -> Option<String> {
 			match self.resolve(&from_dir, specifier) {
@@ -249,7 +262,7 @@ impl Modules {
 					None
 				}
 				Ok(None) => None,
-				Ok(Some(path)) => {
+				Ok(Some((path, tried))) => {
 					if !CODE_EXTENSIONS.iter().any(|e| path.ends_with(e)) {
 						errors.borrow_mut().push(format!(
 							"{src}: {specifier:?} is not a TypeScript, JavaScript or JSON file; only those can be imported"
@@ -258,6 +271,7 @@ impl Modules {
 					}
 					let target = self.out_path_for(&path);
 					imports.borrow_mut().push(path);
+					missing.borrow_mut().extend(tried);
 					let rel = kd_site::path::relative(&out_dir, &target);
 					Some(if rel.starts_with('.') {
 						rel
@@ -294,6 +308,14 @@ impl Modules {
 			out_path,
 			dep,
 			imports,
+			missing: {
+				let mut seen = HashSet::new();
+				missing
+					.into_inner()
+					.into_iter()
+					.filter(|p| seen.insert(p.clone()))
+					.collect()
+			},
 			has_default_export: output.has_default_export,
 		})
 	}
@@ -337,6 +359,10 @@ impl Modules {
 			if let Some(compiled) = state.get(&path) {
 				out.insert(path, compiled.dep.clone());
 				stack.extend(compiled.imports.iter().cloned());
+				for candidate in &compiled.missing {
+					out.entry(candidate.clone())
+						.or_insert_with(kd_build::Dep::missing);
+				}
 			}
 		}
 		out
@@ -470,20 +496,32 @@ mod tests {
 			))
 			.is_ok()
 		);
-		// The closure lists the page and every file that was compiled for it.
-		let files: Vec<String> = m
-			.closure(&page)
-			.keys()
-			.map(|p| p.strip_prefix(&format!("{}/", dir.0)).unwrap().to_owned())
+		// The closure lists the page and every file that was compiled for it,
+		// and the candidates that were tried before the file an import resolved to
+		// (`./card` is `card.tsx`, so a file named `card` would have won).
+		let closure = m.closure(&page);
+		let existing: Vec<String> = closure
+			.iter()
+			.filter(|(_, dep)| **dep != kd_build::Dep::missing())
+			.map(|(p, _)| p.strip_prefix(&format!("{}/", dir.0)).unwrap().to_owned())
 			.collect();
 		assert_eq!(
-			files,
+			existing,
 			[
 				"src/a/index.tsx",
 				"src/components/card.tsx",
 				"src/data.json",
 				"src/lib/util.ts"
 			]
+		);
+		let absent: Vec<String> = closure
+			.iter()
+			.filter(|(_, dep)| **dep == kd_build::Dep::missing())
+			.map(|(p, _)| p.strip_prefix(&format!("{}/", dir.0)).unwrap().to_owned())
+			.collect();
+		assert_eq!(
+			absent,
+			["src/components/card", "src/lib/util", "src/lib/util.tsx"]
 		);
 	}
 
@@ -500,7 +538,12 @@ mod tests {
 		);
 		let m = modules(&dir);
 		m.compile(&a).unwrap();
-		assert_eq!(m.closure(&a).len(), 2);
+		let present = m
+			.closure(&a)
+			.values()
+			.filter(|dep| **dep != kd_build::Dep::missing())
+			.count();
+		assert_eq!(present, 2);
 	}
 
 	#[test]
