@@ -441,6 +441,21 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		.filter(|(_, f)| matches!(f, First::Compile))
 		.map(|(i, _)| i)
 		.collect();
+	// The planner read the source of the pages it did not take from its cache;
+	// the compiler gets that text instead of reading the files again. What is
+	// not compiled (up to date) is dropped: the plan keeps no source of a page.
+	for (page, first) in plan.pages.iter_mut().zip(&first) {
+		if page.kind != PageKind::Tsx {
+			continue;
+		}
+		let text = page.body.take();
+		if matches!(first, First::Compile)
+			&& let Some(text) = text
+			&& let Some(dep) = page.deps.get(&page.file.input_path)
+		{
+			modules.prefetch(&page.file.input_path, text, dep.clone());
+		}
+	}
 	let mut compiled = parallel::map(&to_compile, jobs, |&i| {
 		compile_page(config, &modules, &plan.pages[i])
 	})

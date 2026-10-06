@@ -47,26 +47,60 @@ pub(crate) struct Modules {
 	/// `pages.define`: names and the expressions that replace them.
 	define: Vec<(String, String)>,
 	state: Mutex<HashMap<String, Arc<Compiled>>>,
+	/// Sources that were read already, with their fingerprints, by path. A
+	/// module takes its entry out when it is compiled.
+	prefetched: Mutex<HashMap<String, (String, kd_build::Dep)>>,
 }
 
 fn is_file(path: &str) -> bool {
 	fs::metadata(path).is_ok_and(|m| m.is_file())
 }
 
+/// Writes `bytes` to `path` unless the file already has them.
+///
+/// Why `create_new` first: on a first build every module is new, and asking
+/// whether the file has these bytes (opening it to read) before creating it
+/// doubles the number of opens, which is what a file system with a slow
+/// `open` spends its time on. A file that exists is read and compared.
 fn write_if_changed(path: &str, bytes: &[u8]) -> Result<(), String> {
-	if fs::read(path).is_ok_and(|existing| existing == bytes) {
-		return Ok(());
-	}
-	if let Some(parent) = std::path::Path::new(path).parent() {
-		fs::create_dir_all(parent)
-			.map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
-	}
+	use std::io::{ErrorKind, Write};
 	// Modules are compiled on several threads, and two that share an import
 	// write the same file with the same bytes; that is harmless because nobody
 	// reads the files before the compile phase is over. A temporary file and a
 	// rename would make it atomic, and cost twice the directory operations:
 	// with tens of thousands of new files they are what the phase waits for.
-	fs::write(path, bytes).map_err(|e| format!("cannot write {path}: {e}"))
+	let create = || {
+		std::fs::OpenOptions::new()
+			.write(true)
+			.create_new(true)
+			.open(path)
+	};
+	let mut file = match create() {
+		Ok(file) => file,
+		Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+			if fs::read(path).is_ok_and(|existing| existing == bytes) {
+				return Ok(());
+			}
+			return fs::write(path, bytes).map_err(|e| format!("cannot write {path}: {e}"));
+		}
+		Err(e) if e.kind() == ErrorKind::NotFound => {
+			if let Some(parent) = std::path::Path::new(path).parent() {
+				fs::create_dir_all(parent)
+					.map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+			}
+			match create() {
+				Ok(file) => file,
+				// Another thread made it in the meantime.
+				Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+					return fs::write(path, bytes).map_err(|e| format!("cannot write {path}: {e}"));
+				}
+				Err(e) => return Err(format!("cannot write {path}: {e}")),
+			}
+		}
+		Err(e) => return Err(format!("cannot write {path}: {e}")),
+	};
+	file.write_all(bytes)
+		.map_err(|e| format!("cannot write {path}: {e}"))
 }
 
 impl Modules {
@@ -101,6 +135,7 @@ impl Modules {
 			alias,
 			define: define.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
 			state: Mutex::new(HashMap::new()),
+			prefetched: Mutex::new(HashMap::new()),
 		}
 	}
 
@@ -235,8 +270,16 @@ impl Modules {
 	}
 
 	fn compile_one(&self, src: &str) -> Result<Compiled, String> {
-		let (bytes, dep) =
-			kd_build::read_with_fingerprint(src).map_err(|e| format!("cannot read {src}: {e}"))?;
+		let prefetched = self
+			.prefetched
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.remove(src);
+		let (bytes, dep) = match prefetched {
+			Some((text, dep)) => (text.into_bytes(), dep),
+			None => kd_build::read_with_fingerprint(src)
+				.map_err(|e| format!("cannot read {src}: {e}"))?,
+		};
 		let out_path = self.out_path_for(src);
 		if src.ends_with(".json") {
 			write_if_changed(&out_path, &bytes)?;
@@ -318,6 +361,15 @@ impl Modules {
 			},
 			has_default_export: output.has_default_export,
 		})
+	}
+
+	/// Gives the compiler the text of `path` and its fingerprint, which the
+	/// caller read already: the file is not read again when it is compiled.
+	pub(crate) fn prefetch(&self, path: &str, text: String, dep: kd_build::Dep) {
+		self.prefetched
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.insert(path.to_owned(), (text, dep));
 	}
 
 	/// Forgets the compiled modules in the closure of `src` whose source has

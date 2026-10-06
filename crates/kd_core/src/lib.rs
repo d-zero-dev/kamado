@@ -162,7 +162,10 @@ fn read_page(
 				}
 				None => Vec::new(),
 			};
-			Ok((meta, None, dep))
+			// The source is kept for the compiler, which would read the file a
+			// second time (an open is the slowest thing a page costs on some
+			// file systems); `prepare` hands it over and drops it.
+			Ok((meta, Some(text), dep))
 		}
 	}
 }
