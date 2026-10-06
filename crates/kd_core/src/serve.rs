@@ -891,6 +891,7 @@ mod tests {
 		assert_eq!(serve.request("/img/").unwrap(), Served::NotFound);
 		// A backslash is not a separator of ours.
 		assert_eq!(
+			// cspell:disable-next-line
 			serve.request("/..%5C..%5Csecret.txt").unwrap(),
 			Served::NotFound
 		);

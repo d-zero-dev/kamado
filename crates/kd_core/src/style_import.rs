@@ -53,6 +53,9 @@ pub struct Bundle {
 	/// Which run of `css` came from where, in order; text the bundler added
 	/// (the at-rules that wrap a conditional import) is in no segment.
 	pub segments: Vec<Segment>,
+	/// Byte offset in `css` where a banner goes: after the leading `@charset`
+	/// and the `@layer` statements and imports hoisted to the top.
+	pub banner_at: usize,
 }
 
 /// An `@import` statement in the preamble of a file.
@@ -79,12 +82,15 @@ struct Context<'a> {
 	/// `(file, conditions)` pairs that were inlined already.
 	done: BTreeSet<(String, String)>,
 	/// Remote `@import`s in the order met; they go to the top of the bundle.
-	remote: Vec<Remote>,
+	remote: Vec<Statement>,
+	/// The `@charset` statements taken out of imported files.
+	charsets: Vec<String>,
 }
 
-/// A remote `@import` statement and where it was written.
-struct Remote {
-	statement: String,
+/// An at-rule statement (a remote `@import`, an `@layer` order) and where it
+/// was written.
+struct Statement {
+	text: String,
 	file: usize,
 	src: usize,
 }
@@ -94,6 +100,9 @@ struct Remote {
 struct Piece {
 	text: String,
 	segments: Vec<Segment>,
+	/// Where a banner goes (meaningful for the entry): after the `@charset`
+	/// and what was hoisted to the top.
+	banner_at: usize,
 }
 
 /// Inlines the imports of `entry`.
@@ -117,14 +126,17 @@ pub fn bundle(entry: &str, alias: &[(String, String)]) -> Result<Bundle, String>
 		stack: Vec::new(),
 		done: BTreeSet::new(),
 		remote: Vec::new(),
+		charsets: Vec::new(),
 	};
 	let mut piece = inline_file(&mut ctx, entry, true)?;
+	hoist_charset(&mut piece, &ctx.charsets)?;
 	hoist_remote(&mut piece, &ctx.remote);
 	Ok(Bundle {
 		css: piece.text,
 		deps: ctx.deps,
 		files: ctx.files,
 		segments: piece.segments,
+		banner_at: piece.banner_at,
 	})
 }
 
@@ -163,7 +175,18 @@ fn inline_text(
 	text: &str,
 	is_entry: bool,
 ) -> Result<Piece, String> {
-	let imports = scan_imports(text);
+	let (imports, layers) = scan_preamble(text);
+	// `@layer a, b;` statements after the first import move in front of the
+	// imported content, as postcss-import does: the order they declare must
+	// come before the layers that the imports create.
+	let mut events: Vec<(usize, usize, Option<&Import>)> = imports
+		.iter()
+		.map(|i| (i.start, i.end, Some(i)))
+		.chain(layers.iter().map(|&(s, e)| (s, e, None)))
+		.collect();
+	events.sort_by_key(|e| e.0);
+	let mut hoisted_layers: Vec<Statement> = Vec::new();
+	let mut seen_import = false;
 	let mut out = String::with_capacity(text.len());
 	let mut segments = Vec::new();
 	let copy = |out: &mut String, segments: &mut Vec<Segment>, from: usize, to: usize| {
@@ -178,18 +201,33 @@ fn inline_text(
 		}
 	};
 	let mut last = 0;
-	for import in &imports {
+	for &(start, end, import) in &events {
+		let Some(import) = import else {
+			if seen_import {
+				copy(&mut out, &mut segments, last, start);
+				last = end;
+				let after = &text[end..];
+				last += after.len() - after.trim_start_matches(['\n', '\r']).len();
+				hoisted_layers.push(Statement {
+					text: text[start..end].trim().to_owned(),
+					file: index,
+					src: start,
+				});
+			}
+			continue;
+		};
+		seen_import = true;
 		copy(&mut out, &mut segments, last, import.start);
 		last = import.end;
 		if is_remote(&import.uri) {
 			// An `@import` after a rule is ignored by the browser, so a remote
 			// one met in an inlined file would stop working: it is hoisted.
 			let statement = text[import.start..import.end].trim().to_owned();
-			if !ctx.remote.iter().any(|r| r.statement == statement) {
+			if !ctx.remote.iter().any(|r| r.text == statement) {
 				let lead = text[import.start..import.end].len()
 					- text[import.start..import.end].trim_start().len();
-				ctx.remote.push(Remote {
-					statement,
+				ctx.remote.push(Statement {
+					text: statement,
 					file: index,
 					src: import.start + lead,
 				});
@@ -228,12 +266,19 @@ fn inline_text(
 		out.push_str(&wrapped);
 	}
 	copy(&mut out, &mut segments, last, text.len());
-	if !is_entry {
-		strip_charset(&mut out, &mut segments);
+	// The banner is the first thing in the entry in v2, so what is hoisted to
+	// the top of the entry goes in front of it.
+	let mut banner_at = charset_range(&out).map_or(0, |(_, to)| to);
+	if !hoisted_layers.is_empty() {
+		banner_at += insert_statements(&mut out, &mut segments, banner_at, &hoisted_layers);
+	}
+	if !is_entry && let Some(charset) = strip_charset(&mut out, &mut segments) {
+		ctx.charsets.push(charset);
 	}
 	Ok(Piece {
 		text: out,
 		segments,
+		banner_at,
 	})
 }
 
@@ -268,12 +313,43 @@ fn wrap(import: &Import, content: &str) -> (String, usize, usize) {
 	(text, prefix.len(), kept.len())
 }
 
-/// A `@charset` of an imported file is dropped: only the entry's counts. The
+/// A `@charset` of an imported file is taken out (the first one found is put
+/// back on top of the bundle when the entry has none) and returned. The
 /// segments follow the text.
-fn strip_charset(text: &mut String, segments: &mut Vec<Segment>) {
-	if let Some((from, to)) = charset_range(text) {
-		splice(text, segments, from, to, "");
+fn strip_charset(text: &mut String, segments: &mut Vec<Segment>) -> Option<String> {
+	let (from, to) = charset_range(text)?;
+	let statement = text[from..to].trim().to_owned();
+	splice(text, segments, from, to, "");
+	Some(statement)
+}
+
+/// Gives the bundle one `@charset` on top: the entry's, else the first of the
+/// imported files. Like postcss-import, differing ones are an error.
+fn hoist_charset(piece: &mut Piece, charsets: &[String]) -> Result<(), String> {
+	let own = charset_range(&piece.text).map(|(from, to)| piece.text[from..to].trim().to_owned());
+	let first = own.as_ref().or(charsets.first());
+	let Some(first) = first else {
+		return Ok(());
+	};
+	let value = |s: &str| {
+		s.to_ascii_lowercase()
+			.split_whitespace()
+			.collect::<String>()
+	};
+	let expected = value(first);
+	if own
+		.iter()
+		.chain(charsets)
+		.any(|other| value(other) != expected)
+	{
+		return Err("Incompatible @charset statements in the imported stylesheets".to_owned());
 	}
+	if own.is_none() {
+		let block = format!("{first}\n");
+		splice(&mut piece.text, &mut piece.segments, 0, 0, &block);
+		piece.banner_at += block.len();
+	}
+	Ok(())
 }
 
 /// The range of a leading `@charset` rule with the white space after it.
@@ -294,27 +370,38 @@ fn charset_range(text: &str) -> Option<(usize, usize)> {
 }
 
 /// Puts the remote imports first, after a `@charset`.
-fn hoist_remote(piece: &mut Piece, remote: &[Remote]) {
+fn hoist_remote(piece: &mut Piece, remote: &[Statement]) {
 	if remote.is_empty() {
 		return;
 	}
 	let at = charset_range(&piece.text).map_or(0, |(_, to)| to);
+	piece.banner_at += insert_statements(&mut piece.text, &mut piece.segments, at, remote);
+}
+
+/// Writes `statements`, one per line, at `at`; each is a run of its file like
+/// any other, in order. Returns the number of bytes written.
+fn insert_statements(
+	text: &mut String,
+	segments: &mut Vec<Segment>,
+	at: usize,
+	statements: &[Statement],
+) -> usize {
 	let mut block = String::new();
-	let mut hoisted = Vec::with_capacity(remote.len());
-	for r in remote {
-		hoisted.push(Segment {
+	let mut added = Vec::with_capacity(statements.len());
+	for s in statements {
+		added.push(Segment {
 			out: at + block.len(),
-			len: r.statement.len(),
-			file: r.file,
-			src: r.src,
+			len: s.text.len(),
+			file: s.file,
+			src: s.src,
 		});
-		block.push_str(&r.statement);
+		block.push_str(&s.text);
 		block.push('\n');
 	}
-	splice(&mut piece.text, &mut piece.segments, at, at, &block);
-	// The statements are runs of their files like any other, in order.
-	let position = piece.segments.partition_point(|s| s.out < at + block.len());
-	piece.segments.splice(position..position, hoisted);
+	splice(text, segments, at, at, &block);
+	let position = segments.partition_point(|s| s.out < at + block.len());
+	segments.splice(position..position, added);
+	block.len()
 }
 
 /// Replaces `from..to` of `text` with `with` and moves the segments along:
@@ -443,10 +530,11 @@ fn probe_package(ctx: &mut Context<'_>, path: &str) -> Option<String> {
 	probe_file(ctx, &main)
 }
 
-/// The imports of the preamble of a stylesheet.
-fn scan_imports(text: &str) -> Vec<Import> {
+/// The imports of the preamble of a stylesheet and the byte ranges of its `@layer` statements.
+fn scan_preamble(text: &str) -> (Vec<Import>, Vec<(usize, usize)>) {
 	let bytes = text.as_bytes();
 	let mut imports = Vec::new();
+	let mut layers = Vec::new();
 	let mut i = 0;
 	while i < bytes.len() {
 		match bytes[i] {
@@ -467,7 +555,11 @@ fn scan_imports(text: &str) -> Vec<Import> {
 					break;
 				};
 				match (name.as_str(), terminator) {
-					("charset", b';') | ("layer", b';') => i = prelude_end + 1,
+					("charset", b';') => i = prelude_end + 1,
+					("layer", b';') => {
+						layers.push((i, prelude_end + 1));
+						i = prelude_end + 1;
+					}
 					("import", b';') => {
 						if let Some(import) =
 							parse_import(i, prelude_end + 1, &text[name_end..prelude_end])
@@ -482,7 +574,7 @@ fn scan_imports(text: &str) -> Vec<Import> {
 			_ => break,
 		}
 	}
-	imports
+	(imports, layers)
 }
 
 /// The `;` or `{` that ends the prelude starting at `from`, outside strings,
@@ -677,7 +769,8 @@ mod tests {
 	#[test]
 	fn the_preamble_is_scanned_up_to_the_first_rule() {
 		let text = "@charset \"utf-8\";\n/* c */ @import 'a.css';\n@layer x, y;\n@import url(b.css) screen;\na { color: red }\n@import 'late.css';";
-		let uris: Vec<(String, Option<String>)> = scan_imports(text)
+		let uris: Vec<(String, Option<String>)> = scan_preamble(text)
+			.0
 			.into_iter()
 			.map(|i| (i.uri, i.media))
 			.collect();
@@ -892,10 +985,61 @@ mod tests {
 		// 2 bytes) and the line break the bundler puts after each imported
 		// file (it drops the trailing white space of the file first).
 		let covered: usize = bundle.segments.iter().map(|s| s.len).sum();
-		// The line break after the hoisted remote import is one more.
-		assert_eq!(bundle.css.len() - covered, 16 + 2 + 1 + 1 + 1);
+		// The line break after the hoisted remote import is one more, and the
+		// `@charset` of `a.css` (17 bytes and a line break) is put on top.
+		assert_eq!(bundle.css.len() - covered, 16 + 2 + 1 + 1 + 1 + 18);
 		assert!(bundle.segments.iter().any(|s| s.file == 1));
 		assert!(bundle.segments.iter().any(|s| s.file == 2));
+	}
+
+	#[test]
+	fn a_layer_order_after_the_imports_goes_in_front_of_the_imported_layers() {
+		let dir = Dir::new("layer-order");
+		dir.write("a.css", "a{b:c}\n");
+		dir.write("b.css", "b{b:c}\n");
+		dir.write(
+			"main.css",
+			"@import 'a.css' layer(one);\n@import 'b.css' layer(two);\n@layer two, one;\nx{y:z}\n",
+		);
+		assert_eq!(
+			css(&dir, "main.css", &[]),
+			"@layer two, one;\n@layer one {\na{b:c}\n}\n\n@layer two {\nb{b:c}\n}\n\nx{y:z}\n"
+		);
+	}
+
+	#[test]
+	fn a_layer_order_after_a_rule_stays_where_it_is() {
+		let dir = Dir::new("layer-late");
+		dir.write("a.css", "a{b:c}\n");
+		dir.write("main.css", "@import 'a.css';\nx{y:z}\n@layer one, two;\n");
+		assert_eq!(
+			css(&dir, "main.css", &[]),
+			"a{b:c}\n\nx{y:z}\n@layer one, two;\n"
+		);
+	}
+
+	#[test]
+	fn the_charset_of_an_imported_file_goes_on_top_when_the_entry_has_none() {
+		let dir = Dir::new("charset-up");
+		dir.write("a.css", "a{b:c}\n");
+		dir.write("c.css", "@charset \"UTF-8\";\nc{d:e}\n");
+		dir.write("main.css", "@import 'a.css';\n@import 'c.css';\nx{y:z}\n");
+		assert_eq!(
+			css(&dir, "main.css", &[]),
+			"@charset \"UTF-8\";\na{b:c}\n\nc{d:e}\n\nx{y:z}\n"
+		);
+	}
+
+	#[test]
+	fn charsets_that_differ_are_an_error() {
+		let dir = Dir::new("charset-clash");
+		dir.write("c.css", "@charset \"UTF-8\";\nc{d:e}\n");
+		let entry = dir.write("main.css", "@charset \"ascii\";\n@import 'c.css';\n");
+		assert!(
+			bundle(&entry, &[])
+				.unwrap_err()
+				.contains("Incompatible @charset")
+		);
 	}
 
 	#[test]

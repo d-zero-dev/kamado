@@ -89,7 +89,8 @@ pub fn build(input: &str, output: &str, settings: &StyleSettings) -> Result<Buil
 		Some(banner) if !banner.is_empty() => format!("{banner}\n"),
 		_ => String::new(),
 	};
-	let source = format!("{prefix}{}", bundle.css);
+	let (head, tail) = bundle.css.split_at(bundle.banner_at);
+	let source = format!("{head}{prefix}{tail}");
 	let (mut css, marks) = if settings.minify {
 		if settings.sourcemap {
 			kd_css::minify_with_marks(&source).map_err(|e| format!("{input}: {e}"))?
@@ -140,8 +141,12 @@ fn map_of(
 	let points: Vec<Point> = marks
 		.iter()
 		.filter_map(|m| {
-			// The banner is in no file.
-			let at = m.src.checked_sub(prefix)?;
+			// The banner is in no file; it sits at `banner_at` of the bundle.
+			let at = if m.src < bundle.banner_at {
+				m.src
+			} else {
+				(m.src - bundle.banner_at).checked_sub(prefix)? + bundle.banner_at
+			};
 			let i = bundle
 				.segments
 				.partition_point(|s| s.out <= at)
@@ -211,6 +216,29 @@ mod tests {
 		);
 		assert!(built.deps.contains_key(&format!("{}/base.css", dir.0)));
 		assert!(built.deps.contains_key(&main));
+	}
+
+	#[test]
+	fn the_charset_and_the_layer_order_hoisted_to_the_top_stay_in_front_of_the_banner() {
+		let dir = Dir::new("hoisted");
+		dir.write("base.css", "a { color : white }\n");
+		let main = dir.write(
+			"main.css",
+			"@import 'base.css' layer(one);\n@layer two, one;\nb { margin : 0px 0px }\n",
+		);
+		let settings = StyleSettings {
+			alias: Vec::new(),
+			banner: Some("/*! v */".to_owned()),
+			minify: true,
+			sourcemap: false,
+		};
+
+		let built = build(&main, &format!("{}/out/main.css", dir.0), &settings).unwrap();
+
+		assert_eq!(
+			built.css,
+			"@layer two, one;/*! v */@layer one{a{color:#fff}}b{margin:0}"
+		);
 	}
 
 	#[test]
