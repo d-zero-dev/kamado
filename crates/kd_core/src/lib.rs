@@ -2370,6 +2370,40 @@ mod tests {
 		);
 	}
 
+	/// What v2 refused is still refused, end to end: a page cannot make the
+	/// build read a file outside the output directory (includes, image sizes),
+	/// write outside it (`outputPathField`), or turn a dangerous address into one.
+	#[test]
+	fn a_page_cannot_make_the_build_read_or_write_outside_its_directories() {
+		let site = Site::new("security");
+		site.write("secret.txt", "SECRET-MARKER");
+		site.write("secret.svg", "<svg width=\"9\" height=\"9\"></svg>");
+		site.write(
+			"src/a.html",
+			"<!--#include virtual=\"../secret.txt\" --><!--#include virtual=\"/../secret.txt\" --><img src=\"../secret.svg\"><img src=\"/../secret.svg\"><img src=\"//example.com/x.svg\"><img src=\"data:image/svg+xml,<svg/>\">",
+		);
+		site.write(
+			"src/b.html",
+			"---\nout: ../../escaped.html\n---\n<p>b</p>\n",
+		);
+		let loaded = site.config_raw(
+			r#"{ "dir": { "input": "src", "output": "out" }, "pages": { "outputPathField": "out" }, "html": { "includes": [ { "preset": "ssi" } ], "onError": "silent" } }"#,
+		);
+
+		let err = build(&loaded, &BuildOptions::default()).unwrap_err();
+		assert!(err.contains("out"), "{err}");
+		assert!(!std::path::Path::new(&format!("{}/../escaped.html", site.root)).exists());
+		assert!(!std::path::Path::new(&format!("{}/escaped.html", site.root)).exists());
+
+		// Without the page that asks to be written outside, the rest builds,
+		// and nothing of what it asked to read is in the output.
+		fs::remove_file(format!("{}/src/b.html", site.root)).unwrap();
+		build(&loaded, &BuildOptions::default()).unwrap();
+		let html = site.read("out/a.html");
+		assert!(!html.contains("SECRET-MARKER"), "{html}");
+		assert!(!html.contains("width=\"9\""), "{html}");
+	}
+
 	#[test]
 	fn many_pages_sharing_an_include_and_an_image_build_the_same_on_every_thread_count() {
 		let site = Site::new("shared");
