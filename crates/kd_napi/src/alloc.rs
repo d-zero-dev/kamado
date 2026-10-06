@@ -21,6 +21,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::UnsafeCell;
 use std::ptr::null_mut;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The size classes, in bytes (every one a multiple of 16).
 const CLASSES: [usize; 12] = [16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024];
@@ -41,6 +42,139 @@ struct Cache {
 	free: [*mut u8; CLASSES.len()],
 	bump: [*mut u8; CLASSES.len()],
 	end: [*mut u8; CLASSES.len()],
+	/// [`Guard`] was created for this thread.
+	registered: bool,
+}
+
+/// Its destructor runs when the thread ends and releases the thread's cache.
+///
+/// Why not a destructor on `Cache`: a thread-local with a destructor registers
+/// it on first use, and registering may allocate, which would re-enter the
+/// allocator while the cache is still being initialised. The cache has none;
+/// the guard is created on the first allocation and `registered` stops the
+/// allocation inside its own registration from creating it again.
+struct Guard;
+
+impl Drop for Guard {
+	fn drop(&mut self) {
+		let _ = CACHE.try_with(|cache| {
+			// SAFETY: the cache belongs to this thread; no other reference lives.
+			unsafe { (*cache.get()).release() }
+		});
+	}
+}
+
+thread_local! {
+	static GUARD: Guard = const { Guard };
+}
+
+/// Free lists of threads that ended, one per class.
+///
+/// Why: a build spawns scoped threads per phase and a dev server builds again
+/// and again; without this, everything a finished thread had on its free lists
+/// and in the rest of its chunks was out of reach for ever and the process
+/// grew with every build. A thread that needs a block and has none adopts one
+/// list from here.
+///
+/// A stack of *units*, each the whole free list of one ended thread: the head
+/// block of a unit holds the next unit in its second word. A thread takes one
+/// unit, not everything, or one new thread would take what all the threads
+/// that ended hold while the others allocate fresh chunks and the process
+/// still grows.
+///
+/// A spin lock rather than a `Mutex`: std's mutex boxes itself on first use on
+/// some platforms, which allocates, and this is the allocator. Pushing and
+/// taking a unit is a few instructions and happens once per exhausted chunk
+/// or per ended thread, so the lock is held very briefly and rarely contended.
+/// (A lock-free stack would need a pop that reads a block's link while another
+/// thread may have taken the block: the ABA problem.)
+struct Orphans {
+	locked: AtomicBool,
+	head: UnsafeCell<*mut u8>,
+}
+
+// SAFETY: `head` is only touched while `locked` is held.
+unsafe impl Sync for Orphans {}
+
+impl Orphans {
+	const fn new() -> Orphans {
+		Orphans {
+			locked: AtomicBool::new(false),
+			head: UnsafeCell::new(null_mut()),
+		}
+	}
+
+	fn lock(&self) {
+		while self
+			.locked
+			.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+			.is_err()
+		{
+			std::hint::spin_loop();
+		}
+	}
+
+	fn unlock(&self) {
+		self.locked.store(false, Ordering::Release);
+	}
+
+	/// Adds the list starting at `unit`.
+	///
+	/// # Safety
+	///
+	/// `unit` is the head of a whole, unused free list of one class, and a
+	/// block of at least 16 bytes.
+	unsafe fn push(&self, unit: *mut u8) {
+		self.lock();
+		// SAFETY: the lock is held; the second word of the head is free to use.
+		unsafe {
+			*unit.cast::<*mut u8>().add(1) = *self.head.get();
+			*self.head.get() = unit;
+		}
+		self.unlock();
+	}
+
+	/// Removes one unit, or null.
+	fn pop(&self) -> *mut u8 {
+		self.lock();
+		// SAFETY: the lock is held; a unit's head links the next unit.
+		let unit = unsafe {
+			let unit = *self.head.get();
+			if !unit.is_null() {
+				*self.head.get() = *unit.cast::<*mut u8>().add(1);
+			}
+			unit
+		};
+		self.unlock();
+		unit
+	}
+}
+
+static ORPHANS: [Orphans; CLASSES.len()] = [const { Orphans::new() }; CLASSES.len()];
+
+impl Cache {
+	/// Hands everything this thread holds to [`ORPHANS`].
+	fn release(&mut self) {
+		for class in 0..CLASSES.len() {
+			let size = CLASSES[class];
+			// The unused rest of the chunk becomes blocks of the free list.
+			while (self.end[class] as usize) - (self.bump[class] as usize) >= size {
+				let block = self.bump[class];
+				// SAFETY: `size` bytes remain before `end`, and the block is unused.
+				unsafe {
+					self.bump[class] = block.add(size);
+					self.give(class, block);
+				}
+			}
+			let head = self.free[class];
+			if head.is_null() {
+				continue;
+			}
+			// SAFETY: the head is a whole block of this class, unused.
+			unsafe { ORPHANS[class].push(head) };
+			self.free[class] = null_mut();
+		}
+	}
 }
 
 thread_local! {
@@ -49,6 +183,7 @@ thread_local! {
 			free: [null_mut(); CLASSES.len()],
 			bump: [null_mut(); CLASSES.len()],
 			end: [null_mut(); CLASSES.len()],
+			registered: false,
 		})
 	};
 }
@@ -72,6 +207,13 @@ impl Cache {
 		}
 		let size = CLASSES[class];
 		if (self.end[class] as usize) - (self.bump[class] as usize) < size {
+			// Blocks of threads that ended come before a new chunk.
+			let unit = ORPHANS[class].pop();
+			if !unit.is_null() {
+				// SAFETY: a unit is the free list of a thread that ended.
+				self.free[class] = unsafe { *unit.cast::<*mut u8>() };
+				return unit;
+			}
 			// SAFETY: a non-zero size and a power-of-two alignment.
 			let chunk = unsafe { System.alloc(Layout::from_size_align_unchecked(CHUNK, ALIGN)) };
 			if chunk.is_null() {
@@ -113,8 +255,16 @@ unsafe impl GlobalAlloc for PoolAlloc {
 		}
 		let class = class_of(layout.size().max(1));
 		let from_cache = CACHE.try_with(|cache| {
-			// SAFETY: the cache belongs to this thread; no other reference lives.
-			unsafe { (*cache.get()).take(class) }
+			let cache = cache.get();
+			// SAFETY: the cache belongs to this thread. Only raw access is held
+			// across the registration, which may allocate and come back here.
+			unsafe {
+				if !(*cache).registered {
+					(*cache).registered = true;
+					let _ = GUARD.try_with(|_| ());
+				}
+				(*cache).take(class)
+			}
 		});
 		match from_cache {
 			Ok(block) => block,

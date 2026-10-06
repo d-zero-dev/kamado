@@ -181,11 +181,20 @@ impl Modules {
 		let mut queue = vec![src.to_owned()];
 		let mut visited: HashSet<String> = HashSet::new();
 		let mut entry: Option<Arc<Compiled>> = None;
+		// Why modules are published only when the walk is over: a module in the
+		// shared table is trusted to have its imports in it too. Publishing one
+		// before its imports are compiled lets another thread take it from the
+		// table and see an incomplete closure, so a page would miss a
+		// dependency and stay stale after the dependency changes.
+		let mut fresh: HashMap<String, Arc<Compiled>> = HashMap::new();
 		while let Some(next) = queue.pop() {
 			if !visited.insert(next.clone()) {
 				continue;
 			}
-			let cached = self.lock().get(&next).cloned();
+			let cached = match fresh.get(&next) {
+				Some(done) => Some(done.clone()),
+				None => self.lock().get(&next).cloned(),
+			};
 			let compiled = match cached {
 				Some(done) => {
 					if through_cached {
@@ -195,7 +204,7 @@ impl Modules {
 				}
 				None => {
 					let compiled = Arc::new(self.compile_one(&next)?);
-					self.lock().insert(next.clone(), Arc::clone(&compiled));
+					fresh.insert(next.clone(), Arc::clone(&compiled));
 					queue.extend(compiled.imports.iter().cloned());
 					compiled
 				}
@@ -203,6 +212,9 @@ impl Modules {
 			if entry.is_none() {
 				entry = Some(compiled);
 			}
+		}
+		if !fresh.is_empty() {
+			self.lock().extend(fresh);
 		}
 		Ok(entry.expect("the entry was compiled or cached"))
 	}
@@ -371,6 +383,45 @@ mod tests {
 			&BTreeMap::from([("@".to_owned(), format!("{}/src/lib", dir.0))]),
 			&BTreeMap::new(),
 		)
+	}
+
+	#[test]
+	fn threads_compiling_a_shared_chain_all_see_the_whole_closure() {
+		let dir = Dir::new("shared-chain");
+		let depth = 30;
+		for i in 0..depth {
+			let next = if i + 1 < depth {
+				format!("import {{ f{} }} from './m{}';\n", i + 1, i + 1)
+			} else {
+				String::new()
+			};
+			dir.write(
+				&format!("src/m{i}.ts"),
+				&format!("{next}export const f{i} = {i};\n"),
+			);
+		}
+		let pages: Vec<String> = (0..16)
+			.map(|p| {
+				dir.write(
+					&format!("src/p{p}.tsx"),
+					"import { f0 } from './m0';\nexport default () => <p>{f0}</p>;\n",
+				)
+			})
+			.collect();
+		let m = modules(&dir);
+		let last = format!("{}/src/m{}.ts", dir.0, depth - 1);
+		std::thread::scope(|scope| {
+			for page in &pages {
+				let (m, last) = (&m, &last);
+				scope.spawn(move || {
+					m.compile(page).unwrap();
+					assert!(
+						m.closure(page).contains_key(last),
+						"the deepest module is in the closure of {page}"
+					);
+				});
+			}
+		});
 	}
 
 	#[test]

@@ -64,10 +64,16 @@ pub fn load(config_path: &str) -> Result<Loaded, String> {
 	let package_json = fs::read_to_string(format!("{root_dir}/package.json")).ok();
 	let config = kd_config::parse(&text, &root_dir, package_json.as_deref())
 		.map_err(|e| format!("{config_path}: {e}"))?;
+	// The resolved `site` is hashed with the text: `site.*` falls back to
+	// package.json, so editing it there changes the output without the config
+	// text changing. Other package.json fields (dependencies) do not reach the
+	// output and must not rebuild everything.
+	let mut hashed = text.into_bytes();
+	hashed.extend_from_slice(format!("\0{:?}", config.site).as_bytes());
 	Ok(Loaded {
 		config,
 		config_path,
-		config_hash: kd_hash::to_hex(&kd_hash::sha256(text.as_bytes())),
+		config_hash: kd_hash::to_hex(&kd_hash::sha256(&hashed)),
 	})
 }
 
@@ -869,6 +875,19 @@ mod tests {
 		assert_eq!(loaded.config.dir.input, format!("{}/src", site.root));
 		assert_eq!(loaded.config.site.host.as_deref(), Some("example.com"));
 		assert_eq!(loaded.config_hash.len(), 64);
+
+		// The host comes from package.json, so it is part of the digest; the
+		// fields that never reach the output are not.
+		site.write(
+			"package.json",
+			r#"{ "name": "s", "production": { "host": "example.com" }, "dependencies": {} }"#,
+		);
+		assert_eq!(site.config("").config_hash, loaded.config_hash);
+		site.write(
+			"package.json",
+			r#"{ "name": "s", "production": { "host": "other.test" } }"#,
+		);
+		assert_ne!(site.config("").config_hash, loaded.config_hash);
 		assert!(
 			load(&format!("{}/missing.jsonc", site.root))
 				.unwrap_err()
