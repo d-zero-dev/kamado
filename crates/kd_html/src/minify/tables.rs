@@ -392,16 +392,43 @@ fn in_ranges(ranges: &[(u32, u32)], c: u32) -> bool {
 /// `[letter_]`: where an NCName may start.
 #[must_use]
 pub fn is_name_start(c: char) -> bool {
-	c == '_' || in_ranges(&LETTER, c as u32)
+	// ASCII is nearly all of it: skip the search through the ranges.
+	if c.is_ascii() {
+		return c.is_ascii_alphabetic() || c == '_';
+	}
+	in_ranges(&LETTER, c as u32)
 }
 
 /// The rest of an NCName: letters, digits, `.`, `-`, `_`, combining marks, extenders.
 #[must_use]
 pub fn is_name_char(c: char) -> bool {
+	if c.is_ascii() {
+		return c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_');
+	}
 	let cp = c as u32;
 	matches!(c, '.' | '-' | '_')
 		|| in_ranges(&LETTER, cp)
 		|| in_ranges(&DIGIT, cp)
 		|| in_ranges(&COMBINING_CHAR, cp)
 		|| in_ranges(&EXTENDER, cp)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn the_ascii_shortcuts_agree_with_the_tables() {
+		for cp in 0u32..128 {
+			let c = char::from_u32(cp).unwrap();
+			let start = c == '_' || in_ranges(&LETTER, cp);
+			let name = matches!(c, '.' | '-' | '_')
+				|| in_ranges(&LETTER, cp)
+				|| in_ranges(&DIGIT, cp)
+				|| in_ranges(&COMBINING_CHAR, cp)
+				|| in_ranges(&EXTENDER, cp);
+			assert_eq!(is_name_start(c), start, "start {c:?}");
+			assert_eq!(is_name_char(c), name, "char {c:?}");
+		}
+	}
 }

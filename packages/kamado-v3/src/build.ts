@@ -78,6 +78,16 @@ export async function build(
 	options: BuildOptions = {},
 ): Promise<BuildReport> {
 	const core = native();
+	const timing = process.env['KAMADO_TIMING'] === '1';
+	const started = performance.now();
+	const lap = (what: string) => {
+		if (timing) {
+			// eslint-disable-next-line no-console
+			console.error(
+				`  ${what}: ${Math.round(performance.now() - started)}ms (since start)`,
+			);
+		}
+	};
 	const prepared = JSON.parse(
 		core.prepare(
 			configPath,
@@ -91,6 +101,7 @@ export async function build(
 			RUNTIME_URL,
 		),
 	) as Prepared;
+	lap(`prepared (${prepared.jobs.length} jobs)`);
 	try {
 		// Pages render in worker threads while esbuild bundles the scripts.
 		const [pages, scripts] = await Promise.all([
@@ -102,9 +113,12 @@ export async function build(
 				: [],
 			prepared.scripts ? buildScripts(prepared.scripts) : [],
 		]);
-		return JSON.parse(
-			core.finish(prepared.handle, JSON.stringify({ pages, scripts })),
-		) as BuildReport;
+		lap('rendered');
+		const results = JSON.stringify({ pages, scripts });
+		lap('serialized');
+		const report = JSON.parse(core.finish(prepared.handle, results)) as BuildReport;
+		lap('finished');
+		return report;
 	} catch (error) {
 		core.abort(prepared.handle);
 		throw error;

@@ -22,11 +22,12 @@ use crate::banner::{self, LocalTime};
 use crate::html;
 use crate::jsx::Modules;
 use crate::minifiers::Minifiers;
+use crate::parallel;
 use crate::sitemap;
 use crate::style::{self, StyleSettings};
 use crate::{
 	AssetResult, BuildOptions, Loaded, Page, PageKind, PageResult, Plan, Report, Status,
-	compile_globs, plan, write_output,
+	compile_globs, write_output,
 };
 
 /// What esbuild produced for one script: the bundle and every file it read.
@@ -196,6 +197,43 @@ pub(crate) fn layout_module(
 	))
 }
 
+/// The modules of a page that JavaScript renders: its own, its layout, and the
+/// fingerprints of everything either imports.
+struct Compiled {
+	main: Option<String>,
+	layout: Option<String>,
+	deps: BTreeMap<String, kd_build::Dep>,
+}
+
+fn compile_page(
+	config: &kd_config::Config,
+	modules: &Modules,
+	page: &Page,
+) -> Result<Compiled, String> {
+	let mut deps = BTreeMap::new();
+	let main = if page.kind == PageKind::Tsx {
+		let compiled = modules.compile(&page.file.input_path)?;
+		if !compiled.has_default_export {
+			return Err(format!(
+				"{}: a page must `export default` a component",
+				page.file.input_path
+			));
+		}
+		deps.extend(modules.closure(&page.file.input_path));
+		Some(compiled.out_path.clone())
+	} else {
+		None
+	};
+	let layout = match layout_module(config, modules, page, false)? {
+		Some((out, closure)) => {
+			deps.extend(closure);
+			Some(out)
+		}
+		None => None,
+	};
+	Ok(Compiled { main, layout, deps })
+}
+
 /// The environment digest of pages that JavaScript renders: they read the
 /// whole page list (`nav()`, `breadcrumbs`) and the data, so a change to
 /// either rebuilds them.
@@ -258,12 +296,22 @@ pub(crate) fn site_json(config: &kd_config::Config) -> Value {
 pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result<Prepared, String> {
 	let started = Instant::now();
 	let config = &loaded.config;
-	let plan = plan(config)?;
+	let jobs = options.jobs.unwrap_or(match config.build.jobs {
+		kd_config::Jobs::Auto => std::thread::available_parallelism()
+			.map(|n| n.get())
+			.unwrap_or(1),
+		kd_config::Jobs::Count(n) => n,
+	});
+
+	let mut lap_at = Instant::now();
+	let plan = crate::plan_with(config, jobs)?;
+	lap(&mut lap_at, "plan");
 	let targets = compile_globs(&options.targets)?;
 	let env = page_env(loaded, options);
 	let pipeline = html::Pipeline::compile(config)?;
 	let sitemap = crate::sitemap::settings(config)?;
 	let data = crate::data::load(config)?;
+	lap(&mut lap_at, "html pipeline and data");
 
 	let any_js = plan.pages.iter().any(needs_js);
 	let env_js = if any_js {
@@ -297,13 +345,6 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		on_disk.clone()
 	};
 
-	let jobs = options.jobs.unwrap_or(match config.build.jobs {
-		kd_config::Jobs::Auto => std::thread::available_parallelism()
-			.map(|n| n.get())
-			.unwrap_or(1),
-		kd_config::Jobs::Count(n) => n,
-	});
-
 	// Decide every page.
 	let fingerprinter = kd_build::Fingerprinter::new();
 	let modules = Modules::new(
@@ -312,70 +353,83 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		&config.pages.alias,
 		&config.pages.define,
 	);
+	// First the cheap decisions, in order: a page that is virtual, not asked
+	// for or up to date needs nothing. The pages that JavaScript renders and
+	// that are stale need their modules compiled, which is the expensive part
+	// and is done on several threads.
+	enum First {
+		Done(Decision),
+		Build,
+		Compile,
+	}
+	let first: Vec<First> = plan
+		.pages
+		.iter()
+		.map(|page| {
+			if page.is_virtual {
+				return First::Done(Decision::Virtual);
+			}
+			let rel = kd_site::path::relative(&config.dir.input, &page.file.input_path);
+			if !targets.is_empty() && !targets.iter().any(|t| t.matches(&rel)) {
+				return First::Done(Decision::Skipped);
+			}
+			let page_env = if needs_js(page) { &env_js } else { &env };
+			if let Some(entry) = previous.entries.get(&page.file.output_path)
+				&& let kd_build::Verdict::UpToDate(refreshed) = kd_build::check(
+					entry,
+					&page.file.output_path,
+					&page.file.input_path,
+					page_env,
+					&fingerprinter,
+				) {
+				return First::Done(Decision::Cached(refreshed));
+			}
+			if needs_js(page) {
+				First::Compile
+			} else {
+				First::Build
+			}
+		})
+		.collect();
+	let to_compile: Vec<usize> = first
+		.iter()
+		.enumerate()
+		.filter(|(_, f)| matches!(f, First::Compile))
+		.map(|(i, _)| i)
+		.collect();
+	let mut compiled = parallel::map(&to_compile, jobs, |&i| {
+		compile_page(config, &modules, &plan.pages[i])
+	})
+	.into_iter();
 	let mut decisions = Vec::with_capacity(plan.pages.len());
 	let mut render_jobs = Vec::new();
-	for (i, page) in plan.pages.iter().enumerate() {
-		if page.is_virtual {
-			decisions.push(Decision::Virtual);
-			continue;
-		}
-		let rel = kd_site::path::relative(&config.dir.input, &page.file.input_path);
-		if !targets.is_empty() && !targets.iter().any(|t| t.matches(&rel)) {
-			decisions.push(Decision::Skipped);
-			continue;
-		}
-		let page_env = if needs_js(page) { &env_js } else { &env };
-		if let Some(entry) = previous.entries.get(&page.file.output_path)
-			&& let kd_build::Verdict::UpToDate(refreshed) = kd_build::check(
-				entry,
-				&page.file.output_path,
-				&page.file.input_path,
-				page_env,
-				&fingerprinter,
-			) {
-			decisions.push(Decision::Cached(refreshed));
-			continue;
-		}
-		if !needs_js(page) {
-			decisions.push(Decision::Build { render: None });
-			continue;
-		}
-		let mut deps = BTreeMap::new();
-		let main = if page.kind == PageKind::Tsx {
-			let compiled = modules.compile(&page.file.input_path)?;
-			if !compiled.has_default_export {
-				return Err(format!(
-					"{}: a page must `export default` a component",
-					page.file.input_path
-				));
+	for (i, (page, first)) in plan.pages.iter().zip(first).enumerate() {
+		match first {
+			First::Done(decision) => decisions.push(decision),
+			First::Build => decisions.push(Decision::Build { render: None }),
+			First::Compile => {
+				// The errors come in page order, as they did when pages were
+				// compiled one after the other.
+				let Compiled { main, layout, deps } =
+					compiled.next().expect("one result per page to compile")?;
+				render_jobs.push(RenderJob {
+					page: i,
+					content: if main.is_none() {
+						page.body.clone()
+					} else {
+						None
+					},
+					main,
+					layout,
+				});
+				decisions.push(Decision::Build {
+					render: Some(RenderPlan { deps }),
+				});
 			}
-			deps.extend(modules.closure(&page.file.input_path));
-			Some(compiled.out_path.clone())
-		} else {
-			None
-		};
-		let layout = match layout_module(config, &modules, page, false)? {
-			Some((out, closure)) => {
-				deps.extend(closure);
-				Some(out)
-			}
-			None => None,
-		};
-		render_jobs.push(RenderJob {
-			page: i,
-			content: if main.is_none() {
-				page.body.clone()
-			} else {
-				None
-			},
-			main,
-			layout,
-		});
-		decisions.push(Decision::Build {
-			render: Some(RenderPlan { deps }),
-		});
+		}
 	}
 
+	lap(&mut lap_at, "decide pages (modules compiled)");
 	// Scripts: esbuild (JavaScript's side) builds the ones that are stale.
 	let started_at = std::time::SystemTime::now()
 		.duration_since(std::time::UNIX_EPOCH)
@@ -499,6 +553,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		)
 	};
 
+	lap(&mut lap_at, "assets and context");
 	let page_count = plan.pages.len();
 	let asset_count = assets.len();
 	Ok(Prepared {
@@ -535,6 +590,15 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		context,
 		script_request,
 	})
+}
+
+/// Prints how long a phase took when `KD_TIMING` is set (a development aid for
+/// finding where a build spends its time), and starts the next one.
+fn lap(last: &mut Instant, what: &str) {
+	if std::env::var_os("KD_TIMING").is_some() {
+		eprintln!("  core {what}: {}ms", last.elapsed().as_millis());
+	}
+	*last = Instant::now();
 }
 
 /// The current time as an ISO 8601 string (UTC), for `page.date`.

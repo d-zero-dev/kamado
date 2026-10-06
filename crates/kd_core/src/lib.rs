@@ -19,6 +19,7 @@ mod data;
 mod html;
 mod jsx;
 mod minifiers;
+pub mod parallel;
 pub mod serve;
 mod session;
 mod sitemap;
@@ -204,9 +205,47 @@ fn compile_globs(globs: &[String]) -> Result<Vec<kd_glob::Pattern>, String> {
 		.collect()
 }
 
+/// What reading one page's files gave.
+struct Read {
+	kind: PageKind,
+	in_file: Meta,
+	body: Option<String>,
+	input_dep: kd_build::Dep,
+	side: Meta,
+	sidecar: String,
+	sidecar_dep: kd_build::Dep,
+}
+
+/// Reads the files of one page: the source and its sidecar.
+fn read_files(input_path: &str) -> Result<Read, String> {
+	let kind = page_kind(&kd_site::path::extname(input_path).to_ascii_lowercase())?;
+	let (in_file, body, input_dep) = read_page(input_path, kind)?;
+	let sidecar = sidecar_path(input_path);
+	let (side, sidecar_dep) = read_sidecar(&sidecar)?;
+	Ok(Read {
+		kind,
+		in_file,
+		body,
+		input_dep,
+		side,
+		sidecar,
+		sidecar_dep,
+	})
+}
+
 /// Discovers pages, resolves their metadata and output locations, applies
 /// conflicts and `pages.overrides`.
 pub fn plan(config: &Config) -> Result<Plan, String> {
+	plan_with(
+		config,
+		std::thread::available_parallelism().map_or(1, |n| n.get()),
+	)
+}
+
+/// Like [`plan`], reading the page files on up to `threads` threads. Reading,
+/// hashing and extracting the metadata of a file does not depend on any other
+/// file, so it is the part of planning that scales with the page count.
+pub fn plan_with(config: &Config, threads: usize) -> Result<Plan, String> {
 	let dirs = Dirs {
 		input_dir: &config.dir.input,
 		output_dir: &config.dir.output,
@@ -223,21 +262,31 @@ pub fn plan(config: &Config) -> Result<Plan, String> {
 	let output_rel = kd_site::path::relative(&config.dir.input, &config.dir.output);
 	let output_inside_input = !output_rel.is_empty() && !output_rel.starts_with("..");
 
-	let mut candidates = Vec::with_capacity(found.len());
+	let input_paths: Vec<String> = found
+		.into_iter()
+		.filter(|rel| {
+			!(output_inside_input
+				&& (*rel == output_rel || rel.starts_with(&format!("{output_rel}/"))))
+		})
+		.map(|rel| format!("{}/{rel}", config.dir.input.trim_end_matches('/')))
+		.collect();
+	let reads = parallel::map(&input_paths, threads, |p| read_files(p));
+
+	let mut candidates = Vec::with_capacity(input_paths.len());
 	// Keyed by input path: several inputs may claim one output path, and the
 	// conflict policy decides which input survives.
 	let mut pages_by_input: BTreeMap<String, Page> = BTreeMap::new();
-	for rel in found {
-		if output_inside_input && (rel == output_rel || rel.starts_with(&format!("{output_rel}/")))
-		{
-			continue;
-		}
-		let input_path = format!("{}/{rel}", config.dir.input.trim_end_matches('/'));
+	for (input_path, read) in input_paths.into_iter().zip(reads) {
+		let Read {
+			kind,
+			in_file,
+			body,
+			input_dep,
+			side,
+			sidecar,
+			sidecar_dep,
+		} = read?;
 		let mut file = kd_site::page_file(&input_path, &dirs);
-		let kind = page_kind(&file.extension)?;
-		let (in_file, body, input_dep) = read_page(&input_path, kind)?;
-		let sidecar = sidecar_path(&input_path);
-		let (side, sidecar_dep) = read_sidecar(&sidecar)?;
 		let deps = BTreeMap::from([(input_path.clone(), input_dep), (sidecar, sidecar_dep)]);
 		let meta = kd_site::meta::merge(&[&in_file, &side]);
 		let mut from_override = false;
@@ -534,11 +583,19 @@ pub(crate) fn write_output(
 	{
 		return Ok(Status::Unchanged);
 	}
-	if let Some(parent) = std::path::Path::new(path).parent() {
-		fs::create_dir_all(parent)
-			.map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+	// Write first and make the directory only when it is missing: most files
+	// go into a directory that the build made already, and `create_dir_all`
+	// would stat every component of the path for each of them.
+	if let Err(first) = fs::write(path, bytes) {
+		if first.kind() != std::io::ErrorKind::NotFound {
+			return Err(format!("cannot write {path}: {first}"));
+		}
+		if let Some(parent) = std::path::Path::new(path).parent() {
+			fs::create_dir_all(parent)
+				.map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+		}
+		fs::write(path, bytes).map_err(|e| format!("cannot write {path}: {e}"))?;
 	}
-	fs::write(path, bytes).map_err(|e| format!("cannot write {path}: {e}"))?;
 	Ok(Status::Built)
 }
 

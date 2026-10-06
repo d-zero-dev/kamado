@@ -13,8 +13,13 @@
 
 #![allow(non_camel_case_types, clippy::missing_safety_doc)]
 
+mod alloc;
 mod serve;
 mod session;
+
+/// Every allocation of the addon (the core included) goes through the pools.
+#[global_allocator]
+static GLOBAL: alloc::PoolAlloc = alloc::PoolAlloc;
 
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::sync::OnceLock;

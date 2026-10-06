@@ -57,6 +57,11 @@ fn write_if_changed(path: &str, bytes: &[u8]) -> Result<(), String> {
 		fs::create_dir_all(parent)
 			.map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
 	}
+	// Modules are compiled on several threads, and two that share an import
+	// write the same file with the same bytes; that is harmless because nobody
+	// reads the files before the compile phase is over. A temporary file and a
+	// rename would make it atomic, and cost twice the directory operations:
+	// with tens of thousands of new files they are what the phase waits for.
 	fs::write(path, bytes).map_err(|e| format!("cannot write {path}: {e}"))
 }
 
