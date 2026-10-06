@@ -121,7 +121,64 @@ fn mtime_of(path: &str) -> Option<String> {
 }
 
 /// The XML of the sitemap for `pages`.
-pub(crate) fn render(settings: &Settings, pages: &[Page]) -> String {
+///
+/// The protocol allows 50000 addresses in a file: with more, the addresses go
+/// to `<name>-1.xml`, `<name>-2.xml`, ... next to the output and the output
+/// itself is the index that lists them. Returns the files to write.
+pub(crate) fn render_files(settings: &Settings, pages: &[Page]) -> Vec<(String, String)> {
+	render_files_with(settings, pages, MAX_URLS)
+}
+
+/// [`render_files`] with a limit of `max` addresses per file.
+pub(crate) fn render_files_with(
+	settings: &Settings,
+	pages: &[Page],
+	max: usize,
+) -> Vec<(String, String)> {
+	let entries = collect(settings, pages);
+	if entries.len() <= max {
+		return vec![(settings.output_path.clone(), urlset(&entries))];
+	}
+	let (stem, extension) = match settings.output_path.rsplit_once('.') {
+		Some((stem, ext)) if !ext.contains('/') => (stem, format!(".{ext}")),
+		_ => (settings.output_path.as_str(), String::new()),
+	};
+	let mut files = Vec::new();
+	let mut index = String::from(
+		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
+	);
+	for (n, part) in entries.chunks(max).enumerate() {
+		let path = format!("{stem}-{}{extension}", n + 1);
+		let relative = kd_site::path::relative(&settings.output_dir, &path);
+		index.push_str(&format!(
+			"<sitemap><loc>{}</loc></sitemap>\n",
+			escape(&format!("{}/{}", settings.base, encode_path(&relative)))
+		));
+		files.push((path, urlset(part)));
+	}
+	index.push_str("</sitemapindex>\n");
+	files.push((settings.output_path.clone(), index));
+	files
+}
+
+/// Most addresses a sitemap file may hold.
+const MAX_URLS: usize = 50_000;
+
+fn urlset(entries: &[(&str, String)]) -> String {
+	let mut xml = String::from(
+		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
+	);
+	for (_, entry) in entries {
+		xml.push_str("<url>");
+		xml.push_str(entry);
+		xml.push_str("</url>\n");
+	}
+	xml.push_str("</urlset>\n");
+	xml
+}
+
+/// The entries of the sitemap, sorted by address.
+fn collect<'p>(settings: &Settings, pages: &'p [Page]) -> Vec<(&'p str, String)> {
 	let mut entries: Vec<(&str, String)> = Vec::new();
 	for page in pages {
 		let rel = kd_site::path::relative(&settings.output_dir, &page.file.output_path);
@@ -152,16 +209,7 @@ pub(crate) fn render(settings: &Settings, pages: &[Page]) -> String {
 		entries.push((page.file.url.as_str(), entry));
 	}
 	entries.sort_by(|a, b| a.0.cmp(b.0));
-	let mut xml = String::from(
-		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
-	);
-	for (_, entry) in entries {
-		xml.push_str("<url>");
-		xml.push_str(&entry);
-		xml.push_str("</url>\n");
-	}
-	xml.push_str("</urlset>\n");
-	xml
+	entries
 }
 
 #[cfg(test)]

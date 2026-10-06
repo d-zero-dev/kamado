@@ -384,7 +384,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 
 ## 15. sitemap
 
-`sitemap.output` に XML を書く。対象は `include` の glob（出力ディレクトリ基準、既定 `**/*.html`）から `exclude` を除いたもの。`index.html` は末尾スラッシュの URL。`lastmod`: `"manifest"` は `pages.overrides` の値、`"mtime"` はファイルの更新時刻、`"none"` は出力しない。URL の起点は `site.baseURL`（`https://example.com/sub/` のように完全な URL）、なければ `https://<site.host>`。どちらもなければ設定エラー。`output` は出力ディレクトリの中でなければならない。仮想ページ（`pages.overrides`）も載り、`lastmod: "mtime"` は入力ファイルの更新時刻（仮想ページは出さない）。差分ビルドや `targets` を指定したビルドでも、計画の全ページから毎回書く。
+`sitemap.output` に XML を書く。対象は `include` の glob（出力ディレクトリ基準、既定 `**/*.html`）から `exclude` を除いたもの。`index.html` は末尾スラッシュの URL。`lastmod`: `"manifest"` は `pages.overrides` の値、`"mtime"` はファイルの更新時刻、`"none"` は出力しない。URL の起点は `site.baseURL`（`https://example.com/sub/` のように完全な URL）、なければ `https://<site.host>`。どちらもなければ設定エラー。`output` は出力ディレクトリの中でなければならない。仮想ページ（`pages.overrides`）も載り、`lastmod: "mtime"` は入力ファイルの更新時刻（仮想ページは出さない）。差分ビルドや `targets` を指定したビルドでも、計画の全ページから毎回書く。1 ファイルに載せられる URL は 5 万件までなので、超えるときは `sitemap-1.xml`、`sitemap-2.xml`、…（`output` のファイル名に `-番号` を付けたもの）に分け、`output` はそれらを並べたインデックス（`sitemapindex`）にする。URL に空白や日本語があれば `%XX` に符号化する。
 
 ## 16. 並列モデルと純粋性
 

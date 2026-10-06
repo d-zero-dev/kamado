@@ -1142,8 +1142,9 @@ impl Prepared {
 		}
 		lap(&mut lap_at, "finish: report assembled");
 		if let Some(settings) = &shared.sitemap {
-			let xml = sitemap::render(settings, &shared.plan.pages);
-			write_output(&settings.output_path, xml.as_bytes(), shared.skip_unchanged)?;
+			for (path, xml) in sitemap::render_files(settings, &shared.plan.pages) {
+				write_output(&path, xml.as_bytes(), shared.skip_unchanged)?;
+			}
 		}
 		// Entries nobody claimed belong to pages that are gone.
 		if incremental && (dirty || !carried.is_empty()) {

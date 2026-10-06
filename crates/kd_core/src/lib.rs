@@ -2054,6 +2054,37 @@ mod tests {
 	}
 
 	#[test]
+	fn a_sitemap_with_more_addresses_than_a_file_may_hold_becomes_an_index() {
+		let (_site, loaded) = sitemap_site("sitemap-split", "");
+		let plan = plan(&loaded.config).unwrap();
+		let settings = sitemap::settings(&loaded.config).unwrap().unwrap();
+
+		// Four addresses, two to a file.
+		let files = sitemap::render_files_with(&settings, &plan.pages, 2);
+		let names: Vec<&str> = files
+			.iter()
+			.map(|(p, _)| p.rsplit('/').next().unwrap())
+			.collect();
+		assert_eq!(names, ["sitemap-1.xml", "sitemap-2.xml", "sitemap.xml"]);
+		assert!(files[0].1.contains("<loc>https://example.com/sub/</loc>"));
+		assert!(files[0].1.contains("/sub/about/</loc>"));
+		assert!(files[1].1.contains("/sub/news.html</loc>"));
+		assert!(files[2].1.contains("<sitemapindex "));
+		assert!(
+			files[2]
+				.1
+				.contains("<sitemap><loc>https://example.com/sub/sitemap-1.xml</loc></sitemap>")
+		);
+		assert!(files[2].1.contains("sitemap-2.xml</loc>"));
+
+		// Within the limit it stays one file.
+		assert_eq!(
+			sitemap::render_files_with(&settings, &plan.pages, 4).len(),
+			1
+		);
+	}
+
+	#[test]
 	fn lastmod_changefreq_and_priority_are_written_when_configured() {
 		let (site, loaded) = sitemap_site(
 			"sitemap-lastmod",
