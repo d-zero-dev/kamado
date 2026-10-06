@@ -74,9 +74,23 @@ pub fn discover(config: &Config, kind: AssetKind) -> Result<Vec<Asset>, String> 
 	};
 	let files = compile_globs(files)?;
 	let ignore = compile_globs(ignore)?;
-	let page_files = compile_globs(&config.pages.files)?;
 	let found = kd_site::discover(&config.dir.input, &files, &ignore)
 		.map_err(|e| format!("cannot read input directory {}: {e}", config.dir.input))?;
+	from_found(config, kind, found)
+}
+
+/// The assets of one kind among the files a walk found for them (paths
+/// relative to the input directory).
+///
+/// # Errors
+///
+/// As [`discover`].
+pub(crate) fn from_found(
+	config: &Config,
+	kind: AssetKind,
+	found: Vec<String>,
+) -> Result<Vec<Asset>, String> {
+	let page_files = compile_globs(&config.pages.files)?;
 
 	// The output directory inside the input directory is not a source.
 	let output_rel = kd_site::path::relative(&config.dir.input, &config.dir.output);

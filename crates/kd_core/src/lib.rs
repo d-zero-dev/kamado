@@ -20,6 +20,7 @@ mod html;
 mod jsx;
 mod minifiers;
 pub mod parallel;
+mod plan_cache;
 pub mod serve;
 mod session;
 mod sitemap;
@@ -84,6 +85,9 @@ pub struct Page {
 	pub meta: Meta,
 	/// HTML body (front matter removed) for `Html` pages.
 	pub body: Option<String>,
+	/// The body was not read: the page came from the plan cache, and is read
+	/// when the page has to be built (see `load_bodies`).
+	pub body_pending: bool,
 	/// What the page was built from: the input file and its sidecar `.json`
 	/// (a missing sidecar is recorded too, so creating it later invalidates
 	/// the output). Fingerprinted when the bytes were read, not afterwards.
@@ -216,21 +220,61 @@ struct Read {
 	sidecar_dep: kd_build::Dep,
 }
 
-/// Reads the files of one page: the source and its sidecar.
-fn read_files(input_path: &str) -> Result<Read, String> {
+/// Reads the files of one page: the source and its sidecar. A page the cache
+/// knows, whose files have the size and modification time it recorded, is not
+/// read: what the cache holds stands for it, and its body is read later if it
+/// is needed (`body_pending`).
+fn read_files(
+	input_path: &str,
+	cached: Option<&plan_cache::CachedPage>,
+) -> Result<(Read, bool), String> {
 	let kind = page_kind(&kd_site::path::extname(input_path).to_ascii_lowercase())?;
+	if let Some(c) = cached
+		&& c.kind == kind
+		&& c.sidecar == sidecar_path(input_path)
+		&& same_stat(input_path, &c.input_dep)
+		&& same_stat(&c.sidecar, &c.sidecar_dep)
+	{
+		return Ok((
+			Read {
+				kind,
+				in_file: c.in_file.clone(),
+				body: None,
+				input_dep: c.input_dep.clone(),
+				side: c.side.clone(),
+				sidecar: c.sidecar.clone(),
+				sidecar_dep: c.sidecar_dep.clone(),
+			},
+			true,
+		));
+	}
 	let (in_file, body, input_dep) = read_page(input_path, kind)?;
 	let sidecar = sidecar_path(input_path);
 	let (side, sidecar_dep) = read_sidecar(&sidecar)?;
-	Ok(Read {
-		kind,
-		in_file,
-		body,
-		input_dep,
-		side,
-		sidecar,
-		sidecar_dep,
-	})
+	Ok((
+		Read {
+			kind,
+			in_file,
+			body,
+			input_dep,
+			side,
+			sidecar,
+			sidecar_dep,
+		},
+		false,
+	))
+}
+
+/// Whether `path` has the size and modification time that `dep` records (a
+/// file that is missing matches the fingerprint of a missing file).
+fn same_stat(path: &str, dep: &kd_build::Dep) -> bool {
+	match kd_build::file_stat(path) {
+		None => dep.hash == kd_build::MISSING_FILE_HASH,
+		Some((size, sec, nsec)) => {
+			dep.hash != kd_build::MISSING_FILE_HASH
+				&& (size, sec, nsec) == (dep.size, dep.mtime_sec, dep.mtime_nsec)
+		}
+	}
 }
 
 /// Discovers pages, resolves their metadata and output locations, applies
@@ -246,15 +290,43 @@ pub fn plan(config: &Config) -> Result<Plan, String> {
 /// hashing and extracting the metadata of a file does not depend on any other
 /// file, so it is the part of planning that scales with the page count.
 pub fn plan_with(config: &Config, threads: usize) -> Result<Plan, String> {
+	plan_cached(config, threads, None, None).map(|(plan, _)| plan)
+}
+
+/// What [`plan_cached`] learned about the page files, to be saved for the next
+/// build, and whether it differs from what it was given.
+pub(crate) struct Learned {
+	pub cache: plan_cache::PlanCache,
+	pub changed: bool,
+}
+
+/// Like [`plan_with`], taking the pages it can from `cache` instead of reading
+/// them. Pages that came from the cache have `body_pending` set when their
+/// body has not been read.
+pub(crate) fn plan_cached(
+	config: &Config,
+	threads: usize,
+	cache: Option<&plan_cache::PlanCache>,
+	found: Option<Vec<String>>,
+) -> Result<(Plan, Learned), String> {
 	let dirs = Dirs {
 		input_dir: &config.dir.input,
 		output_dir: &config.dir.output,
 		output_extension: &config.pages.output_extension,
 	};
-	let files = compile_globs(&config.pages.files)?;
-	let ignore = compile_globs(&config.pages.ignore)?;
-	let found = kd_site::discover(&config.dir.input, &files, &ignore)
-		.map_err(|e| format!("cannot read input directory {}: {e}", config.dir.input))?;
+	let t_plan = std::time::Instant::now();
+	let found = match found {
+		Some(found) => found,
+		None => {
+			let files = compile_globs(&config.pages.files)?;
+			let ignore = compile_globs(&config.pages.ignore)?;
+			kd_site::discover(&config.dir.input, &files, &ignore)
+				.map_err(|e| format!("cannot read input directory {}: {e}", config.dir.input))?
+		}
+	};
+	if std::env::var_os("KD_TIMING").is_some() {
+		eprintln!("    plan: discovered in {}ms", t_plan.elapsed().as_millis());
+	}
 
 	// An output directory inside the input directory (`input: "."`,
 	// `output: "htdocs"`) is not a source: without this the next build would
@@ -270,13 +342,34 @@ pub fn plan_with(config: &Config, threads: usize) -> Result<Plan, String> {
 		})
 		.map(|rel| format!("{}/{rel}", config.dir.input.trim_end_matches('/')))
 		.collect();
-	let reads = parallel::map(&input_paths, threads, |p| read_files(p));
+	let reads = parallel::map(&input_paths, threads, |p| {
+		read_files(p, cache.and_then(|c| c.pages.get(p)))
+	});
+	let mut learned = plan_cache::PlanCache::default();
+	let all_hit = !reads.is_empty()
+		&& cache.is_some_and(|c| c.pages.len() == reads.len())
+		&& reads.iter().all(|r| matches!(r, Ok((_, true))));
+	if std::env::var_os("KD_TIMING").is_some() {
+		eprintln!(
+			"    plan: read {} pages in {}ms",
+			input_paths.len(),
+			t_plan.elapsed().as_millis()
+		);
+	}
+	let input_paths_len = input_paths.len();
+	let mut misses = 0usize;
 
 	let mut candidates = Vec::with_capacity(input_paths.len());
 	// Keyed by input path: several inputs may claim one output path, and the
 	// conflict policy decides which input survives.
 	let mut pages_by_input: BTreeMap<String, Page> = BTreeMap::new();
 	for (input_path, read) in input_paths.into_iter().zip(reads) {
+		let (read, hit) = read?;
+		if !hit {
+			misses += 1;
+		}
+		// A page of the cache has its metadata but not its body.
+		let body_pending = hit && read.kind == PageKind::Html;
 		let Read {
 			kind,
 			in_file,
@@ -285,7 +378,21 @@ pub fn plan_with(config: &Config, threads: usize) -> Result<Plan, String> {
 			side,
 			sidecar,
 			sidecar_dep,
-		} = read?;
+		} = read;
+		// What is learned is only needed when it differs from the cache.
+		if !all_hit {
+			learned.pages.insert(
+				input_path.clone(),
+				plan_cache::CachedPage {
+					kind,
+					in_file: in_file.clone(),
+					input_dep: input_dep.clone(),
+					side: side.clone(),
+					sidecar: sidecar.clone(),
+					sidecar_dep: sidecar_dep.clone(),
+				},
+			);
+		}
 		let mut file = kd_site::page_file(&input_path, &dirs);
 		let deps = BTreeMap::from([(input_path.clone(), input_dep), (sidecar, sidecar_dep)]);
 		let meta = kd_site::meta::merge(&[&in_file, &side]);
@@ -305,6 +412,7 @@ pub fn plan_with(config: &Config, threads: usize) -> Result<Plan, String> {
 				kind,
 				meta,
 				body,
+				body_pending,
 				deps,
 				is_virtual: false,
 				lastmod: None,
@@ -314,6 +422,13 @@ pub fn plan_with(config: &Config, threads: usize) -> Result<Plan, String> {
 			file,
 			from_override,
 		});
+	}
+	if std::env::var_os("KD_TIMING").is_some() {
+		eprintln!(
+			"    plan: assembled {} pages in {}ms",
+			input_paths_len,
+			t_plan.elapsed().as_millis()
+		);
 	}
 	let resolved = kd_site::resolve_conflicts(candidates, config.pages.output_path_conflict)
 		.map_err(|e| e.message)?;
@@ -360,6 +475,7 @@ pub fn plan_with(config: &Config, threads: usize) -> Result<Plan, String> {
 						kind: PageKind::Html,
 						meta: o.meta.clone(),
 						body: None,
+						body_pending: false,
 						deps: BTreeMap::new(),
 						is_virtual: true,
 						lastmod: o.lastmod.clone(),
@@ -373,10 +489,48 @@ pub fn plan_with(config: &Config, threads: usize) -> Result<Plan, String> {
 			}
 		}
 	}
-	Ok(Plan {
-		pages,
-		warnings: resolved.warnings,
-	})
+	let changed =
+		!all_hit && (misses > 0 || cache.is_none_or(|c| c.pages.len() != learned.pages.len()));
+	Ok((
+		Plan {
+			pages,
+			warnings: resolved.warnings,
+		},
+		Learned {
+			cache: learned,
+			changed,
+		},
+	))
+}
+
+/// Reads the bodies of the pages that came from the plan cache without one,
+/// for the pages at `indices` (the ones that have to be built).
+///
+/// # Errors
+///
+/// A message for a file that cannot be read any more.
+pub(crate) fn load_bodies(
+	plan: &mut Plan,
+	indices: &[usize],
+	threads: usize,
+) -> Result<(), String> {
+	let wanted: Vec<usize> = indices
+		.iter()
+		.copied()
+		.filter(|&i| plan.pages[i].body_pending)
+		.collect();
+	let read = parallel::map(&wanted, threads, |&i| {
+		let page = &plan.pages[i];
+		read_page(&page.file.input_path, page.kind)
+	});
+	for (i, read) in wanted.into_iter().zip(read) {
+		let (_, body, dep) = read?;
+		let page = &mut plan.pages[i];
+		page.body = body;
+		page.body_pending = false;
+		page.deps.insert(page.file.input_path.clone(), dep);
+	}
+	Ok(())
 }
 
 /// The parsed `pages.overrides` file, if the config names one.
@@ -389,6 +543,54 @@ pub(crate) fn read_overrides(config: &Config) -> Result<Option<Overrides>, Strin
 	Overrides::parse(&text)
 		.map(Some)
 		.map_err(|e| format!("{path}: {e}"))
+}
+
+/// What one walk of the input directory found: the pages, the stylesheets and
+/// the scripts, each as paths relative to the input directory.
+pub(crate) struct Scan {
+	pub pages: Vec<String>,
+	pub styles: Vec<String>,
+	pub scripts: Vec<String>,
+}
+
+/// Walks the input directory once for everything a build looks for.
+///
+/// # Errors
+///
+/// A message for an invalid glob or an input directory that cannot be read.
+pub(crate) fn scan(config: &Config) -> Result<Scan, String> {
+	let page_files = compile_globs(&config.pages.files)?;
+	let page_ignore = compile_globs(&config.pages.ignore)?;
+	let style_files = compile_globs(&config.styles.files)?;
+	let style_ignore = compile_globs(&config.styles.ignore)?;
+	let script_files = compile_globs(&config.scripts.files)?;
+	let script_ignore = compile_globs(&config.scripts.ignore)?;
+	let mut found = kd_site::discover_all(
+		&config.dir.input,
+		&[
+			kd_site::Search {
+				files: &page_files,
+				ignore: &page_ignore,
+			},
+			kd_site::Search {
+				files: &style_files,
+				ignore: &style_ignore,
+			},
+			kd_site::Search {
+				files: &script_files,
+				ignore: &script_ignore,
+			},
+		],
+	)
+	.map_err(|e| format!("cannot read input directory {}: {e}", config.dir.input))?;
+	let scripts = found.pop().unwrap_or_default();
+	let styles = found.pop().unwrap_or_default();
+	let pages = found.pop().unwrap_or_default();
+	Ok(Scan {
+		pages,
+		styles,
+		scripts,
+	})
 }
 
 /// What a page's own files say now: its metadata (the file, its sidecar and
@@ -1783,6 +1985,110 @@ mod tests {
 		assert!(
 			site.read("out/sitemap.xml")
 				.contains("<loc>https://example.com/</loc>")
+		);
+	}
+
+	fn build_incrementally(loaded: &Loaded) -> Report {
+		prepare_incremental(loaded)
+			.finish(Vec::new(), Vec::new())
+			.unwrap()
+	}
+
+	#[test]
+	fn the_plan_cache_serves_unchanged_pages_and_the_pages_that_change_are_read_again() {
+		let site = Site::new("plan-cache");
+		site.write("src/a.html", "---\ntitle: A\n---\n<p>a</p>");
+		site.write("src/b.html", "<p>b</p>");
+		site.write("src/c.html", "<p>c</p>");
+		let loaded = site.config("");
+		build_incrementally(&loaded);
+		let cache = format!("{}/.cache/plan-cache.bin", site.root);
+		assert!(
+			fs::metadata(&cache).is_ok(),
+			"the first build wrote the cache"
+		);
+		let first = fs::read(&cache).unwrap();
+
+		// Nothing changed: the cache is used and not rewritten.
+		let report = build_incrementally(&loaded);
+		assert_eq!(
+			statuses(&report),
+			[
+				("/a.html", "cached"),
+				("/b.html", "cached"),
+				("/c.html", "cached")
+			]
+		);
+		assert_eq!(fs::read(&cache).unwrap(), first);
+
+		// Another environment rebuilds every page from bodies the cache did not
+		// keep: they are read when they are needed.
+		let doctype = site.config(r#", "site": { "siteName": "Changed" }"#);
+		let report = build_incrementally(&doctype);
+		assert_eq!(
+			statuses(&report),
+			[
+				("/a.html", "built"),
+				("/b.html", "built"),
+				("/c.html", "built")
+			]
+		);
+		assert_eq!(site.read("out/a.html"), "<p>a</p>\n");
+		assert_eq!(site.read("out/b.html"), "<p>b</p>\n");
+
+		// One page changes (same length, so only the time tells): it is read
+		// again, with its new metadata; the others stay cached.
+		std::thread::sleep(std::time::Duration::from_millis(5));
+		site.write("src/b.html", "<p>B</p>");
+		let report = build_incrementally(&doctype);
+		assert_eq!(
+			statuses(&report),
+			[
+				("/a.html", "cached"),
+				("/b.html", "built"),
+				("/c.html", "cached")
+			]
+		);
+		assert_eq!(site.read("out/b.html"), "<p>B</p>\n");
+		assert_ne!(
+			fs::read(&cache).unwrap(),
+			first,
+			"the cache follows the page"
+		);
+
+		// A sidecar that appears is a change of the page.
+		site.write("src/c.json", "{ \"title\": \"C\" }");
+		let report = build_incrementally(&doctype);
+		assert_eq!(
+			statuses(&report),
+			[
+				("/a.html", "cached"),
+				("/b.html", "cached"),
+				("/c.html", "built")
+			]
+		);
+		let meta = &plan(&doctype.config).unwrap().pages[2].meta;
+		assert_eq!(
+			meta,
+			&vec![("title".to_owned(), Value::String("C".to_owned()))]
+		);
+	}
+
+	#[test]
+	fn a_damaged_plan_cache_is_ignored() {
+		let site = Site::new("plan-cache-damaged");
+		site.write("src/a.html", "<p>a</p>");
+		let loaded = site.config("");
+		build_incrementally(&loaded);
+		fs::write(format!("{}/.cache/plan-cache.bin", site.root), b"garbage").unwrap();
+
+		let report = build_incrementally(&loaded);
+
+		assert_eq!(statuses(&report), [("/a.html", "cached")]);
+		assert!(
+			fs::read(format!("{}/.cache/plan-cache.bin", site.root))
+				.unwrap()
+				.starts_with(b"KDP")
 		);
 	}
 

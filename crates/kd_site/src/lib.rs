@@ -392,6 +392,14 @@ pub fn resolve_conflicts(
 	Ok(Resolved { files, warnings })
 }
 
+/// One thing to look for in a walk: the files that match any of `files` and
+/// none of `ignore`.
+#[derive(Clone, Copy)]
+pub struct Search<'a> {
+	pub files: &'a [kd_glob::Pattern],
+	pub ignore: &'a [kd_glob::Pattern],
+}
+
 /// Lists the files under `input_dir` that match any of `files` and none of
 /// `ignore`. Paths are returned relative to `input_dir`, `/` separated and
 /// sorted. Symlinked directories are followed once (cycles are skipped).
@@ -409,29 +417,59 @@ pub fn discover(
 	files: &[kd_glob::Pattern],
 	ignore: &[kd_glob::Pattern],
 ) -> std::io::Result<Vec<String>> {
+	let mut found = discover_all(input_dir, &[Search { files, ignore }])?;
+	Ok(found.pop().unwrap_or_default())
+}
+
+/// Like [`discover`] for several searches at once, walking the tree a single
+/// time: with a hundred thousand files the walk is a cost of its own. A
+/// directory is entered unless every search ignores it. The result has one
+/// sorted list per search.
+///
+/// # Example
+///
+/// ```no_run
+/// let pages = [kd_glob::Pattern::new("**/*.html").unwrap()];
+/// let styles = [kd_glob::Pattern::new("**/*.css").unwrap()];
+/// let found = kd_site::discover_all(
+///     "/site/src",
+///     &[
+///         kd_site::Search { files: &pages, ignore: &[] },
+///         kd_site::Search { files: &styles, ignore: &[] },
+///     ],
+/// ).unwrap();
+/// assert_eq!(found.len(), 2);
+/// ```
+pub fn discover_all(input_dir: &str, searches: &[Search<'_>]) -> std::io::Result<Vec<Vec<String>>> {
 	let root = std::path::Path::new(input_dir);
-	let mut out = Vec::new();
+	let mut out: Vec<Vec<String>> = vec![Vec::new(); searches.len()];
 	let mut visited: HashSet<std::path::PathBuf> = HashSet::new();
 	if let Ok(canon) = fs::canonicalize(root) {
 		visited.insert(canon);
 	}
-	walk(root, "", files, ignore, &mut out, &mut visited)?;
-	out.sort();
+	walk(root, "", searches, &mut out, &mut visited)?;
+	for list in &mut out {
+		list.sort();
+	}
 	Ok(out)
 }
 
 fn walk(
 	dir: &std::path::Path,
 	rel_prefix: &str,
-	files: &[kd_glob::Pattern],
-	ignore: &[kd_glob::Pattern],
-	out: &mut Vec<String>,
+	searches: &[Search<'_>],
+	out: &mut [Vec<String>],
 	visited: &mut HashSet<std::path::PathBuf>,
 ) -> std::io::Result<()> {
+	let ignored_everywhere = |rel: &str| {
+		searches
+			.iter()
+			.all(|s| s.ignore.iter().any(|p| p.covers_dir(rel)))
+	};
 	let entries = match fs::read_dir(dir) {
 		Ok(entries) => entries,
 		// An unreadable directory the config ignores must not abort the build.
-		Err(_) if !rel_prefix.is_empty() && ignore.iter().any(|p| p.covers_dir(rel_prefix)) => {
+		Err(_) if !rel_prefix.is_empty() && ignored_everywhere(rel_prefix) => {
 			return Ok(());
 		}
 		Err(e) => return Err(e),
@@ -443,20 +481,26 @@ fn walk(
 			// Not valid UTF-8: cannot be referenced from a config; skip.
 			continue;
 		};
+		// The type comes with the directory listing; only a symlink needs a
+		// `stat` (it is followed, so a linked directory is walked).
+		let file_type = entry.file_type()?;
+		let (is_dir, is_file) = if file_type.is_symlink() {
+			match fs::metadata(entry.path()) {
+				Ok(m) => (m.is_dir(), m.is_file()),
+				Err(_) => continue, // dangling symlink
+			}
+		} else {
+			(file_type.is_dir(), file_type.is_file())
+		};
 		let rel = if rel_prefix.is_empty() {
 			name.to_string()
 		} else {
 			format!("{rel_prefix}/{name}")
 		};
-		// `metadata` follows symlinks, so a linked directory is walked.
-		let meta = match fs::metadata(entry.path()) {
-			Ok(m) => m,
-			Err(_) => continue, // dangling symlink
-		};
-		if meta.is_dir() {
+		if is_dir {
 			// Prune: an ignored directory (`_includes/**`, `**/node_modules/**`)
 			// is never entered, so a large ignored tree costs nothing.
-			if ignore.iter().any(|p| p.covers_dir(&rel)) {
+			if ignored_everywhere(&rel) {
 				continue;
 			}
 			if let Ok(canon) = fs::canonicalize(entry.path())
@@ -464,12 +508,15 @@ fn walk(
 			{
 				continue;
 			}
-			walk(&entry.path(), &rel, files, ignore, out, visited)?;
-		} else if meta.is_file()
-			&& files.iter().any(|p| p.matches(&rel))
-			&& !ignore.iter().any(|p| p.matches(&rel))
-		{
-			out.push(rel);
+			walk(&entry.path(), &rel, searches, out, visited)?;
+		} else if is_file {
+			for (search, list) in searches.iter().zip(out.iter_mut()) {
+				if search.files.iter().any(|p| p.matches(&rel))
+					&& !search.ignore.iter().any(|p| p.matches(&rel))
+				{
+					list.push(rel.clone());
+				}
+			}
 		}
 	}
 	Ok(())
@@ -788,6 +835,54 @@ mod tests {
 		let ignore = [kd_glob::Pattern::new("_includes/**").unwrap()];
 		let found = discover(tmp.to_str().unwrap(), &files, &ignore).unwrap();
 		assert_eq!(found, ["a/index.tsx", "b/page.html", "c/deep/er/leaf.html"]);
+		let _ = fs::remove_dir_all(&tmp);
+	}
+
+	#[test]
+	fn discover_all_answers_several_searches_in_one_walk() {
+		let tmp = std::env::temp_dir().join(format!("kd_site_all_{}", std::process::id()));
+		let _ = fs::remove_dir_all(&tmp);
+		for rel in [
+			"a/index.html",
+			"a/style.css",
+			"a/app.ts",
+			"vendor/lib.css",
+			"vendor/lib.html",
+			"drafts/d.html",
+			"drafts/d.css",
+		] {
+			let p = tmp.join(rel);
+			fs::create_dir_all(p.parent().unwrap()).unwrap();
+			fs::write(&p, b"").unwrap();
+		}
+		let pages = [kd_glob::Pattern::new("**/*.html").unwrap()];
+		let styles = [kd_glob::Pattern::new("**/*.css").unwrap()];
+		let scripts = [kd_glob::Pattern::new("**/*.ts").unwrap()];
+		let ignore_vendor = [kd_glob::Pattern::new("vendor/**").unwrap()];
+		let ignore_drafts = [kd_glob::Pattern::new("drafts/**").unwrap()];
+		let found = discover_all(
+			tmp.to_str().unwrap(),
+			&[
+				Search {
+					files: &pages,
+					ignore: &ignore_drafts,
+				},
+				Search {
+					files: &styles,
+					ignore: &ignore_vendor,
+				},
+				Search {
+					files: &scripts,
+					ignore: &[],
+				},
+			],
+		)
+		.unwrap();
+		// Each search has its own ignore; a directory is walked while any
+		// search still wants it.
+		assert_eq!(found[0], ["a/index.html", "vendor/lib.html"]);
+		assert_eq!(found[1], ["a/style.css", "drafts/d.css"]);
+		assert_eq!(found[2], ["a/app.ts"]);
 		let _ = fs::remove_dir_all(&tmp);
 	}
 

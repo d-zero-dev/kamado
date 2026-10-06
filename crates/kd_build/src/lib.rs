@@ -17,8 +17,9 @@
 //!
 //! The manifest lives outside the project tree by default (OS temp dir,
 //! namespaced by the project root) so nothing has to be git-ignored; a
-//! different version, corrupt JSON or any malformed entry means "full
-//! rebuild" rather than a bad skip.
+//! different version, corrupt data or any malformed entry means "full
+//! rebuild" rather than a bad skip. The file is binary (see [`binary`]); the
+//! JSON of [`Manifest::to_json`] is for looking at it.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -29,16 +30,18 @@ use std::time::UNIX_EPOCH;
 
 use kd_jsonc::Value;
 
+pub mod binary;
+
 /// Bump when the format or the meaning of recorded data changes.
-pub const MANIFEST_VERSION: u64 = 2;
+pub const MANIFEST_VERSION: u64 = 3;
 
 /// Recorded as the hash of a dependency that could not be read.
 pub const MISSING_FILE_HASH: &str = "missing";
 
-const FILE_NAME: &str = "build-manifest.json";
+const FILE_NAME: &str = "build-manifest.bin";
 
 /// Fingerprint of one dependency at the time the output was built.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Dep {
 	pub size: u64,
 	pub mtime_sec: i64,
@@ -174,26 +177,24 @@ impl Manifest {
 	/// of another version, or has any malformed entry: all mean "full rebuild".
 	#[must_use]
 	pub fn load(path: &str) -> Option<Manifest> {
-		let raw = fs::read_to_string(path).ok()?;
-		let value = kd_jsonc::parse(&raw).ok()?;
-		if value.get("version")?.as_f64()? != MANIFEST_VERSION as f64 {
-			return None;
-		}
-		let mut entries = BTreeMap::new();
-		for (output, entry) in value.get("entries")?.as_object()? {
-			entries.insert(output.clone(), parse_entry(entry)?);
-		}
-		Some(Manifest { entries })
+		binary::decode(&fs::read(path).ok()?)
 	}
 
 	/// Writes the manifest atomically (temp file, then rename).
+	///
+	/// # Errors
+	///
+	/// An I/O error, or `InvalidData` for a fingerprint that is not a SHA-256.
 	pub fn save(&self, path: &str) -> io::Result<()> {
 		let target = Path::new(path);
 		if let Some(parent) = target.parent() {
 			fs::create_dir_all(parent)?;
 		}
-		let tmp: PathBuf = target.with_extension(format!("json.tmp-{}", std::process::id()));
-		fs::write(&tmp, self.to_json())?;
+		let bytes = binary::encode(self).ok_or_else(|| {
+			io::Error::new(io::ErrorKind::InvalidData, "a fingerprint is not a SHA-256")
+		})?;
+		let tmp: PathBuf = target.with_extension(format!("bin.tmp-{}", std::process::id()));
+		fs::write(&tmp, bytes)?;
 		fs::rename(&tmp, target)
 	}
 
@@ -245,42 +246,18 @@ impl Manifest {
 	}
 }
 
-fn parse_entry(value: &Value) -> Option<Entry> {
-	let input_path = value.get("inputPath")?.as_str()?.to_string();
-	let env = value.get("env")?.as_str()?.to_string();
-	let output_size = value.get("outputSize")?.as_f64()?;
-	if output_size < 0.0 || output_size.fract() != 0.0 {
-		return None;
-	}
-	let mut deps = BTreeMap::new();
-	for (path, dep) in value.get("deps")?.as_object()? {
-		let items = dep.as_array()?;
-		if items.len() != 4 {
-			return None;
-		}
-		let size = items[0].as_f64()?;
-		let sec = items[1].as_f64()?;
-		let nsec = items[2].as_f64()?;
-		let hash = items[3].as_str()?;
-		if size.fract() != 0.0 || sec.fract() != 0.0 || nsec.fract() != 0.0 || nsec < 0.0 {
-			return None;
-		}
-		deps.insert(
-			path.clone(),
-			Dep {
-				size: size as u64,
-				mtime_sec: sec as i64,
-				mtime_nsec: nsec as u32,
-				hash: hash.to_string(),
-			},
-		);
-	}
-	Some(Entry {
-		input_path,
-		env,
-		output_size: output_size as u64,
-		deps,
-	})
+/// `(size, mtime_sec, mtime_nsec)` of a file, or `None` when it is missing or
+/// not a file: what a fingerprint compares first.
+///
+/// # Example
+///
+/// ```no_run
+/// let (size, _sec, _nsec) = kd_build::file_stat("/site/src/index.html").unwrap();
+/// println!("{size} bytes");
+/// ```
+#[must_use]
+pub fn file_stat(path: &str) -> Option<(u64, i64, u32)> {
+	stat(path)
 }
 
 /// `(size, mtime_sec, mtime_nsec)` of a file, or `None` when it cannot be stat'ed.
@@ -300,12 +277,19 @@ fn stat(path: &str) -> Option<(u64, i64, u32)> {
 	Some((meta.len(), sec, nsec))
 }
 
+/// What `stat` found: size and modification time, or nothing.
+type Stat = Option<(u64, i64, u32)>;
+
 /// Memoizing fingerprinter for one build: a file referenced by many outputs
 /// (a layout, a component) is stat'ed and hashed once. Safe to share across
 /// pool threads.
 #[derive(Default)]
 pub struct Fingerprinter {
 	memo: Mutex<HashMap<String, Dep>>,
+	/// What `stat` said about a file the first time it was asked: the same
+	/// shared component is a dependency of every page, and asking the file
+	/// system once per page is the cost of an up-to-date build.
+	stats: Mutex<HashMap<String, Stat>>,
 }
 
 impl Fingerprinter {
@@ -352,35 +336,76 @@ impl Fingerprinter {
 	/// ```
 	#[must_use]
 	pub fn unchanged(&self, path: &str, recorded: &Dep) -> bool {
-		self.verify(path, recorded).is_some()
+		!matches!(self.verify(path, recorded), Verified::Changed)
+	}
+
+	/// `stat`, asked of the file system once per path for the life of the
+	/// fingerprinter.
+	fn stat_once(&self, path: &str) -> Option<(u64, i64, u32)> {
+		if let Some(known) = self
+			.stats
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.get(path)
+		{
+			return *known;
+		}
+		let seen = stat(path);
+		self.stats
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.insert(path.to_owned(), seen);
+		seen
 	}
 
 	/// Checks a recorded dependency against the file system, reading the
-	/// file only when its stat changed. Returns the fingerprint to record
-	/// when the content is unchanged, `None` when it changed.
-	fn verify(&self, path: &str, recorded: &Dep) -> Option<Dep> {
-		match stat(path) {
-			None => recorded.is_missing().then(|| recorded.clone()),
+	/// file only when its stat changed.
+	fn verify(&self, path: &str, recorded: &Dep) -> Verified {
+		match self.stat_once(path) {
+			None => {
+				if recorded.is_missing() {
+					Verified::Same
+				} else {
+					Verified::Changed
+				}
+			}
 			Some((size, sec, nsec)) => {
 				if recorded.is_missing() {
-					return None;
+					return Verified::Changed;
 				}
 				if size == recorded.size && sec == recorded.mtime_sec && nsec == recorded.mtime_nsec
 				{
-					return Some(recorded.clone());
+					return Verified::Same;
 				}
 				let current = self.fingerprint(path);
-				(current.hash == recorded.hash && !current.is_missing()).then_some(current)
+				if current.hash == recorded.hash && !current.is_missing() {
+					Verified::Moved(current)
+				} else {
+					Verified::Changed
+				}
 			}
 		}
 	}
 }
 
+/// What a recorded dependency turned out to be.
+enum Verified {
+	/// As recorded.
+	Same,
+	/// The content is as recorded but the stat moved (a `touch`, a checkout):
+	/// the fingerprint to record now.
+	Moved(Dep),
+	Changed,
+}
+
 /// Outcome of checking one recorded output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
-	/// Nothing changed. The entry carries refreshed fingerprints (an mtime
-	/// may have moved while the content did not) and should be stored again.
+	/// Nothing changed at all: the entry is current as it is (and need not
+	/// be copied to be kept).
+	Unchanged,
+	/// The content is as recorded but a modification time moved. The entry
+	/// carries the refreshed fingerprints and should be stored again.
 	UpToDate(Entry),
 	/// Something changed (or nothing can be verified): compile again.
 	Stale,
@@ -395,11 +420,11 @@ pub enum Verdict {
 /// # Example
 ///
 /// ```no_run
-/// let manifest = kd_build::Manifest::load("/tmp/kamado/x/build-manifest.json").unwrap_or_default();
+/// let manifest = kd_build::Manifest::load("/tmp/kamado/x/build-manifest.bin").unwrap_or_default();
 /// let fp = kd_build::Fingerprinter::new();
 /// if let Some(entry) = manifest.entries.get("/site/htdocs/index.html") {
 ///     match kd_build::check(entry, "/site/htdocs/index.html", "/site/src/index.tsx", "env-digest", &fp) {
-///         kd_build::Verdict::UpToDate(_) => println!("cached"),
+///         kd_build::Verdict::Unchanged | kd_build::Verdict::UpToDate(_) => println!("cached"),
 ///         kd_build::Verdict::Stale => println!("rebuild"),
 ///     }
 /// }
@@ -428,7 +453,7 @@ pub fn check(
 /// let fp = kd_build::Fingerprinter::new();
 /// # let entry: kd_build::Entry = unimplemented!();
 /// match kd_build::check_inputs(&entry, "/site/src/index.html", "env-digest", &fp) {
-///     kd_build::Verdict::UpToDate(_) => println!("serve from memory"),
+///     kd_build::Verdict::Unchanged | kd_build::Verdict::UpToDate(_) => println!("serve from memory"),
 ///     kd_build::Verdict::Stale => println!("compile again"),
 /// }
 /// ```
@@ -442,20 +467,26 @@ pub fn check_inputs(
 	if entry.env != env || entry.input_path != input_path || entry.deps.is_empty() {
 		return Verdict::Stale;
 	}
-	let mut refreshed = BTreeMap::new();
+	let mut moved: Vec<(&String, Dep)> = Vec::new();
 	for (path, recorded) in &entry.deps {
 		match fingerprinter.verify(path, recorded) {
-			Some(dep) => {
-				refreshed.insert(path.clone(), dep);
-			}
-			None => return Verdict::Stale,
+			Verified::Same => {}
+			Verified::Moved(dep) => moved.push((path, dep)),
+			Verified::Changed => return Verdict::Stale,
 		}
+	}
+	if moved.is_empty() {
+		return Verdict::Unchanged;
+	}
+	let mut deps = entry.deps.clone();
+	for (path, dep) in moved {
+		deps.insert(path.clone(), dep);
 	}
 	Verdict::UpToDate(Entry {
 		input_path: entry.input_path.clone(),
 		env: entry.env.clone(),
 		output_size: entry.output_size,
-		deps: refreshed,
+		deps,
 	})
 }
 
@@ -498,7 +529,7 @@ mod tests {
 			cache_dir_in("/tmp", "/p/", Some(".kamado/cache")),
 			"/p/.kamado/cache"
 		);
-		assert_eq!(manifest_path("/abs/"), "/abs/build-manifest.json");
+		assert_eq!(manifest_path("/abs/"), "/abs/build-manifest.bin");
 	}
 
 	fn sample() -> Manifest {
@@ -527,11 +558,11 @@ mod tests {
 	}
 
 	#[test]
-	fn json_format_is_stable_and_roundtrips() {
+	fn json_view_is_stable_and_the_file_round_trips() {
 		let m = sample();
 		assert_eq!(
 			m.to_json(),
-			r#"{"version":2,"entries":{"/out/index.html":{"inputPath":"/in/index.tsx","env":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","outputSize":456,"deps":{"/in/index.tsx":[123,1700000000,123456789,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"/in/optional.json":[0,0,0,"missing"]}}}}"#
+			r#"{"version":3,"entries":{"/out/index.html":{"inputPath":"/in/index.tsx","env":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","outputSize":456,"deps":{"/in/index.tsx":[123,1700000000,123456789,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"/in/optional.json":[0,0,0,"missing"]}}}}"#
 		);
 		let root = temp_root("roundtrip");
 		let path = manifest_path(&format!("{root}/nested/cache"));
@@ -544,28 +575,23 @@ mod tests {
 	#[test]
 	fn load_returns_none_for_missing_corrupt_or_foreign_manifests() {
 		let root = temp_root("load");
-		assert_eq!(Manifest::load(&format!("{root}/nope.json")), None);
-		let p = write(&root, "corrupt.json", b"{not json");
+		assert_eq!(Manifest::load(&format!("{root}/nope.bin")), None);
+		let p = write(&root, "corrupt.bin", b"{not a manifest");
 		assert_eq!(Manifest::load(&p), None);
-		let p = write(&root, "v1.json", br#"{"version":1,"entries":{}}"#);
+		let p = write(&root, "empty-file.bin", b"");
 		assert_eq!(Manifest::load(&p), None);
-		let p = write(
-			&root,
-			"nodeps.json",
-			br#"{"version":2,"entries":{"/o":{"inputPath":"/i","env":"raw","outputSize":5}}}"#,
-		);
+		// The JSON of an earlier version is not read as a manifest.
+		let p = write(&root, "v2.bin", br#"{"version":2,"entries":{}}"#);
 		assert_eq!(Manifest::load(&p), None);
-		let p = write(&root, "baddep.json", br#"{"version":2,"entries":{"/o":{"inputPath":"/i","env":"raw","outputSize":5,"deps":{"/i":[1,2,3]}}}}"#);
-		assert_eq!(Manifest::load(&p), None);
-		let p = write(&root, "badhash.json", br#"{"version":2,"entries":{"/o":{"inputPath":"/i","env":"raw","outputSize":5,"deps":{"/i":[1,2,3,4]}}}}"#);
+		// A good file cut short.
+		let good = binary::encode(&sample()).unwrap();
+		let p = write(&root, "cut.bin", &good[..good.len() / 2]);
 		assert_eq!(Manifest::load(&p), None);
 		let p = write(
 			&root,
-			"no-input.json",
-			br#"{"version":2,"entries":{"/o":{"env":"raw","outputSize":5,"deps":{}}}}"#,
+			"empty.bin",
+			&binary::encode(&Manifest::default()).unwrap(),
 		);
-		assert_eq!(Manifest::load(&p), None);
-		let p = write(&root, "empty.json", br#"{"version":2,"entries":{}}"#);
 		assert_eq!(Manifest::load(&p), Some(Manifest::default()));
 		let _ = fs::remove_dir_all(&root);
 	}
@@ -641,7 +667,7 @@ mod tests {
 		let fp = Fingerprinter::new();
 		assert!(matches!(
 			check(&entry, &output, &input, "env1", &fp),
-			Verdict::UpToDate(_)
+			Verdict::Unchanged
 		));
 
 		// Different env / input path / no deps.
@@ -716,6 +742,7 @@ mod tests {
 					"stored mtime is refreshed"
 				);
 			}
+			Verdict::Unchanged => panic!("a moved mtime must be reported so it can be stored"),
 			Verdict::Stale => panic!("identical content must not be stale"),
 		}
 		let _ = fs::remove_dir_all(&root);
@@ -731,7 +758,7 @@ mod tests {
 		entry.deps.get_mut(&input).unwrap().hash = "0".repeat(64);
 		assert!(matches!(
 			check(&entry, &output, &input, "env", &Fingerprinter::new()),
-			Verdict::UpToDate(_)
+			Verdict::Unchanged
 		));
 		let _ = fs::remove_dir_all(&root);
 	}

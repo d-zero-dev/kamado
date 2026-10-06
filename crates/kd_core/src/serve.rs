@@ -349,11 +349,13 @@ impl Serve {
 		let fingerprinter = kd_build::Fingerprinter::new();
 		if let Some(cached) = st.cache.get(&index) {
 			let page = &st.plan.pages[index];
-			if let kd_build::Verdict::UpToDate(refreshed) =
-				kd_build::check_inputs(&cached.entry, &page.file.input_path, &env, &fingerprinter)
-			{
+			let verdict =
+				kd_build::check_inputs(&cached.entry, &page.file.input_path, &env, &fingerprinter);
+			if !matches!(verdict, kd_build::Verdict::Stale) {
 				let cached = st.cache.get_mut(&index).expect("it was just read");
-				cached.entry = refreshed;
+				if let kd_build::Verdict::UpToDate(refreshed) = verdict {
+					cached.entry = refreshed;
+				}
 				return Ok(Served::Text {
 					content_type: "text/html",
 					body: cached.body.clone(),
@@ -618,16 +620,19 @@ impl Serve {
 			self.options.esbuild_version.as_deref().unwrap_or_default()
 		);
 		let fingerprinter = kd_build::Fingerprinter::new();
-		if let Some(cached) = st.asset_cache.get(&index)
-			&& let kd_build::Verdict::UpToDate(refreshed) =
-				kd_build::check_inputs(&cached.entry, &asset.input_path, &env, &fingerprinter)
-		{
-			let cached = st.asset_cache.get_mut(&index).expect("it was just read");
-			cached.entry = refreshed;
-			return Ok(Served::Text {
-				content_type,
-				body: cached.body.clone(),
-			});
+		if let Some(cached) = st.asset_cache.get(&index) {
+			let verdict =
+				kd_build::check_inputs(&cached.entry, &asset.input_path, &env, &fingerprinter);
+			if !matches!(verdict, kd_build::Verdict::Stale) {
+				let cached = st.asset_cache.get_mut(&index).expect("it was just read");
+				if let kd_build::Verdict::UpToDate(refreshed) = verdict {
+					cached.entry = refreshed;
+				}
+				return Ok(Served::Text {
+					content_type,
+					body: cached.body.clone(),
+				});
+			}
 		}
 		match asset.kind {
 			AssetKind::Style => {

@@ -58,7 +58,9 @@ pub struct RenderJob {
 enum Decision {
 	Virtual,
 	Skipped,
-	Cached(kd_build::Entry),
+	/// Up to date. The entry is the manifest's own, to be kept as it is
+	/// (`None`), or with refreshed fingerprints.
+	Cached(Option<kd_build::Entry>),
 	/// To be built; `render` is what JavaScript has to do for it.
 	Build {
 		render: Option<RenderPlan>,
@@ -237,17 +239,19 @@ fn compile_page(
 /// The environment digest of pages that JavaScript renders: they read the
 /// whole page list (`nav()`, `breadcrumbs`) and the data, so a change to
 /// either rebuilds them.
-fn pages_digest(plan: &Plan) -> String {
-	let mut hasher_input = String::new();
-	let mut order: Vec<&Page> = plan.pages.iter().collect();
-	order.sort_by(|a, b| a.file.url.cmp(&b.file.url));
-	for p in order {
-		hasher_input.push_str(&p.file.url);
-		hasher_input.push('\0');
-		hasher_input.push_str(&Value::Object(p.meta.clone()).to_json());
-		hasher_input.push('\0');
-	}
-	kd_hash::to_hex(&kd_hash::sha256(hasher_input.as_bytes()))
+fn pages_digest(plan: &Plan, jobs: usize) -> String {
+	// One hash per page, on several threads, then the hashes in order: the
+	// digest does not depend on the order of the pages.
+	let mut hashes: Vec<[u8; 32]> = parallel::map(&plan.pages, jobs, |p| {
+		let mut input = String::with_capacity(p.file.url.len() + 64);
+		input.push_str(&p.file.url);
+		input.push('\0');
+		input.push_str(&Value::Object(p.meta.clone()).to_json());
+		kd_hash::sha256(input.as_bytes())
+	});
+	hashes.sort_unstable();
+	let joined: Vec<u8> = hashes.iter().flatten().copied().collect();
+	kd_hash::to_hex(&kd_hash::sha256(&joined))
 }
 
 pub(crate) fn page_json(page: &Page, date: &str) -> Value {
@@ -303,8 +307,34 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		kd_config::Jobs::Count(n) => n,
 	});
 
+	let cache_dir = kd_build::cache_dir(
+		&config.root_dir,
+		options
+			.cache_dir
+			.as_deref()
+			.or(config.build.cache_dir.as_deref()),
+	);
+	let manifest_path = kd_build::manifest_path(&cache_dir);
+	let incremental = options.incremental || config.build.incremental;
 	let mut lap_at = Instant::now();
-	let plan = crate::plan_with(config, jobs)?;
+	// What the last build learned about the page files: a page whose files
+	// are as it recorded is not read again. A forced build reads everything.
+	let cached_plan = if incremental && !options.force {
+		crate::plan_cache::load(&cache_dir)
+	} else {
+		None
+	};
+	// One walk of the input directory finds the pages, the styles and the
+	// scripts.
+	let scan = crate::scan(config)?;
+	let (mut plan, learned) =
+		crate::plan_cached(config, jobs, cached_plan.as_ref(), Some(scan.pages))?;
+	if incremental
+		&& learned.changed
+		&& let Err(e) = crate::plan_cache::save(&cache_dir, &learned.cache)
+	{
+		plan.warnings.push(format!("plan cache: {e}"));
+	}
 	lap(&mut lap_at, "plan");
 	let targets = compile_globs(&options.targets)?;
 	let env = page_env(loaded, options);
@@ -316,21 +346,17 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	let any_js = plan.pages.iter().any(needs_js);
 	let env_js = if any_js {
 		kd_hash::to_hex(&kd_hash::sha256(
-			format!("{env}\0{}\0{}\0{runtime}", data.hash, pages_digest(&plan)).as_bytes(),
+			format!(
+				"{env}\0{}\0{}\0{runtime}",
+				data.hash,
+				pages_digest(&plan, jobs)
+			)
+			.as_bytes(),
 		))
 	} else {
 		env.clone()
 	};
 
-	let cache_dir = kd_build::cache_dir(
-		&config.root_dir,
-		options
-			.cache_dir
-			.as_deref()
-			.or(config.build.cache_dir.as_deref()),
-	);
-	let manifest_path = kd_build::manifest_path(&cache_dir);
-	let incremental = options.incremental || config.build.incremental;
 	// The on-disk manifest is read whenever the build is incremental, even with
 	// `force`: a forced partial build must still carry over the entries of the
 	// pages it did not touch. `force` only stops them from being *used* to skip.
@@ -339,11 +365,10 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	} else {
 		kd_build::Manifest::default()
 	};
-	let previous = if options.force {
-		kd_build::Manifest::default()
-	} else {
-		on_disk.clone()
-	};
+	lap(&mut lap_at, "manifest load");
+	// Borrowed, not cloned: the manifest of a big site is tens of megabytes.
+	let nothing = kd_build::Manifest::default();
+	let previous = if options.force { &nothing } else { &on_disk };
 
 	// Decide every page.
 	let fingerprinter = kd_build::Fingerprinter::new();
@@ -362,35 +387,45 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		Build,
 		Compile,
 	}
-	let first: Vec<First> = plan
-		.pages
+	let first: Vec<First> = parallel::map(&plan.pages, jobs, |page| {
+		if page.is_virtual {
+			return First::Done(Decision::Virtual);
+		}
+		let rel = kd_site::path::relative(&config.dir.input, &page.file.input_path);
+		if !targets.is_empty() && !targets.iter().any(|t| t.matches(&rel)) {
+			return First::Done(Decision::Skipped);
+		}
+		let page_env = if needs_js(page) { &env_js } else { &env };
+		if let Some(entry) = previous.entries.get(&page.file.output_path) {
+			match kd_build::check(
+				entry,
+				&page.file.output_path,
+				&page.file.input_path,
+				page_env,
+				&fingerprinter,
+			) {
+				kd_build::Verdict::Unchanged => return First::Done(Decision::Cached(None)),
+				kd_build::Verdict::UpToDate(refreshed) => {
+					return First::Done(Decision::Cached(Some(refreshed)));
+				}
+				kd_build::Verdict::Stale => {}
+			}
+		}
+		if needs_js(page) {
+			First::Compile
+		} else {
+			First::Build
+		}
+	});
+	// The pages that have to be built need their bodies, which the plan cache
+	// does not keep.
+	let needing_body: Vec<usize> = first
 		.iter()
-		.map(|page| {
-			if page.is_virtual {
-				return First::Done(Decision::Virtual);
-			}
-			let rel = kd_site::path::relative(&config.dir.input, &page.file.input_path);
-			if !targets.is_empty() && !targets.iter().any(|t| t.matches(&rel)) {
-				return First::Done(Decision::Skipped);
-			}
-			let page_env = if needs_js(page) { &env_js } else { &env };
-			if let Some(entry) = previous.entries.get(&page.file.output_path)
-				&& let kd_build::Verdict::UpToDate(refreshed) = kd_build::check(
-					entry,
-					&page.file.output_path,
-					&page.file.input_path,
-					page_env,
-					&fingerprinter,
-				) {
-				return First::Done(Decision::Cached(refreshed));
-			}
-			if needs_js(page) {
-				First::Compile
-			} else {
-				First::Build
-			}
-		})
+		.enumerate()
+		.filter(|(_, f)| matches!(f, First::Build | First::Compile))
+		.map(|(i, _)| i)
 		.collect();
+	crate::load_bodies(&mut plan, &needing_body, jobs)?;
 	let to_compile: Vec<usize> = first
 		.iter()
 		.enumerate()
@@ -476,8 +511,8 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		)
 		.as_bytes(),
 	));
-	let mut assets = assets::discover(config, AssetKind::Style)?;
-	assets.extend(assets::discover(config, AssetKind::Script)?);
+	let mut assets = assets::from_found(config, AssetKind::Style, scan.styles)?;
+	assets.extend(assets::from_found(config, AssetKind::Script, scan.scripts)?);
 	{
 		let page_outputs: std::collections::HashSet<&str> = plan
 			.pages
@@ -501,19 +536,28 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 			asset_decisions.push(Decision::Skipped);
 			continue;
 		}
-		if let Some(entry) = previous.entries.get(&asset.output_path)
-			&& let kd_build::Verdict::UpToDate(refreshed) = kd_build::check(
+		if let Some(entry) = previous.entries.get(&asset.output_path) {
+			let env = match asset.kind {
+				AssetKind::Style => &env_styles,
+				AssetKind::Script => &env_scripts,
+			};
+			match kd_build::check(
 				entry,
 				&asset.output_path,
 				&asset.input_path,
-				match asset.kind {
-					AssetKind::Style => &env_styles,
-					AssetKind::Script => &env_scripts,
-				},
+				env,
 				&fingerprinter,
 			) {
-			asset_decisions.push(Decision::Cached(refreshed));
-			continue;
+				kd_build::Verdict::Unchanged => {
+					asset_decisions.push(Decision::Cached(None));
+					continue;
+				}
+				kd_build::Verdict::UpToDate(refreshed) => {
+					asset_decisions.push(Decision::Cached(Some(refreshed)));
+					continue;
+				}
+				kd_build::Verdict::Stale => {}
+			}
 		}
 		if asset.kind == AssetKind::Style {
 			asset_decisions.push(Decision::Build { render: None });
@@ -784,24 +828,52 @@ impl Prepared {
 			warnings: shared.plan.warnings.clone(),
 			elapsed_ms: 0,
 		};
-		// A partial build (targets) keeps the entries it did not touch.
-		let mut next = if shared.targets.is_empty() {
-			kd_build::Manifest::default()
+		// A partial build (targets) keeps the entries it did not touch. Any
+		// other build starts a manifest of its own, and the entries that are
+		// up to date are moved over from the old one: with a hundred thousand
+		// pages, copying them is the cost of an up-to-date build.
+		let (mut next, mut carried) = if shared.targets.is_empty() {
+			(kd_build::Manifest::default(), on_disk.entries)
 		} else {
-			on_disk
+			(on_disk, std::collections::BTreeMap::new())
 		};
+		// Whether the manifest differs from the one on disk: an up-to-date build
+		// leaves it alone instead of writing the same tens of megabytes again.
+		let mut dirty = false;
 		for outcome in results.into_iter().flatten() {
 			let (result, entry, warnings) = outcome?;
 			report.warnings.extend(warnings);
-			if let Some(entry) = entry {
-				next.entries.insert(result.output_path.clone(), entry);
+			match entry {
+				Some(entry) => {
+					dirty = true;
+					next.entries.insert(result.output_path.clone(), entry);
+				}
+				None if result.status == Status::Cached => {
+					if let Some(kept) = carried.remove(&result.output_path) {
+						next.entries.insert(result.output_path.clone(), kept);
+					}
+				}
+				None => {
+					dirty |= !matches!(result.status, Status::Virtual | Status::Skipped);
+				}
 			}
 			report.pages.push(result);
 		}
 		for outcome in asset_results.into_iter().flatten() {
 			let (result, entry) = outcome?;
-			if let Some(entry) = entry {
-				next.entries.insert(result.output_path.clone(), entry);
+			match entry {
+				Some(entry) => {
+					dirty = true;
+					next.entries.insert(result.output_path.clone(), entry);
+				}
+				None if result.status == Status::Cached => {
+					if let Some(kept) = carried.remove(&result.output_path) {
+						next.entries.insert(result.output_path.clone(), kept);
+					}
+				}
+				None => {
+					dirty |= !matches!(result.status, Status::Virtual | Status::Skipped);
+				}
 			}
 			report.assets.push(result);
 		}
@@ -809,7 +881,8 @@ impl Prepared {
 			let xml = sitemap::render(settings, &shared.plan.pages);
 			write_output(&settings.output_path, xml.as_bytes(), shared.skip_unchanged)?;
 		}
-		if incremental {
+		// Entries nobody claimed belong to pages that are gone.
+		if incremental && (dirty || !carried.is_empty()) {
 			next.save(&manifest_path)
 				.map_err(|e| format!("cannot write {manifest_path}: {e}"))?;
 		}
@@ -831,7 +904,7 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 		Decision::Virtual => return Ok((result(Status::Virtual), None, Vec::new())),
 		Decision::Skipped => return Ok((result(Status::Skipped), None, Vec::new())),
 		Decision::Cached(entry) => {
-			return Ok((result(Status::Cached), Some(entry.clone()), Vec::new()));
+			return Ok((result(Status::Cached), entry.clone(), Vec::new()));
 		}
 		Decision::Build { render } => render,
 	};
@@ -914,7 +987,7 @@ fn finish_asset(shared: &Shared, i: usize, script: Option<&ScriptOutput>) -> Ass
 	};
 	match &shared.asset_decisions[i] {
 		Decision::Virtual | Decision::Skipped => return Ok((result(Status::Skipped), None)),
-		Decision::Cached(entry) => return Ok((result(Status::Cached), Some(entry.clone()))),
+		Decision::Cached(entry) => return Ok((result(Status::Cached), entry.clone())),
 		Decision::Build { .. } => {}
 	}
 	let (built, env) = match asset.kind {
