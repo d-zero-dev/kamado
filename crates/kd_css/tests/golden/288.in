@@ -1,1 +1,1 @@
-@charset "utf-8";a{content:"é"}
+a{foo:0px;colour:RED;-x-margin:0px;composes:a b from "./x.css"}

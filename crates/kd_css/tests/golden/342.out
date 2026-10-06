@@ -1,1 +1,1 @@
-a:after,a:before,a:first-line{x:y}a::selection{x:y}a:BEFORE{x:y}
+@-webkit-keyframes x{0%{a:b}}@keyframes x{0%{a:b}}

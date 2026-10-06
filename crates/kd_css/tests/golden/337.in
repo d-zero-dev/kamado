@@ -1,2 +1,1 @@
-a   >   b{x:y}
-a ,  b{x:y}
+@layer a{@layer b{c{d:e}}}

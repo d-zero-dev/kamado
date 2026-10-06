@@ -1,1 +1,1 @@
-@font-face{font-family:A;src:url(a.woff2) format("woff2"),url(a.woff) format("woff");font-display:swap;unicode-range:u+00??,u+0131}
+@import url("a.css");@import "b.css" screen;@import url(c.css) screen and (min-width:100px);a{b:c}

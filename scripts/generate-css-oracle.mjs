@@ -33,4 +33,6 @@ for (const name of names) {
 	}
 	writeFileSync(path.join(dir, `${name}.out`), expected);
 }
-process.stdout.write(`wrote ${names.length} oracle outputs (${errors} rejected) to ${dir}\n`);
+process.stdout.write(
+	`wrote ${names.length} oracle outputs (${errors} rejected) to ${dir}\n`,
+);

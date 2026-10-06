@@ -1,1 +1,1 @@
-@media{a{color:red}}
+a{-webkit-box-shadow:0 0 0 red;*zoom:1;_height:0}

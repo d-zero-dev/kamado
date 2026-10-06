@@ -9,8 +9,8 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { cssnanoMinify } from './css-oracle.mjs';
 import { cssCaseGroups } from './css-golden-cases.mjs';
+import { cssnanoMinify } from './css-oracle.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -23,20 +23,39 @@ function rustString(text) {
 	let out = '"';
 	for (const c of text) {
 		const code = c.codePointAt(0) ?? 0;
-		if (c === '"') {
-			out += String.raw`\"`;
-		} else if (c === '\\') {
-			out += String.raw`\\`;
-		} else if (c === '\n') {
-			out += String.raw`\n`;
-		} else if (c === '\r') {
-			out += String.raw`\r`;
-		} else if (c === '\t') {
-			out += String.raw`\t`;
-		} else if (code < 0x20 || code === 0x7f || /[\p{C}\p{Z}]/u.test(c) && c !== ' ') {
-			out += `\\u{${code.toString(16)}}`;
-		} else {
-			out += c;
+		switch (c) {
+			case '"': {
+				out += String.raw`\"`;
+
+				break;
+			}
+			case '\\': {
+				out += String.raw`\\`;
+
+				break;
+			}
+			case '\n': {
+				out += String.raw`\n`;
+
+				break;
+			}
+			case '\r': {
+				out += String.raw`\r`;
+
+				break;
+			}
+			case '\t': {
+				out += String.raw`\t`;
+
+				break;
+			}
+			default: {
+				if (code < 0x20 || code === 0x7f || (/[\p{C}\p{Z}]/u.test(c) && c !== ' ')) {
+					out += `\\u{${code.toString(16)}}`;
+				} else {
+					out += c;
+				}
+			}
 		}
 	}
 	return `${out}"`;
@@ -66,5 +85,8 @@ for (const [family, cases] of Object.entries(groups)) {
 	}
 	out += `\t]);\n}\n\n`;
 }
-writeFileSync(path.join(root, 'crates', 'kd_css', 'tests', 'rules.rs'), out.trimEnd() + '\n');
+writeFileSync(
+	path.join(root, 'crates', 'kd_css', 'tests', 'rules.rs'),
+	out.trimEnd() + '\n',
+);
 process.stdout.write(`wrote ${names.size} families\n`);

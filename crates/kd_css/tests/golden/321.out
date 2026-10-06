@@ -1,1 +1,1 @@
-@property --x{syntax:"<length>";inherits:false;initial-value:0}
+@media screen and (min-width:100px){a{color:red}}

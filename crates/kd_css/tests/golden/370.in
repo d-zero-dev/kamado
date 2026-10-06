@@ -1,1 +1,1 @@
-a{b:}
+a[href="x"]{x:1}a[href='x']{x:2}a[ href = "x" ]{x:3}a[href="x y"]{x:4}a[href="1x"]{x:5}a[href=""]{x:6}

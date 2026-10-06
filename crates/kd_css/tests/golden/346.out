@@ -1,1 +1,1 @@
-a[href|=x],a[href~=x],a[lang|=en]{x:y}
+@page{@top-left{content:"a"}}

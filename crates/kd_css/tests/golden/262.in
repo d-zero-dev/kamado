@@ -1,1 +1,1 @@
-a{--a:/* c */ 1px}
+a{background:conic-gradient(red 0%,blue 100%)}

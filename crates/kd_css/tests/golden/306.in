@@ -1,1 +1,1 @@
-@container (min-width: 400px){a{color:red}}
+a{transition:opacity .3s,transform .3s}

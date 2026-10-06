@@ -1,3 +1,4 @@
 .a {
-	content:'a\'b';content:"\201C";
+	content:'a\'b';
+	content:"\201C";
 }

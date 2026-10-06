@@ -11,14 +11,20 @@ use std::path::PathBuf;
 
 #[test]
 fn every_case_gives_cssnanos_answer_or_a_listed_deliberate_one() {
-	let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("golden");
+	let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+		.join("tests")
+		.join("golden");
 	let mut names: Vec<String> = fs::read_dir(&dir)
 		.unwrap()
 		.map(|e| e.unwrap().file_name().into_string().unwrap())
 		.filter_map(|n| n.strip_suffix(".in").map(str::to_owned))
 		.collect();
 	names.sort_by_key(|n| n.parse::<u64>().unwrap_or(u64::MAX));
-	assert!(names.len() >= 400, "the corpus is missing: {} cases", names.len());
+	assert!(
+		names.len() >= 400,
+		"the corpus is missing: {} cases",
+		names.len()
+	);
 	let cases: Vec<(String, String)> = names
 		.iter()
 		.map(|n| {
@@ -28,6 +34,19 @@ fn every_case_gives_cssnanos_answer_or_a_listed_deliberate_one() {
 			)
 		})
 		.collect();
-	let refs: Vec<(&str, &str)> = cases.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
-	common::check_all(&refs);
+	let refs: Vec<(&str, &str)> = cases
+		.iter()
+		.map(|(a, b)| (a.as_str(), b.as_str()))
+		.collect();
+	let used = common::check_all(&refs);
+	let stale: Vec<&str> = common::DECISIONS
+		.iter()
+		.enumerate()
+		.filter(|(i, _)| !used.contains(i))
+		.map(|(_, d)| d.input)
+		.collect();
+	assert!(
+		stale.is_empty(),
+		"these deliberate differences are no longer needed by any case: {stale:?}"
+	);
 }

@@ -1,1 +1,1 @@
-a:first-child,a:nth-child(2n),a:nth-child(odd){x:y}
+@keyframes x{0%{a:b}to{a:c}}

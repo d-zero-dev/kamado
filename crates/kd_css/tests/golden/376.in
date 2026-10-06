@@ -1,1 +1,1 @@
-a{b:c}/* unterminated
+.a{&:hover{x:1}}.a{& .b{x:2}}.a{&.b{x:3}}.a{.b &{x:4}}

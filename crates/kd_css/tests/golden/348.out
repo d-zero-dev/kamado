@@ -1,1 +1,1 @@
-a .b,a:focus,a:hover,html>body{x:y}
+@property --p{syntax:"<percentage>";inherits:false;initial-value:0%}

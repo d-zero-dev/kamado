@@ -1,1 +1,1 @@
-@page{@top-left{content:"a"}}
+@media(min-width:100px){a{color:red}}

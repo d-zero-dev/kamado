@@ -2,8 +2,23 @@
 
 use crate::parse::{AtRule, Body, Node};
 
-/// Prints a list of nodes. The last node of the list gets no `;`.
-pub fn print_nodes(nodes: &[Node], out: &mut String, _root: bool) {
+/// Prints a list of nodes without white space. The last node of the list
+/// gets no `;`.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::parse::parse_stylesheet;
+/// use kd_css::print::print_nodes;
+///
+/// let sheet = parse_stylesheet("a { b : c ; d : e } @import 'x';");
+/// let mut out = String::new();
+/// print_nodes(&sheet.nodes, &mut out);
+/// assert_eq!(out, "a{b:c;d:e}@import 'x'");
+/// ```
+pub fn print_nodes(nodes: &[Node], out: &mut String) {
+	// A `;` stays before a comment that follows a declaration: without it
+	// the comment would read as part of the value.
 	let len = nodes.len();
 	for (i, n) in nodes.iter().enumerate() {
 		print_node(n, out, i + 1 == len);
@@ -11,6 +26,18 @@ pub fn print_nodes(nodes: &[Node], out: &mut String, _root: bool) {
 }
 
 /// Prints one node; `last` is whether nothing follows it in its block.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::parse::parse_stylesheet;
+/// use kd_css::print::print_node;
+///
+/// let sheet = parse_stylesheet("a{b:c}");
+/// let mut out = String::new();
+/// print_node(&sheet.nodes[0], &mut out, true);
+/// assert_eq!(out, "a{b:c}");
+/// ```
 pub fn print_node(node: &Node, out: &mut String, last: bool) {
 	match node {
 		Node::Comment(c) => out.push_str(&c.text),
@@ -28,7 +55,7 @@ pub fn print_node(node: &Node, out: &mut String, last: bool) {
 		Node::Rule(r) => {
 			out.push_str(&r.selector);
 			out.push('{');
-			print_nodes(&r.nodes, out, false);
+			print_nodes(&r.nodes, out);
 			out.push('}');
 		}
 		Node::AtRule(a) => print_at_rule(a, out, last),
@@ -36,6 +63,19 @@ pub fn print_node(node: &Node, out: &mut String, last: bool) {
 }
 
 /// Prints an at-rule.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::parse::{parse_stylesheet, Node};
+/// use kd_css::print::print_at_rule;
+///
+/// let sheet = parse_stylesheet("@media print { a { b : c } }");
+/// let Node::AtRule(at) = &sheet.nodes[0] else { panic!() };
+/// let mut out = String::new();
+/// print_at_rule(at, &mut out, true);
+/// assert_eq!(out, "@media print{a{b:c}}");
+/// ```
 pub fn print_at_rule(a: &AtRule, out: &mut String, last: bool) {
 	out.push('@');
 	out.push_str(&a.name);
@@ -53,7 +93,7 @@ pub fn print_at_rule(a: &AtRule, out: &mut String, last: bool) {
 		}
 		Body::Nodes(nodes) => {
 			out.push('{');
-			print_nodes(nodes, out, false);
+			print_nodes(nodes, out);
 			out.push('}');
 		}
 		Body::Raw(raw) => {

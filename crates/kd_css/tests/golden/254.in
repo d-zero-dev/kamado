@@ -1,1 +1,1 @@
-a{margin:0 /* c */ 1px;color:red/* c */}
+a{background:linear-gradient(red 50%,blue 40%)}

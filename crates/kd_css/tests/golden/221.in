@@ -1,3 +1,4 @@
 .a {
-	grid-template-areas:"a b" "c d";
+	columns:2 100px;
+	column-rule:1px solid red;
 }

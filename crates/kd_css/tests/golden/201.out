@@ -1,1 +1,1 @@
-.a{background-position:0}
+.a{display:block;display:inline-block;display:flex;display:list-item}

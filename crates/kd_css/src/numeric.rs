@@ -50,6 +50,16 @@ const KEEP_ZERO_FUNCTIONS: [&str; 15] = [
 const SHAPE_FUNCTIONS: [&str; 5] = ["polygon", "inset", "circle", "ellipse", "translate"];
 
 /// What the minifier knows about where a declaration sits.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::numeric::{convert_values, DeclContext};
+///
+/// let in_keyframes = DeclContext { in_keyframes: true, ..DeclContext::default() };
+/// // `0%` stays in a `stroke-dasharray` of a keyframe.
+/// assert_eq!(convert_values("stroke-dasharray", "0% 0px", &in_keyframes), "0% 0px");
+/// ```
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DeclContext {
 	/// The declaration is in a keyframe block.
@@ -61,6 +71,16 @@ pub struct DeclContext {
 
 /// `String(number)` of JavaScript, for the range where it is plain decimal;
 /// `None` outside it (exponent notation).
+///
+/// # Example
+///
+/// ```
+/// use kd_css::numeric::js_number;
+///
+/// assert_eq!(js_number(0.5).as_deref(), Some("0.5"));
+/// assert_eq!(js_number(-0.0).as_deref(), Some("0"));
+/// assert_eq!(js_number(1e21), None);
+/// ```
 pub fn js_number(n: f64) -> Option<String> {
 	if !n.is_finite() {
 		return None;
@@ -176,6 +196,15 @@ fn clamp_opacity(word: &mut String) {
 }
 
 /// Properties in which `0%` and `0` mean the same.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::numeric::percent_may_drop;
+///
+/// assert!(percent_may_drop("margin-left"));
+/// assert!(!percent_may_drop("height"));
+/// ```
 pub fn percent_may_drop(prop: &str) -> bool {
 	let p = prop
 		.strip_prefix('-')
@@ -231,6 +260,10 @@ fn convert_nested(nodes: &mut [ValueNode]) {
 /// ```
 pub fn convert_values(prop: &str, value: &str, ctx: &DeclContext) -> String {
 	if prop.contains("flex") || prop.starts_with("--") || NOT_A_LENGTH.contains(&prop) {
+		return value.to_owned();
+	}
+	// Nothing to convert without a digit.
+	if !value.bytes().any(|b| b.is_ascii_digit()) {
 		return value.to_owned();
 	}
 	let mut nodes = parse(value);

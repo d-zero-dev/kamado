@@ -1,1 +1,1 @@
-a{background:url(a.png) left top / cover no-repeat}
+a{background-position:center left;background-position:left center;background-position:left}

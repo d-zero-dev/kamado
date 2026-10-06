@@ -1,1 +1,2 @@
-a{color:red;
+a   >   b{x:1}
+a ,  b{x:2}

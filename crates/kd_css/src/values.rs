@@ -20,6 +20,7 @@ use crate::color::minify_color;
 use crate::fonts::{minify_font, minify_font_family, minify_weight};
 use crate::numeric::{DeclContext, convert_values};
 use crate::ordered::ordered_values;
+use crate::property_table::KNOWN_PROPERTIES;
 use crate::strings::{normalize_strings_in, normalize_urls};
 use crate::value::{ValueNode, parse, stringify, unit, walk};
 
@@ -44,6 +45,12 @@ pub fn minify_value(property: &str, value: &str, ctx: &DeclContext) -> String {
 		return value.to_owned();
 	}
 	let prop = property.to_ascii_lowercase();
+	// What is not a property the minifier knows (a typo, a preprocessor's
+	// own, `composes` of CSS modules) keeps its value as written, white space
+	// aside: nothing says what `0px` or `RED` is there.
+	if !is_known_property(&prop) {
+		return normalize_whitespace(value);
+	}
 	let lower = value.to_ascii_lowercase();
 	// Values only an old IE reads: whitespace only.
 	if lower.contains("progid:") || lower.contains("expression(") {
@@ -96,7 +103,7 @@ pub fn minify_value(property: &str, value: &str, ctx: &DeclContext) -> String {
 			v = minify_font(&v);
 		}
 	}
-	if prop != "src" {
+	if prop != "src" && lower.contains("url(") {
 		v = normalize_urls(&v);
 	}
 	if is_repeat_property(&prop) {
@@ -109,7 +116,49 @@ pub fn minify_value(property: &str, value: &str, ctx: &DeclContext) -> String {
 	if is_box_shorthand(&prop) {
 		v = reduce_box_values(&v);
 	}
-	v
+	shorten_nothing(&prop, v)
+}
+
+/// `border: none` and `outline: none` are `0` (no style, or no width: no
+/// line), and `background: none` and `background: transparent` are `0 0` (the
+/// initial value of everything but the position, which is `0 0`).
+fn shorten_nothing(prop: &str, value: String) -> String {
+	let nothing = value.eq_ignore_ascii_case("none");
+	match strip_vendor(prop) {
+		"border" | "border-top" | "border-right" | "border-bottom" | "border-left" | "outline"
+			if nothing =>
+		{
+			"0".to_owned()
+		}
+		"background" if nothing || value.eq_ignore_ascii_case("transparent") => "0 0".to_owned(),
+		_ => value,
+	}
+}
+
+/// Whether `prop` (lower case) is a property or descriptor whose values are
+/// rewritten: one of the generated table, with a vendor prefix or an IE hack
+/// character (`*zoom`, `_height`) allowed in front.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::values::is_known_property;
+///
+/// assert!(is_known_property("margin"));
+/// assert!(is_known_property("-webkit-box-shadow"));
+/// assert!(is_known_property("*zoom"));
+/// assert!(!is_known_property("composes"));
+/// assert!(!is_known_property("-x-margin"));
+/// ```
+pub fn is_known_property(prop: &str) -> bool {
+	let p = prop.strip_prefix(['*', '_']).unwrap_or(prop);
+	let p = [
+		"-webkit-", "-moz-", "-ms-", "-o-", "-khtml-", "-apple-", "-epub-",
+	]
+	.iter()
+	.find_map(|v| p.strip_prefix(v))
+	.unwrap_or(p);
+	KNOWN_PROPERTIES.binary_search(&p).is_ok()
 }
 
 fn has_variable_function(value: &str) -> bool {
@@ -203,12 +252,57 @@ fn names_are_identifiers(prop: &str) -> bool {
 		|| p.starts_with("offset")
 }
 
-/// postcss-colormin on a value.
+/// postcss-colormin on a value: the colours in it get their shortest
+/// spelling. `prop` is the lower-case property (colour names are left alone in
+/// properties that hold names, like `animation-name`).
+///
+/// # Example
+///
+/// ```
+/// use kd_css::values::minify_colors;
+///
+/// assert_eq!(minify_colors("border", "1px solid #FF0000"), "1px solid red");
+/// assert_eq!(minify_colors("animation-name", "tan"), "tan");
+/// ```
 pub fn minify_colors(prop: &str, value: &str) -> String {
-	let mut nodes = parse(value);
 	let keep_names = names_are_identifiers(prop);
+	if !may_have_color(value, keep_names) {
+		return value.to_owned();
+	}
+	let mut nodes = parse(value);
 	minify_colors_in(&mut nodes, keep_names);
 	stringify(&nodes)
+}
+
+/// A cheap look at a value before it is parsed: a `#`, an `rgb(` or `hsl(`,
+/// or a word that is a colour name.
+fn may_have_color(value: &str, keep_names: bool) -> bool {
+	let b = value.as_bytes();
+	if b.contains(&b'#') {
+		return true;
+	}
+	let mut i = 0;
+	while i < b.len() {
+		if !b[i].is_ascii_alphabetic() {
+			i += 1;
+			continue;
+		}
+		let start = i;
+		while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'-' || b[i] == b'_') {
+			i += 1;
+		}
+		let word = &value[start..i];
+		if b.get(i) == Some(&b'(')
+			&& word.len() >= 3
+			&& (word[..3].eq_ignore_ascii_case("rgb") || word[..3].eq_ignore_ascii_case("hsl"))
+		{
+			return true;
+		}
+		if !keep_names && crate::color::is_color_name(word) {
+			return true;
+		}
+	}
+	false
 }
 
 fn minify_colors_in(nodes: &mut Vec<ValueNode>, keep_names: bool) {

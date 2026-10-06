@@ -1,1 +1,1 @@
-a{color:red}
+@supports (display:grid) and (not (display:inline-grid)){a{color:red}}

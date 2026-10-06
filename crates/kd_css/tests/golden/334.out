@@ -1,1 +1,1 @@
-a{color:red}
+@layer a,b;@layer a{a{color:red}}

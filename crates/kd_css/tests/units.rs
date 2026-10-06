@@ -62,10 +62,18 @@ fn the_tokens_tile_the_input_and_rebuild_it() {
 #[test]
 fn token_kinds_follow_css_syntax() {
 	use Kind::*;
-	assert_eq!(kinds("a{b:c}"), [Ident, LBrace, Ident, Colon, Ident, RBrace]);
+	assert_eq!(
+		kinds("a{b:c}"),
+		[Ident, LBrace, Ident, Colon, Ident, RBrace]
+	);
 	assert_eq!(kinds("@media"), [AtKeyword]);
 	assert_eq!(kinds("#fff"), [Hash]);
-	assert_eq!(kinds("12px 50% 1.5e3 -.5"), [Dimension, Whitespace, Percentage, Whitespace, Number, Whitespace, Number]);
+	assert_eq!(
+		kinds("12px 50% 1.5e3 -.5"),
+		[
+			Dimension, Whitespace, Percentage, Whitespace, Number, Whitespace, Number
+		]
+	);
 	assert_eq!(kinds("rgb(0)"), [Function, Number, RParen]);
 	assert_eq!(kinds("url(a.png)"), [Url]);
 	assert_eq!(kinds("URL( a.png )"), [Url]);
@@ -74,7 +82,12 @@ fn token_kinds_follow_css_syntax() {
 	assert_eq!(kinds("\"a\nb\""), [BadString, Whitespace, Ident, String]);
 	assert_eq!(kinds("<!-- -->"), [Cdo, Whitespace, Cdc]);
 	assert_eq!(kinds("/**/"), [Comment]);
-	assert_eq!(kinds("a,b;c[d]"), [Ident, Comma, Ident, Semicolon, Ident, LBracket, Ident, RBracket]);
+	assert_eq!(
+		kinds("a,b;c[d]"),
+		[
+			Ident, Comma, Ident, Semicolon, Ident, LBracket, Ident, RBracket
+		]
+	);
 	assert_eq!(kinds("--x"), [Ident]);
 	assert_eq!(kinds("-1"), [Number]);
 	assert_eq!(kinds("- 1"), [Delim, Whitespace, Number]);
@@ -87,7 +100,10 @@ fn an_unterminated_string_comment_or_block_is_closed_at_the_end() {
 	assert_eq!(kd_css::minify("a{b:\"c").unwrap(), "a{b:\"c\"}");
 	assert_eq!(kd_css::minify("a{b:c").unwrap(), "a{b:c}");
 	assert_eq!(kd_css::minify("a{b:c}/* x").unwrap(), "a{b:c}");
-	assert_eq!(kd_css::minify("@media screen{a{b:c}").unwrap(), "@media screen{a{b:c}}");
+	assert_eq!(
+		kd_css::minify("@media screen{a{b:c}").unwrap(),
+		"@media screen{a{b:c}}"
+	);
 	assert_eq!(kd_css::minify("a{b:url(x").unwrap(), "a{b:url(x)}");
 	assert_eq!(kd_css::minify("a{b:(c").unwrap(), "a{b:(c)}");
 }
@@ -95,15 +111,23 @@ fn an_unterminated_string_comment_or_block_is_closed_at_the_end() {
 #[test]
 fn a_qualified_rule_cut_short_is_dropped_and_an_at_rule_is_kept() {
 	assert_eq!(kd_css::minify("a{b:c}d").unwrap(), "a{b:c}");
-	assert_eq!(kd_css::minify("a{b:c}@import \"x\"").unwrap(), "a{b:c}@import \"x\"");
+	assert_eq!(
+		kd_css::minify("a{b:c}@import \"x\"").unwrap(),
+		"a{b:c}@import \"x\""
+	);
 	// A prelude runs across `;` to the next `{`, as in a browser.
 	assert_eq!(kd_css::minify("a{b:c};d{e:f}").unwrap(), "a{b:c};d{e:f}");
 }
 
 #[test]
 fn nesting_keeps_rules_declarations_and_at_rules_in_order() {
-	let out = kd_css::minify(".a{color:red;&:hover{color:blue}@media (width>=1px){color:green}margin:0}").unwrap();
-	assert_eq!(out, ".a{color:red;&:hover{color:blue}@media (width>=1px){color:green}margin:0}");
+	let out =
+		kd_css::minify(".a{color:red;&:hover{color:blue}@media (width>=1px){color:green}margin:0}")
+			.unwrap();
+	assert_eq!(
+		out,
+		".a{color:red;&:hover{color:blue}@media (width>=1px){color:green}margin:0}"
+	);
 }
 
 #[test]
@@ -134,7 +158,8 @@ fn the_tree_has_offsets_that_map_to_lines_and_columns() {
 
 #[test]
 fn the_parser_keeps_unknown_at_rules_and_custom_properties_as_written() {
-	let sheet = parse_stylesheet("@unknown  x { a : b ; { c } }\n:root{--x:  1px /* c */  2px ;--y:{a:b}}");
+	let sheet =
+		parse_stylesheet("@unknown  x { a : b ; { c } }\n:root{--x:  1px /* c */  2px ;--y:{a:b}}");
 	let Node::AtRule(at) = &sheet.nodes[0] else {
 		panic!("an at-rule")
 	};
@@ -157,7 +182,12 @@ fn the_parser_keeps_unknown_at_rules_and_custom_properties_as_written() {
 
 #[test]
 fn important_is_a_flag_and_not_part_of_the_value() {
-	for src in ["a:b!important", "a:b ! important", "a:b !IMPORTANT", "a:b/* c */!important/* d */"] {
+	for src in [
+		"a:b!important",
+		"a:b ! important",
+		"a:b !IMPORTANT",
+		"a:b/* c */!important/* d */",
+	] {
 		let decls = parse_declaration_list(src);
 		assert_eq!(decls.len(), 1, "{src}");
 		assert!(decls[0].important, "{src}");
@@ -171,18 +201,30 @@ fn a_style_attribute_keeps_only_declarations() {
 	let decls = parse_declaration_list("color:red;a{b:c};@media x{d:e};margin:0;nonsense;");
 	let names: Vec<&str> = decls.iter().map(|d| d.property.as_str()).collect();
 	assert_eq!(names, ["color", "margin"]);
-	assert_eq!(kd_css::minify_declarations("color : #FF0000 ;  margin : 0px  0px ").unwrap(), "color:red;margin:0");
+	assert_eq!(
+		kd_css::minify_declarations("color : #FF0000 ;  margin : 0px  0px ").unwrap(),
+		"color:red;margin:0"
+	);
 	assert_eq!(kd_css::minify_declarations("").unwrap(), "");
-	assert_eq!(kd_css::minify_declarations("color:red;color:red").unwrap(), "color:red");
+	assert_eq!(
+		kd_css::minify_declarations("color:red;color:red").unwrap(),
+		"color:red"
+	);
 }
 
 #[test]
 fn a_media_attribute_is_minified_like_an_at_media_prelude() {
-	assert_eq!(kd_css::minify_media_query("  screen  and ( min-width : 100px ) "), "screen and (min-width:100px)");
+	assert_eq!(
+		kd_css::minify_media_query("  screen  and ( min-width : 100px ) "),
+		"screen and (min-width:100px)"
+	);
 	assert_eq!(kd_css::minify_media_query("print , screen"), "print,screen");
 	assert_eq!(kd_css::minify_media_query("all"), "");
 	assert_eq!(kd_css::minify_media_query(""), "");
-	assert_eq!(kd_css::minify_media_query("(min-aspect-ratio: 32/18)"), "(min-aspect-ratio:16/9)");
+	assert_eq!(
+		kd_css::minify_media_query("(min-aspect-ratio: 32/18)"),
+		"(min-aspect-ratio:16/9)"
+	);
 }
 
 #[test]
@@ -211,7 +253,13 @@ fn the_value_parser_prints_back_what_it_read() {
 fn the_colour_name_table_is_sorted_for_the_binary_search() {
 	let names: Vec<&str> = {
 		let mut v = Vec::new();
-		for n in ["aliceblue", "yellowgreen", "rebeccapurple", "lightgoldenrodyellow", "darkslategray"] {
+		for n in [
+			"aliceblue",
+			"yellowgreen",
+			"rebeccapurple",
+			"lightgoldenrodyellow",
+			"darkslategray",
+		] {
 			assert!(kd_css::color::is_color(n), "{n}");
 			v.push(n);
 		}
@@ -226,13 +274,52 @@ fn the_colour_name_table_is_sorted_for_the_binary_search() {
 fn nothing_is_lost_in_a_large_minified_output_and_it_is_stable() {
 	let mut css = String::new();
 	for i in 0..2000 {
-		css.push_str(&format!(".c{i} > a:hover, .d{i}::before {{ margin: 0px {i}px; color: #FF{:02X}00 }}\n", i % 256));
+		css.push_str(&format!(
+			".c{i} > a:hover, .d{i}::before {{ margin: 0px {i}px; color: #FF{:02X}00 }}\n",
+			i % 256
+		));
 	}
 	let once = kd_css::minify(&css).unwrap();
 	assert_eq!(kd_css::minify(&once).unwrap(), once);
 	assert!(
-		once.starts_with(".c0>a:hover,.d0:before{margin:0;color:red}.c1>a:hover,.d1:before{margin:0 1px;color:#ff0100}"),
+		once.starts_with(
+			".c0>a:hover,.d0:before{margin:0;color:red}.c1>a:hover,.d1:before{margin:0 1px;color:#ff0100}"
+		),
 		"{}",
 		&once[..120]
+	);
+}
+
+#[test]
+fn pathological_nesting_neither_overflows_the_stack_nor_takes_long() {
+	let started = std::time::Instant::now();
+	// Blocks nested too deep are refused.
+	let deep = "a{".repeat(1000);
+	let err = kd_css::minify(&deep).unwrap_err();
+	assert!(err.message.contains("nested"), "{err}");
+	assert_eq!((err.line, err.column > 0), (1, true));
+	assert!(kd_css::minify(&"@media a{".repeat(1000)).is_err());
+	// Everything else is walked without recursion, or with a limit.
+	let parens = format!("a{{b:{}1{}}}", "f(".repeat(50_000), ")".repeat(50_000));
+	assert!(kd_css::minify(&parens).unwrap().starts_with("a{b:f(f("));
+	let calc = format!("a{{b:calc({}1px)}}", "- ".repeat(50_000));
+	assert!(kd_css::minify(&calc).is_ok());
+	let groups = format!(
+		"a{{b:calc({}1px{})}}",
+		"(".repeat(50_000),
+		")".repeat(50_000)
+	);
+	assert!(kd_css::minify(&groups).is_ok());
+	let nots = format!("a{}b{}{{x:y}}", ":not(".repeat(20_000), ")".repeat(20_000));
+	assert!(kd_css::minify(&nots).is_ok());
+	let list = format!("a{}{{x:y}}", ",a".repeat(50_000));
+	assert_eq!(kd_css::minify(&list).unwrap(), "a{x:y}");
+	assert_eq!(kd_css::minify(&"a{x:1}".repeat(20_000)).unwrap(), "a{x:1}");
+	assert!(kd_css::minify(&"(".repeat(200_000)).is_ok());
+	assert!(kd_css::minify(&format!("a{{b:{}", "(".repeat(200_000))).is_ok());
+	assert!(
+		started.elapsed().as_secs() < 30,
+		"took {:?}",
+		started.elapsed()
 	);
 }

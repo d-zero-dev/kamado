@@ -12,6 +12,9 @@
 //! selector is at worst left unminified. cssnano's `:is()` folding of
 //! selector lists with a shared prefix is not done.
 
+/// How deep `:is(:not(...))` is rewritten.
+const MAX_DEPTH: usize = 32;
+
 /// Splits at the commas that are not inside parentheses, brackets or strings.
 fn split_top_level(s: &str) -> Vec<&str> {
 	let b = s.as_bytes();
@@ -153,7 +156,7 @@ pub(crate) fn collapse_ws(s: &str) -> String {
 /// Normalises the argument of `:nth-*`: white space around `+` goes, then
 /// `even` -> `2n`, `2n+1` -> `odd`. Returns the argument and whether it is
 /// exactly `1`.
-fn nth_argument(arg: &str) -> (String, bool) {
+fn nth_argument(arg: &str, depth: usize) -> (String, bool) {
 	let trimmed = arg.trim_matches(|c: char| c.is_ascii() && is_ws(c as u8));
 	let (an_b, of) = match find_of(trimmed) {
 		Some(pos) => (&trimmed[..pos], Some(&trimmed[pos + 4..])),
@@ -179,7 +182,10 @@ fn nth_argument(arg: &str) -> (String, bool) {
 		}
 	}
 	match of {
-		Some(list) => (format!("{an} of {}", minify_inner_list(list)), false),
+		Some(list) => (
+			format!("{an} of {}", minify_inner_list(list, depth + 1)),
+			false,
+		),
 		None => (an, false),
 	}
 }
@@ -199,10 +205,10 @@ fn find_of(s: &str) -> Option<usize> {
 
 /// A selector list inside a pseudo-class: each selector minified, duplicates
 /// dropped, order kept.
-fn minify_inner_list(s: &str) -> String {
+fn minify_inner_list(s: &str, depth: usize) -> String {
 	let mut out: Vec<String> = Vec::new();
 	for part in split_top_level(s) {
-		let m = minify_complex(part, false);
+		let m = minify_complex(part, false, depth);
 		if !out.contains(&m) {
 			out.push(m);
 		}
@@ -333,8 +339,13 @@ fn minify_attribute(inner: &str) -> String {
 }
 
 /// Minifies one complex selector (no top-level commas).
-fn minify_complex(sel: &str, keyframe: bool) -> String {
+fn minify_complex(sel: &str, keyframe: bool, depth: usize) -> String {
 	let s = sel.trim_matches(|c: char| c.is_ascii() && is_ws(c as u8));
+	// Pseudo-classes nested this deep are not selectors anyone writes: the
+	// rest is kept as it is rather than recursed into.
+	if depth > MAX_DEPTH {
+		return collapse_ws(s);
+	}
 	if keyframe {
 		let lower = s.to_ascii_lowercase();
 		if lower == "from" {
@@ -431,7 +442,7 @@ fn minify_complex(sel: &str, keyframe: bool) -> String {
 					let args = &s[i + 1..close.min(b.len())];
 					let lname = name.to_ascii_lowercase();
 					if is_nth(&lname) {
-						let (arg, one) = nth_argument(args);
+						let (arg, one) = nth_argument(args, depth);
 						if one {
 							let replaced = match lname.as_str() {
 								":nth-child" => ":first-child",
@@ -450,7 +461,7 @@ fn minify_complex(sel: &str, keyframe: bool) -> String {
 					} else if takes_selector_list(&lname) {
 						out.push_str(&s[start..i]);
 						out.push('(');
-						out.push_str(&minify_inner_list(args));
+						out.push_str(&minify_inner_list(args, depth + 1));
 						out.push(')');
 					} else {
 						out.push_str(&s[start..i]);
@@ -564,11 +575,11 @@ pub fn minify_selector_list(sel: &str, keyframe: bool) -> String {
 	}
 	let parts = split_top_level(trimmed);
 	if parts.len() == 1 {
-		return minify_complex(parts[0], keyframe);
+		return minify_complex(parts[0], keyframe, 0);
 	}
 	let mut list: Vec<String> = Vec::with_capacity(parts.len());
 	for part in parts {
-		let m = minify_complex(part, keyframe);
+		let m = minify_complex(part, keyframe, 0);
 		list.push(m);
 	}
 	list.sort_by(|a, b| js_cmp(a, b));

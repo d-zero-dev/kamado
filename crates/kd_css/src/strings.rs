@@ -108,6 +108,17 @@ fn normalize_inside(inside: &str, quote: char) -> (String, char) {
 }
 
 /// Normalises every string of a parsed value.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::strings::normalize_strings_in;
+/// use kd_css::value::{parse, stringify};
+///
+/// let mut nodes = parse("'a' f('b')");
+/// normalize_strings_in(&mut nodes);
+/// assert_eq!(stringify(&nodes), "\"a\" f(\"b\")");
+/// ```
 pub fn normalize_strings_in(nodes: &mut [ValueNode]) {
 	walk(nodes, &mut |n| {
 		if let ValueNode::Str { quote, value, .. } = n {

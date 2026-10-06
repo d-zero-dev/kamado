@@ -1,1 +1,1 @@
-@media screen and (min-width : 100px) , print{a{color:red}}
+a{--x: 0.50px;--y: RED;--z: url( "a.png" )}

@@ -5,7 +5,10 @@
 //! What it checks, over every `<n>.in` in `KD_CSS_DIR`:
 //! - the size: the total, and every file, is at most 3 % larger than
 //!   cssnano's output (with 8 bytes of slack for the very small files, whose
-//!   3 % is less than a byte); a summary table is printed;
+//!   3 % is less than a byte); a summary table is printed. A file whose
+//!   difference from cssnano is entirely made of the decisions listed in
+//!   `common::DECISIONS` (a custom property kept as written, a `0%` kept) is
+//!   reported but not held to the bound: those decisions cost size on purpose;
 //! - idempotence: minifying the output changes nothing;
 //! - robustness: the corpus and 20000 byte-level mutations of it (truncation,
 //!   flipped bytes, inserted `{`, `}`, `"`, `/*` and friends) are minified
@@ -13,6 +16,9 @@
 //!
 //! Equivalence (that the output means what the input meant) cannot be checked
 //! here, as it needs cssnano and postcss: `scripts/check-css.mjs` does that.
+
+#[allow(dead_code)]
+mod common;
 
 use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -39,6 +45,7 @@ fn sizes_are_close_to_cssnano_and_minifying_twice_changes_nothing() {
 	let mut total_original = 0usize;
 	let mut rows: Vec<(f64, String, usize, usize, usize)> = Vec::new();
 	let mut too_big = Vec::new();
+	let mut deliberate = Vec::new();
 	let mut not_idempotent = Vec::new();
 	for name in &names {
 		let input = fs::read_to_string(dir.join(format!("{name}.in"))).unwrap();
@@ -61,12 +68,23 @@ fn sizes_are_close_to_cssnano_and_minifying_twice_changes_nothing() {
 		};
 		rows.push((ratio, name.clone(), input.len(), theirs.len(), mine.len()));
 		if mine.len() as f64 > theirs.len() as f64 * 1.03 + 8.0 {
+			// Entirely explained by listed decisions?
+			if mine != theirs && common::check(&input, &theirs).is_ok_and(|used| !used.is_empty()) {
+				deliberate.push(name.clone());
+				continue;
+			}
 			too_big.push(format!(
 				"{name}: {} bytes against cssnano's {} ({ratio:.3})",
 				mine.len(),
 				theirs.len()
 			));
 		}
+	}
+	if !deliberate.is_empty() {
+		println!(
+			"larger than the bound by listed decisions only: {}",
+			deliberate.join(", ")
+		);
 	}
 	rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 	let median = rows[rows.len() / 2].0;
@@ -133,12 +151,17 @@ fn throughput_of_the_tokenizer_and_the_minifier() {
 	let tokens = kd_css::token::tokenize(&all);
 	let tokenize = start.elapsed().as_secs_f64();
 	let start = std::time::Instant::now();
+	let sheet = kd_css::parse::parse_stylesheet(&all);
+	let parse = start.elapsed().as_secs_f64();
+	let start = std::time::Instant::now();
 	let out = kd_css::minify(&all).unwrap();
 	let minify = start.elapsed().as_secs_f64();
 	println!(
-		"{mb:.1} MiB: tokenizer {:.0} MiB/s ({} tokens), minify {:.1} MiB/s (to {:.1} MiB)",
+		"{mb:.1} MiB: tokenizer {:.0} MiB/s ({} tokens), parser {:.0} MiB/s ({} top-level nodes), minify {:.1} MiB/s (to {:.1} MiB)",
 		mb / tokenize,
 		tokens.len(),
+		mb / parse,
+		sheet.nodes.len(),
 		mb / minify,
 		out.len() as f64 / (1 << 20) as f64
 	);

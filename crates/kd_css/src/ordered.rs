@@ -17,7 +17,9 @@ fn strip_vendor(prop: &str) -> &str {
 	if let Some(rest) = prop.strip_prefix('-')
 		&& let Some((vendor, tail)) = rest.split_once('-')
 		&& !vendor.is_empty()
-		&& vendor.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+		&& vendor
+			.bytes()
+			.all(|c| c.is_ascii_alphanumeric() || c == b'_')
 	{
 		return tail;
 	}
@@ -78,9 +80,14 @@ fn border(nodes: &[ValueNode], drop_defaults: bool) -> Option<String> {
 	}
 	if drop_defaults {
 		let is = |part: &Option<String>, default: &str| {
-			part.as_deref().is_some_and(|p| p.eq_ignore_ascii_case(default))
+			part.as_deref()
+				.is_some_and(|p| p.eq_ignore_ascii_case(default))
 		};
-		let (w, s, c) = (is(&width, "medium"), is(&style, "none"), is(&color, "currentcolor"));
+		let (w, s, c) = (
+			is(&width, "medium"),
+			is(&style, "none"),
+			is(&color, "currentcolor"),
+		);
 		if w {
 			width = None;
 		}
@@ -192,7 +199,10 @@ fn transition(nodes: &[ValueNode]) -> Option<String> {
 			let t = text(n);
 			match n {
 				ValueNode::Function { name, .. }
-					if matches!(name.to_ascii_lowercase().as_str(), "cubic-bezier" | "linear" | "steps") =>
+					if matches!(
+						name.to_ascii_lowercase().as_str(),
+						"cubic-bezier" | "linear" | "steps"
+					) =>
 				{
 					timing.push(t);
 				}
@@ -245,7 +255,10 @@ fn animation(nodes: &[ValueNode]) -> Option<String> {
 				&& matches!(l.as_str(), "cubic-bezier" | "linear" | "steps" | "frames")
 				|| (matches!(n, ValueNode::Word(_)) && is_timing_keyword(&l));
 			let is_iteration = l == "infinite" || time_unit(n).is_some_and(|(_, u)| u.is_empty());
-			let is_direction = matches!(l.as_str(), "normal" | "reverse" | "alternate" | "alternate-reverse");
+			let is_direction = matches!(
+				l.as_str(),
+				"normal" | "reverse" | "alternate" | "alternate-reverse"
+			);
 			let is_fill = matches!(l.as_str(), "none" | "forwards" | "backwards" | "both");
 			let is_play = matches!(l.as_str(), "running" | "paused");
 			// Slot 1 duration, 2 timing, 3 delay, 4 iteration, 5 direction, 6 fill, 7 play state.
@@ -313,7 +326,10 @@ fn flex_flow(nodes: &[ValueNode]) -> Option<String> {
 			ValueNode::Space(_) => {}
 			ValueNode::Word(w) => {
 				let l = w.to_ascii_lowercase();
-				if matches!(l.as_str(), "row" | "row-reverse" | "column" | "column-reverse") {
+				if matches!(
+					l.as_str(),
+					"row" | "row-reverse" | "column" | "column-reverse"
+				) {
 					if direction.replace(w.clone()).is_some() {
 						return None;
 					}
@@ -338,7 +354,10 @@ fn should_abort(nodes: &mut [ValueNode]) -> bool {
 		match n {
 			ValueNode::Comment { .. } => abort = true,
 			ValueNode::Function { name, .. }
-				if matches!(name.to_ascii_lowercase().as_str(), "var" | "env" | "constant") =>
+				if matches!(
+					name.to_ascii_lowercase().as_str(),
+					"var" | "env" | "constant"
+				) =>
 			{
 				abort = true;
 			}
@@ -367,9 +386,17 @@ pub fn ordered_values(prop: &str, value: &str) -> String {
 	let rule = match strip_vendor(prop) {
 		"animation" => animation,
 		"outline" | "column-rule" => border_keeping_defaults,
-		"border" | "border-block" | "border-inline" | "border-block-end" | "border-block-start"
-		| "border-inline-end" | "border-inline-start" | "border-top" | "border-right"
-		| "border-bottom" | "border-left" => border_dropping_defaults,
+		"border"
+		| "border-block"
+		| "border-inline"
+		| "border-block-end"
+		| "border-block-start"
+		| "border-inline-end"
+		| "border-inline-start"
+		| "border-top"
+		| "border-right"
+		| "border-bottom"
+		| "border-left" => border_dropping_defaults,
 		"box-shadow" => box_shadow,
 		"flex-flow" => flex_flow,
 		"transition" => transition,

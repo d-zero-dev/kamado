@@ -1,1 +1,1 @@
-@keyframes x{0%{width:0;stroke-dasharray:0%}to{width:100%}}
+@media print,screen and (min-width:100px){a{color:red}}

@@ -20,10 +20,12 @@
 //! svgo on inline SVG, reordering of shorthand components.
 
 mod color_table;
+mod property_table;
 
 pub mod calc;
 pub mod color;
 pub mod fonts;
+mod merge;
 mod minify;
 pub mod numeric;
 pub mod ordered;

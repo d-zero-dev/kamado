@@ -1,1 +1,1 @@
-.a\:b{x:y}.a\31 b{x:y}.\31 0{x:y}
+@property --x{syntax:'<length>';inherits:false;initial-value:0px}

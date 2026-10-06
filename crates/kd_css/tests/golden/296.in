@@ -1,1 +1,1 @@
-@media (min-aspect-ratio: 16/9){a{color:red}}
+a{width:calc(1px + var(--a));margin:calc(-1 * var(--x))}

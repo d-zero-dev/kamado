@@ -1,6 +1,3 @@
 .a {
-	margin:0 auto!important;
-	color:red ! important;
-	color:red !IMPORTANT;
-	color:red!important;
+	border:1px solid currentColor;
 }

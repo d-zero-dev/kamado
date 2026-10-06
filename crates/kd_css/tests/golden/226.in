@@ -1,1 +1,1 @@
-a{background:linear-gradient(to right,red,blue)}
+a{grid-template-columns:repeat(auto-fill,minmax(0px,1fr)) [end]}

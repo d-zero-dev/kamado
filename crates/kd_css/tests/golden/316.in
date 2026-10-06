@@ -1,1 +1,1 @@
-@-webkit-keyframes x{from{a:b}}@keyframes x{from{a:b}}
+@media all{a{color:red}}

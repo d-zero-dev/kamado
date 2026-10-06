@@ -1,1 +1,6 @@
-a{content:"é"}@charset "utf-8";
+.a {
+	foo:0px;
+	colour:RED;
+	-x-margin:0px;
+	composes:a b from "./x.css";
+}

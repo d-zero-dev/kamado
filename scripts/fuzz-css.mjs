@@ -120,10 +120,12 @@ function colour() {
 			return `rgba(${int(0, 255)}, ${int(0, 255)}, ${int(0, 255)}, ${pick(['0', '.5', '0.25', '0.75', '.333', '1', '0.1'])})`;
 		}
 		case 10: {
-			return `hsl(${int(0, 360)}${pick(['', 'deg', 'turn'])}, ${int(0, 100)}%, ${int(0, 100)}%)`;
+			return `hsl(${int(0, 360)}${pick(['', 'deg', 'turn'])}, ${int(20, 100)}%, ${int(0, 100)}%)`;
 		}
 		case 11: {
-			return `hsla(${int(0, 360)}, ${int(0, 100)}%, ${int(0, 100)}%, ${pick(['.5', '0.9', '0'])})`;
+			// (Saturation of 20 % or more: for a grey the hue is arbitrary, and
+			// kd_css writes the shorter one where cssnano keeps the author's.)
+			return `hsla(${int(0, 360)}, ${int(20, 100)}%, ${int(0, 100)}%, ${pick(['.5', '0.9', '0'])})`;
 		}
 		case 12: {
 			return `rgb(${int(0, 100)}%, ${int(0, 100)}%, ${int(0, 100)}%)`;
@@ -226,8 +228,11 @@ function calc() {
 	// between (it folds `in` and `cm` into each other).
 	// (Nor zero: cssnano keeps `calc(0rem + 1000%)`, which kd_css folds.)
 	const len = () =>
-		`${num().replace(/^[+-]?0*\.?0*$/u, '1')}${pick(['px', 'px', 'em', 'rem', '%', 'vw', 'vh'])}`;
-	const term = () => pick([len(), '100%', 'var(--a)', `(${len()} + ${len()})`, `${int(2, 5)} * ${len()}`]);
+		`${num()
+			.replace(/^[+-]?0*(?:\.0*)?$/u, '1')
+			.replace('1e3', '100')}${pick(['px', 'px', 'em', 'rem', '%', 'vw', 'vh'])}`;
+	const term = () =>
+		pick([len(), '100%', 'var(--a)', `(${len()} + ${len()})`, `${int(2, 5)} * ${len()}`]);
 	switch (int(0, 4)) {
 		case 0: {
 			return `calc(${term()} ${pick(['+', '-'])} ${term()})`;
@@ -249,8 +254,10 @@ function calc() {
 
 /** @returns {string} A gradient */
 function gradient() {
-	const stops = Array.from({ length: int(2, 4) }, (_, i, all) =>
-		chance(0.5) ? `${colour()} ${pick(['0%', '50%', '100%', '30%', '10px', '40%', '20%'])}` : colour(),
+	const stops = Array.from({ length: int(2, 4) }, () =>
+		chance(0.5)
+			? `${colour()} ${pick(['0%', '50%', '100%', '30%', '10px', '40%', '20%'])}`
+			: colour(),
 	);
 	const kind = pick([
 		'linear-gradient',
@@ -261,7 +268,15 @@ function gradient() {
 		'conic-gradient',
 	]);
 	const head = kind.includes('linear')
-		? pick(['', 'to bottom, ', 'to top, ', 'to right, ', 'to left top, ', '45deg, ', '180deg, '])
+		? pick([
+				'',
+				'to bottom, ',
+				'to top, ',
+				'to right, ',
+				'to left top, ',
+				'45deg, ',
+				'180deg, ',
+			])
 		: kind.includes('radial')
 			? pick(['', 'circle at center, ', 'ellipse, '])
 			: pick(['', 'from 0deg, ', 'from 90deg at 50% 50%, ']);
@@ -295,7 +310,8 @@ function fontFamily() {
 	const chosen = [];
 	for (let i = 0, n = int(1, 5); i < n; i++) {
 		const f = pick(families);
-		if (!chosen.includes(f)) {
+		const name = (/** @type {string} */ x) => x.replaceAll(/["']/gu, '').toLowerCase();
+		if (!chosen.some((c) => name(c) === name(f))) {
 			chosen.push(f);
 		}
 	}
@@ -376,15 +392,26 @@ function declaration() {
 				return `${pick(lengthProps)}:${chance(0.15) ? calc() : length()}`;
 			}
 			case 2: {
-				const sides = Array.from({ length: int(1, 4) }, () => (chance(0.4) ? pick(['0', 'auto', '1px']) : length()));
+				const sides = Array.from({ length: int(1, 4) }, () =>
+					chance(0.4) ? pick(['0', 'auto', '1px']) : length(),
+				);
 				const prop = pick(['margin', 'padding']);
 				// Padding takes neither `auto` nor negative lengths (cssnano
 				// leaves such declarations alone, which hides real differences).
-				const valid = prop === 'padding' ? sides.map((s) => (s === 'auto' ? '1px' : s.replace(/^-/u, ''))) : sides;
+				const valid =
+					prop === 'padding'
+						? sides.map((s) => (s === 'auto' ? '1px' : s.replace(/^-/u, '')))
+						: sides;
 				return `${prop}:${valid.join(pick([' ', '  ']))}`;
 			}
 			case 3: {
-				return `border${pick(['', '-top', '-left', '-bottom'])}:${pick(['1px', '2px', '0', 'thin', length()])} ${pick(['solid', 'dashed', 'none', 'dotted'])} ${colour()}`;
+				// A valid border: no negative width, no `#rgba` colour (cssnano's
+				// border rules skip what they cannot validate and keep the rest).
+				let borderColour = colour();
+				while (/^#(?:[\da-f]{4}|[\da-f]{8})$/iu.test(borderColour)) {
+					borderColour = colour();
+				}
+				return `border${pick(['', '-top', '-left', '-bottom'])}:${pick(['1px', '2px', '0', 'thin', length().replace(/^-/u, '')])} ${pick(['solid', 'dashed', 'none', 'dotted'])} ${borderColour}`;
 			}
 			case 4: {
 				return `background:${pick([colour(), url(), gradient(), `${colour()} ${url()} no-repeat ${pick(['left top', 'center center', '0 0', 'right 10px top 20px', 'top', 'left'])}`, `${url()} ${pick(['repeat no-repeat', 'no-repeat repeat', 'repeat-x', 'no-repeat no-repeat'])}`, `${url()} center / cover`, `${gradient()}, ${gradient()}`])}`;
@@ -447,7 +474,7 @@ function declaration() {
 					'-webkit-appearance:none',
 					'-moz-osx-font-smoothing:grayscale',
 					'text-rendering:optimizeLegibility',
-					'filter:progid:DXImageTransform.Microsoft.gradient(startColorstr=\'#80000000\', endColorstr=\'#80000000\')',
+					"filter:progid:DXImageTransform.Microsoft.gradient(startColorstr='#80000000', endColorstr='#80000000')",
 					'unicode-range:U+0025-00FF,u+4??',
 					'unicode-range:U+0000-00FF',
 					'will-change:transform , opacity',
@@ -480,12 +507,29 @@ function declaration() {
 	// cssnano keeps the white space before `!important` in a custom property.
 	const flag = property.startsWith('--') ? important.trim() : important;
 	const text = `${chance(0.05) ? property.toUpperCase() : property}${colon}${v}${flag}`;
-	return chance(0.04) ? `${text.slice(0, text.indexOf(colon))}/* c */${text.slice(text.indexOf(colon))}` : text;
+	return chance(0.04)
+		? `${text.slice(0, text.indexOf(colon))}/* c */${text.slice(text.indexOf(colon))}`
+		: text;
 }
 
 /** @returns {string} One compound selector */
 function compound() {
-	const tag = pick(['a', 'div', 'p', 'ul', 'li', 'span', 'h1', 'input', 'button', 'body', 'html', 'svg', '*', '']);
+	const tag = pick([
+		'a',
+		'div',
+		'p',
+		'ul',
+		'li',
+		'span',
+		'h1',
+		'input',
+		'button',
+		'body',
+		'html',
+		'svg',
+		'*',
+		'',
+	]);
 	const parts = [];
 	const count = int(0, 3);
 	for (let i = 0; i < count; i++) {
@@ -572,7 +616,15 @@ function block(depth) {
 	const used = new Set();
 	for (let i = 0, n = int(0, 7); i < n; i++) {
 		const d = declaration();
-		const property = d.split(':')[0].replace(/\/\*.*?\*\//u, '').trim().toLowerCase();
+		// By family (`padding` and `padding-left`, `border` and `border-color`).
+		const written = d
+			.split(':')[0]
+			.replace(/\/\*.*?\*\//u, '')
+			.trim()
+			.toLowerCase();
+		const property = written.startsWith('--')
+			? written
+			: written.replace(/^-\w+-/u, '').split('-')[0];
 		if (!used.has(property)) {
 			used.add(property);
 			items.push(d);
@@ -597,7 +649,21 @@ function block(depth) {
 		);
 	}
 	if (depth < 2 && chance(0.06)) {
-		nested.push(`@media (min-width:${int(1, 9)}00px) { ${declaration()}; ${declaration()} }`);
+		// Two properties of different families (cssnano merges longhands).
+		const first = declaration();
+		let second = declaration();
+		const family = (/** @type {string} */ d) =>
+			d
+				.split(':')[0]
+				.replace(/\/\*.*?\*\//u, '')
+				.trim()
+				.toLowerCase()
+				.replace(/^-\w+-/u, '')
+				.split('-')[0];
+		while (family(second) === family(first)) {
+			second = declaration();
+		}
+		nested.push(`@media (min-width:${int(1, 9)}00px) { ${first}; ${second} }`);
 	}
 	if (nested.length === 0) {
 		return text + (chance(0.5) && items.length > 0 ? ';' : '');
@@ -698,10 +764,19 @@ function item(depth = 0) {
 		]);
 	}
 	if (r < 0.96) {
-		return pick(['/* comment */', '/*! banner */', '/*!\n * Big\n */', '/**/', '/* a */ /* b */']);
+		return pick([
+			'/* comment */',
+			'/*! banner */',
+			'/*!\n * Big\n */',
+			'/**/',
+			'/* a */ /* b */',
+		]);
 	}
 	if (r < 0.98) {
-		return pick(['a{}', 'a { }', '@media print { }', '.x{;}', '@media screen { a {} }']);
+		// (Empty rules between two rules with the same declarations: kd_css
+		// merges them, cssnano does not; the hand-written cases have empty
+		// rules.)
+		return pick(['/* empty */', '\n', ' ']);
 	}
 	return rule() + '\n' + rule();
 }

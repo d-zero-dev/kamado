@@ -1,1 +1,1 @@
-a:not(.b,.b){x:y}
+@keyframes x{from{a:b}to{a:c}}

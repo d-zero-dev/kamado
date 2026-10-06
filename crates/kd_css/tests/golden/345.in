@@ -1,1 +1,1 @@
-a[href="x" i]{x:y}a[href=x i]{x:y}a[href^="http"]{x:y}a[data-a="a-b"]{x:y}a[data-a="a_b"]{x:y}
+@page :first{margin:0px}

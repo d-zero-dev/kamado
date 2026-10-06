@@ -1,1 +1,3 @@
-@layer a{@layer b{c{d:e}}}
+.a {
+	mask:url(a.svg#b) center / contain no-repeat;
+}

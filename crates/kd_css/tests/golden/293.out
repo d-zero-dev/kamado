@@ -1,1 +1,1 @@
-@media (min-width:100px) and (max-width:200px),(min-width:300px){a{color:red}}
+.a{--x:0.50px;--y:red;--z:url(a.png)}

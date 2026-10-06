@@ -7,6 +7,21 @@
 //! changes nothing changes nothing.
 
 /// One node of a parsed value.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::value::{parse, ValueNode};
+///
+/// let nodes = parse("1px solid rgb(0,0,0)");
+/// assert_eq!(nodes[0].word(), Some("1px"));
+/// assert!(nodes[1].is_space());
+/// assert_eq!(nodes[2].value(), "solid");
+/// assert!(matches!(&nodes[4], ValueNode::Function { name, .. } if name == "rgb"));
+/// assert!(nodes[0].is_word() && !nodes[0].is_div(','));
+/// assert_eq!(ValueNode::new_word("a"), ValueNode::Word("a".to_owned()));
+/// assert_eq!(ValueNode::new_space(), ValueNode::Space(" ".to_owned()));
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueNode {
 	/// Anything that is not one of the others: `12px`, `red`, `#fff`, `+`.
@@ -95,6 +110,9 @@ enum Parent {
 		calc: bool,
 	},
 }
+
+/// How deep functions and parentheses are parsed; see [`parse`].
+const MAX_DEPTH: usize = 256;
 
 struct Frame {
 	name: String,
@@ -313,6 +331,18 @@ pub fn parse(input: &str) -> Vec<ValueNode> {
 						unclosed,
 					});
 				pos = if unclosed { max } else { n + 1 };
+			} else if stack.len() > MAX_DEPTH {
+				// Parentheses nested this deep are not CSS anyone writes, and
+				// a tree this deep would overflow the stack of every rule that
+				// walks it: the rest is kept as one word, text for text.
+				let from = open - name.len();
+				name.clear();
+				stack
+					.last_mut()
+					.expect("the root frame")
+					.nodes
+					.push(ValueNode::Word(input[from..].to_owned()));
+				pos = max;
 			} else {
 				stack.push(Frame {
 					name: std::mem::take(&mut name),
@@ -424,6 +454,18 @@ pub fn stringify(nodes: &[ValueNode]) -> String {
 }
 
 /// Appends one node's text to `out`.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::value::{parse, push_node};
+///
+/// let mut out = String::new();
+/// for node in &parse("a b") {
+///     push_node(&mut out, node);
+/// }
+/// assert_eq!(out, "a b");
+/// ```
 pub fn push_node(out: &mut String, node: &ValueNode) {
 	match node {
 		ValueNode::Word(s) | ValueNode::UnicodeRange(s) | ValueNode::Space(s) => out.push_str(s),
@@ -531,6 +573,17 @@ pub fn unit(value: &str) -> Option<(&str, &str)> {
 
 /// Splits the nodes at dividers, like cssnano's `getArguments`: dividers are
 /// dropped, everything else is cloned into its group.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::value::{arguments, parse, stringify};
+///
+/// let groups = arguments(&parse("a b, c"));
+/// assert_eq!(groups.len(), 2);
+/// assert_eq!(stringify(&groups[0]), "a b");
+/// assert_eq!(stringify(&groups[1]), "c");
+/// ```
 pub fn arguments(nodes: &[ValueNode]) -> Vec<Vec<ValueNode>> {
 	let mut list: Vec<Vec<ValueNode>> = vec![Vec::new()];
 	for n in nodes {
@@ -545,6 +598,21 @@ pub fn arguments(nodes: &[ValueNode]) -> Vec<Vec<ValueNode>> {
 
 /// Visits every node, parents before children. The callback returns whether
 /// to descend into a function's arguments.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::value::{parse, stringify, walk, ValueNode};
+///
+/// let mut nodes = parse("a f(b, c)");
+/// walk(&mut nodes, &mut |n| {
+///     if let ValueNode::Word(w) = n {
+///         *w = w.to_uppercase();
+///     }
+///     true
+/// });
+/// assert_eq!(stringify(&nodes), "A f(B, C)");
+/// ```
 pub fn walk(nodes: &mut [ValueNode], f: &mut dyn FnMut(&mut ValueNode) -> bool) {
 	for n in nodes.iter_mut() {
 		let descend = f(n);

@@ -126,6 +126,19 @@ fn parse_name(input: &str) -> Option<Rgba> {
 	})
 }
 
+/// Whether `word` is one of the colour names colormin knows (`red`, not
+/// `grey`).
+///
+/// # Example
+///
+/// ```
+/// assert!(kd_css::color::is_color_name("Red"));
+/// assert!(!kd_css::color::is_color_name("transparent"));
+/// ```
+pub fn is_color_name(word: &str) -> bool {
+	parse_name(word).is_some()
+}
+
 /// Whether colormin understands `input` as a colour (hex, name, `rgb()` or
 /// `hsl()`).
 ///

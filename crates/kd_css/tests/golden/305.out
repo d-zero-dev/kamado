@@ -1,1 +1,1 @@
-@supports selector(:has(a)){a{color:red}}
+.a{will-change:transform,opacity}

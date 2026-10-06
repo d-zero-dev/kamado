@@ -1,1 +1,1 @@
-@media print{@media (min-width:1px){a{b:c}}}
+@media only screen and (-webkit-min-device-pixel-ratio:1.5),only screen and (min-resolution:144dpi){a{color:red}}

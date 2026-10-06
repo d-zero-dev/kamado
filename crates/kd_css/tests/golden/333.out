@@ -1,1 +1,1 @@
-a,b{x:y}
+@container sidebar (min-width:400px) and (max-width:  500px){a{color:red}}

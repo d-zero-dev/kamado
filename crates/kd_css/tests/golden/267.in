@@ -1,3 +1,6 @@
 .a {
-	--x: 0.50px;--y: RED;--z: url( "a.png" );
+	color:red;
+	;
+	;
+	color:blue;
 }

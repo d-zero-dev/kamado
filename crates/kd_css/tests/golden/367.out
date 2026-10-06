@@ -1,1 +1,1 @@
-a{b:c};d{e:f}
+a:nth-child(2n+1 of .b){x:1}a:last-child{x:2}a:first-of-type{x:3}a:nth-child(n+2){x:4}

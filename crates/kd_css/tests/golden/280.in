@@ -1,1 +1,1 @@
-a{transition:opacity .3s,transform .3s}
+a{/* c */color/* c */:/* c */red/* c */}

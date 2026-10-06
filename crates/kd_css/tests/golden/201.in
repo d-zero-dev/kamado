@@ -1,5 +1,6 @@
 .a {
-	background-position:center left;
-	background-position:left center;
-	background-position:left;
+	display:block flow;
+	display:inline flow-root;
+	display:block flex;
+	display:list-item block flow;
 }

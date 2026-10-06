@@ -1,1 +1,1 @@
-@supports not (display:grid){a{color:red}}
+.a{src:url(a.woff2) format("woff2"),url(a.woff) format("woff")}

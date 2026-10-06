@@ -1,1 +1,1 @@
-a{/* c */color/* c */:/* c */red/* c */}
+a{background:-webkit-linear-gradient(top,red 0%,blue 100%)}

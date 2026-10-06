@@ -1,5 +1,6 @@
 .a {
-	background:url(a.png) no-repeat repeat;
-	background-repeat:repeat no-repeat;
-	background-repeat:no-repeat no-repeat;
+	background-position:left top;
+	background-position:top left;
+	background-position:center center;
+	background-position:0 0;
 }

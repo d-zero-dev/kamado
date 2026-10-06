@@ -1,1 +1,1 @@
-@media (width >= 600px) and (width <= 900px){a{color:red}}
+a{color:var(--a,#fff)}

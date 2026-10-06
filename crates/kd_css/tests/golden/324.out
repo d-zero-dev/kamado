@@ -1,1 +1,1 @@
-@counter-style x{system:cyclic;symbols:"a"}
+@media (width >= 600px) and (width <= 900px){a{color:red}}

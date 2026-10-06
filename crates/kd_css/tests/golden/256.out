@@ -1,1 +1,1 @@
-a{margin:0 1px}
+a{background:radial-gradient(circle at center,red,blue)}

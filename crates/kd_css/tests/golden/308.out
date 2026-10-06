@@ -1,1 +1,1 @@
-@layer a,b;@layer a{a{color:red}}
+a{font-feature-settings:"liga" 1,"kern" 1}

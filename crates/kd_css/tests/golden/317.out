@@ -1,1 +1,1 @@
-@keyframes x{0%,50%{a:b}}
+@media (min-width:100px){a{color:red}}

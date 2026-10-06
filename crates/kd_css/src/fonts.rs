@@ -10,6 +10,16 @@ fn push_node_text(out: &mut String, n: &ValueNode) {
 }
 
 /// `normal` -> `400`, `bold` -> `700`.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::fonts::minify_weight;
+///
+/// assert_eq!(minify_weight("bold"), "700");
+/// assert_eq!(minify_weight("NORMAL"), "400");
+/// assert_eq!(minify_weight("lighter"), "lighter");
+/// ```
 pub fn minify_weight(value: &str) -> String {
 	let lower = value.to_ascii_lowercase();
 	match lower.as_str() {
@@ -216,12 +226,27 @@ const KEYWORDS: [&str; 9] = [
 	"unset",
 ];
 
+/// Whether a family name must stay quoted because a word of it is a generic
+/// family or a CSS-wide keyword. cssnano looks for the keywords anywhere in
+/// the name, so `"KaTeX_SansSerif"` keeps its quotes; here a word is a run of
+/// letters, digits, `-` and `_`, and only a whole word counts.
 fn is_keyword(value: &str) -> bool {
 	let lower = value.to_ascii_lowercase();
-	KEYWORDS.iter().any(|k| lower.contains(k))
+	lower
+		.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_' || !c.is_ascii()))
+		.any(|word| KEYWORDS.contains(&word))
 }
 
 /// Options of the family minifier.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::fonts::FamilyOptions;
+///
+/// let options = FamilyOptions { remove_quotes: true };
+/// assert!(options.remove_quotes);
+/// ```
 #[derive(Clone, Copy)]
 pub struct FamilyOptions {
 	pub remove_quotes: bool,
@@ -337,7 +362,19 @@ fn utf16_len(s: &str) -> usize {
 	s.encode_utf16().count()
 }
 
-/// `font-family`.
+/// `font-family`: quotes go where an identifier would do and is not longer,
+/// duplicates go, white space around the commas goes.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::fonts::minify_font_family;
+///
+/// assert_eq!(
+///     minify_font_family("\"Helvetica Neue\" , 'Arial', Arial, \"serif\""),
+///     "Helvetica Neue,Arial,\"serif\""
+/// );
+/// ```
 pub fn minify_font_family(value: &str) -> String {
 	let tree = parse(value);
 	stringify(&minify_family(
@@ -367,6 +404,17 @@ const SIZE: [&str; 9] = [
 ];
 
 /// The `font` shorthand: weights are minified and the family list too.
+///
+/// # Example
+///
+/// ```
+/// use kd_css::fonts::minify_font;
+///
+/// assert_eq!(
+///     minify_font("normal normal bold 12px/1.5 \"Helvetica Neue\", Arial"),
+///     "normal normal 700 12px/1.5 Helvetica Neue,Arial"
+/// );
+/// ```
 pub fn minify_font(value: &str) -> String {
 	let mut nodes = parse(value);
 	let mut family_start: Option<usize> = None;

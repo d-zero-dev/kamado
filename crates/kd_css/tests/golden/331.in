@@ -1,1 +1,1 @@
-@media a{a{b:c}}@media a{a{b:c}}
+@supports selector(:has(a)){a{color:red}}

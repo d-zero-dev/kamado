@@ -1,1 +1,1 @@
-a{width:calc(1px+2px)}
+a{*zoom:1;_height:1px;color:red\9;width:100px\9;filter:progid:DXImageTransform.Microsoft.gradient(startColorstr='#80000000', endColorstr='#80000000')}

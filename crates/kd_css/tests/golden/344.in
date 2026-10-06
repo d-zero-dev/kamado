@@ -1,1 +1,1 @@
-a[href="x"]{x:y}a[href='x']{x:y}a[ href = "x" ]{x:y}a[href="x y"]{x:y}a[href="1x"]{x:y}a[href=""]{x:y}
+@keyframes x{0%{width:0%;stroke-dasharray:0%}to{width:100%}}

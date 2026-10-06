@@ -1,1 +1,1 @@
-__ERROR__
+:root{--a:1px;--b:#fff;--c:3px;--d:{a:b}}

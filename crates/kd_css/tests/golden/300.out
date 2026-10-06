@@ -1,1 +1,1 @@
-@media not all and (monochrome){a{color:red}}
+a{background:url(a.png) no-repeat,url(b.png) repeat-x}

@@ -1,1 +1,1 @@
-a{background:linear-gradient(180deg,rgba(0,0,0,.5),transparent)}
+a{outline:none!important}

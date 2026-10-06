@@ -1,1 +1,1 @@
-a{animation:2s ease-in 1s infinite alternate both running foo}
+a{box-shadow:0 0 1px red inset;box-shadow:inset 0 0 1px red,0 1px 2px blue}

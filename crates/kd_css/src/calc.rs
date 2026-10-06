@@ -48,7 +48,13 @@ impl Dec {
 		if neg {
 			m = -m;
 		}
-		Some(Dec { m, e: frac.len() as u32 }.normal())
+		Some(
+			Dec {
+				m,
+				e: frac.len() as u32,
+			}
+			.normal(),
+		)
 	}
 
 	fn normal(mut self) -> Dec {
@@ -77,7 +83,10 @@ impl Dec {
 	}
 
 	fn neg(self) -> Dec {
-		Dec { m: -self.m, e: self.e }
+		Dec {
+			m: -self.m,
+			e: self.e,
+		}
 	}
 
 	fn mul(self, o: Dec) -> Option<Dec> {
@@ -85,7 +94,13 @@ impl Dec {
 		if e > MAX_SCALE {
 			return None;
 		}
-		Some(Dec { m: self.m.checked_mul(o.m)?, e }.normal())
+		Some(
+			Dec {
+				m: self.m.checked_mul(o.m)?,
+				e,
+			}
+			.normal(),
+		)
 	}
 
 	/// An exact quotient with at most five decimals.
@@ -99,7 +114,11 @@ impl Dec {
 				num = num.checked_mul(10)?;
 			}
 			if num % o.m == 0 {
-				let r = Dec { m: num / o.m, e: self.e + k }.normal();
+				let r = Dec {
+					m: num / o.m,
+					e: self.e + k,
+				}
+				.normal();
 				return (r.e <= 5).then_some(r);
 			}
 		}
@@ -117,7 +136,11 @@ impl Dec {
 		let body = if e == 0 {
 			digits
 		} else if digits.len() > e {
-			format!("{}.{}", &digits[..digits.len() - e], &digits[digits.len() - e..])
+			format!(
+				"{}.{}",
+				&digits[..digits.len() - e],
+				&digits[digits.len() - e..]
+			)
 		} else {
 			format!(".{}{}", "0".repeat(e - digits.len()), digits)
 		};
@@ -281,14 +304,27 @@ impl Eval<'_> {
 			}
 			Tok::Group(inner) => {
 				self.pos += 1;
-				let mut e = Eval { toks: inner, pos: 0 };
+				let mut e = Eval {
+					toks: inner,
+					pos: 0,
+				};
 				let v = e.expr()?;
 				(e.pos == inner.len()).then_some(v)
 			}
-			Tok::Op(c @ ('-' | '+')) => {
-				self.pos += 1;
+			Tok::Op('-' | '+') => {
+				// Signs in front of an operand, counted rather than recursed
+				// into (a run of them must not overflow the stack).
+				let mut negative = false;
+				while let Some(Tok::Op(c @ ('-' | '+'))) = self.toks.get(self.pos) {
+					negative ^= *c == '-';
+					self.pos += 1;
+				}
 				let v = self.factor()?;
-				if *c == '-' { v.scale(Dec { m: -1, e: 0 }) } else { Some(v) }
+				if negative {
+					v.scale(Dec { m: -1, e: 0 })
+				} else {
+					Some(v)
+				}
 			}
 			Tok::Op(_) => None,
 		}
@@ -301,12 +337,16 @@ fn fold(nodes: &[ValueNode], original: &str) -> Option<String> {
 	if toks.is_empty() {
 		return None;
 	}
-	let mut e = Eval { toks: &toks, pos: 0 };
+	let mut e = Eval {
+		toks: &toks,
+		pos: 0,
+	};
 	let sum = e.expr()?;
 	if e.pos != toks.len() {
 		return None;
 	}
-	let terms: Vec<&(String, String, Dec)> = sum.0.iter().filter(|(_, _, d)| !d.is_zero()).collect();
+	let terms: Vec<&(String, String, Dec)> =
+		sum.0.iter().filter(|(_, _, d)| !d.is_zero()).collect();
 	let text = match terms.as_slice() {
 		// A zero keeps its unit here; dropping it is the number rules' job,
 		// which know the properties where `0` is not `0px`.
@@ -351,7 +391,11 @@ pub fn fold_calc(value: &str) -> String {
 	let mut nodes = crate::value::parse(value);
 	let mut changed = false;
 	fold_in(&mut nodes, &mut changed);
-	if changed { stringify(&nodes) } else { value.to_owned() }
+	if changed {
+		stringify(&nodes)
+	} else {
+		value.to_owned()
+	}
 }
 
 fn fold_in(nodes: &mut [ValueNode], changed: &mut bool) {

@@ -1,1 +1,1 @@
-*,* a,*|*,.a,:hover,a *,a>*{x:y}
+@keyframes x{0%,50%{a:b}}

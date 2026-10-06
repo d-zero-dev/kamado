@@ -1,1 +1,1 @@
-a{mask:url(a.svg#b) center/contain no-repeat}
+a{--a:1px}

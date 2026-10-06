@@ -1,1 +1,1 @@
-@import url("a.css");@import "b.css" screen;@import url(c.css) screen and (min-width:100px);a{b:c}
+a{--empty:;--space:;--json:{"a": [1, 2]}}

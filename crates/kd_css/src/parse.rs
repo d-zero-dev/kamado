@@ -24,6 +24,9 @@ use crate::token::{Kind, Token, tokenize};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stylesheet {
 	pub nodes: Vec<Node>,
+	/// The byte offset of the first block nested more than [`MAX_NESTING`]
+	/// deep (its content is not in `nodes`), if there was one.
+	pub too_deep: Option<usize>,
 }
 
 /// A node of a style sheet or of a block.
@@ -148,10 +151,18 @@ enum Text {
 	Plain,
 }
 
+/// How deep blocks may nest. Browsers stop far below this; the limit keeps a
+/// run of `{` from overflowing the stack of everything that walks the tree.
+pub const MAX_NESTING: usize = 256;
+
 struct Parser<'a> {
 	src: &'a str,
 	toks: Vec<Token>,
 	pos: usize,
+	/// How many blocks are open.
+	depth: usize,
+	/// The offset of the first block that was too deep.
+	too_deep: Option<usize>,
 }
 
 fn is_css_ws(c: char) -> bool {
@@ -285,6 +296,24 @@ impl Parser<'_> {
 	}
 
 	fn parse_list(&mut self, ctx: Ctx, nested: bool) -> Vec<Node> {
+		if nested {
+			if self.depth >= MAX_NESTING {
+				// Skip the block: the style sheet is refused by the caller.
+				self.too_deep
+					.get_or_insert(self.toks.get(self.pos).map_or(self.src.len(), |t| t.start));
+				let (close, _) = self.scan(self.pos, false, true, true);
+				self.pos = close;
+				return Vec::new();
+			}
+			self.depth += 1;
+			let out = self.parse_items(ctx, nested);
+			self.depth -= 1;
+			return out;
+		}
+		self.parse_items(ctx, nested)
+	}
+
+	fn parse_items(&mut self, ctx: Ctx, nested: bool) -> Vec<Node> {
 		let mut out = Vec::new();
 		while let Some(&t) = self.toks.get(self.pos) {
 			match t.kind {
@@ -479,6 +508,10 @@ impl Parser<'_> {
 				.iter()
 				.position(|t| t.kind != Kind::Whitespace);
 			match first {
+				// `--x: ;` keeps its one space: `--x:;` was an error in the
+				// browsers of the "space toggle" days, and the space is the
+				// whole value.
+				None if value_end > colon + 1 => " ".to_owned(),
 				None => String::new(),
 				Some(f) => {
 					let from = self.toks[colon + 1 + f].start;
@@ -590,12 +623,17 @@ pub fn parse_stylesheet(source: &str) -> Stylesheet {
 		src: source,
 		toks: tokenize(source),
 		pos: 0,
+		depth: 0,
+		too_deep: None,
 	};
 	let mut nodes = Vec::new();
 	while p.pos < p.toks.len() {
 		nodes.extend(p.parse_list(Ctx::Rules, false));
 	}
-	Stylesheet { nodes }
+	Stylesheet {
+		nodes,
+		too_deep: p.too_deep,
+	}
 }
 
 /// Parses the content of a `style` attribute: a list of declarations. Rules
@@ -612,6 +650,8 @@ pub fn parse_declaration_list(source: &str) -> Vec<Declaration> {
 		src: source,
 		toks: tokenize(source),
 		pos: 0,
+		depth: 0,
+		too_deep: None,
 	};
 	let mut nodes = Vec::new();
 	while p.pos < p.toks.len() {

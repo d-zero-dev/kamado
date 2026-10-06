@@ -3,10 +3,11 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::merge::merge_rules;
 use crate::numeric::DeclContext;
 use crate::params::minify_params;
 use crate::parse::{
-	AtRule, Body, Declaration, Node, Rule, parse_declaration_list, parse_stylesheet,
+	AtRule, Body, Declaration, Node, Rule, line_col, parse_declaration_list, parse_stylesheet,
 };
 use crate::selector::minify_selector_list;
 use crate::strings::normalize_strings;
@@ -14,9 +15,11 @@ use crate::values::minify_value;
 
 /// A style sheet the minifier cannot process.
 ///
-/// CSS is parsed the way a browser recovers from errors, so this happens for
-/// input that is not a style sheet at all: it is the only error there is,
-/// and it is reported for text larger than the 4 GiB an offset can address.
+/// CSS is parsed the way a browser recovers from errors, so an error is for
+/// input that is not a style sheet in any useful sense: text larger than the
+/// 4 GiB an offset can address, and blocks nested more than 256 deep (a run
+/// of `{`), which no browser keeps either and which would overflow the stack
+/// of every pass over the tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
 	pub message: String,
@@ -252,69 +255,66 @@ fn dedupe(nodes: &mut Vec<Node>) {
 	}
 	let len = nodes.len();
 	let mut remove = vec![false; len];
-	let mut seen: HashSet<String> = HashSet::new();
-	for i in (0..len).rev() {
-		match &nodes[i] {
-			Node::Declaration(d) => {
-				if !seen.insert(format!("d{}", declaration_key(d))) {
-					remove[i] = true;
+	{
+		let mut seen_declarations: HashSet<(&str, &str, bool)> = HashSet::new();
+		let mut seen_at_rules: HashSet<String> = HashSet::new();
+		for i in (0..len).rev() {
+			match &nodes[i] {
+				Node::Declaration(d) => {
+					if !seen_declarations.insert((
+						d.property.as_str(),
+						d.value.as_str(),
+						d.important,
+					)) {
+						remove[i] = true;
+					}
 				}
-			}
-			Node::AtRule(a) if a.name != "layer" => {
-				let mut key = String::from("a");
-				crate::print::print_at_rule(a, &mut key, false);
-				if !seen.insert(key) {
-					remove[i] = true;
+				Node::AtRule(a) if a.name != "layer" => {
+					let mut key = String::new();
+					crate::print::print_at_rule(a, &mut key, false);
+					if !seen_at_rules.insert(key) {
+						remove[i] = true;
+					}
 				}
+				_ => {}
 			}
-			_ => {}
 		}
 	}
 	// Rules with the same selector: what a later rule declares again is
-	// dropped from the earlier ones.
+	// dropped from the earlier ones. From the last rule to the first, the
+	// declarations of the rules after it are the set to drop.
 	let mut groups: HashMap<&str, Vec<usize>> = HashMap::new();
 	for (i, n) in nodes.iter().enumerate() {
 		if let Node::Rule(r) = n {
 			groups.entry(r.selector.as_str()).or_default().push(i);
 		}
 	}
-	let mut work: Vec<Vec<usize>> = groups.into_values().filter(|g| g.len() > 1).collect();
-	work.sort_by_key(|g| g[0]);
+	let work: Vec<Vec<usize>> = groups.into_values().filter(|g| g.len() > 1).collect();
 	let mut rule_removed = vec![false; len];
 	for group in &work {
-		for gi in (1..group.len()).rev() {
-			let last_idx = group[gi];
-			if rule_removed[last_idx] {
+		let mut later: HashSet<String> = HashSet::new();
+		for &idx in group.iter().rev() {
+			let Node::Rule(r) = &mut nodes[idx] else {
 				continue;
-			}
-			let keys: HashSet<String> = match &nodes[last_idx] {
-				Node::Rule(r) => r
-					.nodes
-					.iter()
-					.filter_map(|n| match n {
-						Node::Declaration(d) => Some(declaration_key(d)),
-						_ => None,
-					})
-					.collect(),
-				_ => continue,
 			};
-			if keys.is_empty() {
-				continue;
-			}
-			for &ei in &group[..gi] {
-				if rule_removed[ei] {
-					continue;
+			let own: Vec<String> = r
+				.nodes
+				.iter()
+				.filter_map(|n| match n {
+					Node::Declaration(d) => Some(declaration_key(d)),
+					_ => None,
+				})
+				.collect();
+			if !later.is_empty() {
+				r.nodes.retain(|n| match n {
+					Node::Declaration(d) => !later.contains(&declaration_key(d)),
+					_ => true,
+				});
+				if only_comments(&r.nodes) {
+					rule_removed[idx] = true;
 				}
-				if let Node::Rule(r) = &mut nodes[ei] {
-					r.nodes.retain(|n| match n {
-						Node::Declaration(d) => !keys.contains(&declaration_key(d)),
-						_ => true,
-					});
-					if only_comments(&r.nodes) {
-						rule_removed[ei] = true;
-					}
-				}
 			}
+			later.extend(own);
 		}
 	}
 	let mut i = 0;
@@ -441,6 +441,17 @@ fn normalize_charset(nodes: &mut Vec<Node>) {
 pub fn minify_stylesheet(source: &str) -> Result<String, Error> {
 	check_size(source)?;
 	let sheet = parse_stylesheet(source);
+	if let Some(offset) = sheet.too_deep {
+		let (line, column) = line_col(source, offset);
+		return Err(Error {
+			message: format!(
+				"blocks are nested more than {} deep",
+				crate::parse::MAX_NESTING
+			),
+			line,
+			column,
+		});
+	}
 	let mut nodes = sheet.nodes;
 	let mut m = Minifier {
 		selectors: HashMap::new(),
@@ -454,8 +465,11 @@ pub fn minify_stylesheet(source: &str) -> Result<String, Error> {
 	normalize_charset(&mut nodes);
 	dedupe(&mut nodes);
 	discard_empty(&mut nodes, &[], &mut HashSet::new());
+	merge_rules(&mut nodes);
+	// Merged rules may repeat a declaration.
+	dedupe(&mut nodes);
 	let mut out = String::with_capacity(source.len() / 2);
-	crate::print::print_nodes(&nodes, &mut out, true);
+	crate::print::print_nodes(&nodes, &mut out);
 	Ok(out)
 }
 
@@ -477,6 +491,6 @@ pub fn minify_declaration_list(source: &str) -> Result<String, Error> {
 	dedupe(&mut nodes);
 	discard_empty(&mut nodes, &[], &mut HashSet::new());
 	let mut out = String::with_capacity(source.len());
-	crate::print::print_nodes(&nodes, &mut out, true);
+	crate::print::print_nodes(&nodes, &mut out);
 	Ok(out)
 }

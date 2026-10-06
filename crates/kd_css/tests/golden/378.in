@@ -1,1 +1,1 @@
-@media screen
+.a{color:red;&:hover{color:blue}}

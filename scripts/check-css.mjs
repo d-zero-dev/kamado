@@ -81,6 +81,38 @@ function diffOf(theirs, mine) {
 }
 
 /**
+ * Joins neighbouring `@media` / `@supports` / `@container` blocks that have the
+ * same query, so that two spellings of the same style sheet compare equal.
+ * @param {string} css - A minified style sheet
+ * @returns {string} The style sheet with the blocks joined
+ */
+function joinAdjacentAtRules(css) {
+	let out = css;
+	const start = /@(?:media|supports|container)[^{};]*\{/gu;
+	let match = start.exec(out);
+	while (match) {
+		const header = match[0];
+		let depth = 1;
+		let i = match.index + header.length;
+		while (i < out.length && depth > 0) {
+			if (out[i] === '{') {
+				depth++;
+			} else if (out[i] === '}') {
+				depth--;
+			}
+			i++;
+		}
+		// `i` is just after the closing brace of the block.
+		if (depth === 0 && out.startsWith(header, i)) {
+			out = out.slice(0, i - 1) + out.slice(i + header.length);
+			start.lastIndex = match.index;
+		}
+		match = start.exec(out);
+	}
+	return out;
+}
+
+/**
  * Differences that are cssnano leaving something unminified that kd_css
  * minifies, each a pure formatting difference. A mismatch that disappears when
  * one of these is undone on both sides is counted under its name instead of
@@ -90,17 +122,23 @@ function diffOf(theirs, mine) {
 const benign = {
 	// cssnano keeps the line break before and after a `/*! */` comment.
 	'white space around important comments': (css) =>
-		css.replaceAll(/\s*(\/\*![^]*?\*\/)\s*/gu, '$1'),
+		css.replaceAll(/\s*(\/\*![\s\S]*?\*\/)\s*/gu, '$1'),
 	// cssnano keeps `;;`, `};` and a `;` before `}` or at the end around
 	// custom properties and nested rules.
-	'stray semicolons': (css) => css.replaceAll(/;+(?=[;}])/gu, '').replace(/;$/u, '').replaceAll('};', '}'),
+	'stray semicolons': (css) =>
+		css
+			.replaceAll(/;+(?=[;}])/gu, '')
+			.replace(/;$/u, '')
+			.replaceAll('};', '}'),
 	// cssnano keeps the space in `--x: 1 !important` and `! important`.
 	'important flag spacing': (css) => css.replaceAll(/\s*!\s*important/giu, '!important'),
 	// cssnano keeps a line break in a selector (`a\n\tb`).
 	'line breaks in selectors': (css) => css.replaceAll(/\s*[\n\t]\s*/gu, ' '),
 	// cssnano keeps the space after the colon in a container query.
 	'container query spacing': (css) =>
-		css.replaceAll(/(@container[^{]*?)\(([\w-]+):\s*/gu, '$1($2:').replaceAll(/\s{2,}/gu, ' '),
+		css
+			.replaceAll(/(@container[^{]*?)\(([\w-]+):\s*/gu, '$1($2:')
+			.replaceAll(/\s{2,}/gu, ' '),
 	// cssnano keeps the space after a comma inside calc().
 	'comma in calc': (css) => css.replaceAll(/(calc\([^)]*?),\s+/gu, '$1,'),
 	// cssnano keeps the space before a `/` once a function has been seen
@@ -142,6 +180,53 @@ const benign = {
 				}
 				return `${prop}:${out.join(' ')}`;
 			},
+		),
+	// kd_css drops the initial `none` style from a border (`1px none #c1ebd5`);
+	// cssnano does only when it knows the colour.
+	'border style none': (css) =>
+		css.replaceAll(
+			/(?<=[;{])(border(?:-top|-right|-bottom|-left)?):([^;}!]+)/giu,
+			(match, prop, value) => {
+				const parts = value.split(/ (?![^(]*\))/u);
+				return parts.length > 1
+					? `${prop}:${parts.filter((p) => p.toLowerCase() !== 'none').join(' ')}`
+					: match;
+			},
+		),
+	// kd_css joins `a{x:1}a{x:2}` into `a{x:1;x:2}` once the two selectors
+	// read the same; cssnano compares them as written.
+	'adjacent rules with the same selector': (css) => {
+		let out = css;
+		let previous;
+		do {
+			previous = out;
+			out = out.replaceAll(
+				/(?<=^|[}{;])([^{}@;]+)\{([^{}]*)\}\1\{([^{}]*)\}/gu,
+				'$1{$2;$3}',
+			);
+		} while (out !== previous);
+		return out;
+	},
+	// kd_css joins `@media x{a}@media x{b}` into `@media x{ab}`; cssnano
+	// does that only for some of them.
+	'adjacent at-rules with the same query': joinAdjacentAtRules,
+	// kd_css writes `border: none` as `border: 0` and `background: none` as
+	// `background: 0 0` (what clean-css does); cssnano keeps the keywords.
+	'nothing written shorter': (css) =>
+		css
+			.replaceAll(
+				/(?<=[;{])(border(?:-top|-right|-bottom|-left)?|outline):none(?=[;}!]|$)/giu,
+				'$1:0',
+			)
+			.replaceAll(
+				/(?<=[;{])background:(?:none|transparent)(?=[;}!]|$)/giu,
+				'background:0 0',
+			),
+	// kd_css unquotes `"KaTeX_SansSerif"`; cssnano keeps the quotes of a name
+	// with `serif` anywhere inside it.
+	'font family names with a keyword inside': (css) =>
+		css.replaceAll(/(?<=font-family:)[^;}!]+/giu, (value) =>
+			value.replaceAll(/"([A-Za-z_][\w-]*)"/gu, '$1'),
 		),
 	// cssnano removes duplicate selectors before it rewrites them, so
 	// `p::before,p:before` survives; kd_css rewrites first.
@@ -219,7 +304,9 @@ for (const n of names) {
 			try {
 				mineMin = await cssnanoMinify(out);
 			} catch (error) {
-				failures.parse.push(`${n}: cssnano rejects the output: ${String(error).split('\n')[0]}`);
+				failures.parse.push(
+					`${n}: cssnano rejects the output: ${String(error).split('\n')[0]}`,
+				);
 				continue;
 			}
 			if (mineMin === theirs) {
@@ -228,8 +315,13 @@ for (const n of names) {
 				const category = categoryOf(theirs, mineMin);
 				if (category === null) {
 					// Show what is left once the known leftovers are undone.
-					const left = (/** @type {string} */ css) =>
-						Object.values(benign).reduce((acc, fix) => fix(acc), css);
+					const left = (/** @type {string} */ css) => {
+						let acc = css;
+						for (const fix of Object.values(benign)) {
+							acc = fix(acc);
+						}
+						return acc;
+					};
 					failures.equivalence.push(`${n}: ${diffOf(left(theirs), left(mineMin))}`);
 				} else {
 					categories.set(category, (categories.get(category) ?? 0) + 1);

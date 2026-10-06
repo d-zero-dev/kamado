@@ -1,6 +1,2 @@
-a{}
-a{;}
-@media screen{}
-@media screen{a{}}
-a{color:red}b{}
-@font-face{}
+@layer a,b;
+@layer a{a{color:red}}

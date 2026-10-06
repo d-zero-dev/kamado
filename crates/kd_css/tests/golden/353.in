@@ -1,1 +1,1 @@
-.a{color:red;@media (min-width:1px){color:blue}}
+@media print{@media (min-width:1px){a{b:c}}}

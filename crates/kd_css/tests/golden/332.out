@@ -1,1 +1,1 @@
-a{b:c}@media a{a{b:c}}
+@container (min-width: 400px){a{color:red}}

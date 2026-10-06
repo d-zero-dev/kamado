@@ -1,1 +1,1 @@
-@keyframes x{from{a:b}to{a:c}}@keyframes x{from{a:d}to{a:e}}
+a{content:"é"}@charset "utf-8";

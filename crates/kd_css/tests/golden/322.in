@@ -1,1 +1,1 @@
-@property --p{syntax:'<percentage>';inherits:false;initial-value:0%}
+@media (min-aspect-ratio: 16/9){a{color:red}}

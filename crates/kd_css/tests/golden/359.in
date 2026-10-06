@@ -1,1 +1,1 @@
-a{x:y;/*! keep */}
+a,b{x:y}b,a{x:y}a,a{x:y}

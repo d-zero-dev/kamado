@@ -1,1 +1,1 @@
-a:nth-child(1){x:y}a:nth-child(2n+1){x:y}a:nth-child(even){x:y}a:nth-child( 2n + 1 ){x:y}
+@keyframes x{0%{a:b}100%{a:c}}

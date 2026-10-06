@@ -1,3 +1,5 @@
 .a {
-	content:'a';content:"a\"b";content:'a"b';
+	content:'a';
+	content:"a\"b";
+	content:'a"b';
 }

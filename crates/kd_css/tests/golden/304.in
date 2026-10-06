@@ -1,1 +1,1 @@
-@supports (--css: variables){a{color:red}}
+a{will-change:transform , opacity}

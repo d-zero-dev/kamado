@@ -1,1 +1,1 @@
-a{grid-template-areas:"a b" "c d"}
+a{columns:2 100px;column-rule:1px solid red}

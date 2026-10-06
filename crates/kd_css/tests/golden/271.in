@@ -1,4 +1,4 @@
 .a {
-	width:calc(1px + var(--a));
-	margin:calc(-1 * var(--x));
+	filter:alpha(opacity=50);
+	-ms-filter:"progid:DXImageTransform.Microsoft.Alpha(Opacity=50)";
 }

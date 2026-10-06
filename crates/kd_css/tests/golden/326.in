@@ -1,1 +1,1 @@
-@unknown foo  bar {a   :  b  ;  c:d}
+@media not all and (monochrome){a{color:red}}
