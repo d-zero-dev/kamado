@@ -17,18 +17,22 @@ node scripts/check-rust-no-external-crates.mjs
 
 ## クレートの構成
 
-| クレート    | 担当                                                                               | 依存するクレート               |
-| ----------- | ---------------------------------------------------------------------------------- | ------------------------------ |
-| `kd_hash`   | SHA-256                                                                            | なし                           |
-| `kd_jsonc`  | JSONC のパーサと決定的な JSON 出力（`Value` 型）                                   | なし                           |
-| `kd_glob`   | glob のマッチと、探索を枝刈りするための判定                                        | なし                           |
-| `kd_yaml`   | YAML のサブセットと front matter の分割                                            | `kd_jsonc`                     |
-| `kd_pool`   | スレッドプール                                                                     | なし                           |
-| `kd_site`   | 出力パス・URL の写像、`outputPathField`、衝突、探索、メタデータのマージ、overrides | `kd_glob` `kd_jsonc`           |
-| `kd_build`  | 差分ビルドの manifest（stat 先行の指紋）                                           | `kd_hash` `kd_jsonc`           |
-| `kd_config` | `kamado.config.jsonc` の型・既定値・検証                                           | `kd_glob` `kd_jsonc` `kd_site` |
-| `kd_core`   | ビルドの組み立て（設定 → 探索 → メタ → 差分判定 → 書き出し）                       | 上のすべて                     |
-| `kd_napi`   | Node-API の接続層。`unsafe` はここだけ                                             | `kd_core` `kd_hash` `kd_jsonc` |
+| クレート    | 担当                                                                                             | 依存するクレート               |
+| ----------- | ------------------------------------------------------------------------------------------------ | ------------------------------ |
+| `kd_hash`   | SHA-256                                                                                          | なし                           |
+| `kd_jsonc`  | JSONC のパーサと決定的な JSON 出力（`Value` 型）                                                 | なし                           |
+| `kd_glob`   | glob のマッチと、探索を枝刈りするための判定                                                      | なし                           |
+| `kd_yaml`   | YAML のサブセットと front matter の分割                                                          | `kd_jsonc`                     |
+| `kd_pool`   | スレッドプール                                                                                   | なし                           |
+| `kd_image`  | 画像（png / jpeg / webp / avif / svg）の寸法の読み取り                                           | なし                           |
+| `kd_css`    | CSS のトークナイザ・パーサ・圧縮（cssnano 相当）                                                 | なし                           |
+| `kd_js`     | TS / TSX / JSX のパーサ、型の除去、JSX → 文字列連結へのコンパイル、静的な meta の抽出            | なし                           |
+| `kd_html`   | HTML のパーサ、DOM、セレクタ、宣言的ルール、取り込み、画像寸法の付与、整形と圧縮（融合した印字） | `kd_image`                     |
+| `kd_site`   | 出力パス・URL の写像、`outputPathField`、衝突、探索、メタデータのマージ、overrides               | `kd_glob` `kd_jsonc`           |
+| `kd_build`  | 差分ビルドの manifest（バイナリ形式、stat 先行の指紋）                                           | `kd_hash` `kd_jsonc`           |
+| `kd_config` | `kamado.config.jsonc` の型・既定値・検証                                                         | `kd_glob` `kd_jsonc` `kd_site` |
+| `kd_core`   | ビルドの組み立て（設定 → 探索 → メタ → 差分判定 → HTML・CSS・JS → 書き出し）と開発サーバーの核   | 上のすべて                     |
+| `kd_napi`   | Node-API の接続層とアロケータ。`unsafe` はここだけ                                               | `kd_core` `kd_hash` `kd_jsonc` |
 
 依存の向きは上から下の一方向で、`kd_napi` が一番上位にある。パース系のクレート（`kd_jsonc` `kd_glob` `kd_yaml`）は、ユーザーが書くファイルを読むので、入れ子の深さや計算量を制限している。
 
@@ -43,7 +47,7 @@ node --test crates/kd_napi/check/load.check.mjs
 
 ## Node 側のパッケージ（`packages/kamado-v3`）
 
-v2 の `kamado` パッケージと同じワークスペースに置くため、v2 を取り除くまでの間は `kamado-v3` という名前で開発する（公開時に `kamado` に戻す）。中身は CLI、`build()` の薄いラッパー、アドオンの読み込みだけで、ランタイム依存はない。
+v2 の `kamado` パッケージと同じワークスペースに置くため、v2 を取り除くまでの間は `kamado-v3` という名前で開発する（公開時に `kamado` に戻す）。中身は CLI、`build()` / `start()`、JSX の描画ワーカー、開発サーバー（hono）、esbuild の呼び出し、アドオンの読み込みで、ランタイム依存は `esbuild` と `hono` / `@hono/node-server` だけ。使い方は `packages/kamado-v3/README.md`、設定の補完用に `schema.json` を同梱している（キーは `kd_config` のテストが双方向に照合する）。
 
 ```sh
 cargo build --release -p kd_napi   # アドオンを先に作る
