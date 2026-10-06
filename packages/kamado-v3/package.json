@@ -12,7 +12,8 @@
 	},
 	"exports": {
 		".": "./dist/index.js",
-		"./build": "./dist/build.js"
+		"./build": "./dist/build.js",
+		"./jsx": "./dist/jsx/runtime.js"
 	},
 	"engines": {
 		"node": ">=24.11.0"

@@ -3,7 +3,18 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 
 import { PROPS as GENERATED_PROPS } from './attr-table.js';
-import { a, c, el, Fragment, k, m, Markup, preloadImage, render } from './runtime.js';
+import {
+	a,
+	c,
+	el,
+	Fragment,
+	html,
+	k,
+	m,
+	Markup,
+	preloadImage,
+	render,
+} from './runtime.js';
 
 // ---------------------------------------------------------------------------
 // Differential harness: one data tree, rendered by React (the oracle) and by
@@ -1760,5 +1771,15 @@ describe('deliberate deviations from React', () => {
 	test('a Markup that leaves a position marker is only meaningful inside render', () => {
 		const stray = render(() => el('title', null, 'x'), {});
 		expect(stray).toBe('<title>x</title>');
+	});
+});
+
+describe('html', () => {
+	test('is output as it is, next to other children, where a string would be escaped', () => {
+		const out = render(
+			() => el('div', null, [html('<b>raw & ok</b>'), 'a & b', el('i', null, 'x')]),
+			{},
+		);
+		expect(out).toBe('<div><b>raw & ok</b>a &amp; b<i>x</i></div>');
 	});
 });

@@ -124,10 +124,13 @@ export default ({ page, meta, data }: PageProps) => (
 
 ### 3.4 変換スクリプトと、変換で見つかった注意点
 
-`node scripts/pug-to-tsx.mjs <project> <out>` は、`__assets` の `.pug` をコンポーネント（`.tsx`）に直す。`include` はコンポーネントの呼び出し（include する側の props とスコープの変数を渡す）、`each` は `map`、`if` は `&&` / `?:`、`pkg.production.*` は `site.*`、`filters.date` は `formatDate` になる。表現できないもの（テキスト中の生の HTML、唯一の子でない `!{}`）は止まるので、手で直す。出力は必ず読む。実案件（Pug のスキャフォールド）で試して見つかった点:
+`node scripts/pug-to-tsx.mjs <project> <out>` は、`__assets` の `.pug` をコンポーネント（`.tsx`）に直す。`include` はコンポーネントの呼び出し（include する側の props とスコープの変数を渡す）、`each` は `map`、`if` は `&&` / `?:`、`pkg.production.*` は `site.*`、`filters.date` は `formatDate` になる。`mixin` は大文字で始まるコンポーネント、`else if` は入れ子の `?:`、`include` したテキスト（生の HTML）は `html()` になる。表現できないもの（唯一の子でない `!{}` など）は止まるので、手で直す。出力は必ず読む。実案件（Pug のスキャフォールド）で試して見つかった点:
 
 - **属性名は React の綴り**: `charset` → `charSet`、`itemprop` → `itemProp`、`itemtype` → `itemType`、`itemid` → `itemID`。小文字のままだと、`<meta charset>` は先頭に置かれず、`<meta itemprop>`（パンくずの `position`）が `<head>` に持ち上げられる。
 - **`&nbsp;` などの実体参照は、そのままテキストに書く**（`{"&nbsp;"}` と文字列にすると `&amp;nbsp;` になる）。
+- **他の子と並ぶ生の HTML**は、`kamado-v3/jsx` の `html()` で書く（`import { html } from 'kamado-v3/jsx'`、`{html(markup)}`）。Pug の `!{}` と `include` したテキストの置き換え先。
+- **`<option selected>`** は React が無視する。`<select defaultValue="...">` に書く。
+- **`<link media="all">`** は空にならず `all` のまま出る（v2 と同じ）。
 - **JSX に書けない属性名**（絵文字など、`⚠️="..."` のような印）は React が出力しない。静的なマークアップなら `html.inject` に HTML 文字列として書く。
 - **React 19 は `<img>` ごとに `<link rel="preload" as="image">` を `<head>` に足す**（Pug では出ない）。要らなければ `html.rules` で消す: `{ "selector": "link[rel=preload][as=image]", "action": "remove" }`。
 - **Pug の `pretty`** は要素の間に空白を入れる（v2 の既定は `true` かもしれない）。インライン要素の中のブロックの整形が JSX と変わるので、比較の基準にするときは `pretty: false` で出す。
@@ -167,6 +170,7 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
 
 - スタイル（`styles.files`、既定 `**/*.css`）は v3 が自前で処理します（`@import` の展開、alias、圧縮、バナー、source map）。**postcss.config のプラグインは使えません**。autoprefixer などが要るなら、npm scripts で別に処理してから kamado に渡します。
 - `@import` の解決: alias（`@/x.css`）、importing ファイルからの相対パス、`node_modules`（パッケージの `style` → `.css` の `main` → `index.css`）の順。
+- postcss-import と同じ扱い: `@import` のあとに書いた `@layer a, b;`（順序の宣言）は、取り込んだ内容より前、バナーより前に移る。取り込んだファイルの `@charset` は先頭に 1 つだけ残り、値が違えばエラーになる。
 - スクリプト（`scripts.files`、既定 `**/*.{js,ts,jsx,tsx,mjs,cjs}`）は esbuild（`bundle: true`）です。`alias` / `define` / `target`（既定 `es2022`）/ `minify` / `sourcemap` / `banner` が使えます。**`pages.files` に一致するファイルはスクリプトとして扱いません**（`.tsx` はページ）。
 - **v2 と出力を揃えたいとき**: v2 は esbuild に `target` を渡さない（esnext）。構文が `es2022` で変わるコードでは `"scripts": { "target": "esnext" }` にする。
 - `<script>` の中身とイベントハンドラは esbuild で圧縮されます。v2（terser）とバイトは違いますが意味は同じです。
@@ -221,20 +225,20 @@ yarn kamado build --incremental        # そのページだけ built
 
 意図した差です（`docs/v3/RFC.md` §2 の番号つき）。これ以外の差は、v3 の不具合か移行の誤りです。
 
-| 内容                                                                                  | RFC  |
-| ------------------------------------------------------------------------------------- | ---- |
-| 本文中の `<?php ... ?>` を v2 は**削除**した。v3 は保持する                           | #21  |
-| `<title>` 中の `&amp;` と `&lt;` の扱い（展開すると意味が変わる並びだけ、展開しない） | #27  |
-| `<script>` の開始タグの属性値に `><` を含むとき、v2 は本文が壊れた                    | #28  |
-| `characterEntities` を v2 は `<script>` / `<style>` の中も置換した。v3 は置換しない   | #29  |
-| 断片の途中の `<!doctype>` で v2 は内容を落とした                                      | #30  |
-| `breadcrumbs` の起点（`site.baseURL` のパス部分）                                     | §7.3 |
-| YAML の日付が文字列                                                                   | #19  |
-| CSS の圧縮結果（cssnano と同じ意味で、バイトは違いうる。サイズは近い）                | §10  |
-| `<script>` の圧縮結果（terser と esbuild）                                            | §10  |
-| prettier の幅（入力ごとから統一へ）                                                   | #15  |
-| HTML のコメント（JSX には書けない）。`<head>` 内の並び（React 19 の持ち上げ）         | §7.1 |
-| フォームの属性の並び（`action` と `method` は React が最後に出す）                    | §7.1 |
+| 内容                                                                                                                                         | RFC  |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 本文中の `<?php ... ?>` を v2 は**削除**した。v3 は保持する                                                                                  | #21  |
+| `<title>` 中の `&amp;` と `&lt;` の扱い（展開すると意味が変わる並びだけ、展開しない）                                                        | #27  |
+| `<script>` の開始タグの属性値に `><` を含むとき、v2 は本文が壊れた                                                                           | #28  |
+| `characterEntities` を v2 は `<script>` / `<style>` の中も置換した。v3 は置換しない                                                          | #29  |
+| 断片の途中の `<!doctype>` で v2 は内容を落とした                                                                                             | #30  |
+| `breadcrumbs` の起点（`site.baseURL` のパス部分）                                                                                            | §7.3 |
+| YAML の日付が文字列                                                                                                                          | #19  |
+| CSS の圧縮結果（cssnano と同じ意味で、バイトは違いうる。サイズは近い。`initial` を `normal` に縮める `reduce-initial` などは移植していない） | §10  |
+| `<script>` の圧縮結果（terser と esbuild）                                                                                                   | §10  |
+| prettier の幅（入力ごとから統一へ）                                                                                                          | #15  |
+| HTML のコメント（JSX には書けない）。`<head>` 内の並び（React 19 の持ち上げ）                                                                | §7.1 |
+| フォームの属性の並び（`action` と `method` は React が最後に出す）                                                                           | §7.1 |
 
 ## 11. 困ったとき
 

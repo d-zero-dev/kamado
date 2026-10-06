@@ -248,7 +248,16 @@ impl Hooks for Minifiers {
 		match kind {
 			CssKind::Block => kd_css::minify(text),
 			CssKind::Inline => kd_css::minify_declarations(text),
-			CssKind::Media => return kd_css::minify_media_query(text),
+			CssKind::Media => {
+				// `all` is no condition in an `@media` rule, but an attribute value of
+				// nothing at all reads as a mistake and v2 keeps it.
+				let minified = kd_css::minify_media_query(text);
+				return if minified.is_empty() && !text.trim().is_empty() {
+					"all".to_owned()
+				} else {
+					minified
+				};
+			}
 		}
 		.unwrap_or_else(|_| text.to_owned())
 	}
@@ -385,6 +394,7 @@ mod tests {
 			m.css("color : white ;  margin : 0px", CssKind::Inline),
 			"color:#fff;margin:0"
 		);
+		assert_eq!(m.css("all", CssKind::Media), "all");
 		assert_eq!(
 			m.css("screen  and (min-width : 100px)", CssKind::Media),
 			"screen and (min-width:100px)"

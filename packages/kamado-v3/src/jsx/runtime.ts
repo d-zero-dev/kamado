@@ -120,6 +120,23 @@ export function m(html: string): Markup {
 	return new Markup(html);
 }
 
+/**
+ * Raw HTML as a child, next to other children (`dangerouslySetInnerHTML` is
+ * for an element with no other children). The text is output as it is: it
+ * must be HTML you trust and have escaped.
+ * @param text - HTML
+ * @returns A child that is not escaped
+ * @example
+ * ```tsx
+ * import { html } from 'kamado-v3/jsx';
+ *
+ * const Body = ({ content }) => <div>{html(content)}<footer>end</footer></div>;
+ * ```
+ */
+export function html(text: string): Markup {
+	return new Markup(text);
+}
+
 // ---------------------------------------------------------------------------
 // Text
 // ---------------------------------------------------------------------------

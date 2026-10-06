@@ -143,7 +143,7 @@ function mapExpr(expr) {
 		.replaceAll(/\bfilters\.date\(/g, 'formatDate(');
 }
 
-const converted = new Set();
+const converted = new Map();
 const queue = [];
 
 /**
@@ -175,33 +175,67 @@ function jsxText(text) {
  *
  * @param file
  */
-function convertFile(file) {
-	if (converted.has(file)) return;
-	converted.add(file);
-	const src = readFileSync(file, 'utf8');
-	const ast = parse(lex(src, { filename: file }), { filename: file, src });
-	const ctx = {
+/**
+ * A mixin's name as a component's: JSX takes a lower case name for an element.
+ * @param name
+ */
+function component(name) {
+	return name[0].toUpperCase() + name.slice(1);
+}
+
+/**
+ *
+ * @param file
+ */
+function newContext(file) {
+	return {
 		file,
 		declared: new Set(),
 		used: new Set(),
 		imports: new Map(),
+		named: new Map(),
+		mixins: new Map(),
 		scope: [],
 		nesting: 0,
 		hoisted: [],
 	};
-	const body = block(ast.nodes, ctx, 1);
-	const rel = path.relative(path.join(srcRoot, '__assets'), file);
-	const outFile = path.join(outRoot, '__assets', rel.replace(/\.pug$/, '.tsx'));
+}
+
+/**
+ * The parameters of a mixin: `a, b = "x"` -> [{ name, init }].
+ * @param args
+ */
+function mixinParams(args) {
+	if (!args || !args.trim()) return [];
+	const source = `(${args}) => 0`;
+	const ast = acorn.parseExpressionAt(source, 0, { ecmaVersion: 'latest' });
+	return ast.params.map((p) =>
+		p.type === 'AssignmentPattern'
+			? { name: p.left.name, init: source.slice(p.right.start, p.right.end) }
+			: { name: p.name },
+	);
+}
+
+/**
+ * The code of one component: the function (the imports are written by the caller).
+ * @param ctx
+ * @param name
+ * @param body
+ * @param exported
+ * @param params
+ */
+function componentText(ctx, name, body, exported, params) {
 	const needsExt = [...ctx.used].filter((n) => !ctx.declared.has(n) && !GLOBALS.has(n));
 	const fromProps = needsExt.filter((n) => PROP_NAMES.has(n) && n !== 'meta');
 	const dataVars = needsExt.filter((n) => DATA_VARS.has(n));
 	const external = needsExt.filter((n) => !PROP_NAMES.has(n) && !DATA_VARS.has(n));
-	const lines = ["import type { PageProps } from 'kamado-v3';"];
-	for (const [name, spec] of ctx.imports) lines.push(`import ${name} from '${spec}';`);
-	lines.push('');
-	lines.push(
-		`export default function ${pascal(file)}(props: PageProps & Record<string, any>) {`,
-	);
+	const lines = [
+		`${exported} function ${name}(props: PageProps & Record<string, any>) {`,
+	];
+	if (params.length > 0) {
+		const list = params.map((p) => (p.init ? `${p.name} = ${p.init}` : p.name));
+		lines.push(`\tconst { ${list.join(', ')} } = props as any;`);
+	}
 	if (fromProps.length > 0)
 		lines.push(`\tconst { ${fromProps.join(', ')} } = props as any;`);
 	if (dataVars.length > 0) {
@@ -215,8 +249,62 @@ function convertFile(file) {
 	for (const h of ctx.hoisted) lines.push(`\t${h}`);
 	lines.push(`\treturn (\n${body}\n\t);`);
 	lines.push('}');
+	return lines.join('\n');
+}
+
+/**
+ *
+ * @param ctx
+ */
+function importLines(ctx) {
+	const head = ["import type { PageProps } from 'kamado-v3';"];
+	if (ctx.html) head.push("import { html } from 'kamado-v3/jsx';");
+	for (const [name, spec] of ctx.imports) head.push(`import ${name} from '${spec}';`);
+	for (const [spec, names] of ctx.named)
+		head.push(`import { ${names.join(', ')} } from '${spec}';`);
+	return head;
+}
+
+/**
+ *
+ * @param file
+ */
+function convertFile(file) {
+	if (converted.has(file)) return converted.get(file);
+	const info = { mixins: [] };
+	converted.set(file, info);
+	const src = readFileSync(file, 'utf8');
+	const ast = parse(lex(src, { filename: file }), { filename: file, src });
+	const rel = path.relative(path.join(srcRoot, '__assets'), file);
+	const outFile = path.join(outRoot, '__assets', rel.replace(/\.pug$/, '.tsx'));
+	const defs = ast.nodes.filter((n) => n.type === 'Mixin' && !n.call);
+	let text;
+	if (defs.length > 0) {
+		// A file of mixins: one exported component per mixin.
+		const head = new Set();
+		const parts = [];
+		for (const def of defs) {
+			const params = mixinParams(def.args);
+			info.mixins.push({ name: component(def.name), params });
+			const ctx = newContext(file);
+			for (const p of params) ctx.declared.add(p.name);
+			const body = block(def.block.nodes, ctx, 1);
+			for (const l of importLines(ctx)) head.add(l);
+			parts.push(componentText(ctx, component(def.name), body, 'export', params));
+		}
+		text = [...head].join('\n') + '\n\n' + parts.join('\n\n') + '\n';
+	} else {
+		const ctx = newContext(file);
+		const body = block(ast.nodes, ctx, 1);
+		text =
+			importLines(ctx).join('\n') +
+			'\n\n' +
+			componentText(ctx, pascal(file), body, 'export default', []) +
+			'\n';
+	}
 	mkdirSync(path.dirname(outFile), { recursive: true });
-	writeFileSync(outFile, lines.join('\n') + '\n');
+	writeFileSync(outFile, text);
+	return info;
 }
 
 /**
@@ -323,6 +411,33 @@ function useStmt(stmt, ctx) {
  * @param tag
  * @param ctx
  */
+/**
+ * The `value` (as a JSX attribute value) of the first option marked `selected` below `nodes`.
+ * @param nodes
+ */
+function selectedValue(nodes) {
+	for (const n of nodes) {
+		if (n.type === 'Tag' && n.name === 'option') {
+			const has = n.attrs.some((a) => a.name === 'selected');
+			const value = n.attrs.find((a) => a.name === 'value');
+			if (has && value && typeof value.val === 'string') {
+				return /^(["'])[\s\S]*\1$/.test(value.val)
+					? `"${value.val.slice(1, -1)}"`
+					: `{${value.val}}`;
+			}
+		}
+		const inner = n.block?.nodes ?? n.consequent?.nodes ?? [];
+		const found = selectedValue(inner);
+		if (found !== undefined) return found;
+	}
+	return;
+}
+
+/**
+ *
+ * @param tag
+ * @param ctx
+ */
 function attrsOf(tag, ctx) {
 	const classes = [];
 	const out = [];
@@ -398,12 +513,24 @@ function node(n, ctx, depth) {
 		case 'Code': {
 			// Buffered output.
 			const expr = use(n.val, ctx);
-			if (!n.mustEscape)
-				throw new Error(`unescaped interpolation needs a sole child: ${n.val}`);
+			if (!n.mustEscape) {
+				// Raw HTML next to other children: the helper of kamado-v3/jsx.
+				ctx.html = true;
+				return [`${pad}{html(${expr})}`];
+			}
 			return [`${pad}{${expr}}`];
 		}
 		case 'Tag': {
 			const attrs = attrsOf(n, ctx);
+			if (n.name === 'select') {
+				// React ignores `selected` on an option: the select says which one is.
+				const chosen = selectedValue(n.block ? n.block.nodes : []);
+				if (chosen !== undefined) attrs.push(`defaultValue=${chosen}`);
+			}
+			if (n.name === 'option') {
+				const at = attrs.findIndex((a) => a === 'selected' || a.startsWith('selected='));
+				if (at !== -1) attrs.splice(at, 1);
+			}
 			const open = attrs.length > 0 ? `${n.name} ${attrs.join(' ')}` : n.name;
 			const kids = n.block ? n.block.nodes : [];
 			if (VOID.has(n.name) && kids.length === 0) return [`${pad}<${open} />`];
@@ -437,12 +564,15 @@ function node(n, ctx, depth) {
 				ctx.nesting--;
 				return [`${pad}{${test} && (\n${cons}\n${pad})}`];
 			}
+			// `else if` is another conditional: its expression, without the braces
+			// that would make it a child.
 			const alt =
 				n.alternate.type === 'Block'
 					? block(n.alternate.nodes, ctx, depth + 1)
-					: node(n.alternate, ctx, depth + 1)
+					: `${indent(depth + 1)}${node(n.alternate, ctx, depth + 1)
 							.join('\n')
-							.replace(/^\s*\{/, `${indent(depth + 1)}{`);
+							.trim()
+							.slice(1, -1)}`;
 			ctx.nesting--;
 			return [`${pad}{${test} ? (\n${cons}\n${pad}) : (\n${alt}\n${pad})}`];
 		}
@@ -464,7 +594,26 @@ function node(n, ctx, depth) {
 			const abs = p.startsWith('/')
 				? path.join(libs, p)
 				: path.resolve(path.dirname(ctx.file), p);
-			convertFile(abs);
+			const info = convertFile(abs);
+			if (info.mixins.length > 0) {
+				// A file of mixins is imported by name, and renders nothing where it is included.
+				const toOut = (f) =>
+					path.join(
+						outRoot,
+						'__assets',
+						path.relative(path.join(srcRoot, '__assets'), f),
+					);
+				let mixinSpec = path
+					.relative(path.dirname(toOut(ctx.file)), toOut(abs))
+					.replace(/\.pug$/, '.tsx');
+				if (!mixinSpec.startsWith('.')) mixinSpec = `./${mixinSpec}`;
+				ctx.named.set(
+					mixinSpec,
+					info.mixins.map((m) => m.name),
+				);
+				for (const m of info.mixins) ctx.mixins.set(m.name, m);
+				return [];
+			}
 			const name = pascal(abs);
 			const outFrom = path.join(
 				outRoot,
@@ -485,6 +634,40 @@ function node(n, ctx, depth) {
 			);
 			const passed = locals.map((l) => `${l}={${l}}`).join(' ');
 			return [`${pad}<${name} {...props}${passed ? ' ' + passed : ''} />`];
+		}
+		case 'RawInclude': {
+			// A file that is not Pug is put in as it is. One of the data directory is
+			// already a value of \`data\` (its name without the extension).
+			const p = n.file.path;
+			const abs = p.startsWith('/')
+				? path.join(libs, p)
+				: path.resolve(path.dirname(ctx.file), p);
+			ctx.html = true;
+			const dataDir = path.join(libs, 'data') + path.sep;
+			if (abs.startsWith(dataDir)) {
+				const key = path.basename(abs, path.extname(abs));
+				return [`${pad}{html((props.data as any)[${JSON.stringify(key)}])}`];
+			}
+			return [`${pad}{html(${JSON.stringify(readFileSync(abs, 'utf8'))})}`];
+		}
+		case 'Mixin': {
+			if (!n.call) throw new Error(`a mixin defined in the middle of ${ctx.file}`);
+			const mixin = ctx.mixins.get(component(n.name));
+			if (!mixin) throw new Error(`+${n.name} is called in ${ctx.file} but not included`);
+			// The arguments, split where acorn says they are.
+			const source = `[${n.args ?? ''}]`;
+			const list = n.args
+				? acorn.parseExpressionAt(source, 0, { ecmaVersion: 'latest' }).elements
+				: [];
+			const given = list.map((e) => use(source.slice(e.start, e.end), ctx));
+			const locals = [...ctx.declared].filter(
+				(d) => !PROP_NAMES.has(d) && !DATA_VARS.has(d),
+			);
+			const passed = [
+				...locals.map((l) => `${l}={${l}}`),
+				...given.map((g, i) => `${mixin.params[i].name}={${g}}`),
+			].join(' ');
+			return [`${pad}<${mixin.name} {...props}${passed ? ' ' + passed : ''} />`];
 		}
 		default: {
 			throw new Error(`unsupported pug node ${n.type} in ${ctx.file}`);
