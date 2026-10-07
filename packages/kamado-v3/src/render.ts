@@ -239,10 +239,17 @@ export async function renderJobs(
 						return;
 					}
 					if (message.results) {
-						if (options.onRendered) {
-							options.onRendered(message.results);
-						} else {
-							results.push(...message.results);
+						try {
+							if (options.onRendered) {
+								options.onRendered(message.results);
+							} else {
+								results.push(...message.results);
+							}
+						} catch (error) {
+							// A throw in an event handler is not a rejection: it would
+							// leave the other workers running and crash the process.
+							stop(error);
+							return;
 						}
 					}
 					dispatch(worker);

@@ -466,14 +466,23 @@ pub(crate) fn plan_cached(
 		let text = fs::read_to_string(path)
 			.map_err(|e| format!("cannot read pages.overrides {path}: {e}"))?;
 		let overrides = Overrides::parse(&text).map_err(|e| format!("{path}: {e}"))?;
+		// Where each page is, by URL (a sheet of tens of thousands of rows against
+		// as many pages must not be a search per row).
+		let mut at: std::collections::HashMap<String, usize> = pages
+			.iter()
+			.enumerate()
+			.map(|(i, p)| (p.file.url.clone(), i))
+			.collect();
 		for url in &overrides.order {
 			let o = &overrides.by_url[url];
-			match pages.iter_mut().find(|p| p.file.url == *url) {
-				Some(page) => {
+			match at.get(url).copied() {
+				Some(i) => {
+					let page = &mut pages[i];
 					page.meta = kd_site::meta::merge(&[&page.meta, &o.meta]);
 					page.lastmod = o.lastmod.clone();
 				}
 				None if o.is_virtual => {
+					at.insert(url.clone(), pages.len());
 					let rel = kd_site::url_to_local_path(url, &config.pages.output_extension);
 					let file = kd_site::page_file(
 						&format!("{}/{rel}", config.dir.input.trim_end_matches('/')),
@@ -497,21 +506,16 @@ pub(crate) fn plan_cached(
 				}
 			}
 		}
-	}
-	if let Some(path) = &config.pages.overrides {
 		// The file lists the pages in the order they are shown in (navigation,
 		// `pages`): its pages come first in its order, the others follow. The
 		// sort is stable.
-		let text = fs::read_to_string(path)
-			.map_err(|e| format!("cannot read pages.overrides {path}: {e}"))?;
-		let overrides = Overrides::parse(&text).map_err(|e| format!("{path}: {e}"))?;
 		let rank: std::collections::HashMap<&str, usize> = overrides
 			.order
 			.iter()
 			.enumerate()
 			.map(|(i, u)| (u.as_str(), i))
 			.collect();
-		pages.sort_by_key(|p| rank.get(p.file.url.as_str()).copied().unwrap_or(usize::MAX));
+		pages.sort_by_cached_key(|p| rank.get(p.file.url.as_str()).copied().unwrap_or(usize::MAX));
 	}
 	let changed =
 		!all_hit && (misses > 0 || cache.is_none_or(|c| c.pages.len() != learned.pages.len()));

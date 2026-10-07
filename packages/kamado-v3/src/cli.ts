@@ -93,19 +93,24 @@ async function main(argv: readonly string[]): Promise<number> {
 				throw new Error(`--jobs must be a positive integer: ${values.jobs}`);
 			}
 			const progress = progressLine();
-			const report = await build(configPath, {
-				onProgress: progress.update,
-				incremental: values.incremental,
-				force: values.force,
-				skipUnchanged: values['skip-unchanged'],
-				targets: rest,
-				jobs,
-				cacheDir:
-					values['cache-dir'] === undefined
-						? undefined
-						: path.resolve(process.cwd(), values['cache-dir']),
-			});
-			progress.clear();
+			let report;
+			try {
+				report = await build(configPath, {
+					onProgress: progress.update,
+					incremental: values.incremental,
+					force: values.force,
+					skipUnchanged: values['skip-unchanged'],
+					targets: rest,
+					jobs,
+					cacheDir:
+						values['cache-dir'] === undefined
+							? undefined
+							: path.resolve(process.cwd(), values['cache-dir']),
+				});
+			} finally {
+				// An error message must not follow the progress line on the same row.
+				progress.clear();
+			}
 			console.log(summarize(report, values.verbose));
 			return 0;
 		}

@@ -24,6 +24,25 @@ pub(crate) fn resolve(nodes: &mut Vec<Node>) {
 	if defined.is_empty() {
 		return;
 	}
+	// A definition may use another one: expand until nothing changes (a cycle
+	// stops at the limit and leaves its references as they are).
+	for _ in 0..8 {
+		let snapshot = defined.clone();
+		let mut changed = false;
+		for alternatives in defined.values_mut() {
+			let next: Vec<String> = alternatives
+				.iter()
+				.flat_map(|q| replace_query(q, &snapshot))
+				.collect();
+			if next != *alternatives {
+				*alternatives = next;
+				changed = true;
+			}
+		}
+		if !changed {
+			break;
+		}
+	}
 	apply(nodes, &defined);
 }
 
@@ -61,7 +80,13 @@ fn definition(prelude: &str) -> Option<(String, Vec<String>)> {
 	if !name.starts_with("--") || name.len() == 2 {
 		return None;
 	}
-	let queries = split_queries(prelude[end..].trim());
+	let value = prelude[end..].trim();
+	// `true` and `false` are the queries that always and never match.
+	let queries = match value.to_ascii_lowercase().as_str() {
+		"true" => vec!["(max-color:2147477350)".to_owned()],
+		"false" => vec!["(color:2147477350)".to_owned()],
+		_ => split_queries(value),
+	};
 	if queries.is_empty() {
 		return None;
 	}
@@ -132,7 +157,12 @@ fn replace_query(query: &str, defined: &HashMap<String, Vec<String>>) -> Vec<Str
 		let inner = after[..close].trim();
 		let reference = inner.starts_with("--") && !inner.contains(char::is_whitespace);
 		match defined.get(inner).filter(|_| reference) {
-			Some(alternatives) if !head.trim_end().to_ascii_lowercase().ends_with("not") => {
+			// `not (--a)` is replaced when `--a` is one query; negating a list is
+			// not something a replacement can say.
+			Some(alternatives)
+				if alternatives.len() == 1
+					|| !head.trim_end().to_ascii_lowercase().ends_with("not") =>
+			{
 				let mut next = Vec::with_capacity(results.len() * alternatives.len());
 				for r in &results {
 					for alt in alternatives {
@@ -187,11 +217,42 @@ mod tests {
 	}
 
 	#[test]
-	fn an_undefined_name_and_a_negated_one_stay() {
-		let css = "@custom-media --a (width < 1px);\n@media (--b) { a { top: 0 } }\n@media not (--a) { b { top: 0 } }";
+	fn an_undefined_name_and_the_negation_of_a_list_stay() {
+		let css = "@custom-media --l (width < 1px), print;\n@media (--b) { a { top: 0 } }\n@media not (--l) { b { top: 0 } }";
 		assert_eq!(
 			minify(css).unwrap(),
-			"@media (--b ){a{top:0}}@media not (--a ){b{top:0}}"
+			"@media (--b ){a{top:0}}@media not (--l ){b{top:0}}"
+		);
+	}
+
+	#[test]
+	fn the_negation_of_one_query_is_replaced() {
+		let css = "@custom-media --a (width < 1px);\n@media not (--a) { b { top: 0 } }";
+		assert_eq!(minify(css).unwrap(), "@media not (width < 1px){b{top:0}}");
+	}
+
+	#[test]
+	fn a_definition_may_use_another_one_in_any_order() {
+		let css = "@custom-media --b (--a) and (hover);\n@custom-media --a (width < 1px);\n@media (--b) { a { top: 0 } }";
+		assert_eq!(
+			minify(css).unwrap(),
+			"@media (width < 1px) and (hover){a{top:0}}"
+		);
+	}
+
+	#[test]
+	fn a_cycle_does_not_loop() {
+		let css =
+			"@custom-media --a (--b);\n@custom-media --b (--a);\n@media (--a) { a { top: 0 } }";
+		assert!(minify(css).unwrap().starts_with("@media"));
+	}
+
+	#[test]
+	fn true_and_false_are_queries_that_always_and_never_match() {
+		let css = "@custom-media --t true;\n@custom-media --f false;\n@media (--t) { a { top: 0 } }\n@media (--f) { b { top: 0 } }";
+		assert_eq!(
+			minify(css).unwrap(),
+			"@media (max-color:2147477350){a{top:0}}@media (color:2147477350){b{top:0}}"
 		);
 	}
 }

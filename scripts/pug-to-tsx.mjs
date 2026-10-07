@@ -295,13 +295,7 @@ function mixinParams(args) {
  * @param pattern
  */
 function patternNames(pattern) {
-	const names = [];
-	for (const prop of pattern.properties) {
-		const v = prop.type === 'RestElement' ? prop.argument : prop.value;
-		const target = v.type === 'AssignmentPattern' ? v.left : v;
-		if (target.type === 'Identifier') names.push(target.name);
-	}
-	return names;
+	return bindingNames(pattern);
 }
 
 /**
@@ -689,8 +683,8 @@ function selectedValue(nodes) {
 			const has = n.attrs.some((a) => a.name === 'selected');
 			const value = n.attrs.find((a) => a.name === 'value');
 			if (has && value && typeof value.val === 'string') {
-				return /^(["'])[\s\S]*\1$/.test(value.val)
-					? `"${value.val.slice(1, -1)}"`
+				return isStringLiteral(value.val)
+					? `{${JSON.stringify(value.val.slice(1, -1).replaceAll(/\\(["'\\])/g, '$1'))}}`
 					: `{${value.val}}`;
 			}
 		}
@@ -711,6 +705,12 @@ function attrsOf(tag, ctx) {
 	const out = [];
 	const spread = [];
 	let id;
+	if ((tag.attributeBlocks ?? []).length > 0) {
+		// `&attributes(obj)` would be left out without a word.
+		throw new Error(
+			`&attributes of <${tag.name}> in ${ctx.file} is not converted: write it by hand`,
+		);
+	}
 	for (const a of tag.attrs) {
 		const name = a.name;
 		const val = a.val;
@@ -925,7 +925,13 @@ function node(n, ctx, depth) {
 			ctx.nesting--;
 			ctx.scope.pop();
 			ctx.declared = before;
-			return [`${pad}{${obj}.map((${added.join(', ')}) => (\n${inner}\n${pad}))}`];
+			const mapped = `${obj}.map((${added.join(', ')}) => (\n${inner}\n${pad}))`;
+			if (n.alternate) {
+				// `each ... else`: the block that shows when there is nothing to loop over.
+				const other = block(n.alternate.nodes, ctx, depth + 2);
+				return [`${pad}{(${obj}).length ? ${mapped} : (\n${other}\n${pad})}`];
+			}
+			return [`${pad}{${mapped}}`];
 		}
 		case 'Include': {
 			const p = path.extname(n.file.path) ? n.file.path : `${n.file.path}.pug`;
@@ -997,6 +1003,19 @@ function node(n, ctx, depth) {
 			const list = n.args
 				? acorn.parseExpressionAt(source, 0, { ecmaVersion: 'latest' }).elements
 				: [];
+			if (
+				list.length > mixin.params.length ||
+				list.some((e) => e.type === 'SpreadElement')
+			) {
+				throw new Error(
+					`+${n.name} in ${ctx.file} is called with more arguments than it declares (or a spread): write it by hand`,
+				);
+			}
+			if ((n.block && n.block.nodes.length > 0) || (n.attributeBlocks ?? []).length > 0) {
+				throw new Error(
+					`+${n.name} in ${ctx.file} has a block or &attributes: write it by hand`,
+				);
+			}
 			const given = list.map((e) => use(source.slice(e.start, e.end), ctx));
 			const locals = [...ctx.declared].filter(
 				(d) => !PROP_NAMES.has(d) && !DATA_VARS.has(d),

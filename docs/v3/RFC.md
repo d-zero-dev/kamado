@@ -217,7 +217,8 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 
 **コンパイル結果の置き場**: `build` は、ページ（TSX）を 1 ファイル 1 モジュールとして書き出さず、**連続する 64 ページを 1 つの「チャンク」ファイル（`node_modules/.cache/kamado-v3/jsx/__chunks__/<hash>.mjs`）の関数**にまとめる。チャンクは runtime とページが import するモジュールを 1 回だけ import し、`pages[i]()` がそのページの export（`default`）を返す。ページが import するコンポーネントやレイアウトは、従来どおり 1 モジュール 1 ファイルで、全ページで共有する。
 
-- なぜ: ファイルの作成と Node の `import()` は、ページ数が数万になるとビルドの大半を占める。`import()` はファイルを開いて解決しリンクする。開発に使っている macOS では `open` が 70〜200µs かかる。チャンクにすると、ページを読み込む CPU 時間は 1 ページあたり約 440µs から約 30µs になる（20000 ページのフルビルドで 9s から 7s）。HTML の出力は、チャンクにしても 20013 ファイルがバイト一致する。
+- なぜ: ファイルの作成と Node の `import()` は、ページ数が数万になるとビルドの大半を占める。`import()` はファイルを開いて解決しリンクする。開発に使っている macOS では `open` が 70〜200µs かかる。チャンクにすると、ページを読み込む CPU 時間は 1 ページあたり約 440µs から約 30µs になる（20000 ページのフルビルドで 9s から 7s）。HTML の出力は、チャンクにしても 20013 ファイルがバイト一致する（その後、描画結果をバッチごとに `feed` で渡すようにして 6.2s）。
+- 副作用: チャンクはページが import するモジュールを先頭でまとめて import するので、同じチャンクのどれかのページの import が失敗すると、チャンクの全ページが失敗し、エラーは最初にチャンクを読んだページの名前で出る（壊れたページとは限らない）。前回のチャンクは「今回使わないもの」をすべて消すので、同じ `cacheDir` で 2 つのビルドを同時に走らせてはいけない。ページが別のモジュールから import されている場合、そのページは関数とモジュールの 2 つの実体になる。
 - 取り込みの意味: `import { a } from "m"` は、チャンクが取り込んだ `m` の名前空間から `const { a } = ...` で取り出す（ESM の巻き上げと同じく、ページの先頭で）。ページの `export default` は関数の `default`、それ以外の `export` は捨てる（ホストは読まない。宣言したものはローカルに残る）。
 - チャンクにできないページ（`export * from` / `export { a } from` の再 export、`import.meta`、副作用だけの `import "x"`、hashbang）は、従来どおり 1 ファイルのモジュールとして書き出す。ページが別のモジュールから import されている場合も、そのページはモジュールとして書き出す。
 - 開発サーバーはチャンクを使わない（1 ページずつ、モジュールのファイルから描画する）。環境変数 `KD_PAGE_CHUNKS=0` で `build` でも使わなくなる（出力の比較用）。
@@ -318,7 +319,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 - 汎用ルール（`selector`）: `attr` の値が取り込むファイルのパス（`/` 始まりは `root` 基準、それ以外は取り込み元のファイル基準）。`pick` は取り込んだファイルの中から使う部分（セレクタの最初の一致。省略すると全体）。`replace` は `element`（一致した要素を置き換える）か `children`（一致した要素の子を置き換える）。
 - `preset: "ssi"`: `<!--#include virtual="..." -->`。起点は出力ディレクトリ（v2 と同じ）。`dir` を指定すると、本番サーバーのドキュメントルートを出力ディレクトリに対応づける（v2 の `dir` と同じ）。
 - `preset: "includeComment"`: `<!-- @include(PATH) -->`。PATH が `<documentRoot>/` で始まれば入力ディレクトリ基準、`/` で始まれば `root` 基準、それ以外は取り込み元のファイル基準。**取り込み先もパイプライン全体を通す**（取り込んだ先の include も再帰的に展開する。v2 は最初の 1 つしか展開しなかった）。
-- `preset: "burgerEditorImport"`: `[data-bge-container] [data-bgi=import] bge-import` の `src` を読み、取り込んだファイルの**すべての** `[data-bge-container]`（文書順。ほかの container に入っているものはその中に残る）で、外側の container を置き換える（v2 の `importBlock` と同じ）。`src` は `/` 始まりで、`root` 基準。相対パスはエラー。
+- `preset: "burgerEditorImport"`: `[data-bge-container] [data-bgi=import] bge-import` の `src` を読み、取り込んだファイルの**すべての** `[data-bge-container]`（文書順）で、外側の container を置き換える（v2 の `importBlock` と同じ。ただし container の中の container は、v2 はその外へ出して兄弟にするが、v3 はその中に残す）。`src` は `/` 始まりで、`root` 基準。相対パスはエラー。
 
 ### 9.3 `html.inject`
 
@@ -386,7 +387,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 
 ## 15. sitemap
 
-`sitemap.output` に XML を書く。対象は `include` の glob（出力ディレクトリ基準、既定 `**/*.html`）から `exclude` を除いたもの。`index.html` は末尾スラッシュの URL。`lastmod`: `"manifest"` は `pages.overrides` の値、`"mtime"` はファイルの更新時刻、`"none"` は出力しない。URL の起点は `site.baseURL`（`https://example.com/sub/` のように完全な URL）、なければ `https://<site.host>`。どちらもなければ設定エラー。`output` は出力ディレクトリの中でなければならない。仮想ページ（`pages.overrides`）も載り、`lastmod: "mtime"` は入力ファイルの更新時刻（仮想ページは出さない）。差分ビルドや `targets` を指定したビルドでも、計画の全ページから毎回書く。1 ファイルに載せられる URL は 5 万件までなので、超えるときは `sitemap-1.xml`、`sitemap-2.xml`、…（`output` のファイル名に `-番号` を付けたもの）に分け、`output` はそれらを並べたインデックス（`sitemapindex`）にする。URL に空白や日本語があれば `%XX` に符号化する。
+`sitemap.output` に XML を書く。対象は `include` の glob（出力ディレクトリ基準、既定 `**/*.html`）から `exclude` を除いたもの。`index.html` は末尾スラッシュの URL。`lastmod`: `"manifest"` は `pages.overrides` の値、`"mtime"` はファイルの更新時刻、`"none"` は出力しない。URL の起点は `site.baseURL`（`https://example.com/sub/` のように完全な URL）、なければ `https://<site.host>`。どちらもなければ設定エラー。`output` は出力ディレクトリの中でなければならない。仮想ページ（`pages.overrides`）も載り、`lastmod: "mtime"` は入力ファイルの更新時刻（仮想ページは出さない）。差分ビルドや `targets` を指定したビルドでも、計画の全ページから毎回書く。1 ファイルに載せられる URL は 5 万件までなので、超えるときは `sitemap-1.xml`、`sitemap-2.xml`、…（`output` のファイル名に `-番号` を付けたもの）に分け、`output` はそれらを並べたインデックス（`sitemapindex`）にする。URL に空白や日本語があれば `%XX` に符号化する。**分けるのは件数だけ**で、1 ファイル 50MB（非圧縮）の上限は見ない（1 件が 1KB を超えるほど `lastmod` などを付けると超えうる）。**古いファイルは消さない**（§5）ので、ページ数が減って分割がなくなった、または分割数が減ったとき、前のビルドの `sitemap-N.xml` が出力に残る。配信の前に消すのは `build.report` を使う postbuild の仕事。
 
 ## 16. 並列モデルと純粋性
 

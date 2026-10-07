@@ -1742,6 +1742,16 @@ describe('deliberate deviations from React', () => {
 		).not.toContain('oncontextmenu');
 	});
 
+	test('an input in a static page has one value and one checked, and no children', () => {
+		const both = (): Markup =>
+			el('input', { value: 'a', defaultValue: 'b', checked: true, defaultChecked: true });
+		expect(render(both, { meta: { kdStatic: true } })).toBe(
+			'<input value="a" checked=""/>',
+		);
+		const text = (): Markup => el('input', { type: 'text' }, 'x');
+		expect(() => render(text, { meta: { kdStatic: true } })).toThrow();
+	});
+
 	test('a static page keeps defaultValue and defaultChecked of an input as value and checked', () => {
 		const input = (): Markup =>
 			el('input', { type: 'text', defaultValue: 'v', defaultChecked: true });
@@ -1865,6 +1875,13 @@ describe('styleOf', () => {
 		});
 	});
 
+	test('comments are skipped and upper case names are lower cased', () => {
+		expect(styleOf('/* a;b */ margin: 0; COLOR: red')).toEqual({
+			margin: '0',
+			color: 'red',
+		});
+	});
+
 	test('an object is kept and nothing is no style', () => {
 		const object = { color: 'red' };
 		expect(styleOf(object)).toBe(object);
@@ -1881,6 +1898,12 @@ describe('styleOf', () => {
 });
 
 describe('html', () => {
+	test('nothing is written for null and undefined (Pug prints nothing for them)', () => {
+		expect(
+			el('div', null, [html(undefined as never), 'x', html(null as never)]).html,
+		).toBe('<div>x</div>');
+	});
+
 	test('is output as it is, next to other children, where a string would be escaped', () => {
 		const out = render(
 			() => el('div', null, [html('<b>raw & ok</b>'), 'a & b', el('i', null, 'x')]),

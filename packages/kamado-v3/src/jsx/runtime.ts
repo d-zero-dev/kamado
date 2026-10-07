@@ -153,6 +153,8 @@ export function styleOf(value: unknown): Record<string, unknown> | undefined {
 		return value as Record<string, unknown>;
 	}
 	const style: Record<string, unknown> = {};
+	// Comments are not declarations (and may hold a `;`).
+	const css = value.replaceAll(/\/\*[\s\S]*?\*\//g, '');
 	let depth = 0;
 	let quote = '';
 	let start = 0;
@@ -169,11 +171,11 @@ export function styleOf(value: unknown): Record<string, unknown> | undefined {
 		style[
 			key.startsWith('--')
 				? key
-				: key.replaceAll(/-([a-z])/g, (_, c: string) => c.toUpperCase())
+				: key.toLowerCase().replaceAll(/-([a-z])/g, (_, c: string) => c.toUpperCase())
 		] = text;
 	};
-	for (let i = 0; i < value.length; i++) {
-		const ch = value[i]!;
+	for (let i = 0; i < css.length; i++) {
+		const ch = css[i]!;
 		if (quote) {
 			if (ch === '\\') {
 				i++;
@@ -198,14 +200,14 @@ export function styleOf(value: unknown): Record<string, unknown> | undefined {
 			}
 			case ';': {
 				if (depth === 0) {
-					put(value.slice(start, i));
+					put(css.slice(start, i));
 					start = i + 1;
 				}
 				break;
 			}
 		}
 	}
-	put(value.slice(start));
+	put(css.slice(start));
 	return style;
 }
 
@@ -223,7 +225,7 @@ export function styleOf(value: unknown): Record<string, unknown> | undefined {
  * ```
  */
 export function html(text: string): Markup {
-	return new Markup(text);
+	return new Markup(text == null ? '' : '' + text);
 }
 
 // ---------------------------------------------------------------------------
@@ -1896,7 +1898,7 @@ export function el(tag: string, props: Props | null, children?: unknown): Markup
 			return new Markup(textarea(info, p, ch));
 		}
 		case T_INPUT: {
-			return new Markup(scope.plain ? plainInput(p) : input(info, p, ch));
+			return new Markup(scope.plain ? plainInput(p, ch) : input(info, p, ch));
 		}
 		case T_BUTTON: {
 			return new Markup(scope.plain ? generic(info, p, ch) : button(info, p, ch));
@@ -2042,13 +2044,23 @@ export function el(tag: string, props: Props | null, children?: unknown): Markup
  * `defaultValue` and `defaultChecked` are the `value` and `checked` of a
  * template, and stay where they were written.
  * @param props - The props
+ * @param children - The children, which an input cannot have
  * @returns The element
  */
-function plainInput(props: Props): string {
+function plainInput(props: Props, children: unknown): string {
+	assertSelfClosing('input', children, props);
 	let out = '<input';
 	for (const key of Object.keys(props)) {
 		const value = props[key];
 		if (value == null || key === 'children' || key === 'key' || key === 'ref') {
+			continue;
+		}
+		// `value` wins over `defaultValue`, `checked` over `defaultChecked`: one
+		// attribute each.
+		if (key === 'defaultValue' && props.value != null) {
+			continue;
+		}
+		if (key === 'defaultChecked' && props.checked != null) {
 			continue;
 		}
 		if (key === 'value' || key === 'defaultValue') {
