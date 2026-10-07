@@ -1,7 +1,7 @@
 //! Applying the edits: TypeScript syntax becomes white space, module
 //! specifiers are rewritten and JSX becomes calls to the runtime.
 //!
-//! Output shape for JSX (the runtime is in `packages/kamado-v3/src/jsx`):
+//! Output shape for JSX (the runtime is in `packages/kamado/src/jsx`):
 //!
 //! - A subtree with no dynamic part is one module-level constant,
 //!   `const __kd_s0 = __kd_m("<p class=\"a\">b</p>")`, created once when the

@@ -23,7 +23,7 @@ const dist = path.resolve(
 	'..',
 	'..',
 	'packages',
-	'kamado-v3',
+	'kamado',
 	'dist',
 );
 const { build } = await import(pathToFileURL(path.join(dist, 'build.js')).href);

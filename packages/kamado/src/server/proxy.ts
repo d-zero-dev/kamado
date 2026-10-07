@@ -1,90 +1,163 @@
-import type { ProxyRule } from '../config/types.js';
+/**
+ * `devServer.proxy`: requests under a path prefix are forwarded to another
+ * server (an API during development). The longest prefix wins; the body is
+ * streamed both ways; redirects are not followed (the browser follows them);
+ * TLS is Node's `fetch`.
+ */
 import type { Context, Hono } from 'hono';
 
-import c from 'ansi-colors';
+import { styleText } from 'node:util';
 
-/**
- * Normalize a proxy rule (string shorthand or ProxyRule object)
- * @param rule - Proxy rule to normalize
- * @returns Normalized ProxyRule object
- */
-export function normalizeRule(rule: ProxyRule | string): ProxyRule {
-	if (typeof rule === 'string') {
-		return { target: rule };
-	}
-	return rule;
+/** A proxy rule as the config gives it. */
+export interface ProxyRule {
+	/** The server to forward to. */
+	readonly target: string;
+	/** Rewrites the path with a regular expression before forwarding. */
+	readonly rewrite?: { readonly from: string; readonly to: string };
+	/** Sends the target's host and origin instead of the browser's. */
+	readonly changeOrigin?: boolean;
 }
 
 /**
- * Check if the HTTP method typically carries a request body
- * @param method - HTTP method
- * @returns Whether the method has a body
+ * Turns the string shorthand into a rule.
+ * @param rule - A target URL or a rule
+ * @example
+ * ```ts
+ * normalizeRule('http://localhost:8080'); // { target: 'http://localhost:8080' }
+ * ```
+ */
+export function normalizeRule(rule: string | ProxyRule): ProxyRule {
+	return typeof rule === 'string' ? { target: rule } : rule;
+}
+
+/**
+ * Applies `rewrite` to a path.
+ * @param pathname - The path of the request
+ * @param rewrite - `from` is a regular expression, `to` its replacement
+ * @example
+ * ```ts
+ * rewritePath('/api/users', { from: '^/api', to: '' }); // '/users'
+ * ```
+ */
+export function rewritePath(pathname: string, rewrite?: ProxyRule['rewrite']): string {
+	return rewrite ? pathname.replace(new RegExp(rewrite.from), rewrite.to) : pathname;
+}
+
+/**
+ * Copies response headers without the ones that describe the body as it was sent
+ * (`fetch` has decoded it) and the connection, which would be wrong for what the dev
+ * server sends on.
+ * @param headers - the headers of the upstream response
+ * @example
+ * withoutEncodingHeaders(new Headers({ 'content-encoding': 'gzip', 'x-a': '1' })).has('content-encoding'); // false
+ */
+export function withoutEncodingHeaders(headers: Headers): Headers {
+	const copy = new Headers(headers);
+	for (const name of ['content-encoding', 'content-length', 'connection', 'keep-alive']) {
+		copy.delete(name);
+	}
+	return copy;
+}
+
+/**
+ * Copies the headers of a request that is sent on, without the ones that belong to the
+ * connection it came in on (RFC 9110 7.6.1): `fetch` refuses `transfer-encoding` (a
+ * chunked upload would be a 502) and frames the body again by itself.
+ * @param headers - the headers of the request the dev server received
+ * @example
+ * withoutHopByHopHeaders(new Headers({ 'transfer-encoding': 'chunked', 'x-a': '1' })).has('transfer-encoding'); // false
+ */
+export function withoutHopByHopHeaders(headers: Headers): Headers {
+	const copy = new Headers(headers);
+	for (const name of [
+		'connection',
+		'keep-alive',
+		'proxy-connection',
+		'te',
+		'trailer',
+		'transfer-encoding',
+		'upgrade',
+	]) {
+		copy.delete(name);
+	}
+	return copy;
+}
+
+/**
+ * Whether a method carries a request body.
+ * @param method - The HTTP method
  */
 export function hasBody(method: string): boolean {
 	return !['GET', 'HEAD'].includes(method.toUpperCase());
 }
 
 /**
- * Register proxy routes on the Hono app.
- * Must be called BEFORE setRoute() so proxy routes take priority.
- * @param app - Hono application instance
- * @param proxyConfig - Proxy configuration record
+ * Registers the proxy routes. Call it before the routes of the site, so that
+ * a proxied path never reaches them.
+ * @param app - The application
+ * @param proxy - Rules by path prefix
+ * @param fetchImpl - `fetch`, replaceable for tests
+ * @throws {Error} naming the prefix when a target or a rewrite is invalid
  */
 export function setProxyRoutes(
 	app: Hono,
-	proxyConfig: Readonly<Record<string, ProxyRule | string>>,
+	proxy: Readonly<Record<string, string | ProxyRule>>,
+	fetchImpl: typeof fetch = fetch,
 ): void {
-	const sortedEntries = Object.entries(proxyConfig).toSorted(
-		([a], [b]) => b.length - a.length,
-	);
-
-	for (const [pathPrefix, rawRule] of sortedEntries) {
-		const rule = normalizeRule(rawRule);
-		const targetUrl = new URL(rule.target);
-		const changeOrigin = rule.changeOrigin === true;
-
-		const handler = async (ctx: Context) => {
-			const requestUrl = new URL(ctx.req.url);
-			const originalPath = requestUrl.pathname;
-			const rewrittenPath = rule.pathRewrite
-				? await rule.pathRewrite(originalPath)
-				: originalPath;
-
-			const proxyUrl = new URL(rewrittenPath, targetUrl);
-			proxyUrl.search = requestUrl.search;
-
-			const headers = new Headers(ctx.req.raw.headers);
-			if (changeOrigin) {
-				headers.set('host', targetUrl.host);
-				headers.set('origin', targetUrl.origin);
+	const entries = Object.entries(proxy).toSorted(([a], [b]) => b.length - a.length);
+	for (const [prefix, raw] of entries) {
+		const rule = normalizeRule(raw);
+		let target: URL;
+		try {
+			target = new URL(rule.target);
+			if (rule.rewrite) {
+				// Fails now, not on the first request.
+				new RegExp(rule.rewrite.from);
 			}
-
+		} catch (error) {
+			throw new Error(
+				`devServer.proxy.${prefix}: ${error instanceof Error ? error.message : String(error)}`,
+				{ cause: error },
+			);
+		}
+		const handler = async (ctx: Context) => {
+			const requested = new URL(ctx.req.url);
+			const forwarded = new URL(rewritePath(requested.pathname, rule.rewrite), target);
+			// A rewritten path that starts with `//` is a network-path reference:
+			// `new URL('//host/x', target)` would send the request to `host`.
+			if (forwarded.origin !== target.origin) {
+				return new Response('Bad Request', { status: 400 });
+			}
+			forwarded.search = requested.search;
+			const headers = withoutHopByHopHeaders(ctx.req.raw.headers);
+			if (rule.changeOrigin === true) {
+				headers.set('host', target.host);
+				headers.set('origin', target.origin);
+			}
 			try {
-				const proxyResponse = await fetch(proxyUrl.toString(), {
+				const response = await fetchImpl(forwarded.toString(), {
 					method: ctx.req.method,
 					headers,
 					body: hasBody(ctx.req.method) ? ctx.req.raw.body : undefined,
-					// @ts-expect-error -- Node.js fetch supports duplex for streaming request bodies
+					// @ts-expect-error -- Node's fetch needs `duplex` to stream a request body
 					duplex: hasBody(ctx.req.method) ? 'half' : undefined,
 					redirect: 'manual',
 				});
-
-				return new Response(proxyResponse.body, {
-					status: proxyResponse.status,
-					statusText: proxyResponse.statusText,
-					headers: proxyResponse.headers,
+				return new Response(response.body, {
+					status: response.status,
+					statusText: response.statusText,
+					headers: withoutEncodingHeaders(response.headers),
 				});
 			} catch (error) {
 				const message = error instanceof Error ? error.message : 'Unknown proxy error';
 				// eslint-disable-next-line no-console
 				console.error(
-					c.red(`  Proxy error [${pathPrefix} → ${rule.target}]: ${message}`),
+					styleText('red', `  Proxy error [${prefix} → ${rule.target}]: ${message}`),
 				);
 				return ctx.text('Proxy error', 502);
 			}
 		};
-
-		app.all(`${pathPrefix}/*`, handler);
-		app.all(pathPrefix, handler);
+		app.all(`${prefix}/*`, handler);
+		app.all(prefix, handler);
 	}
 }

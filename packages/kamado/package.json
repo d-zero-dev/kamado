@@ -1,26 +1,17 @@
 {
 	"name": "kamado",
-	"version": "2.0.0-alpha.17",
-	"description": "Bake your HTML hard. The on-demand static site generator.",
+	"version": "3.0.0-alpha.0",
+	"description": "Bake your HTML hard. The on-demand static site generator (v3, Rust core).",
 	"repository": "https://github.com/d-zero-dev/kamado.git",
 	"author": "D-ZERO Co., Ltd.",
 	"license": "MIT",
-	"publishConfig": {
-		"access": "public"
-	},
+	"private": true,
 	"type": "module",
 	"bin": "./dist/cli.js",
 	"exports": {
-		"./build": "./dist/builder/build.js",
-		"./server": "./dist/server/app.js",
-		"./config": "./dist/config/config.js",
-		"./compiler": "./dist/compiler/compiler.js",
-		"./compiler/banner": "./dist/compiler/banner.js",
-		"./compiler/function-map": "./dist/compiler/function-map.js",
-		"./data": "./dist/data/data.js",
-		"./files": "./dist/files/files.js",
-		"./path": "./dist/path/path.js",
-		"./utils/dom": "./dist/utils/dom.js"
+		".": "./dist/index.js",
+		"./build": "./dist/build.js",
+		"./jsx": "./dist/jsx/runtime.js"
 	},
 	"engines": {
 		"node": ">=24.11.0"
@@ -30,27 +21,16 @@
 		"dev": "tsc --watch --project tsconfig.build.json"
 	},
 	"files": [
-		"dist"
+		"dist",
+		"native",
+		"schema.json"
 	],
 	"dependencies": {
-		"@d-zero/dealer": "1.14.0",
-		"@d-zero/roar": "2.2.1",
-		"@d-zero/shared": "0.23.0",
 		"@hono/node-server": "2.1.3",
-		"ansi-colors": "4.1.3",
-		"character-entities": "2.0.2",
-		"cosmiconfig": "10.0.1",
-		"dayjs": "1.11.23",
-		"fast-glob": "3.3.3",
-		"gray-matter": "4.0.3",
-		"hono": "4.13.11",
-		"linkedom": "0.18.13",
-		"open": "11.0.4",
-		"picomatch": "4.0.7",
-		"yaml": "2.9.1"
+		"esbuild": "0.28.2",
+		"hono": "4.13.11"
 	},
 	"devDependencies": {
-		"@types/node": "24.19.0",
-		"@types/picomatch": "4.0.3"
+		"@types/node": "24.19.0"
 	}
 }

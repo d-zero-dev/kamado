@@ -44,7 +44,7 @@ mkdirSync(work, { recursive: true });
 // which Node cannot load from source; bundle it for the check.
 const runtimeFile = path.join(work, 'runtime.mjs');
 buildSync({
-	entryPoints: [path.join(root, 'packages', 'kamado-v3', 'src', 'jsx', 'runtime.ts')],
+	entryPoints: [path.join(root, 'packages', 'kamado', 'src', 'jsx', 'runtime.ts')],
 	bundle: true,
 	format: 'esm',
 	platform: 'node',

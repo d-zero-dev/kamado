@@ -1524,7 +1524,7 @@ mod tests {
 			.collect();
 		// `plain.html` has no layout and is not rendered by JavaScript.
 		assert_eq!(jobs, [("/about.html", false, true), ("/", true, true)]);
-		let compiled = format!("{}/node_modules/.cache/kamado-v3/jsx", site.root);
+		let compiled = format!("{}/node_modules/.cache/kamado/jsx", site.root);
 		// A page of a build is a function in a chunk, not a file of its own; the
 		// components it imports are files.
 		assert!(fs::metadata(format!("{compiled}/src/index.tsx.mjs")).is_err());
@@ -1562,7 +1562,7 @@ mod tests {
 	#[test]
 	fn chunks_of_an_earlier_build_are_removed_when_the_pages_to_render_change() {
 		let (site, loaded) = jsx_site("chunks-prune");
-		let chunk_dir = format!("{}/node_modules/.cache/kamado-v3/jsx/__chunks__", site.root);
+		let chunk_dir = format!("{}/node_modules/.cache/kamado/jsx/__chunks__", site.root);
 		let chunks = || fs::read_dir(&chunk_dir).unwrap().count();
 		let render = |prepared: Prepared| {
 			let rendered = prepared
@@ -1615,7 +1615,7 @@ mod tests {
 		);
 		site.write("src/other.tsx", "export default () => <p>other</p>;\n");
 		let prepared = prepare_incremental(&loaded);
-		let compiled = format!("{}/node_modules/.cache/kamado-v3/jsx", site.root);
+		let compiled = format!("{}/node_modules/.cache/kamado/jsx", site.root);
 
 		let by_url = |url: &str| {
 			prepared

@@ -6,12 +6,12 @@ alwaysApply: true
 
 # Quality Checks After Code Changes
 
-## Monorepo Context
+## Repository Context
 
-**This is a Lerna-managed monorepo.** ALL commands MUST be run from the repository root.
+**This repository has a Cargo workspace (`crates/`) and one Yarn workspace package (`packages/kamado`, versioned with Lerna).** ALL commands MUST be run from the repository root.
 
-- **NEVER use `cd` to navigate to individual package directories**
-- Lerna handles running commands across all packages from the root
+- **NEVER use `cd` to navigate to individual package or crate directories**
+- Lerna runs the Node scripts of the package from the root
 - Working directory should always be the repository root
 
 ## File Type Based Checks
@@ -27,7 +27,7 @@ After completing any code changes, you MUST run the following commands in order 
    - Ask user permission before disabling ESLint rules
 
 2. **Build Check**: `yarn build`
-   - Builds all packages via Lerna
+   - Builds the Node package via Lerna
    - Ensure all packages build successfully
    - Verify import paths are correct
    - Check for TypeScript compilation errors
@@ -36,6 +36,16 @@ After completing any code changes, you MUST run the following commands in order 
    - Run all test suites across all packages via Vitest
    - Ensure all tests pass
    - Verify no regressions introduced
+
+### For Rust Files (\*.rs, Cargo.toml)
+
+After completing any Rust changes, you MUST also run the following commands **from the repository root**, one command per call:
+
+1. `cargo fmt --all`
+2. `cargo clippy --locked --offline --all-targets -- -D warnings`
+3. `cargo test --locked --offline --workspace`
+
+Do NOT add external crates (CI runs `node scripts/check-rust-no-external-crates.mjs`).
 
 ### For Non-Code Files (_.md, _.json, \*.mdc, config files, etc.)
 

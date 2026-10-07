@@ -88,6 +88,16 @@
 			"description": "Oracles of v3: golden files and tables are generated from them (docs/v3/development.md)",
 			"groupName": "v3 oracles",
 			"matchPackageNames": ["prettier", "character-entities", "esbuild"]
+		},
+		{
+			"description": "The v2 oracles are the published v2 on purpose and do not move (docs/v3/development.md)",
+			"matchDepNames": ["kamado-v2"],
+			"enabled": false
+		},
+		{
+			"description": "benchmarks/v2-baseline pins the published v2 and what it needs; it is not kept up to date",
+			"matchFileNames": ["benchmarks/v2-baseline/package.json"],
+			"enabled": false
 		}
 	]
 }

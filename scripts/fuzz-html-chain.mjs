@@ -18,7 +18,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { domSerialize } from '../packages/kamado/src/utils/dom.ts';
+import { domSerialize } from 'kamado-v2/utils/dom';
 
 import { createInputGenerator } from './html-fuzz.mjs';
 import { addDoctype, prettierHtml, v2Minify } from './v2-print.mjs';

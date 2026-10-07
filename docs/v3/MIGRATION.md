@@ -2,6 +2,8 @@
 
 この文書は **AI が上から順に実行できる手順書**です。各ステップに「やること」「確認すること」を書いてあります。仕様の根拠は `docs/v3/RFC.md`（破壊的変更の一覧は §2）。
 
+v3 はこのリポジトリの `packages/kamado`（npm 名 `kamado`、bin は `kamado`、JSX のランタイムは `kamado/jsx`）です。まだ公開しておらず（alpha の開発中。公開は issue #277）、v2 は `v2` ブランチで保守しています。公開済みの v2（`kamado@2.0.0-alpha.17` など）は npm に残っています。`@kamado-io/*` の 5 つのパッケージ（page / script / style / pug / jsx のコンパイラ）は v3 にはなく、機能は `kamado` に組み込まれています（RFC §2 の #3、#22）。
+
 v3 は v2 と**出力（HTML）がバイト一致**することを目標にしています。移行の合格条件は「同じ入力から、v2 と v3 の出力ディレクトリを比べて差がない（差があるなら §11 の意図した差だけ）」ことです。
 
 ## 0. 進め方
@@ -49,7 +51,7 @@ v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは `p
 
 ```jsonc
 {
-	"$schema": "./node_modules/kamado-v3/schema.json",
+	"$schema": "./node_modules/kamado/schema.json",
 	"dir": { "input": "src", "output": "htdocs" },
 	"pages": {
 		"ignore": ["_libs/**"],
@@ -141,7 +143,7 @@ export default ({ meta }: { meta: { title: string } }) => (
 
 - **属性名は React の綴り**: `charset` → `charSet`、`itemprop` → `itemProp`、`itemtype` → `itemType`、`itemid` → `itemID`。小文字のままだと、`<meta charset>` は先頭に置かれず、`<meta itemprop>`（パンくずの `position`）が `<head>` に持ち上げられる。
 - **`&nbsp;` などの実体参照は、そのままテキストに書く**（`{"&nbsp;"}` と文字列にすると `&amp;nbsp;` になる）。
-- **他の子と並ぶ生の HTML**は、`kamado-v3/jsx` の `html()` で書く（`import { html } from 'kamado-v3/jsx'`、`{html(markup)}`）。Pug の `!{}` と `include` したテキストの置き換え先。
+- **他の子と並ぶ生の HTML**は、`kamado/jsx` の `html()` で書く（`import { html } from 'kamado/jsx'`、`{html(markup)}`）。Pug の `!{}` と `include` したテキストの置き換え先。
 - **`<option selected>`** は React が無視する。`<select defaultValue="...">` に書く。
 - **`<link media="all">`** は空にならず `all` のまま出る（v2 と同じ）。
 - **JSX に書けない属性名**（絵文字など、`⚠️="..."` のような印）は React が出力しない。静的なマークアップなら `html.inject` に HTML 文字列として書く。
@@ -149,7 +151,7 @@ export default ({ meta }: { meta: { title: string } }) => (
 - **Pug の `pretty`**（`createCompileHooks` の既定は `true`）は、インラインでないタグの前と、ブロックを含むタグの閉じタグの前に改行を入れる。これは空白として出力に残り、インライン要素の隣では見た目も変わる。変換スクリプトに `--pretty` を付けると、同じ規則で `{"\n"}` を書き出す（付けなければ空白は入らない）。v2 の出力と揃えるなら `--pretty`、`pretty: false` の基準と比べるなら付けない。
 - **Pug の出力順をそのまま保つ**: 変換スクリプトは `<html static>` を出す。React の持ち上げ（`<head>` の `async` な `script` が `title` の前に出る）と、`form` / `input` / `button` の属性の並べ替え（`action` と `name` が後ろへ）をやめ、書いた順で出す。`<html>` を持たない、`--pages=<ディレクトリ>`（既定 `htdocs`）で指したディレクトリの下のページ（フラグメント）と `extends` したページには `export const meta = { kdStatic: true }` を出す（`<html static>` の外で評価される子を持つページは、手で書くときも `kdStatic` が要る。レイアウトの外側で評価される子や、`k('html', ...)` 経由の `html` は対象外）。
 - **`on*` 属性の文字列**（`oncontextmenu="return false;"`）は、`<html static>`（`kdStatic` のページ）の中でだけ出る。React と同じく、ふだんは `on*` をすべて捨てる（データ由来の props が実行可能な属性にならないように）。
-- **`style` を CSS の文字列で渡す**（`style=\`anchor-name: ${x}\``）は、`kamado-v3/jsx`の`styleOf()` を通してオブジェクトにする。
+- **`style` を CSS の文字列で渡す**（`style=\`anchor-name: ${x}\``）は、`kamado/jsx`の`styleOf()` を通してオブジェクトにする。
 - **`data-*` / `aria-*` に `false`**: Pug は属性を出さず、React は `"false"` と書く。変換スクリプトは `false` を `undefined` にして出す。
 - **`if (x)` が `0` を返す式**: Pug は何も出さず、JSX の `x && <b/>` は `0` を出す。変換スクリプトは `!!` を付ける。
 - **未宣言の変数への代入**（`- isHome = false`）は、変換スクリプトが `let` を足す。
@@ -212,7 +214,7 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
 
 ## 8. 開発サーバー
 
-`kamado3 server`（設定は `devServer`）。v2 との違い:
+`kamado server`（設定は `devServer`）。v2 との違い:
 
 - ファイルを監視しません（v2 と同じ）。リクエストごとに依存の stat を確かめ、変更がなければメモリの出力を返します。
 - ページファイルの**追加と削除**、設定ファイル・`pages.overrides` の変更は、**再起動**すると反映されます。
@@ -251,7 +253,7 @@ builder の出力と揃えるときの違い:
 ### 10.1 出力の比較
 
 ```sh
-yarn kamado3 build --force
+yarn kamado build --force   # v3 のプロジェクトで（§1 の `kamado` は v2、ここは v3）
 node benchmarks/v3/compare-outputs.ts /tmp/baseline-v2 <v3 output dir>
 ```
 
@@ -261,10 +263,10 @@ node benchmarks/v3/compare-outputs.ts /tmp/baseline-v2 <v3 output dir>
 ### 10.2 差分ビルド
 
 ```sh
-yarn kamado3 build --incremental        # 初回: すべて built
-yarn kamado3 build --incremental        # 2 回目: すべて cached
+yarn kamado build --incremental        # 初回: すべて built
+yarn kamado build --incremental        # 2 回目: すべて cached
 # ページを 1 つ直して
-yarn kamado3 build --incremental        # そのページだけ built
+yarn kamado build --incremental        # そのページだけ built
 ```
 
 - 共有のレイアウトやコンポーネントを直すと、それを使うページだけが再ビルドされる。
@@ -273,7 +275,7 @@ yarn kamado3 build --incremental        # そのページだけ built
 
 ### 10.3 開発サーバー
 
-`kamado3 server` を起動し、ページ・CSS・JS・出力ディレクトリの静的ファイルを開く。コンポーネントを 1 つ直して再読み込みし、反映を確かめる。プロキシを使うなら `devServer.proxy` の経路も確かめる。
+`kamado server` を起動し、ページ・CSS・JS・出力ディレクトリの静的ファイルを開く。コンポーネントを 1 つ直して再読み込みし、反映を確かめる。プロキシを使うなら `devServer.proxy` の経路も確かめる。
 
 ## 11. 出力に差が出る既知の点
 

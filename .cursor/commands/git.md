@@ -8,8 +8,8 @@ description: Git manipulation rules
   1. Check staged files using `git diff --staged` and create a commit message using _only_ the staged files.
      - Once the message is ready, directly propose the commit command to the user.
   2. If no files are staged, check the differences using `git status`, then stage files sequentially based on the following commit granularity before committing:
-     - Separate commits by package.
-     - Commit dependencies first (if dependency order is unclear, check using `npx lerna list --graph`).
+     - Separate commits by area (Rust crates, the `kamado` package, docs, and so on).
+     - Commit dependencies first: root config, then Rust crates (lower crates first; the table in `docs/v3/development.md` shows the order), then `packages/kamado`, then `scripts`, `benchmarks` and `docs`.
 - If the OS, application settings, or context suggest a language other than English is being used, provide a translation and explanation of the commit message in that language immediately before proposing the commit command to the user.
 - When the commit message is ready, try to execute it directly as `git commit` (the user will approve as appropriate).
 
@@ -26,8 +26,8 @@ description: Git manipulation rules
     - `test`
     - `chore`
   - You must use the following scopes:
-    - Each package name (without namespace)
-    - `repo`
+    - `kamado` (the package name)
+    - `repo` (also for Rust crates: crate names are not in the scope list)
     - `deps`
     - `github`
 - The message body's lines must not be longer than 100 characters

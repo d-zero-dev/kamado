@@ -22,7 +22,7 @@
  * `formatDate`; comments and the doctype are dropped. What it cannot express it
  * stops on (an unescaped value that is not the only child, `&attributes`):
  * fix the source or the output by hand. It needs the pug packages of the project
- * (`pug-lexer`, `pug-parser`, `acorn`) and a build of kamado-v3.
+ * (`pug-lexer`, `pug-parser`, `acorn`) and a build of kamado.
  *
  * Read the output before using it: the names of the data variables
  * (`data`, `blocks`) follow the files of the data directory, and `charset`,
@@ -63,7 +63,7 @@ const VOID = new Set(
 );
 // html attribute name (lower case) -> React prop name
 const { PROPS } = await import(
-	new URL('../packages/kamado-v3/dist/jsx/attr-table.js', import.meta.url).href
+	new URL('../packages/kamado/dist/jsx/attr-table.js', import.meta.url).href
 );
 // Props React spells in camel case that its own table does not list.
 const propOf = new Map([
@@ -488,8 +488,9 @@ function importLines(...contexts) {
 			named.set(spec, set);
 		}
 	}
-	const head = ["import type { PageProps } from 'kamado-v3';"];
-	if (rt.size > 0) head.push(`import { ${[...rt].join(', ')} } from 'kamado-v3/jsx';`);
+	// The package ships no props types: the page props are declared where they are used.
+	const head = ['type PageProps = Record<string, any>;'];
+	if (rt.size > 0) head.push(`import { ${[...rt].join(', ')} } from 'kamado/jsx';`);
 	for (const [name, spec] of imports) head.push(`import ${name} from '${spec}';`);
 	for (const [spec, names] of named)
 		head.push(`import { ${[...names].join(', ')} } from '${spec}';`);
@@ -986,7 +987,7 @@ function node(n, ctx, depth) {
 			// Buffered output.
 			const expr = use(n.val, ctx);
 			if (!n.mustEscape) {
-				// Raw HTML next to other children: the helper of kamado-v3/jsx.
+				// Raw HTML next to other children: the helper of kamado/jsx.
 				ctx.rt.add('html');
 				return [`${pad}{html(${expr})}`];
 			}

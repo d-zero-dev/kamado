@@ -15,7 +15,7 @@
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { domSerialize } from '../packages/kamado/src/utils/dom.ts';
+import { domSerialize } from 'kamado-v2/utils/dom';
 
 import { cases as extraCases } from './html-golden-cases.mjs';
 

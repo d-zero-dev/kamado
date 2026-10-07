@@ -1,154 +1,91 @@
-# Kamado
+# kamado v3
 
-[![npm version](https://badge.fury.io/js/kamado.svg)](https://www.npmjs.com/package/kamado)
+Rust のコアを持つ、オンデマンドの静的サイトジェネレータ。ページは **HTML（front matter 付き）と TSX** の 2 種類で、ランタイム JavaScript を出力に残さない。
 
-**Kamado is an extremely simple static site build tool.** No hydration, no client-side runtime, no magic. Pure static HTML, baked on demand.
+- 10 万ページ級のビルドと開発サーバー応答を速くすることが目的。Rust 側は標準ライブラリだけで書き、npm の依存は `esbuild` と `hono` / `@hono/node-server` だけ。
+- 出力の HTML は v2 と**バイト一致**する（意図した差は `docs/v3/RFC.md`）。
+- v2 から移るには `docs/v3/MIGRATION.md`（AI が上から順に実行できる手順書）。
 
-設計の詳細・実行フロー・依存追跡・キャッシュ戦略・型システム上の制約は [ARCHITECTURE.md](./ARCHITECTURE.md) を参照。
+> alpha の開発中で、まだ公開していない。v2 は `v2` ブランチで保守している。
 
-## Installation
+## 設定
 
-```sh
-yarn add kamado
+プロジェクトのルートに `kamado.config.jsonc` を置く。関数は書けない。相対パスは設定ファイルのディレクトリ基準で、未知のキーはエラーになる。
+
+```jsonc
+{
+	"$schema": "./node_modules/kamado/schema.json",
+	"dir": { "input": "src", "output": "htdocs" },
+	"site": { "baseURL": "https://example.com/" },
+	"pages": { "ignore": ["_libs/**"], "layouts": { "dir": "src/_libs/layouts" } },
+	"html": { "format": { "printWidth": 90 } },
+	"sitemap": { "lastmod": "mtime" },
+}
 ```
 
-## 基本的な使い方
+`schema.json` は、設定のキーの一覧（未知のキーの検出）と、値の型・列挙できる候補を持つ。既定値を書いているのは一部（5 個）だけで、`html.rules` / `html.includes` / `html.inject` / `html.overrides` の項目は型のない `object` として通す（中身の検証は Rust 側の設定の読み込みが行う）。エディタに `$schema` を読ませれば、キーの補完と大まかな検証が効く。オプションの意味と既定値は `docs/v3/RFC.md` の §3 以降にある。
 
-`kamado.config.ts` をプロジェクトルートに作成:
+| セクション  | 内容                                                                                           |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| `dir`       | 入力と出力のディレクトリ（異なること）                                                         |
+| `site`      | `host` / `baseURL` / `siteName` / `siteNameEn`（未指定なら `package.json` の `production`）    |
+| `pages`     | 対象の glob、出力パス、レイアウト、`alias` / `define`、メタデータの `overrides`                |
+| `data`      | JSON / YAML / HTML / テキストのデータと、設定内のリテラル                                      |
+| `html`      | doctype・整形・圧縮・文字参照・画像寸法・DOM ルール・取り込み・head への挿入・ページ別の上書き |
+| `sitemap`   | `sitemap.xml`（`false` で無効）                                                                |
+| `styles`    | `@import` の展開、alias、banner、sourcemap、圧縮                                               |
+| `scripts`   | esbuild でのバンドル（alias / define / target / banner / sourcemap / 圧縮）                    |
+| `devServer` | `port` / `host` / `open` / `startPath` / `proxy`                                               |
+| `build`     | `jobs` / `incremental` / `cacheDir` / `skipUnchanged` / `report`                               |
+
+## コマンド
+
+```sh
+kamado build [globs...] [--incremental] [--force] [--skip-unchanged]
+                         [--jobs <n|auto>] [--cache-dir <dir>] [-c, --config <file>] [--verbose]
+kamado server           [--cache-dir <dir>] [-c, --config <file>] [--verbose]
+kamado --help           (-h)
+```
+
+- `--config` / `-c` を省略すると、カレントディレクトリの `kamado.config.jsonc` を使う。`--cache-dir` は差分ビルドの manifest などの置き場を変える（`build` と `server` の両方）。
+- `build` は設定の対象を全部出力する。`globs` を渡すとその入力だけ。`--incremental` は前回から変わっていないものを飛ばす（`--force` で無視）。`--jobs` は並列度（JSX の描画のワーカーと Rust のスレッドの数）で、`auto`（既定）は使える CPU の数から決める。
+- `server` はリクエストごとに依存ファイルを stat し、変わっていなければ前回の結果を返す。ファイルは書き出さない。ライブリロードはない。変更したコンポーネントはワーカーを作り直して反映する。
+
+## プログラムから
 
 ```ts
 import path from 'node:path';
 
-import { defineConfig } from 'kamado/config';
-import { createPageCompiler } from '@kamado-io/page-compiler';
-import { createScriptCompiler } from '@kamado-io/script-compiler';
-import { createStyleCompiler } from '@kamado-io/style-compiler';
+import { build, start } from 'kamado';
 
-export default defineConfig({
-	dir: {
-		root: import.meta.dirname,
-		input: path.resolve(import.meta.dirname, '__assets', 'htdocs'),
-		output: path.resolve(import.meta.dirname, 'htdocs'),
-	},
-	devServer: { port: 8000, open: true },
-	compilers: (def) => [
-		def(createPageCompiler(), {
-			files: '**/*.html',
-			outputExtension: '.html',
-		}),
-		def(createStyleCompiler(), {
-			files: '**/*.{css,scss,sass}',
-			ignore: '**/*.{scss,sass}',
-			outputExtension: '.css',
-		}),
-		def(createScriptCompiler(), {
-			files: '**/*.{js,ts,jsx,tsx,mjs,cjs}',
-			outputExtension: '.js',
-			minifier: true,
-		}),
-	],
-});
+// Both take the absolute path of the config file, not an object.
+const config = path.resolve('kamado.config.jsonc');
+
+const report = await build(config, { incremental: true });
+console.log(report.pages.length);
+
+const server = await start(config);
+console.log(server.location);
+await server.close();
 ```
 
-CLI:
+`build()` と `start()` の第 1 引数は、設定ファイルの**絶対パス**（相対パスの基準になるディレクトリが設定ファイルの場所のため）。`build()` のオプションは CLI のフラグと同じ（`incremental` / `force` / `skipUnchanged` / `targets` / `jobs` / `cacheDir`）。`report` は各ページの URL・入出力のパス・状態（`built` / `cached` / …）・メタデータを持つ。
 
-```sh
-kamado build              # 静的ビルド
-kamado server             # 開発サーバ起動
-kamado build --incremental  # キャッシュベースの増分ビルド
-kamado build --skip-unchanged  # 出力が同一ならスキップ（mtime 保持）
-```
+## 対応プラットフォーム
 
-各オプション・各 compiler の設定値は型定義（`Config<M>`、`CompilerOptions`）と各 compiler パッケージの README を参照。
+Rust のアドオン（`.node`）を使うので、プラットフォームごとにビルドが要る。CI（`.github/workflows/rust.yml`）がビルドとテストをするのは次の 3 つ。
 
-## 重要な罠・設計上の注意
+| プラットフォーム          | 状態                                         |
+| ------------------------- | -------------------------------------------- |
+| macOS arm64               | CI で確認（`macOS-latest`）                  |
+| Linux x64（glibc）        | CI で確認（`ubuntu-latest`）                 |
+| Linux arm64（glibc）      | CI で確認（`ubuntu-24.04-arm`）              |
+| macOS x64                 | 対象だが CI では確認していない               |
+| Linux x64 / arm64（musl） | 対象だが CI では確認していない               |
+| Windows（ネイティブ）     | 非対応（WSL 上の Linux は Linux として扱う） |
 
-### `compileHooks` / `transforms` の解決タイミング
+Node は 24.11 以上（`engines`）。
 
-関数で渡した場合、解決は **ビルド/サーブごとに 1 回**（ファイルごとではない）。並列コンパイル中のすべてのページが**同じインスタンスを共有**するため、ファイル間で状態を持たせてはいけない。
+## 開発
 
-### `pageList` フックの `metaData`
-
-`pageList` 実行時点では `metaData` はまだ frontmatter から populate されていない。breadcrumbs/navigation で `__NO_TITLE__` を避けるには、`pageList` 内で `metaData.title` を明示的に設定する必要がある。
-
-### `outputPathField` は opt-in
-
-frontmatter の特定フィールドから出力パスを上書きする機能はデフォルト off。既存プロジェクトの frontmatter キーが routing として誤解釈されないため。詳細は [`@kamado-io/page-compiler`](../@kamado-io/page-compiler/) の README。
-
-### `devServer.transforms` と Page Compiler の `transforms` の違い
-
-| 項目     | `devServer.transforms`               | `createPageCompiler({ transforms })` |
-| -------- | ------------------------------------ | ------------------------------------ |
-| スコープ | serve のみ                           | build + serve 両方                   |
-| 対象     | 全レスポンス（HTML/CSS/JS/画像など） | コンパイル後 HTML のみ               |
-| `filter` | 有効                                 | 無視（全 HTML を処理）               |
-
-同じ `Transform` インターフェース（`kamado/config`）を使うが、上記の通り適用範囲が異なる。
-
-### `sourcemap: 'onServer'`（デフォルト）
-
-`kamado server` 時のみ source map を埋め込み、`kamado build` では出力しない。常に出すなら `true`、常に出さないなら `false`。
-
-## 主要 API
-
-### `devServer.transforms` — レスポンス変換
-
-```ts
-defineConfig({
-	devServer: {
-		transforms: [
-			{
-				name: 'inject-dev-script',
-				filter: { include: '**/*.html' },
-				transform: (content) => {
-					if (typeof content !== 'string') {
-						content = new TextDecoder('utf-8').decode(content);
-					}
-					return content.replace('</body>', '<script src="/__dev.js"></script></body>');
-				},
-			},
-		],
-	},
-});
-```
-
-非 HTML は `ArrayBuffer` で渡る点に注意（`TextDecoder` で復号）。transform 内のエラーはサーバを落とさず、元のコンテンツが返る。
-
-### `devServer.proxy` — 外部 API への転送
-
-```ts
-defineConfig({
-	devServer: {
-		proxy: {
-			'/api': 'https://backend.example.com',
-			'/api/v2': {
-				target: 'https://api-v2.example.com',
-				pathRewrite: (path) => path.replace(/^\/api\/v2/, ''),
-				changeOrigin: true,
-			},
-		},
-	},
-});
-```
-
-ストリーミング転送。全 HTTP メソッド対応。serve 時のみ動作（build には影響しない）。
-
-### Hooks
-
-`onBeforeBuild` / `onAfterBuild` は `Context`（`Config` + `mode: 'build' | 'serve'`）を受け取る。`mode` は CLI コマンドで自動設定され、ユーザは変更できない。詳細は [ARCHITECTURE.md](./ARCHITECTURE.md#config-vs-context) 参照。
-
-### Page List
-
-```ts
-defineConfig({
-	pageList: async (pageAssetFiles, config) => {
-		return pageAssetFiles.filter((p) => !p.url.includes('/drafts/'));
-	},
-});
-```
-
-External page を追加する場合は `urlToFile` を使う（`kamado/files` から import）。
-
-## License
-
-MIT
+ビルド・テスト・ベンチマークの手順は `docs/v3/development.md`。

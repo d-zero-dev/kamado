@@ -6,6 +6,10 @@ import dz from '@d-zero/eslint-config';
 export default [
 	...dz.configs.node,
 	{
+		// The frozen copy of kamado v2 that the differential specs compare with (see its README.md).
+		ignores: ['packages/*/oracle/**'],
+	},
+	{
 		files: ['**/{*.{config,spec}.{js,mjs,ts},*.*rc,*.*rc.{js,mjs}}'],
 		rules: {
 			'import-x/no-extraneous-dependencies': 0,

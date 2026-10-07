@@ -8,9 +8,8 @@
  * minifier's attribute rewrites are added on top.
  */
 import { minify } from 'html-minifier-terser';
+import { domSerialize } from 'kamado-v2/utils/dom';
 import { format } from 'prettier';
-
-import { domSerialize } from '../packages/kamado/src/utils/dom.ts';
 
 /**
  * html-minifier-terser as v2 calls it, without the code minifiers (those are

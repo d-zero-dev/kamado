@@ -9,8 +9,8 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'scripts/**'
-      - 'packages/kamado-v3/**'
-      - 'benchmarks/v3/**'
+      - 'packages/kamado/**'
+      - 'benchmarks/**'
       - '.github/workflows/rust.yml'
   pull_request:
     branches:
@@ -22,8 +22,8 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'scripts/**'
-      - 'packages/kamado-v3/**'
-      - 'benchmarks/v3/**'
+      - 'packages/kamado/**'
+      - 'benchmarks/**'
       - '.github/workflows/rust.yml'
 
 jobs:

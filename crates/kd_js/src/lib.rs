@@ -1,5 +1,5 @@
 //! TSX → JavaScript for kamado v3: types are erased and JSX becomes string
-//! concatenation against the runtime in `packages/kamado-v3/src/jsx`.
+//! concatenation against the runtime in `packages/kamado/src/jsx`.
 //!
 //! The compiler reads the whole TypeScript + JSX grammar (see `parser`) but
 //! builds no tree: it records the ranges to blank out, the JSX to replace and

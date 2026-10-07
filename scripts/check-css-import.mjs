@@ -30,11 +30,11 @@ const FILES = {
 	'css/theme.css': '.theme { background : red ; color : rgba(0,0,0,.5) }\n',
 	'css/print.css': '.print { display : none }\n',
 	'css/main1.css':
-		"@import 'base/index.css';\n@import url(\"theme.css\");\n.main { padding : 0px 0px 0px 0px }\n",
+		'@import \'base/index.css\';\n@import url("theme.css");\n.main { padding : 0px 0px 0px 0px }\n',
 	'css/main2.css':
 		"@import 'theme.css' screen and (min-width: 600px);\n@import 'print.css' print;\n@import 'base/reset.css';\n.m2 { margin : 10px }\n",
 	'css/main3.css':
-		'@charset "utf-8";\n@import \'theme.css\';\n@import \'theme.css\';\n.m3 { font-weight : normal }\n',
+		"@charset \"utf-8\";\n@import 'theme.css';\n@import 'theme.css';\n.m3 { font-weight : normal }\n",
 	'css/main4.css': "@import '@/theme.css';\n.m4 { top : 0px }\n",
 	'css/main5.css': "@import 'base/index.css';\n@import 'base/reset.css';\n.m5{}\n",
 	'node_modules/pkg/package.json': '{ "name": "pkg", "style": "dist/pkg.css" }',
@@ -58,9 +58,13 @@ writeFileSync(
 );
 
 const v3Config = path.join(root, 'kamado.config.jsonc');
-execFileSync('node', [path.join(repo, 'packages/kamado-v3/dist/cli.js'), 'build', '--config', v3Config], {
-	stdio: ['ignore', 'ignore', 'inherit'],
-});
+execFileSync(
+	'node',
+	[path.join(repo, 'packages/kamado/dist/cli.js'), 'build', '--config', v3Config],
+	{
+		stdio: ['ignore', 'ignore', 'inherit'],
+	},
+);
 
 /**
  * The output of v2's style compiler for one file.
@@ -70,7 +74,9 @@ async function v2(file) {
 	const processor = postcss([
 		postcssImport({
 			resolve: (id, basedir) => {
-				for (const [alias, target] of Object.entries({ '@': path.join(root, 'src/css') })) {
+				for (const [alias, target] of Object.entries({
+					'@': path.join(root, 'src/css'),
+				})) {
 					if (id.startsWith(alias + '/')) {
 						return [path.resolve(basedir, id.replace(alias, target))];
 					}
@@ -81,7 +87,10 @@ async function v2(file) {
 		cssnano({
 			preset: [
 				'default',
-				{ discardComments: { removeAll: false, removeAllButFirst: false }, cssDeclarationSorter: false },
+				{
+					discardComments: { removeAll: false, removeAllButFirst: false },
+					cssDeclarationSorter: false,
+				},
 			],
 		}),
 	]);

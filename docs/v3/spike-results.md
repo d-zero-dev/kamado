@@ -49,7 +49,7 @@ x86_64 の SHA-NI と、命令を使った実装は採用していない（`kd_h
 
 `rust-toolchain.toml` で `channel = "1.98.1"` と `components` を指定すると、ローカルの `stable` と別のツールチェーンとして再インストールが走り、環境によっては中途半端な状態で失敗する（実測で確認）。再現ビルドのための固定は、CI（`.github/workflows/rust.yml`）が `rustup toolchain install 1.98.1` を明示して行う。ローカルは `rust-toolchain.toml` を置かず、同じ版を手で入れる（`development.md`）。
 
-## v2 の基準値（`yarn bench --full`、同一マシン、1 回計測）
+## v2 の基準値（`v2` ブランチの `yarn bench --full`、同一マシン、1 回計測）
 
 | ページ数 | 時間     | pages/s                                                                                                                                                          |
 | -------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -58,8 +58,8 @@ x86_64 の SHA-NI と、命令を使った実装は採用していない（`kd_h
 | 100,000  | 計測不可 | v2 のベンチ生成器が全ファイルを一斉に開き、macOS のファイル数上限（約 61,440）で `EMFILE` になる（v2 のベンチツールの制約。`ulimit` を上げても上限は変わらない） |
 
 - **規模に対して非線形に遅くなる**（1 万→5 万で pages/s が半分以下）。v3 の目標（10 万ページで cold ≤ 10s）は、v2 の外挿（10 万ページで 10 分超）に対して 60 倍以上の改善にあたる。
-- RSS は `run-bench.ts` の出力にこの規模では出なかったので、v3 の比較用の RSS は `benchmarks/v3/` のハーネスで計測する。
-- 10 万ページの v2 基準値は、v2 の生成器を使えないので、v3 の fixture 生成器（`benchmarks/v3/generate-jsx-fixtures.ts`、ディレクトリを分けて生成）で作った fixture を v2 で処理する形で取る。
+- RSS は v2 の `run-bench.ts`（`v2` ブランチ）の出力にこの規模では出なかったので、v3 の比較用の RSS は `benchmarks/v3/` のハーネスで計測する。
+- 10 万ページの v2 基準値は、v2 の生成器を使えないので、v3 の fixture 生成器（`benchmarks/v3/generate-jsx-fixtures.ts`、`--target=v2`、ディレクトリを分けて生成）で作った fixture を、`benchmarks/v2-baseline/run.ts`（公開済みの v2 を固定した版で動かす）で処理する形で取る。手順は `docs/v3/development.md` の「v2 の oracle」。
 
 ## 構造文字の走査（SIMD）
 

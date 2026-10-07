@@ -1,7 +1,7 @@
 /**
  * Generates the React DOM attribute tables used by kamado v3's JSX runtime:
  *
- * - `packages/kamado-v3/src/jsx/attr-table.ts` (read by `runtime.ts`)
+ * - `packages/kamado/src/jsx/attr-table.ts` (read by `runtime.ts`)
  * - `crates/kd_js/src/react_attrs.rs` (read by the Rust JSX compiler)
  *
  * The tables are read out of the installed react-dom's server build
@@ -330,9 +330,9 @@ for (const name of voidElements) {
 	tsLines.push(`\t${ts(name)},`);
 }
 tsLines.push('];', '');
-mkdirSync(path.join(root, 'packages', 'kamado-v3', 'src', 'jsx'), { recursive: true });
+mkdirSync(path.join(root, 'packages', 'kamado', 'src', 'jsx'), { recursive: true });
 writeFileSync(
-	path.join(root, 'packages', 'kamado-v3', 'src', 'jsx', 'attr-table.ts'),
+	path.join(root, 'packages', 'kamado', 'src', 'jsx', 'attr-table.ts'),
 	tsLines.join('\n'),
 );
 

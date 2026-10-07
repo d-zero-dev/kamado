@@ -1,6 +1,6 @@
 # kamado v3 RFC
 
-状態: **合意済み**。17 章の論点はユーザーが確認して確定した（`Html` 型の実体は、実装して測ったうえで `Markup` クラスに決めた）。仕様の変更は、この文書を更新してから実装に反映する。
+状態: **合意済み**。17 章の論点はユーザーが確認して確定した（`Html` 型の実体は、実装して測ったうえで `Markup` クラスに決めた）。仕様の変更は、この文書を更新してから実装に反映する。v3 はこのリポジトリの `kamado` パッケージで、v2 は `v2` ブランチで保守している。
 
 関連: `docs/v3/spike-results.md`（設計判断の根拠にした実測結果）。
 
@@ -35,7 +35,7 @@
 | 19  | YAML の日付は front matter だけ `Date`                                                                                                                                                                                                                                        | すべて文字列                                                                                                                                                           | `formatDate()` に文字列を渡す                                                                  |
 | 20  | `.yaml` のデータは無視                                                                                                                                                                                                                                                        | `.yaml` も読む                                                                                                                                                         | —                                                                                              |
 | 21  | 本文中の `<?php ... ?>` が linkedom により**削除**される                                                                                                                                                                                                                      | 処理命令のトークンとして**保持**する                                                                                                                                   | v2 のデータ損失を再現しない                                                                    |
-| 22  | `@kamado-io/*` の 6 パッケージ                                                                                                                                                                                                                                                | `kamado` 1 つ + プラットフォーム別 core                                                                                                                                | import の指定を変える                                                                          |
+| 22  | `@kamado-io/*` の 6 パッケージ                                                                                                                                                                                                                                                | `kamado` 1 つ（ネイティブのコアは全プラットフォーム分を同梱する。§18）                                                                                                 | import の指定を変える                                                                          |
 | 23  | `kamado/compiler` `kamado/data` `kamado/files` `kamado/path` `kamado/utils/dom` 等の内部 export                                                                                                                                                                               | 廃止。プログラム API は `build()` / `start()` のみ                                                                                                                     | —                                                                                              |
 | 24  | Windows ネイティブ                                                                                                                                                                                                                                                            | 非対応（WSL2 は対応）                                                                                                                                                  | —                                                                                              |
 | 25  | リクエストごとの再コンパイル（開発サーバー）                                                                                                                                                                                                                                  | 依存の stat による再利用                                                                                                                                               | 挙動は同じ（結果は新しい）                                                                     |
@@ -214,13 +214,13 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 - 属性: `className` → `class`、`htmlFor` → `for`、`style` はオブジェクト → `prop: value;` 形式（ケバブケース、数値には React と同じ unitless の表に従い `px` を付ける）、真偽値は属性の有無、`null` / `undefined` / `false` は出さない、`dangerouslySetInnerHTML={{ __html }}` は生で出す。`key` と `ref` は無視する。関数値（`onClick` 等）は**警告して無視**する。
 - 空要素（`br` `img` `input` `meta` `link` `hr` 等）は閉じタグを出さない。`<script>` と `<style>` の子はエスケープしない。
 - JSX の空白の規則は React / TypeScript の `jsx` 変換と同じ（行頭行末の空白と改行の除去、空行の除去、`{" "}` で明示）。
-- **React との意図した違い**: ①`<html static>` の中でだけ、属性 `on*` の**文字列**をそのまま属性として出す（React は全部捨てる。テンプレートから移した静的なページは `onclick="..."` を持つ）。関数と、static でない描画では捨てる。②`<html static>`（または、`<html>` を持たないページの `meta.kdStatic: true`）は、テンプレートの書いた順を保つモード。`<head>` の `title` / `meta` / `link` / `script` を持ち上げず（`<head hoist={false}>` ならこれだけ）、`form` / `input` / `button` の属性を書いた順で出す。`html` と `head` の子はこの目的で遅延評価（thunk）にコンパイルされる。③`styleOf(text)`（`kamado-v3/jsx` が公開する、ユーザー向けの名前。もう 1 つは `html(text)`）は CSS 文字列を `style` のオブジェクトにする。
+- **React との意図した違い**: ①`<html static>` の中でだけ、属性 `on*` の**文字列**をそのまま属性として出す（React は全部捨てる。テンプレートから移した静的なページは `onclick="..."` を持つ）。関数と、static でない描画では捨てる。②`<html static>`（または、`<html>` を持たないページの `meta.kdStatic: true`）は、テンプレートの書いた順を保つモード。`<head>` の `title` / `meta` / `link` / `script` を持ち上げず（`<head hoist={false}>` ならこれだけ）、`form` / `input` / `button` の属性を書いた順で出す。`html` と `head` の子はこの目的で遅延評価（thunk）にコンパイルされる。③`styleOf(text)`（`kamado/jsx` が公開する、ユーザー向けの名前。もう 1 つは `html(text)`）は CSS 文字列を `style` のオブジェクトにする。
 - **描画結果の文字列は、そのまま出力されず、Rust の HTML 後処理（再パース → 融合印字）を通る**。したがって、エスケープの細かい形（`&#x27;` と `&#39;` など）は後処理で正規化され、出力に影響しない。
 
-**コンパイル結果の置き場**: `build` は、ページ（TSX）を 1 ファイル 1 モジュールとして書き出さず、**連続する 64 ページを 1 つの「チャンク」ファイル（`node_modules/.cache/kamado-v3/jsx/__chunks__/<hash>.mjs`）の関数**にまとめる。チャンクは runtime とページが import するモジュールを 1 回だけ import し、`pages[i]()` がそのページの export（`default`）を返す。ページが import するコンポーネントやレイアウトは、従来どおり 1 モジュール 1 ファイルで、全ページで共有する。
+**コンパイル結果の置き場**: `build` は、ページ（TSX）を 1 ファイル 1 モジュールとして書き出さず、**連続する 64 ページを 1 つの「チャンク」ファイル（`node_modules/.cache/kamado/jsx/__chunks__/<hash>.mjs`）の関数**にまとめる。チャンクは runtime とページが import するモジュールを 1 回だけ import し、`pages[i]()` がそのページの export（`default`）を返す。ページが import するコンポーネントやレイアウトは、従来どおり 1 モジュール 1 ファイルで、全ページで共有する。
 
 - なぜ: ファイルの作成と Node の `import()` は、ページ数が数万になるとビルドの大半を占める。`import()` はファイルを開いて解決しリンクする。開発に使っている macOS では `open` が 70〜200µs かかる。チャンクにすると、ページを読み込む CPU 時間は 1 ページあたり約 440µs から約 30µs になる（20000 ページのフルビルドで 9s から 7s）。HTML の出力は、チャンクにしても 20013 ファイルがバイト一致する（その後、描画結果をバッチごとに `feed` で渡すようにして 6.2s）。
-- 副作用: チャンクはページが import するモジュールを先頭でまとめて import するので、同じチャンクのどれかのページの import が失敗すると、チャンクの全ページが失敗し、エラーは最初にチャンクを読んだページの名前で出る（壊れたページとは限らない）。前回のチャンクは「今回使わないもの」をすべて消す。コンパイル結果の置き場は `build.cacheDir` に関係なく**常に `<プロジェクトのルート>/node_modules/.cache/kamado-v3/jsx`**（`node_modules` を辿ってパッケージを解決させるため、プロジェクトの中に置く）なので、同じプロジェクトで 2 つのビルド（開発サーバーを含む）を同時に走らせると互いのファイルを消し合って壊れる。また `node_modules` に書き込めなければ、JSX ページのビルドはできない。ページが別のモジュールから import されている場合、そのページは関数とモジュールの 2 つの実体になる。
+- 副作用: チャンクはページが import するモジュールを先頭でまとめて import するので、同じチャンクのどれかのページの import が失敗すると、チャンクの全ページが失敗し、エラーは最初にチャンクを読んだページの名前で出る（壊れたページとは限らない）。前回のチャンクは「今回使わないもの」をすべて消す。コンパイル結果の置き場は `build.cacheDir` に関係なく**常に `<プロジェクトのルート>/node_modules/.cache/kamado/jsx`**（`node_modules` を辿ってパッケージを解決させるため、プロジェクトの中に置く）なので、同じプロジェクトで 2 つのビルド（開発サーバーを含む）を同時に走らせると互いのファイルを消し合って壊れる。また `node_modules` に書き込めなければ、JSX ページのビルドはできない。ページが別のモジュールから import されている場合、そのページは関数とモジュールの 2 つの実体になる。
 - 取り込みの意味: `import { a } from "m"` は、チャンクが取り込んだ `m` の名前空間から `const { a } = ...` で取り出す（ESM の巻き上げと同じく、ページの先頭で）。ページの `export default` は関数の `default`、それ以外の `export` は捨てる（ホストは読まない。宣言したものはローカルに残る）。
 - チャンクにできないページ（`export * from` / `export { a } from` の再 export、`import.meta`、副作用だけの `import "x"`、hashbang）は、従来どおり 1 ファイルのモジュールとして書き出す。ページが別のモジュールから import されている場合も、そのページはモジュールとして書き出す。
 - 開発サーバーはチャンクを使わない（1 ページずつ、モジュールのファイルから描画する）。環境変数 `KD_PAGE_CHUNKS=0` で `build` でも使わなくなる（出力の比較用）。
@@ -393,9 +393,9 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 
 ## 13. CLI
 
-`kamado3 build [globs...]`、`kamado3 server`。共通: `--config/-c`、`--verbose`、`--cache-dir <dir>`、`--help/-h`。build: `--incremental`、`--force`、`--skip-unchanged`、`--jobs <n|auto>`（`auto` は設定の `build.jobs` と同じく既定の数）。設定エラーは赤字で表示して exit 1。進捗表示（スピナー、done/total、`Build completed in Xs`）と色分けは v2 に準じる。
+`kamado build [globs...]`、`kamado server`。共通: `--config/-c`、`--verbose`、`--cache-dir <dir>`、`--help/-h`。build: `--incremental`、`--force`、`--skip-unchanged`、`--jobs <n|auto>`（`auto` は設定の `build.jobs` と同じく既定の数）。設定エラーは赤字で表示して exit 1。進捗表示（スピナー、done/total、`Build completed in Xs`）と色分けは v2 に準じる。
 
-コマンド名は `kamado3`（`package.json` の `bin`。公開時に `kamado` へ戻す）。
+コマンド名は `kamado`（`packages/kamado/package.json` の `bin`）。
 
 プログラム API: `build(configPath, options?)` と `start(configPath, options?)`。第 1 引数は**設定ファイル（JSONC）の絶対パス**の文字列で、オブジェクトは受け取らない（相対パスの基準になるディレクトリが設定ファイルの場所だから）。`options` は CLI のフラグに対応する（`build` は `incremental` / `force` / `skipUnchanged` / `targets` / `jobs` / `cacheDir` / `onProgress`、`start` は `verbose` / `cacheDir` / `write`）。
 
@@ -437,6 +437,24 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 | Q3  | `HTML` ページ（`.html`）での JSX                               | 不可。`.html` は HTML としてのみ扱い、レイアウトだけが JSX                                                                                                                         |
 | Q4  | `pages.files` の既定に `.md` を含めるか                        | 含めない（v2 にもない）                                                                                                                                                            |
 | Q5  | `Html` 型の実体（文字列のラッパークラス / ブランド型の文字列） | 文字列のラッパークラス（ランタイムの `Markup`）。型は同梱しない（§7.2）                                                                                                            |
-| Q6  | `kamado-v3/jsx` を公開するか                                   | `./jsx` として export する。ユーザー向けの名前は `html` と `styleOf` だけで、それ以外（コンパイル後の JS が使う `Markup` `el` `k` `c` `a` `render` など）は内部 API で、変更しうる |
+| Q6  | `kamado/jsx` を公開するか                                      | `./jsx` として export する。ユーザー向けの名前は `html` と `styleOf` だけで、それ以外（コンパイル後の JS が使う `Markup` `el` `k` `c` `a` `render` など）は内部 API で、変更しうる |
 
 Q1 は欠番（番号の飛びで、内容は記録に残っていない）。
+
+| #   | 論点                                                             | 決定                                                                                              |
+| --- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Q7  | アドオンを、プラットフォーム別のパッケージに分けるか、同梱するか | **同梱する**（§18）。ロックファイルを共有する環境の違いに依存しないことと、公開の単純さを優先した |
+
+## 18. 配布
+
+v3 は `kamado` の 1 パッケージで公開する（v2 は `v2` ブランチで保守していて、公開済みの v2 は npm に残る）。`packages/kamado` は、公開の仕組みができるまで `private: true`（版は `3.0.0-alpha.0`）。公開のパイプラインは issue #277 で扱う。
+
+**アドオンは `kamado` に全プラットフォーム分を同梱する**（プラットフォーム別のパッケージには分けない）。Rust のコアは、プラットフォームごとにビルドした共有ライブラリ（N-API のアドオン、`kd_napi`。`libkd_napi.dylib` / `libkd_napi.so`）で、`kamado` の中に `native/<os>-<arch>/kd_napi.node` として置き、実行時に `process.platform` と `process.arch` で選ぶ。
+
+- 対象のプラットフォームは、macOS（arm64 / x64）と Linux（x64 / arm64、glibc）。WSL2 は Linux として扱う。Windows のネイティブと musl は対象外（§2 #24）。CI で確認しているのは macOS arm64、Linux x64、Linux arm64（`.github/workflows/rust.yml`）。
+- 読み込む場所は、環境変数 `KAMADO_NATIVE_ADDON` で指定したファイル（開発用）、なければ `target/release`、`target/debug` の順（`packages/kamado/src/native.ts`）。同梱した `native/<os>-<arch>/kd_napi.node` を探す処理は実装済み（開発用の指定、同梱、`target/` の順）。成果物を詰める公開のパイプラインは #277 で作る。
+- 公開は OS ごとにビルドした成果物を 1 つのジョブに集めて `kamado` に詰めて行う。npm の信頼設定と provenance は `kamado` の 1 つだけ。
+
+**なぜ分けないか**: 実際のプロジェクトでは、macOS、WSL2 ほかの環境の人が同じ `package.json` とロックファイルを共有する。プラットフォーム別のパッケージを `optionalDependencies` で参照する方式（esbuild など）では、あるプラットフォームで作ったロックファイルが、別のプラットフォームでの解決に失敗することがある。同梱なら、全員が同じ 1 つのパッケージを取るだけで、ロックファイルに環境の違いが出ない。バイナリは 1 プラットフォームあたり約 2.8 MB で、全部で約 11 MB。分けるとパッケージが 5 つになり、信頼設定と公開の順序、途中で失敗したときの部分的な公開の後始末も要る。
+
+サイズが問題になる（対象のプラットフォームが増える、バイナリが大きくなる）ときは、分割を再検討する。移行しても、利用者の側（`kamado` の `import` や CLI）は変わらない。

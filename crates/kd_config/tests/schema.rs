@@ -1,4 +1,4 @@
-//! `packages/kamado-v3/schema.json` lists the options `kd_config` accepts.
+//! `packages/kamado/schema.json` lists the options `kd_config` accepts.
 //!
 //! The parser is the authority: an unknown key is an error whose message lists
 //! the allowed keys, so the test provokes that error in each section and
@@ -10,7 +10,7 @@ use kd_jsonc::Value;
 fn schema() -> Value {
 	let path = concat!(
 		env!("CARGO_MANIFEST_DIR"),
-		"/../../packages/kamado-v3/schema.json"
+		"/../../packages/kamado/schema.json"
 	);
 	let text = std::fs::read_to_string(path).expect("schema.json is readable");
 	kd_jsonc::parse(&text).expect("schema.json is valid JSON")

@@ -135,7 +135,7 @@ pub(crate) fn write_if_changed(path: &str, bytes: &[u8]) -> Result<(), String> {
 
 impl Modules {
 	/// `root_dir` is the project directory; compiled modules go to
-	/// `<root_dir>/node_modules/.cache/kamado-v3/jsx`. `runtime` is the file
+	/// `<root_dir>/node_modules/.cache/kamado/jsx`. `runtime` is the file
 	/// URL of the JSX runtime.
 	pub(crate) fn new(
 		root_dir: &str,
@@ -158,7 +158,7 @@ impl Modules {
 		Modules {
 			root_dir: root_dir.trim_end_matches('/').to_owned(),
 			out_dir: format!(
-				"{}/node_modules/.cache/kamado-v3/jsx",
+				"{}/node_modules/.cache/kamado/jsx",
 				root_dir.trim_end_matches('/')
 			),
 			runtime: runtime.to_owned(),
@@ -687,7 +687,7 @@ mod tests {
 		assert_eq!(
 			compiled.out_path,
 			format!(
-				"{}/node_modules/.cache/kamado-v3/jsx/src/a/index.tsx.mjs",
+				"{}/node_modules/.cache/kamado/jsx/src/a/index.tsx.mjs",
 				dir.0
 			)
 		);
@@ -697,7 +697,7 @@ mod tests {
 		assert!(out.contains("from \"../lib/util.ts.mjs\""));
 		assert!(out.contains("from 'node:fs'"));
 		let card = fs::read_to_string(format!(
-			"{}/node_modules/.cache/kamado-v3/jsx/src/components/card.tsx.mjs",
+			"{}/node_modules/.cache/kamado/jsx/src/components/card.tsx.mjs",
 			dir.0
 		))
 		.unwrap();
@@ -705,7 +705,7 @@ mod tests {
 		assert!(!card.contains("./types"));
 		assert!(
 			fs::metadata(format!(
-				"{}/node_modules/.cache/kamado-v3/jsx/src/data.json",
+				"{}/node_modules/.cache/kamado/jsx/src/data.json",
 				dir.0
 			))
 			.is_ok()
