@@ -3,6 +3,89 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [3.0.0-alpha.1](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.17...v3.0.0-alpha.1) (2026-10-07)
+
+- feat(repo)!: make v3 the kamado package and move v2 to its own branch ([945f10a](https://github.com/d-zero-dev/kamado/commit/945f10ade55c996755b6d7348572a2588833896e)), closes [#277](https://github.com/d-zero-dev/kamado/issues/277)
+
+### Bug Fixes
+
+- **github:** keep the platform directory of the addons and harden the sync ([fe7a829](https://github.com/d-zero-dev/kamado/commit/fe7a829402003c00887506176d310171593a2c2f))
+- **kamado:** keep the frozen v2 copy out of the build ([03fd9f9](https://github.com/d-zero-dev/kamado/commit/03fd9f91c129bd049ad37472339363d0ec4f4d6f))
+- **repo:** apply the kd_html review findings and grow the linkedom corpus to 308 cases ([6b1e67b](https://github.com/d-zero-dev/kamado/commit/6b1e67b37b381b9f3831cd52b01a84285a7f33d1))
+- **repo:** dev server request paths, cancelled renders and the plan cache's depth and format ([a1bc6f1](https://github.com/d-zero-dev/kamado/commit/a1bc6f1b47da6a51c63d7d9b5188da3199fb2df8))
+- **repo:** drop manifest entries of outputs a failed build rewrote, and watch shadowing files ([d14051e](https://github.com/d-zero-dev/kamado/commit/d14051e85c37206c5ad559cf3afa9c3eb9f29671))
+- **repo:** fix six findings of the review of the pull request ([2c0a7ba](https://github.com/d-zero-dev/kamado/commit/2c0a7ba7da43b2f6f722d6aedcf027940edabdde))
+- **repo:** fix the findings of the QA and PdM reviews of the v3 branch ([260baf0](https://github.com/d-zero-dev/kamado/commit/260baf04f021fb765e34e26a5b06b6784dd3f7c6))
+- **repo:** fix the findings of the review of the last twelve commits ([fd235fb](https://github.com/d-zero-dev/kamado/commit/fd235fb1be8b37ac3b4cfe1706fb1c6993ed7e43))
+- **repo:** fix the findings of the review of the whole v3 branch ([2a3fba0](https://github.com/d-zero-dev/kamado/commit/2a3fba0a65b52667dc0138d05055f3d35e843535))
+- **repo:** follow postcss-import for conditions and remote imports, and fix review findings ([6a7c50b](https://github.com/d-zero-dev/kamado/commit/6a7c50bca4c3295c06ca5086781afbc170aa211a))
+- **repo:** harden the v3 parsers and the build against unsafe inputs ([1549881](https://github.com/d-zero-dev/kamado/commit/15498812294213d4eaae5caa3eed578b8e5466b8))
+- **repo:** hoist layer orders and charsets of imported styles like postcss-import ([583887a](https://github.com/d-zero-dev/kamado/commit/583887a9ce55e2b37a47f38a91389c4aa48387a3))
+- **repo:** keep a script banner closed, and say when esbuild's other outputs are dropped ([5d5bf8b](https://github.com/d-zero-dev/kamado/commit/5d5bf8bfd8194da22d2cb9556fa5cd8db2c0dded))
+- **repo:** keep an edit made just after a build began from being taken as current ([74cd0d4](https://github.com/d-zero-dev/kamado/commit/74cd0d4c1227ac6666b8cbd8b15a1565cd0d50bd))
+- **repo:** keep closures whole across threads, hash package.json, reuse memory of ended threads ([e1dd21c](https://github.com/d-zero-dev/kamado/commit/e1dd21c48da95c5598336c91cfb26c51a3d5400e))
+- **repo:** keep the dev server renderer in step after an error, a late change or a lost worker ([0742353](https://github.com/d-zero-dev/kamado/commit/0742353e6655e7b7d5950b5def28e42ad24e33fe))
+- **repo:** limit on* strings to static pages, harden the Pug converter ([fca8960](https://github.com/d-zero-dev/kamado/commit/fca896014d707a78ce1828245e718afefb246287))
+- **repo:** make grill-me template comply with textlint jtf-style ([dcb8ac2](https://github.com/d-zero-dev/kamado/commit/dcb8ac2988cff070b49a602ee36c38a2b1d3fc36))
+- **repo:** match linkedom on raw-text elements and end-of-input tags, add differential fuzzing ([19fcdf4](https://github.com/d-zero-dev/kamado/commit/19fcdf431771005814fcf9973f4f5bad1c11c98b))
+- **repo:** update the Cargo version in the release commit ([38d261e](https://github.com/d-zero-dev/kamado/commit/38d261eb74c4a5a939eaa885f99f849e4c0eb07d))
+
+### Features
+
+- **github:** publish kamado with the addons of all platforms ([64d57cf](https://github.com/d-zero-dev/kamado/commit/64d57cf1f2e4f9be8d696b46b07996a7a32d8bac))
+- **repo:** add declarative DOM rules and a regex subset to kd_html ([55d0eaf](https://github.com/d-zero-dev/kamado/commit/55d0eaf63aee8f77917c85171ac061c31bdec70d))
+- **repo:** add dependency-free JSONC, glob and YAML parsers ([9e9a0b3](https://github.com/d-zero-dev/kamado/commit/9e9a0b36e3136a449d2d83078976242d109beeb0))
+- **repo:** add html.includes to kd_html (ssi, includeComment, burgerEditorImport, selector) ([efcb467](https://github.com/d-zero-dev/kamado/commit/efcb467494f48ded8b63aa066d63455215b40697))
+- **repo:** add html.inject and serializer entity modes to kd_html ([41edb62](https://github.com/d-zero-dev/kamado/commit/41edb62901205f65f414048ab8b7948b2d88fcc4))
+- **repo:** add inline source maps to stylesheets ([ef749e5](https://github.com/d-zero-dev/kamado/commit/ef749e55dd4dfbe1d3ae2400dba2cc6168c12ef2))
+- **repo:** add kd_config, the kamado.config.jsonc schema with defaults ([b663664](https://github.com/d-zero-dev/kamado/commit/b663664916e2209d4543ffad47dfd84bf0a40353))
+- **repo:** add kd_core, the build export of the addon and the kamado-v3 CLI ([022e2df](https://github.com/d-zero-dev/kamado/commit/022e2dfcd6fac340c67b85e27300e6c4ff1bf7f8))
+- **repo:** add kd_html arena DOM, an htmlparser2 parser port and a linkedom-compatible serializer ([702eb74](https://github.com/d-zero-dev/kamado/commit/702eb740c51d7eabf72723eb307acebfb7fc6df0))
+- **repo:** add kd_html character references generated from WHATWG data ([8c613df](https://github.com/d-zero-dev/kamado/commit/8c613df4598fc1c60d22ccd7b24909afcf796389))
+- **repo:** add kd_image and html.imageSizes ([5b9be9f](https://github.com/d-zero-dev/kamado/commit/5b9be9ff20ad984bdac09c2265b8d281d387e525))
+- **repo:** add kd_js, the TSX to JavaScript compiler ([6448956](https://github.com/d-zero-dev/kamado/commit/6448956d4606f3f477f4767b5d80cf90ff6aa981))
+- **repo:** add kd_site path mapping, overrides, conflicts and discovery ([d68ace1](https://github.com/d-zero-dev/kamado/commit/d68ace11bb5238abebb9fd931958f9fc23e9987f))
+- **repo:** add page metadata merging and the pages.overrides format ([88c9384](https://github.com/d-zero-dev/kamado/commit/88c93847b5fa611767e018f8a272c264f02b9361))
+- **repo:** add the dev server, stylesheet builds and a work-in-progress kd_css ([de3dda0](https://github.com/d-zero-dev/kamado/commit/de3dda0fd83cd5a6506ba1da4f35b812cd461376))
+- **repo:** add the JSX runtime that compiled pages render with ([4f5931c](https://github.com/d-zero-dev/kamado/commit/4f5931cc8919adbf02a76f061ae4aae8348866e1))
+- **repo:** add the kd_build incremental manifest with stat-first fingerprints ([6ea73f3](https://github.com/d-zero-dev/kamado/commit/6ea73f3f4f760fcf373fba8b4993081f41eb3a9e))
+- **repo:** add the kd_html page glue that classifies fragments and documents like v2's getDOM ([94c1e66](https://github.com/d-zero-dev/kamado/commit/94c1e661257a14628d46399ca6371daaf2f1a38c))
+- **repo:** add the kd_html selector engine for declarative rules ([5bae8c6](https://github.com/d-zero-dev/kamado/commit/5bae8c6f735e6f075da8c30e611dcbc185d7acf3))
+- **repo:** add the kd_pool thread pool ([b3fc25d](https://github.com/d-zero-dev/kamado/commit/b3fc25d652ca101c9b428156a75529a996aed5ae))
+- **repo:** add the v3 Rust workspace, RFC and parity harness ([eeffe59](https://github.com/d-zero-dev/kamado/commit/eeffe59cb4cc50a78b640d098e52033638fc467d))
+- **repo:** build pages into chunk files, one function per page ([e78e9eb](https://github.com/d-zero-dev/kamado/commit/e78e9ebf1d545491bac4c95ec1680963fce80151))
+- **repo:** build scripts with esbuild under the control of the core ([2a3bda6](https://github.com/d-zero-dev/kamado/commit/2a3bda64ccfc3aa3ba8071200952cddd667d5154))
+- **repo:** convert files of mixins with markup, mixin blocks and Pug code ([3b41145](https://github.com/d-zero-dev/kamado/commit/3b411450e932d1b937a71a436865dfd2bf817f60))
+- **repo:** convert mixins and raw markup from Pug, add html() to the JSX runtime ([070b2d9](https://github.com/d-zero-dev/kamado/commit/070b2d9302286ae894b009a2d678032f06df5eff))
+- **repo:** convert Pug to TSX with a script, and treat project paths in script aliases as paths ([78df6a2](https://github.com/d-zero-dev/kamado/commit/78df6a2f7a51d3190bb211352dfc0a752dad40a0))
+- **repo:** convert raw HTML lines, comments and filters of Pug, keep style text ([5aff50f](https://github.com/d-zero-dev/kamado/commit/5aff50f9959d294380259fbed1421c9888f5e04b)), closes [--#include](https://github.com/--/issues/include)
+- **repo:** finish kd_css, a cssnano-equivalent CSS minifier ([463265a](https://github.com/d-zero-dev/kamado/commit/463265a552741ccb575b90a39c9972abe789bed6))
+- **repo:** format JSON in script elements the way prettier does ([9c62452](https://github.com/d-zero-dev/kamado/commit/9c624523a95ac47b03df68bf2f4863882405a6c6))
+- **repo:** inline [@import](https://github.com/import) in stylesheets like postcss-import did ([9c4d833](https://github.com/d-zero-dev/kamado/commit/9c4d833e3320734a01c0c2abf9ab5354a95202ad))
+- **repo:** keep a template's order with html static, convert extends and pretty ([5cd67fc](https://github.com/d-zero-dev/kamado/commit/5cd67fc591502de8c6375f4abb40dff5cb30a2e6))
+- **repo:** keep the Cargo version equal to the lerna version ([36da100](https://github.com/d-zero-dev/kamado/commit/36da100da5ef573272306ee09008cd4afee94d50))
+- **repo:** minify inline scripts and event handlers with esbuild ([bc133dd](https://github.com/d-zero-dev/kamado/commit/bc133ddd62a7817226ffe4eb50ef7e4b5f126b01))
+- **repo:** port html-minifier-terser's HTML minifier to kd_html::minify ([1545369](https://github.com/d-zero-dev/kamado/commit/1545369843b197647d051fd82e4857c550cf89b5))
+- **repo:** port nav, breadcrumbs, titleList and formatDate to kamado-v3 ([5fc3056](https://github.com/d-zero-dev/kamado/commit/5fc305642233c04e19c6f34462e2ca113f772a5c))
+- **repo:** port prettier's HTML printer to kd_html::print ([2a422bf](https://github.com/d-zero-dev/kamado/commit/2a422bf19e0b2a476fccc374f4cebb265a0d7147))
+- **repo:** render JSX pages and layouts from Node, in worker threads ([69a9b1a](https://github.com/d-zero-dev/kamado/commit/69a9b1aa6b4abafec4730fd299e11b3e399ace0f))
+- **repo:** render JSX pages in two steps: prepare, render, finish ([e6c28e1](https://github.com/d-zero-dev/kamado/commit/e6c28e127af151fd6ffe342f09d5cf4fab507ca7))
+- **repo:** render the banner of built CSS and JS files in Rust ([baac96c](https://github.com/d-zero-dev/kamado/commit/baac96c777a6ca3d4f21df0c5a82c05e23703aa1))
+- **repo:** replace pages.define names in JSX modules like esbuild's define ([3ba0496](https://github.com/d-zero-dev/kamado/commit/3ba04964cec066fb1e0b58955d4e21840a481755))
+- **repo:** resolve custom media, import every BurgerEditor container ([dae1154](https://github.com/d-zero-dev/kamado/commit/dae1154c1b0b366dadd74d57347d0d99f45f3c25))
+- **repo:** run pages through the HTML stages in kd_core ([3a22b16](https://github.com/d-zero-dev/kamado/commit/3a22b163e59b8ffe2692ae4db46cf1cbbe5d15f6))
+- **repo:** ship a JSON Schema for kamado.config.jsonc ([d7b7ddb](https://github.com/d-zero-dev/kamado/commit/d7b7ddbd9563a1cdb489035ead61d6b28002097c))
+- **repo:** show how many pages are rendered while a build runs ([f1126da](https://github.com/d-zero-dev/kamado/commit/f1126da7c326fff3a0ac4e400c4967e6ac5a7c49))
+- **repo:** split a sitemap of more than 50000 addresses into files and an index ([426ca15](https://github.com/d-zero-dev/kamado/commit/426ca15275f7c3c2f607f5590f31ccfa9452d242))
+- **repo:** support :where and :has in the kd_html selector engine ([2422bbe](https://github.com/d-zero-dev/kamado/commit/2422bbe7eabea6627cbbf1c4ea1fec3be09eb60b))
+- **repo:** write pages as Shift_JIS, and the markup as the HTML standard says ([4a8b779](https://github.com/d-zero-dev/kamado/commit/4a8b779f6adbf0c33ae07534c2ecccf40447043d))
+- **repo:** write sitemap.xml at the end of a build ([07cc87d](https://github.com/d-zero-dev/kamado/commit/07cc87dcf1aee331b3a171aedc7f70c7808b80ad))
+
+### BREAKING CHANGES
+
+- `kamado` is v3. v2 users stay on the 2.x releases (v2
+  branch).
+
 # [2.0.0-alpha.17](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.16...v2.0.0-alpha.17) (2026-08-12)
 
 - refactor(page-compiler)!: drop host option and align hook types with linkedom ([ea9e4ef](https://github.com/d-zero-dev/kamado/commit/ea9e4ef277744e1cc8829fe47fd73c9f63f88be4))
