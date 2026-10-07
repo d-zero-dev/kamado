@@ -1742,6 +1742,14 @@ describe('deliberate deviations from React', () => {
 		).not.toContain('oncontextmenu');
 	});
 
+	test('a string style is written as it is in a static page and is an error otherwise (as in React)', () => {
+		const box = (): Markup => el('div', { style: '--a: var(--b);  top : 0' }, 'x');
+		expect(render(box, { meta: { kdStatic: true } })).toBe(
+			'<div style="--a: var(--b);  top : 0">x</div>',
+		);
+		expect(() => render(box, {})).toThrow(/expects a mapping/);
+	});
+
 	test('an input in a static page has one value and one checked, and no children', () => {
 		const both = (): Markup =>
 			el('input', { value: 'a', defaultValue: 'b', checked: true, defaultChecked: true });

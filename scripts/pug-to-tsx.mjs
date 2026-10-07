@@ -17,7 +17,7 @@
  * props of the file that includes it and the variables in scope; `each` and `if` become
  * `map` and `&&` / `?:`; `pkg.production.*` becomes `site.*` and `filters.date`
  * `formatDate`; comments and the doctype are dropped. What it cannot express it
- * stops on (raw HTML in text, an unescaped value that is not the only child):
+ * stops on (an unescaped value that is not the only child, `&attributes`):
  * fix the source or the output by hand. It needs the pug packages of the project
  * (`pug-lexer`, `pug-parser`, `acorn`) and a build of kamado-v3.
  *
@@ -25,7 +25,14 @@
  * (`data`, `blocks`) follow the files of the data directory, and `charset`,
  * `itemprop` and the like have to be camel case props (see MIGRATION.md 3.4).
  */
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	statSync,
+	writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -323,6 +330,7 @@ function pascal(file) {
 	return path
 		.basename(file, '.pug')
 		.split(/[-_.]/)
+		.filter(Boolean)
 		.map((s) => s[0].toUpperCase() + s.slice(1))
 		.join('')
 		.replace(/^(\d)/, 'Page$1');
@@ -896,10 +904,9 @@ function attrsOf(tag, ctx) {
 			continue;
 		}
 		if (name === 'style' && val !== true) {
-			// CSS text (a string, a template literal, a variable): the runtime reads
-			// it, `;` inside `url(...)` and quotes included.
-			ctx.rt.add('styleOf');
-			out.push(`style={styleOf(${isString ? JSON.stringify(strValue) : use(val, ctx)})}`);
+			// CSS text (a string, a template literal, a variable): a static page
+			// (`<html static>`) writes a string as it is, as Pug did.
+			out.push(`style={${isString ? JSON.stringify(strValue) : use(val, ctx)}}`);
 			continue;
 		}
 		const prop = propOf.get(name.toLowerCase()) ?? name;
@@ -909,7 +916,7 @@ function attrsOf(tag, ctx) {
 			out.push(kind === 1 || kind === 2 ? prop : `${prop}=""`);
 		} else if (isString) {
 			out.push(
-				strValue.includes('"')
+				/["&<>{}\\]/.test(strValue)
 					? `${prop}={${JSON.stringify(strValue)}}`
 					: `${prop}="${strValue}"`,
 			);
@@ -943,14 +950,27 @@ function attrsOf(tag, ctx) {
 function node(n, ctx, depth) {
 	const pad = indent(depth);
 	switch (n.type) {
+		case 'Comment': {
+			// `// text` is an HTML comment in the page (`//-` is not); JSX cannot
+			// write one, so it is written as markup.
+			if (!n.buffer) return [];
+			ctx.rt.add('html');
+			// Pug's `pretty` starts a comment on a new line.
+			const lead = PRETTY && !ctx.pre ? [`${pad}{"\\n"}`] : [];
+			return [...lead, `${pad}{html(${JSON.stringify(`<!--${n.val}-->`)})}`];
+		}
 		case 'Doctype':
-		case 'Comment':
 		case 'BlockComment': {
 			return [];
 		}
 		case 'Text': {
 			const t = n.val;
 			if (t.trim() === '' && t.includes('\n')) return [`${pad}{' '}`];
+			if (/</.test(t)) {
+				// A line of HTML written in the template (`<meta ...>`, `<!--#include ...-->`).
+				ctx.rt.add('html');
+				return [`${pad}{html(${JSON.stringify(t)})}`];
+			}
 			return [`${pad}${jsxText(t)}`];
 		}
 		case 'Code': {
@@ -1199,6 +1219,17 @@ function node(n, ctx, depth) {
 			}
 			return [`${pad}<${open} />`];
 		}
+		case 'Filter': {
+			// `:name` with a function of that name that reads `data/<name>.html`
+			// (a `filters.cjs` of the data directory): the file is the value of `data`.
+			if (!existsSync(path.join(libs, 'data', `${n.name}.html`))) {
+				throw new Error(
+					`filter :${n.name} in ${ctx.file} has no data/${n.name}.html: write it by hand`,
+				);
+			}
+			ctx.rt.add('html');
+			return [`${pad}{html((props as any).data[${JSON.stringify(n.name)}])}`];
+		}
 		case 'MixinBlock': {
 			return [`${pad}{(props as any).children}`];
 		}
@@ -1220,7 +1251,20 @@ function walkDir(dir, fn) {
 		else fn(p);
 	}
 }
+const failures = [];
 walkDir(path.join(srcRoot, '__assets'), (f) => {
-	if (f.endsWith('.pug') && !f.includes('/mixin/meta-example')) convertFile(f);
+	if (!f.endsWith('.pug') || f.includes('/mixin/meta-example')) return;
+	try {
+		convertFile(f);
+	} catch (error) {
+		// A file nothing includes may be broken (an include of a file that is not
+		// there): it is reported, and a page that fails fails the run.
+		converted.delete(f);
+		failures.push([f, error.message.split('\n')[0]]);
+	}
 });
 console.log([...converted].length, 'files converted');
+for (const [f, message] of failures)
+	console.log(`not converted: ${path.relative(srcRoot, f)}: ${message}`);
+if (failures.some(([f]) => f.includes(`${path.sep}htdocs${path.sep}`)))
+	process.exitCode = 1;

@@ -498,6 +498,10 @@ function styleName(name: string): string {
  * @returns ` style="a:b;c:d"` or an empty string
  */
 function styleAttr(style: unknown): string {
+	if (typeof style === 'string' && scope.plain) {
+		// A static page writes the text of the attribute as its template did.
+		return style === '' ? '' : ' style="' + escapeValue(style) + '"';
+	}
 	if (typeof style !== 'object' || style === null) {
 		throw new Error(
 			"The `style` prop expects a mapping from style properties to values, not a string. For example, style={{marginRight: spacing + 'em'}} when using JSX.",
