@@ -3,7 +3,9 @@
 //! The modules are added one by one; see `docs/v3/RFC.md` §9 for what the
 //! whole pipeline does.
 
+mod cp932_table;
 pub mod dom;
+pub mod encode;
 pub mod entities;
 mod entities_table;
 pub mod image_sizes;

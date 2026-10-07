@@ -113,17 +113,18 @@ fn raw_text_content(doc: &Document, id: NodeId) -> String {
 #[must_use]
 pub fn escape_text(text: &str) -> String {
 	let mut out = String::with_capacity(text.len());
-	push_escaped_text(text, &mut out);
+	push_escaped_text(text, false, &mut out);
 	out
 }
 
-fn push_escaped_text(text: &str, out: &mut String) {
+fn push_escaped_text(text: &str, spec: bool, out: &mut String) {
 	let mut last = 0;
 	for (i, c) in text.char_indices() {
 		let rep = match c {
 			'&' => "&amp;",
 			'<' => "&lt;",
 			'>' => "&gt;",
+			'\u{A0}' if spec => "&nbsp;",
 			'\u{A0}' => "&#160;",
 			_ => continue,
 		};
@@ -136,9 +137,10 @@ fn push_escaped_text(text: &str, out: &mut String) {
 
 /// Prints one attribute (with a leading space), or nothing for an empty
 /// `id`, `class` or `style`.
-fn push_attribute(name: &str, value: &str, ent: &Entities, out: &mut String) {
+fn push_attribute(name: &str, value: &str, ent: &Entities, spec: bool, out: &mut String) {
 	if value.is_empty() {
-		if is_empty_attribute(name) {
+		// The standard writes every empty attribute as `name=""`.
+		if is_empty_attribute(name) && !spec {
 			if matches!(name, "id" | "class" | "style") {
 				return;
 			}
@@ -156,10 +158,12 @@ fn push_attribute(name: &str, value: &str, ent: &Entities, out: &mut String) {
 	out.push_str("=\"");
 	let mut quoted = String::with_capacity(value.len());
 	for c in value.chars() {
-		if c == '"' {
-			quoted.push_str("&quot;");
-		} else {
-			quoted.push(c);
+		match c {
+			'"' => quoted.push_str("&quot;"),
+			// The standard also escapes these two in an attribute value.
+			'&' if spec => quoted.push_str("&amp;"),
+			'\u{A0}' if spec => quoted.push_str("&nbsp;"),
+			_ => quoted.push(c),
 		}
 	}
 	if ent.is_none() {
@@ -188,7 +192,9 @@ fn push_children_reversed<'a>(doc: &'a Document, id: NodeId, stack: &mut Vec<Wor
 
 /// Writes `id` and everything below it. `parent_raw` tells a starting text
 /// node that its parent is a raw-text element.
-fn push_node(doc: &Document, id: NodeId, parent_raw: bool, ent: &Entities, out: &mut String) {
+fn push_node(doc: &Document, id: NodeId, parent_raw: bool, options: &Options, out: &mut String) {
+	let ent = &options.entities;
+	let spec = options.spec;
 	let mut stack: Vec<Work<'_>> = vec![Work::Visit(id)];
 	let mut starting = true;
 	while let Some(work) = stack.pop() {
@@ -209,7 +215,7 @@ fn push_node(doc: &Document, id: NodeId, parent_raw: bool, ent: &Entities, out: 
 				if raw_parent {
 					text.push_str(t);
 				} else {
-					push_escaped_text(t, &mut text);
+					push_escaped_text(t, spec, &mut text);
 				}
 				// The content of script, style and xmp is code or plain text
 				// where a character reference would not be decoded, so it is
@@ -248,11 +254,17 @@ fn push_node(doc: &Document, id: NodeId, parent_raw: bool, ent: &Entities, out: 
 				out.push('<');
 				out.push_str(&e.name);
 				for a in &e.attrs {
-					push_attribute(&a.name, &a.value, ent, out);
+					push_attribute(&a.name, &a.value, ent, spec, out);
 				}
 				if is_raw_text_element(e) {
 					out.push('>');
-					let text = raw_text_content(doc, node);
+					let mut text = raw_text_content(doc, node);
+					if spec && matches!(e.name.as_str(), "title" | "textarea") {
+						// The standard escapes the text of an element that decodes references.
+						let mut escaped = String::with_capacity(text.len());
+						push_escaped_text(&text, true, &mut escaped);
+						text = escaped;
+					}
 					if !ent.is_none() && matches!(e.name.as_str(), "title" | "textarea") {
 						out.push_str(&ent.apply(&text));
 					} else {
@@ -262,7 +274,7 @@ fn push_node(doc: &Document, id: NodeId, parent_raw: bool, ent: &Entities, out: 
 					out.push_str(&e.name);
 					out.push('>');
 				} else if doc.first_child(node).is_none() {
-					if e.svg {
+					if e.svg && !spec {
 						out.push_str(" />");
 					} else if is_serializer_void(&e.name) {
 						out.push('>');
@@ -294,6 +306,11 @@ fn parent_decodes_references(doc: &Document, id: NodeId) -> bool {
 pub struct Options {
 	/// Which characters become character references.
 	pub entities: Entities,
+	/// Write as the HTML standard says (what browsers and jsdom do) instead of
+	/// as linkedom does: `&` and U+00A0 are escaped in attribute values,
+	/// U+00A0 is `&nbsp;` in text, an empty attribute is `name=""`, and an empty
+	/// SVG element is `<path></path>`, not `<path />`.
+	pub spec: bool,
 }
 
 /// The markup of `id` including the node itself.
@@ -318,7 +335,7 @@ pub fn outer_html_with(doc: &Document, id: NodeId, options: &Options) -> String 
 		.parent(id)
 		.and_then(|p| doc.element(p))
 		.is_some_and(is_raw_text_element);
-	push_node(doc, id, parent_raw, &options.entities, &mut out);
+	push_node(doc, id, parent_raw, options, &mut out);
 	out
 }
 
@@ -336,7 +353,7 @@ pub fn inner_html_with(doc: &Document, id: NodeId, options: &Options) -> String 
 		return raw_text_content(doc, id);
 	}
 	for child in doc.children(id) {
-		push_node(doc, child, false, &options.entities, &mut out);
+		push_node(doc, child, false, options, &mut out);
 	}
 	out
 }
@@ -542,7 +559,56 @@ mod tests {
 
 	fn with_entities(src: &str, entities: Entities) -> String {
 		let doc = parse(src);
-		inner_html_with(&doc, ROOT, &Options { entities })
+		inner_html_with(
+			&doc,
+			ROOT,
+			&Options {
+				entities,
+				spec: false,
+			},
+		)
+	}
+
+	#[test]
+	fn the_standard_form_escapes_the_attribute_ampersand_and_the_no_break_space_and_keeps_empties()
+	{
+		let doc = parse(
+			"<a href=\"/x?a=1&amp;b=2\" title=\"a&nbsp;b\" class=\"\" data-x=\"\">a&nbsp;b</a><svg><path d=\"M0\"/></svg>",
+		);
+		let spec = Options {
+			entities: Entities::None,
+			spec: true,
+		};
+		assert_eq!(
+			inner_html_with(&doc, ROOT, &spec),
+			"<a href=\"/x?a=1&amp;b=2\" title=\"a&nbsp;b\" class=\"\" data-x=\"\">a&nbsp;b</a><svg><path d=\"M0\"></path></svg>"
+		);
+		// linkedom's form, which is the default: raw `&` in an attribute, `&#160;`, no empty class.
+		assert_eq!(
+			inner_html(&doc, ROOT),
+			"<a href=\"/x?a=1&b=2\" title=\"a\u{A0}b\" data-x=\"\">a&#160;b</a><svg><path d=\"M0\" /></svg>"
+		);
+	}
+
+	#[test]
+	fn the_standard_form_escapes_the_text_of_a_title() {
+		let doc = parse("<title>a &amp; b&nbsp;c</title>");
+		let spec = Options {
+			entities: Entities::None,
+			spec: true,
+		};
+		assert_eq!(
+			inner_html_with(&doc, ROOT, &spec),
+			"<title>a &amp; b&nbsp;c</title>"
+		);
+		let all = Options {
+			entities: Entities::All,
+			spec: true,
+		};
+		assert_eq!(
+			inner_html_with(&parse("<p>a\u{A0}b</p>"), ROOT, &all),
+			"<p>a&nbsp;b</p>"
+		);
 	}
 
 	#[test]

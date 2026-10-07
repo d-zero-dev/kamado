@@ -869,6 +869,10 @@ mod tests {
 		fn read(&self, rel: &str) -> String {
 			fs::read_to_string(format!("{}/{rel}", self.root)).unwrap()
 		}
+
+		fn read_bytes(&self, rel: &str) -> Vec<u8> {
+			fs::read(format!("{}/{rel}", self.root)).unwrap()
+		}
 	}
 
 	impl Drop for Site {
@@ -2330,6 +2334,28 @@ mod tests {
 		let loaded = site.config(r#", "html": { "lineBreak": "crlf" }"#);
 		run_build(&loaded).unwrap();
 		assert_eq!(site.read("out/a.html"), "<p>a</p>\r\n<p>b</p>\r\n");
+	}
+
+	#[test]
+	fn pages_are_written_as_shift_jis_except_the_ones_an_override_keeps_in_utf8() {
+		let site = Site::new("sjis");
+		let page = "<!doctype html><html><head><meta charset=\"utf-8\" /></head><body><p>日本©</p></body></html>";
+		site.write("src/a.html", page);
+		site.write("src/modern/b.html", page);
+		let loaded = site.config(
+			r#", "html": { "encoding": "shift_jis", "lineBreak": "crlf", "format": false, "overrides": [ { "pages": ["/modern/**"], "encoding": "utf8" } ] }"#,
+		);
+		run_build(&loaded).unwrap();
+		let mut expected =
+			b"<!DOCTYPE html>\r\n<html><head><meta charset=\"shift_jis\"></head><body><p>".to_vec();
+		expected.extend_from_slice(&[0x93, 0xFA, 0x96, 0x7B]);
+		expected.extend_from_slice(b"&copy;</p></body></html>");
+		assert_eq!(site.read_bytes("out/a.html"), expected);
+		assert!(
+			site.read("out/modern/b.html")
+				.contains("<meta charset=\"utf-8\">")
+		);
+		assert!(site.read("out/modern/b.html").contains("日本©"));
 	}
 
 	#[test]

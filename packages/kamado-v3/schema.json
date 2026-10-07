@@ -71,6 +71,22 @@
 				"lineBreak": {
 					"enum": ["\n", "lf", "\r\n", "crlf"]
 				},
+				"serializer": {
+					"description": "How the markup is written: \"linkedom\" (as v2 did) or \"spec\" (as the HTML standard says: & and no-break space escaped in attribute values, &nbsp; in text, class=\"\" kept, <path></path>).",
+					"enum": ["linkedom", "spec"]
+				},
+				"encoding": {
+					"description": "The character encoding the pages are written in: UTF-8, or Shift_JIS (Windows, CP932). A page can name its own in html.overrides.",
+					"enum": [
+						"utf8",
+						"utf-8",
+						"shift_jis",
+						"shift-jis",
+						"sjis",
+						"cp932",
+						"windows-31j"
+					]
+				},
 				"entities": {
 					"description": "\"none\", \"all\", or a map from a character to its reference.",
 					"oneOf": [{ "enum": ["none", "all"] }, { "$ref": "#/definitions/stringMap" }]

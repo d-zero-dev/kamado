@@ -55,6 +55,9 @@ struct Layer {
 	format: Option<print::Options>,
 	minify: Option<minify::Options>,
 	line_break: &'static str,
+	encoding: kd_html::encode::Encoding,
+	/// Write the markup as the HTML standard says (`html.serializer: "spec"`).
+	spec: bool,
 	entities: kd_html::entities::Entities,
 	image_sizes: ImageSettings,
 	rules: Vec<Scoped<Rule>>,
@@ -95,6 +98,9 @@ pub(crate) struct PageInput<'a> {
 /// What a processed page yields.
 pub(crate) struct PageOutput {
 	pub html: String,
+	/// The encoding the bytes of the page are written in (a build; the dev
+	/// server answers in UTF-8).
+	pub encoding: kd_html::encode::Encoding,
 	pub warnings: Vec<String>,
 	/// Files the page read besides its own source (includes, images), with
 	/// their fingerprints, missing ones included.
@@ -448,6 +454,11 @@ fn compile_layer(html: &Html, host: &str, root_dir: &str, path: &str) -> Result<
 		} else {
 			"\n"
 		},
+		spec: html.serializer == kd_config::HtmlSerializer::Spec,
+		encoding: match html.encoding {
+			kd_config::HtmlEncoding::Utf8 => kd_html::encode::Encoding::Utf8,
+			kd_config::HtmlEncoding::ShiftJis => kd_html::encode::Encoding::ShiftJis,
+		},
 		entities: compile_entities(&html.entities, path)?,
 		image_sizes: ImageSettings {
 			enabled: html.image_sizes.enabled,
@@ -518,6 +529,8 @@ struct Effective<'a> {
 	format: &'a Option<print::Options>,
 	minify: &'a Option<minify::Options>,
 	line_break: &'a &'static str,
+	encoding: &'a kd_html::encode::Encoding,
+	spec: &'a bool,
 	entities: &'a kd_html::entities::Entities,
 	image_sizes: &'a ImageSettings,
 	rules: &'a [Scoped<Rule>],
@@ -534,6 +547,8 @@ impl Pipeline {
 			format: &b.format,
 			minify: &b.minify,
 			line_break: &b.line_break,
+			encoding: &b.encoding,
+			spec: &b.spec,
 			entities: &b.entities,
 			image_sizes: &b.image_sizes,
 			rules: &b.rules,
@@ -552,6 +567,8 @@ impl Pipeline {
 					"format" => e.format = &l.format,
 					"minify" => e.minify = &l.minify,
 					"lineBreak" => e.line_break = &l.line_break,
+					"encoding" => e.encoding = &l.encoding,
+					"serializer" => e.spec = &l.spec,
 					"entities" => e.entities = &l.entities,
 					"imageSizes" => e.image_sizes = &l.image_sizes,
 					"rules" => e.rules = &l.rules,
@@ -684,6 +701,7 @@ impl Pipeline {
 		}
 		Ok(page.serialize_with(&kd_html::serialize::Options {
 			entities: e.entities.clone(),
+			spec: *e.spec,
 		}))
 	}
 
@@ -744,6 +762,7 @@ impl Pipeline {
 		let html = line_breaks(&result, e.line_break);
 		Ok(PageOutput {
 			html,
+			encoding: *e.encoding,
 			warnings,
 			deps: recorder.deps.into_inner(),
 		})

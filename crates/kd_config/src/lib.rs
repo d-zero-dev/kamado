@@ -111,6 +111,25 @@ pub struct ImageSizes {
 	pub keep_authored: bool,
 }
 
+/// The character encoding a page is written in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HtmlEncoding {
+	#[default]
+	Utf8,
+	/// Windows Shift_JIS (CP932).
+	ShiftJis,
+}
+
+/// How the markup is written after the page was read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HtmlSerializer {
+	/// As linkedom wrote it, which v2 did.
+	#[default]
+	Linkedom,
+	/// As the HTML standard says (browsers, jsdom).
+	Spec,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnError {
 	Silent,
@@ -126,6 +145,8 @@ pub struct Html {
 	pub format: Option<Format>,
 	pub minify: Option<Minify>,
 	pub line_break: String,
+	pub encoding: HtmlEncoding,
+	pub serializer: HtmlSerializer,
 	pub entities: Entities,
 	pub image_sizes: ImageSizes,
 	pub rules: Vec<Value>,
@@ -538,6 +559,8 @@ fn parse_html(o: &Obj<'_>) -> R<Html> {
 		"format",
 		"minify",
 		"lineBreak",
+		"encoding",
+		"serializer",
 		"entities",
 		"imageSizes",
 		"rules",
@@ -604,6 +627,26 @@ fn parse_html(o: &Obj<'_>) -> R<Html> {
 			return Err(o.err(
 				"lineBreak",
 				format!("expected \"\\n\" (\"lf\") or \"\\r\\n\" (\"crlf\"), got {other:?}"),
+			));
+		}
+	};
+	let encoding = match o.str_or("encoding", "utf8")?.to_ascii_lowercase().as_str() {
+		"utf8" | "utf-8" => HtmlEncoding::Utf8,
+		"shift_jis" | "shift-jis" | "sjis" | "cp932" | "windows-31j" => HtmlEncoding::ShiftJis,
+		other => {
+			return Err(o.err(
+				"encoding",
+				format!("expected \"utf8\" or \"shift_jis\" (\"cp932\"), got {other:?}"),
+			));
+		}
+	};
+	let serializer = match o.str_or("serializer", "linkedom")?.as_str() {
+		"linkedom" => HtmlSerializer::Linkedom,
+		"spec" => HtmlSerializer::Spec,
+		other => {
+			return Err(o.err(
+				"serializer",
+				format!("expected \"linkedom\" or \"spec\", got {other:?}"),
 			));
 		}
 	};
@@ -690,6 +733,8 @@ fn parse_html(o: &Obj<'_>) -> R<Html> {
 		format,
 		minify,
 		line_break,
+		encoding,
+		serializer,
 		entities,
 		image_sizes,
 		rules: o.object_array("rules")?,

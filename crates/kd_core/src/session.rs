@@ -1187,7 +1187,7 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 		},
 		&shared.minifiers,
 	)?;
-	let bytes = out.html.into_bytes();
+	let bytes = kd_html::encode::encode(&out.html, out.encoding);
 	let status = write_output(&page.file.output_path, &bytes, shared.skip_unchanged)?;
 	// The fingerprints were taken when the bytes were read, so an edit made
 	// after that is detected by the next build instead of being recorded as if

@@ -92,6 +92,8 @@ JSONC（`//` と `/* */` のコメント、末尾カンマ可）。`$schema` で
 			"js": true,
 		},
 		"lineBreak": "\n",
+		"encoding": "utf8", // "utf8" | "shift_jis"（§9.4）
+		"serializer": "linkedom", // "linkedom" | "spec"（§9.5）
 		"entities": "none", // "none" | "all" | { "©": "&copy;" }
 		"imageSizes": { "enabled": true, "exclude": [], "keepAuthored": false },
 		"rules": [], // §9.1
@@ -264,7 +266,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 4. `html.rules`（宣言的な DOM 操作）
 5. `html.inject`
 6. `imageSizes`
-7. 印字（`doctype`、`format`、`minify`、`entities`、`lineBreak`）。`<style>` と `style` 属性の CSS は Rust の CSS 圧縮、`<script>` は esbuild（子プロセス、内容のハッシュでキャッシュ）
+7. 印字（`doctype`、`format`、`minify`、`entities`、`lineBreak`）。DOM を戻す書き方は `serializer`、書き出すバイト列の文字コードは `encoding`（§9.4、§9.5）。`<style>` と `style` 属性の CSS は Rust の CSS 圧縮、`<script>` は esbuild（子プロセス、内容のハッシュでキャッシュ）
 8. 書き出し
 
 `<script type="application/ld+json">`（`importmap`、`speculationrules`、`json` で終わる type も同じ）の中身は、v2 と同じく prettier の JSON 整形がそのまま出力に残る（オブジェクトは `{ "a": 1 }` の 1 行、`{` の直後で改行されていれば展開、複数のオブジェクトを持つ配列は展開、数値は `1.50` → `1.5`、文字列は二重引用符、末尾カンマなし）。コメントを含む JSON と JSON として読めない中身は整形せず、書かれたまま出す（prettier も後者はそのまま出す）。
@@ -339,6 +341,29 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 
 - `entities`: `"all"` は ASCII 以外を名前付き文字参照（小文字を優先）に。オブジェクトは指定した文字だけ。`<script>` / `<style>` の中は変更しない。
 - `imageSizes`: `img` と `picture > source` に `width` / `height` を付ける（png / jpg / jpeg / webp / avif / svg）。出力ディレクトリ基準で解決し、外部 URL・`data:` URI・パスが出力ディレクトリを出るものは対象外。`exclude` は glob（ページ）、`keepAuthored: true` は手書きの値を残す。読んだ画像は依存として記録する。
+
+### 9.4 `html.encoding`
+
+ページのバイト列の文字コード。`"utf8"`（既定）と `"shift_jis"`（別名 `shift-jis` `sjis` `cp932` `windows-31j`。Windows の Shift_JIS = CP932）。ページごとに `html.overrides` の `pages`（出力 URL の glob）で変えられる。ビルドだけに効き、開発サーバーは UTF-8 で返す。CSS と JS は常に UTF-8。
+
+- 入力は UTF-8 のまま書く。印字のあと（`lineBreak` のあと）に、1 回だけ変換する。
+- `<meta charset="utf-8">`（`utf8`、大文字小文字、閉じの `/` の有無は問わない）は `<meta charset="shift_jis">` に書き換える（d-zero/builder と同じ）。
+- Shift_JIS にない文字は文字参照にする: 名前があれば名前（`©` → `&copy;`）、なければ番号（`〜` U+301C → `&#12316;`）。`<script>` と `<style>` の中は参照が文字として読まれるので `?`（`iconv-lite` と同じ）。表は CP932（NEC 行 13、IBM 拡張を含む）で、`iconv-lite` の `CP932` と BMP 全域で同じ結果（私用領域は変換しない。`¥` は 0x5C、`‾` は 0x7E）。
+- 表は `scripts/gen-cp932-table.mjs` が Node のデコーダ（WHATWG `shift_jis`）から作る。
+
+### 9.5 `html.serializer`
+
+DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中間 HTML と同じ書き方で、v2 とバイト一致させるためのもの。`"spec"` は HTML 標準（ブラウザ、jsdom、parse5）の書き方で、d-zero/builder の出力と揃える。違い:
+
+|                                   | `linkedom`                                                 | `spec`                          |
+| --------------------------------- | ---------------------------------------------------------- | ------------------------------- |
+| 属性値の `&` と U+00A0            | そのまま（`&`）／そのまま                                  | `&amp;` ／ `&nbsp;`             |
+| テキストの U+00A0                 | `&#160;`                                                   | `&nbsp;`                        |
+| `<title>` `<textarea>` のテキスト | そのまま                                                   | `&` `<` `>` U+00A0 をエスケープ |
+| 空の属性                          | 既知の真偽属性は名前だけ。空の `class` `id` `style` は消す | すべて `name=""`                |
+| 空の SVG 要素                     | `<path />`                                                 | `<path></path>`                 |
+
+`html.entities: "all"` は U+00A0 を `&nbsp;` にする（表の先頭の `NonBreakingSpace` ではなく）。
 
 ## 10. CSS と JS
 

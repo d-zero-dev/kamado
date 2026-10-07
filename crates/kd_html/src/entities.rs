@@ -231,6 +231,11 @@ pub fn encode_non_ascii(input: &str) -> String {
 			out.push(ch);
 			continue;
 		}
+		// The table lists `NonBreakingSpace` first; the one everybody writes is `nbsp`.
+		if ch == '\u{A0}' {
+			out.push_str("&nbsp;");
+			continue;
+		}
 		match name_of(ch.encode_utf8(&mut buf)) {
 			Some(name) => {
 				out.push('&');
@@ -429,8 +434,19 @@ impl Entities {
 	pub fn apply(&self, text: &str) -> String {
 		match self {
 			Entities::None => text.to_owned(),
-			Entities::All => encode_non_ascii(text),
+			// A no-break space is escaped as `&#160;` by the serializer; a page that
+			// asks for named references wants `&nbsp;`.
+			Entities::All => encode_non_ascii(&text.replace("&#160;", "&nbsp;")),
 			Entities::Custom(map) => {
+				let nbsp = map.iter().find(|(c, _)| *c == '\u{A0}');
+				let replaced;
+				let text = match nbsp {
+					Some((_, replacement)) => {
+						replaced = text.replace("&#160;", replacement);
+						replaced.as_str()
+					}
+					None => text,
+				};
 				let mut out = String::with_capacity(text.len());
 				for ch in text.chars() {
 					match map.iter().find(|(c, _)| *c == ch) {

@@ -219,6 +219,33 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
 - コンポーネントを直すと、次のリクエストで描画用のワーカーが作り直されます（初回は少し遅い）。
 - ブラウザのライブリロードはありません。
 
+## 8.5 d-zero/builder（11ty）からの移行
+
+kamado の前身の `@d-zero/builder`（Eleventy ベース）で作られた案件も、同じ手順（変換スクリプトで Pug → TSX、`.html` はそのまま）で v3 に移せる。Shift_JIS と CRLF で配信するサイトでも、下の対応表の設定で builder の出力に揃えられる。builder の設定と v3 の対応:
+
+| builder（`eleventy.config.mjs`）                                                 | v3                                                                                                                                                |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `charset: { encoding: 'shift_jis', overrides: [{ paths, encoding: 'utf8' }] }`   | `html.encoding: "shift_jis"` と、`html.overrides` の `{ "pages": [...], "encoding": "utf8" }`。`pages` は**出力 URL**（`/a/index.html` は `/a/`） |
+| `lineBreak: '\r\n'`                                                              | `html.lineBreak: "crlf"`                                                                                                                          |
+| `prettier: { tabWidth: 4, useTabs: true }`                                       | `html.format: { "tabWidth": 4, "useTabs": true }`                                                                                                 |
+| `minifier: { minifyCSS: false }`（HTML Minifier の他の機能は何も有効にならない） | `html.minify: { "redundantAttributes": false, "css": false }`（空の `class=""` を残し、`style` 属性を圧縮しない）                                 |
+| `characterEntities: true`                                                        | `html.entities: "all"`                                                                                                                            |
+| builder が DOM を jsdom で書き戻す（属性の `&amp;`、`<path></path>`、`&nbsp;`）  | `html.serializer: "spec"`                                                                                                                         |
+| `autoDecode`（入力が Shift_JIS）                                                 | **未対応**（入力は UTF-8）                                                                                                                        |
+| `ssi`（開発サーバーで `<!--#include virtual-->` を展開）                         | ビルドでは何もしない（コメントのまま残る）。展開が要るなら `html.includes` の `ssi`                                                               |
+| `banner()`                                                                       | `styles.banner` / `scripts.banner` の文字列（`{{date:YYYY-MM-DD}}` `{{year}}`）                                                                   |
+| `eleventy-pug-plugin` の `filters.cjs`（`:name` が `data/<name>.html` を返す）   | `data/<name>.html` を置く。変換スクリプトは `:name` を `html(data[name])` にする                                                                  |
+
+builder の出力と揃えるときの違い（実案件で見つけたもの）:
+
+- **インラインの `<script>`**: builder は terser、v3 は esbuild で圧縮する。意味は同じで、バイトは違う（GTM のスニペットなど）。
+- **画像の寸法**: builder は属性に書いた `height` があっても画像の実寸で上書きすることがある。v3 の `html.imageSizes`（既定）は v2 と同じ（書いてあれば残す）。SVG の寸法の丸めも違う。画像は出力ディレクトリから読むので、出力ディレクトリに画像が要る。
+- **`<pre>` の中の字下げ**: 変換スクリプトの `--pretty` は再現しない。
+- **`.html` に混ざった SSI のコメント**: そのまま残る（HTML のコメントは消えない）。
+- **Pug が `include` する出力ディレクトリのファイル**（`../../../htdocs/img/icon.svg` のような SVG）: 変換スクリプトはその時点のファイルを読んで文字列にする。
+- **生の HTML を書いた Pug**（`<meta ...>` の行、`| <!--#include ... -->`）は `html("...")` になる。`//` のコメントも HTML のコメントとして残る。
+- 参照できないパッケージ（`node_modules` が無い）の TS は、`scripts.files` を絞って後回しにできる。
+
 ## 9. 検証
 
 ### 9.1 出力の比較
