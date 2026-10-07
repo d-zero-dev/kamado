@@ -82,11 +82,11 @@ describe('compareTrees', () => {
 		expect(result.ok).toBe(false);
 	});
 
-	test('two empty trees are ok with zero files', () => {
+	test('two empty trees are not ok: nothing was compared', () => {
 		const result = compareTrees(baseline, candidate);
 
 		expect(result.results).toEqual([]);
-		expect(result.ok).toBe(true);
+		expect(result.ok).toBe(false);
 	});
 
 	test('nested directories are walked and paths are relative', () => {

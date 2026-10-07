@@ -321,9 +321,22 @@ pub fn parse(config_text: &str, root_dir: &str, package_json: Option<&str>) -> R
 			.map(parse_package_json)
 			.transpose()?
 			.unwrap_or_default();
+		// A base URL that is neither a full URL nor a path (`example.com/sub`, a typo)
+		// would be taken for the root and shift every link without a word.
+		let base_url = o.opt_str("baseURL")?;
+		if let Some(base) = &base_url
+			&& !(base.starts_with('/')
+				|| base.starts_with("http://")
+				|| base.starts_with("https://"))
+		{
+			return Err(o.err(
+				"baseURL",
+				"expected a full URL (https://example.com/sub/) or a path (/sub/)",
+			));
+		}
 		Site {
 			host: o.opt_str("host")?.or(pkg.host),
-			base_url: o.opt_str("baseURL")?.or(pkg.base_url),
+			base_url: base_url.or(pkg.base_url),
 			site_name: o.opt_str("siteName")?.or(pkg.site_name),
 			site_name_en: o.opt_str("siteNameEn")?.or(pkg.site_name_en),
 			package_name: pkg.package_name,
@@ -1132,6 +1145,25 @@ mod tests {
 		);
 		assert_eq!(c.dev_server.port, 8000);
 		assert!(c.dev_server.open);
+	}
+
+	#[test]
+	fn a_base_url_is_a_full_url_or_a_path() {
+		for ok in ["https://example.com/sub/", "http://example.test/", "/sub/"] {
+			let text =
+				format!(r#"{{ "dir": {{ "output": "out" }}, "site": {{ "baseURL": "{ok}" }} }}"#);
+			assert_eq!(
+				parse(&text, "/p", None).unwrap().site.base_url.as_deref(),
+				Some(ok)
+			);
+		}
+		let e = fail(r#"{ "site": { "baseURL": "example.com/sub" } }"#);
+		assert_eq!(e.path, "site.baseURL");
+		assert!(
+			e.message.starts_with("expected a full URL"),
+			"{}",
+			e.message
+		);
 	}
 
 	#[test]

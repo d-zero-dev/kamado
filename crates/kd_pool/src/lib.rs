@@ -299,11 +299,26 @@ mod tests {
 		let names = names.lock().unwrap();
 		assert_eq!(names.len(), 8);
 		assert!(names.iter().all(|n| n.starts_with("kd-pool-")));
-		let distinct: std::collections::HashSet<&String> = names.iter().collect();
-		assert!(
-			distinct.len() > 1,
-			"expected more than one worker to run jobs"
-		);
+	}
+
+	#[test]
+	fn two_jobs_can_be_running_at_the_same_moment() {
+		// Each of the two waits for the other at the barrier: a pool that ran one job at
+		// a time would never get past it (the test would hang, not pass by luck).
+		let pool = Pool::new(2);
+		let barrier = Arc::new(std::sync::Barrier::new(2));
+		let met = Arc::new(AtomicUsize::new(0));
+		pool.scope(|s| {
+			for _ in 0..2 {
+				let barrier = Arc::clone(&barrier);
+				let met = Arc::clone(&met);
+				s.spawn(move || {
+					barrier.wait();
+					met.fetch_add(1, Ordering::SeqCst);
+				});
+			}
+		});
+		assert_eq!(met.load(Ordering::SeqCst), 2);
 	}
 
 	#[test]

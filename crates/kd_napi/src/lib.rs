@@ -47,38 +47,47 @@ struct DlInfo {
 	dli_saddr: *mut c_void,
 }
 
-/// Tells the core which build of it this is: the size and mtime of the library file
-/// this code was loaded from. Why: the version of the crate does not change between
-/// builds, and the manifests and the plan cache of a site built with an older core
-/// must not be taken for current.
+/// The size and mtime of the library file this code was loaded from.
+fn library_stamp() -> Option<String> {
+	let mut info = DlInfo {
+		dli_fname: std::ptr::null(),
+		dli_fbase: std::ptr::null_mut(),
+		dli_sname: std::ptr::null(),
+		dli_saddr: std::ptr::null_mut(),
+	};
+	let here: fn() -> Option<String> = library_stamp;
+	// SAFETY: `info` is a valid out pointer, and the address is one of this library.
+	let found = unsafe { dladdr(here as *const c_void, &raw mut info) };
+	if found == 0 || info.dli_fname.is_null() {
+		return None;
+	}
+	// SAFETY: dladdr returned a NUL-terminated string that lives as long as the library.
+	let file = unsafe { CStr::from_ptr(info.dli_fname) }.to_str().ok()?;
+	let meta = std::fs::metadata(file).ok()?;
+	let nanos = meta
+		.modified()
+		.ok()?
+		.duration_since(std::time::UNIX_EPOCH)
+		.ok()?
+		.as_nanos();
+	Some(format!("{}-{nanos}", meta.len()))
+}
+
+/// Tells the core which build of it this is. Why: the version of the crate does not
+/// change between builds, and the manifests and the plan cache of a site built with an
+/// older core must not be taken for current. When the library file cannot be read the
+/// stamp is the time of this process, so that nothing a process wrote is reused by
+/// another one (the safe side: a full build).
 fn set_core_stamp() {
 	static ONCE: OnceLock<()> = OnceLock::new();
 	ONCE.get_or_init(|| {
-		let mut info = DlInfo {
-			dli_fname: std::ptr::null(),
-			dli_fbase: std::ptr::null_mut(),
-			dli_sname: std::ptr::null(),
-			dli_saddr: std::ptr::null_mut(),
-		};
-		let here: fn() = set_core_stamp;
-		// SAFETY: `info` is a valid out pointer, and the address is one of this library.
-		let found = unsafe { dladdr(here as *const c_void, &raw mut info) };
-		if found == 0 || info.dli_fname.is_null() {
-			return;
-		}
-		// SAFETY: dladdr returned a NUL-terminated string that lives as long as the library.
-		let Ok(file) = unsafe { CStr::from_ptr(info.dli_fname) }.to_str() else {
-			return;
-		};
-		let Ok(meta) = std::fs::metadata(file) else {
-			return;
-		};
-		let nanos = meta
-			.modified()
-			.ok()
-			.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-			.map_or(0, |d| d.as_nanos());
-		kd_core::set_core_stamp(format!("{}-{nanos}", meta.len()));
+		let stamp = library_stamp().unwrap_or_else(|| {
+			let now = std::time::SystemTime::now()
+				.duration_since(std::time::UNIX_EPOCH)
+				.map_or(0, |d| d.as_nanos());
+			format!("unstamped-{now}")
+		});
+		kd_core::set_core_stamp(stamp);
 	});
 }
 

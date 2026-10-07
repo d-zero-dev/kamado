@@ -143,7 +143,9 @@ pub(crate) fn finish(handle: &str, results_json: &str) -> Result<String, String>
 		let pair = item.as_array().filter(|a| a.len() == 2);
 		let (page, html) = pair
 			.and_then(|a| Some((a[0].as_f64()?, a[1].as_str()?)))
-			.ok_or("results: each page must be [page, html]")?;
+			// `as usize` would turn a negative number or NaN into page 0.
+			.filter(|(page, _)| page.fract() == 0.0 && *page >= 0.0)
+			.ok_or("results: each page must be [page, html] with a page number")?;
 		rendered.push((page as usize, html.to_owned()));
 	}
 	let script_items = match value.get("scripts") {

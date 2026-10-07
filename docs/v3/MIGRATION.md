@@ -2,14 +2,14 @@
 
 この文書は **AI が上から順に実行できる手順書**です。各ステップに「やること」「確認すること」を書いてあります。仕様の根拠は `docs/v3/RFC.md`（破壊的変更の一覧は §2）。
 
-v3 は v2 と**出力（HTML）がバイト一致**することを目標にしています。移行の合格条件は「同じ入力から、v2 と v3 の出力ディレクトリを比べて差がない（差があるなら §10 の意図した差だけ）」ことです。
+v3 は v2 と**出力（HTML）がバイト一致**することを目標にしています。移行の合格条件は「同じ入力から、v2 と v3 の出力ディレクトリを比べて差がない（差があるなら §11 の意図した差だけ）」ことです。
 
 ## 0. 進め方
 
 1. v2 のままビルドして、**基準の出力**を残す（§1）。
-2. v3 の設定とソースを用意する（§2〜§8）。ソースは**コピー**して直す。v2 のツリーは壊さない。
-3. v3 でビルドして、基準と比べる（§9）。差が出たら §10 の表で意図した差か確かめ、違えば原因を直す。
-4. 開発サーバーと差分ビルドを確かめる（§9）。
+2. v3 の設定とソースを用意する（§2〜§9）。ソースは**コピー**して直す。v2 のツリーは壊さない。
+3. v3 でビルドして、基準と比べる（§10）。差が出たら §11 の表で意図した差か確かめ、違えば原因を直す。
+4. 開発サーバーと差分ビルドを確かめる（§10）。
 
 迷ったら、まず出力の差を見ます。ソースを見て推測するより、差のある 1 ページを小さくして原因を探すほうが速く確実です。
 
@@ -49,7 +49,7 @@ v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは `p
 
 ```jsonc
 {
-	"$schema": "./node_modules/kamado/schema.json",
+	"$schema": "./node_modules/kamado-v3/schema.json",
 	"dir": { "input": "src", "output": "htdocs" },
 	"pages": {
 		"ignore": ["_libs/**"],
@@ -67,9 +67,9 @@ v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは `p
 
 ### 2.1 `pageList` と、それにぶら下がる設定
 
-v2 の `pageList()` と `transformBreadcrumbItem` / `filterNavigationNode` を使う構成は、次のように置き換える。
+`pageList()` でページ一覧を返し、`transformBreadcrumbItem` / `filterNavigationNode` で整える構成は、次のように置き換える。
 
-- **一覧は prebuild で JSON にする**（`pages.overrides`、RFC §6）。`meta` には**シートに値があるキーだけ**を書く。`null` を書くと、ページ自身の front matter の同じキーを隠す（v2 は一覧のメタをナビゲーション用にだけ使い、ページ自身の変数は front matter から取った）。ファイルに書いたページが、書いた順で `pages` の先頭に並び、`nav()` の表示順になる。
+- **一覧は prebuild で JSON にする**（`pages.overrides`、RFC §6）。`meta` には**一覧に値があるキーだけ**を書く。`null` を書くと、ページ自身の front matter の同じキーを隠す（v2 は一覧のメタをナビゲーション用にだけ使い、ページ自身の変数は front matter から取った）。ファイルに書いたページが、書いた順で `pages` の先頭に並び、`nav()` の表示順になる。
 - **一覧にないページ**: v2 は一覧に載らないページを `nav()` と `breadcrumbs` に出さなかった。v3 は常にすべてのページを索引に入れる。ナビゲーションから隠すなら、そのページに `{ "url": "/x/", "meta": { "navHidden": true } }` を書く。ページのタイトル（`<title>` とパンくず）は v3 では自分の front matter の値になる（v2 は一覧になければサイト名）。
 - **`transformBreadcrumbItem`** はコンポーネントに書く（`link.href` を `link.meta.realHref ?? link.href` に）。**`filterNavigationNode`** は `nav()` の結果を再帰で絞るヘルパーを書く（子から先に絞り、`keep(node)` が偽なら捨てる）。
 - **`<!-- @include(...) -->` のコメントを出力する transform** は `html.includes` の `includeComment`（`root` は `/` 始まりの基準ディレクトリ）に、**BurgerEditor の `importBlock`** は `burgerEditorImport`（`root` は入力ディレクトリ）に、`data-bgi-ver` を消す正規表現は `html.rules` の `removeAttr` に、`©` などを実体参照にする transform は `html.entities` に置き換える。`manipulateDOM` が全ページから要素を消していたなら `html.rules` の `remove`。
@@ -137,7 +137,7 @@ export default ({ meta }: { meta: { title: string } }) => (
 
 ### 3.4 変換スクリプトと、変換で見つかった注意点
 
-`node scripts/pug-to-tsx.mjs <project> <out>` は、`__assets` の `.pug` をコンポーネント（`.tsx`）に直す。`include` はコンポーネントの呼び出し（include する側の props とスコープの変数を渡す）、`each` は `map`、`if` は `&&` / `?:`、`pkg.production.*` は `site.*`、`filters.date` は `formatDate` になる。`mixin` は大文字で始まるコンポーネント、`else if` は入れ子の `?:`、`include` したテキスト（生の HTML）は `html()` になる。表現できないもの（唯一の子でない `!{}` など）は止まるので、手で直す。出力は必ず読む。実案件（Pug のスキャフォールド）で試して見つかった点:
+`node scripts/pug-to-tsx.mjs <project> <out>` は、`__assets` の `.pug` をコンポーネント（`.tsx`）に直す。`include` はコンポーネントの呼び出し（include する側の props とスコープの変数を渡す）、`each` は `map`、`if` は `&&` / `?:`、`pkg.production.*` は `site.*`、`filters.date` は `formatDate` になる。`mixin` は大文字で始まるコンポーネント、`else if` は入れ子の `?:`、`include` したテキスト（生の HTML）は `html()` になる。表現できないもの（唯一の子でない `!{}` など）は止まるので、手で直す。出力は必ず読む。変換で見つかった点:
 
 - **属性名は React の綴り**: `charset` → `charSet`、`itemprop` → `itemProp`、`itemtype` → `itemType`、`itemid` → `itemID`。小文字のままだと、`<meta charset>` は先頭に置かれず、`<meta itemprop>`（パンくずの `position`）が `<head>` に持ち上げられる。
 - **`&nbsp;` などの実体参照は、そのままテキストに書く**（`{"&nbsp;"}` と文字列にすると `&amp;nbsp;` になる）。
@@ -212,16 +212,16 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
 
 ## 8. 開発サーバー
 
-`kamado server`（設定は `devServer`）。v2 との違い:
+`kamado3 server`（設定は `devServer`）。v2 との違い:
 
 - ファイルを監視しません（v2 と同じ）。リクエストごとに依存の stat を確かめ、変更がなければメモリの出力を返します。
 - ページファイルの**追加と削除**、設定ファイル・`pages.overrides` の変更は、**再起動**すると反映されます。
 - コンポーネントを直すと、次のリクエストで描画用のワーカーが作り直されます（初回は少し遅い）。
 - ブラウザのライブリロードはありません。
 
-## 8.5 d-zero/builder（11ty）からの移行
+## 9. d-zero/builder（11ty）からの移行
 
-kamado の前身の `@d-zero/builder`（Eleventy ベース）で作られた案件も、同じ手順（変換スクリプトで Pug → TSX、`.html` はそのまま）で v3 に移せる。Shift_JIS と CRLF で配信するサイトでも、下の対応表の設定で builder の出力に揃えられる。builder の設定と v3 の対応:
+kamado の前身の `@d-zero/builder`（Eleventy ベース）で作られた案件も、同じ手順（変換スクリプトで Pug → TSX、`.html` はそのまま）で v3 に移せます。Shift_JIS と CRLF で配信するサイトでも、下の対応表の設定で builder の出力に揃えられます。builder の設定と v3 の対応:
 
 | builder（`eleventy.config.mjs`）                                                 | v3                                                                                                                                                |
 | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -236,7 +236,7 @@ kamado の前身の `@d-zero/builder`（Eleventy ベース）で作られた案�
 | `banner()`                                                                       | `styles.banner` / `scripts.banner` の文字列（`{{date:YYYY-MM-DD}}` `{{year}}`）                                                                   |
 | `eleventy-pug-plugin` の `filters.cjs`（`:name` が `data/<name>.html` を返す）   | `data/<name>.html` を置く。変換スクリプトは `:name` を `html(data[name])` にする                                                                  |
 
-builder の出力と揃えるときの違い（実案件で見つけたもの）:
+builder の出力と揃えるときの違い:
 
 - **インラインの `<script>`**: builder は terser、v3 は esbuild で圧縮する。意味は同じで、バイトは違う（GTM のスニペットなど）。
 - **画像の寸法**: builder は属性に書いた `height` があっても画像の実寸で上書きすることがある。v3 の `html.imageSizes`（既定）は v2 と同じ（書いてあれば残す）。SVG の寸法の丸めも違う。画像は出力ディレクトリから読むので、出力ディレクトリに画像が要る。
@@ -246,36 +246,36 @@ builder の出力と揃えるときの違い（実案件で見つけたもの）
 - **生の HTML を書いた Pug**（`<meta ...>` の行、`| <!--#include ... -->`）は `html("...")` になる。`//` のコメントも HTML のコメントとして残る。
 - 参照できないパッケージ（`node_modules` が無い）の TS は、`scripts.files` を絞って後回しにできる。
 
-## 9. 検証
+## 10. 検証
 
-### 9.1 出力の比較
+### 10.1 出力の比較
 
 ```sh
-yarn kamado build --force
+yarn kamado3 build --force
 node benchmarks/v3/compare-outputs.ts /tmp/baseline-v2 <v3 output dir>
 ```
 
-- `identical`（バイト一致）の割合を見る。`different` のファイルを 1 つ選び、差を見て §10 の表と照らす。
+- `identical`（バイト一致）の割合を見る。`different` のファイルを 1 つ選び、差を見て §11 の表と照らす。
 - `extra`（v3 だけにあるファイル）: v2 の設定でビルドしていなかったスタイル / スクリプトが v3 では出力されている場合。意図したものか確かめる。
 
-### 9.2 差分ビルド
+### 10.2 差分ビルド
 
 ```sh
-yarn kamado build --incremental        # 初回: すべて built
-yarn kamado build --incremental        # 2 回目: すべて cached
+yarn kamado3 build --incremental        # 初回: すべて built
+yarn kamado3 build --incremental        # 2 回目: すべて cached
 # ページを 1 つ直して
-yarn kamado build --incremental        # そのページだけ built
+yarn kamado3 build --incremental        # そのページだけ built
 ```
 
 - 共有のレイアウトやコンポーネントを直すと、それを使うページだけが再ビルドされる。
 - データファイル（`data.dir`）を直すと、JSX で描画するページが再ビルドされる。
 - どれかのページのメタ（front matter、sidecar、`pages.overrides`）を直すと、`pages` / `nav` などを読むかどうかにかかわらず、JSX で描画する全ページが再ビルドされる（`.html` ページは再ビルドされない）。
 
-### 9.3 開発サーバー
+### 10.3 開発サーバー
 
-`kamado server` を起動し、ページ・CSS・JS・出力ディレクトリの静的ファイルを開く。コンポーネントを 1 つ直して再読み込みし、反映を確かめる。プロキシを使うなら `devServer.proxy` の経路も確かめる。
+`kamado3 server` を起動し、ページ・CSS・JS・出力ディレクトリの静的ファイルを開く。コンポーネントを 1 つ直して再読み込みし、反映を確かめる。プロキシを使うなら `devServer.proxy` の経路も確かめる。
 
-## 10. 出力に差が出る既知の点
+## 11. 出力に差が出る既知の点
 
 意図した差です（`docs/v3/RFC.md` §2 の番号つき）。これ以外の差は、v3 の不具合か移行の誤りです。
 
@@ -294,7 +294,7 @@ yarn kamado build --incremental        # そのページだけ built
 | HTML のコメント（JSX には書けない）。`<head>` 内の並び（React 19 の持ち上げ）                                                                | §7.1 |
 | フォームの属性の並び（`action` と `method` は React が最後に出す）                                                                           | §7.1 |
 
-## 11. 困ったとき
+## 12. 困ったとき
 
 - 設定エラーは、キーのパスと理由を出して止まります。
 - ページのビルド失敗（JSX の構文エラー、存在しないレイアウト、`meta` に式を書いた）は、ファイルと行・列を出します。

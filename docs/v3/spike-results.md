@@ -10,7 +10,7 @@ v3 の設計判断の根拠にした実測結果。環境: macOS arm64（M 系�
 - context-aware: `napi_register_module_v1` が環境ごとに呼ばれる。main スレッドとワーカー 4 つで同じ `.node` を読み込み、プロセス static の `counter()` が 1〜7 と連続した（状態の共有を確認）。
 - `Buffer` はコピーなしで読める（`napi_get_buffer_info`）。8 MiB の SHA-256 が `node:crypto` と一致した。
 
-**未検証:** Linux x64 / arm64 での読み込み。CI の Linux ジョブで確認する。
+Linux x64 / arm64 での読み込みは、`.github/workflows/rust.yml` の `ubuntu-latest` と `ubuntu-24.04-arm` のジョブが `crates/kd_napi/check/load.check.mjs` で確認している（macOS arm64 も同じジョブ）。CI で確認していないのは、darwin-x64 と Linux の musl。
 
 ## Node 内蔵の型除去（`module.stripTypeScriptTypes`）
 
@@ -35,19 +35,19 @@ v3 の設計判断の根拠にした実測結果。環境: macOS arm64（M 系�
 
 v3 への影響:
 
-- v3 は `<?...?>` を**処理命令のトークンとして保持**する（データ損失を再現しない）。これは v2 とバイト一致しない**意図的な差分**で、MIGRATION.md に記載する。
-- 比較ハーネスの corpus に、本文 PHP と属性 PHP を加える。
+- v3 は `<?...?>` を**処理命令のトークンとして保持**する（データ損失を再現しない）。これは v2 とバイト一致しない**意図的な差分**で、RFC §2 と MIGRATION.md §11 に記載している。
+- 本文 PHP と属性 PHP は、`scripts/generate-html-golden.mjs` と `scripts/generate-minify-golden.mjs` のケースに含まれている。
 - 旧 CMS のテンプレート変数（`{...}` 形式）が残っているページもあるが、HTML としては普通の文字なので v2 も v3 も何もしない。特別扱いはしない。
 
 ## SHA-256 のハードウェア命令
 
 **結果:** aarch64 の `sha2` 拡張（`vsha256hq_u32` など）は Rust 1.98.1 の stable で使え、`is_aarch64_feature_detected!("sha2")` で実行時検出もできた。`crates/kd_hash` は portable 実装で、NIST のベクタ（空、`abc`、448 ビット、896 ビット、100 万個の `a`）と分割更新の境界テストが通っている。
 
-**未検証:** x86_64 の SHA-NI（CI の Linux x64 で確認）、命令を使った実装の速度。stat 先行の判定により、ハッシュを取るのは (size, mtime) が変わったファイルだけなので、優先度は低い。
+x86_64 の SHA-NI と、命令を使った実装は採用していない（`kd_hash` は portable 実装のみで、CI の Linux x64 でも同じ NIST のベクタが通る）。stat 先行の判定により、ハッシュを取るのは (size, mtime) が変わったファイルだけなので、必要になるまで入れない。
 
 ## ツールチェーンの固定
 
-`rust-toolchain.toml` で `channel = "1.98.1"` と `components` を指定すると、ローカルの `stable` と別のツールチェーンとして再インストールが走り、環境によっては中途半端な状態で失敗する（実測で確認）。再現ビルドのための固定は必要だが、CI で `rustup toolchain install` を明示してから行う。ローカルの手順は別途整備する。
+`rust-toolchain.toml` で `channel = "1.98.1"` と `components` を指定すると、ローカルの `stable` と別のツールチェーンとして再インストールが走り、環境によっては中途半端な状態で失敗する（実測で確認）。再現ビルドのための固定は、CI（`.github/workflows/rust.yml`）が `rustup toolchain install 1.98.1` を明示して行う。ローカルは `rust-toolchain.toml` を置かず、同じ版を手で入れる（`development.md`）。
 
 ## v2 の基準値（`yarn bench --full`、同一マシン、1 回計測）
 
@@ -58,8 +58,8 @@ v3 への影響:
 | 100,000  | 計測不可 | v2 のベンチ生成器が全ファイルを一斉に開き、macOS のファイル数上限（約 61,440）で `EMFILE` になる（v2 のベンチツールの制約。`ulimit` を上げても上限は変わらない） |
 
 - **規模に対して非線形に遅くなる**（1 万→5 万で pages/s が半分以下）。v3 の目標（10 万ページで cold ≤ 10s）は、v2 の外挿（10 万ページで 10 分超）に対して 60 倍以上の改善にあたる。
-- RSS は `run-bench.ts` の出力にこの規模では出なかったため、v3 の比較用の計測はハーネスに組み込む。
-- 10 万ページの v2 基準値は、生成器を使わず v3 の fixture 生成器（`benchmarks/v3/generate-jsx-fixtures.ts`、ディレクトリを分けて生成）で作った fixture を v2 で処理する形で取り直す。
+- RSS は `run-bench.ts` の出力にこの規模では出なかったので、v3 の比較用の RSS は `benchmarks/v3/` のハーネスで計測する。
+- 10 万ページの v2 基準値は、v2 の生成器を使えないので、v3 の fixture 生成器（`benchmarks/v3/generate-jsx-fixtures.ts`、ディレクトリを分けて生成）で作った fixture を v2 で処理する形で取る。
 
 ## 構造文字の走査（SIMD）
 
@@ -70,9 +70,9 @@ v3 への影響:
 | スカラー（バイトのループ）  | 2.11 GB/s    | 14.3 µs      |
 | NEON（16 バイトを一括分類） | 8.41 GB/s    | 3.6 µs       |
 
-- NEON はスカラーの約 4 倍。ただし、スカラーでも 10 万ページ（各 30 KB）の走査は単一スレッドで約 1.4 秒で、全体の目標（cold ≤ 10s）に対して小さい。印字・DOM・書き出しのほうが支配的になる見込み。
-- 判断: **トークナイザはまずスカラーで書き、構造文字の探索を 1 つの関数に分離して置く**。SIMD への差し替えは最適化の段階で、実測してから行う（x86_64 の AVX2 / SSE2 と NEON の両方に portable な実装を残す）。
+- NEON はスカラーの約 4 倍。ただし、スカラーでも 10 万ページ（各 30 KB）の走査は単一スレッドで約 1.4 秒で、全体の目標（cold ≤ 10s）に対して小さい。印字・DOM・書き出しのほうが支配的になる。
+- 判断: **トークナイザはスカラーで書き、構造文字の探索を 1 つの関数に分離して置く**。SIMD への差し替えは、実測で必要になってから行う（x86_64 の AVX2 / SSE2 と NEON の両方に portable な実装を残す）。
 
 ## Rust プールとワーカーの CPU 配分
 
-**未実施。** 配分の実測には、実際の描画（ワーカー）と後処理（Rust のスレッドプール）が両方動いている必要がある。ワーカー描画を実装した後に、ベンチ fixture を使って測り、プールの数とワーカーの数の配分を決める。
+ワーカー描画は実装済みで、描画（ワーカー、`--jobs` / `build.jobs` で数を指定）と後処理（Rust のスレッドプール）は同じビルドの中で動く。プールの数とワーカーの数の配分を変えた比較の結果は、この文書にはない（既定は `auto`）。

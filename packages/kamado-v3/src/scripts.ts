@@ -1,5 +1,5 @@
 /**
- * Builds the scripts the core asks for with esbuild (RFC section 8). The core
+ * Builds the scripts the core asks for with esbuild (RFC section 10). The core
  * decides which scripts are stale and what the options are; this module only
  * runs the bundler and reports every file it read, so the core can record
  * them as the dependencies of the output.

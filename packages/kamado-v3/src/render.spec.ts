@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
-import { createRenderer } from './render.js';
+import { createRenderer, renderJobs } from './render.js';
 
 let dir = '';
 
@@ -167,5 +167,65 @@ describe('createRenderer', () => {
 		expect(await render({ page: 0, main: null, layout, content: '<p>body</p>' })).toEqual(
 			[0, '<main><p>body</p></main>'],
 		);
+	});
+});
+
+describe('renderJobs', () => {
+	test('a few jobs are rendered in order in this thread and returned', async () => {
+		const chunk = await write(
+			'chunk.mjs',
+			'export const pages = [async () => ({ default: (p) => `<p>${p.page.url}</p>` }), async () => ({ default: (p) => `<p>${p.page.url}</p>` })];\n',
+		);
+
+		const rendered = await renderJobs(
+			[
+				{ page: 1, main: chunk, entry: 1, layout: null, content: null },
+				{ page: 0, main: chunk, entry: 0, layout: null, content: null },
+			],
+			CONTEXT,
+			{ runtimeUrl: await runtimeUrl(), parallelism: 2 },
+		);
+
+		expect(rendered).toEqual([
+			[1, '<p>/b/</p>'],
+			[0, '<p>/a/</p>'],
+		]);
+	});
+
+	test('with onRendered the pages go to it and nothing is kept', async () => {
+		const chunk = await write(
+			'chunk.mjs',
+			'export const pages = [async () => ({ default: () => "<b>x</b>" })];\n',
+		);
+		const seen: unknown[] = [];
+
+		const returned = await renderJobs(
+			[{ page: 0, main: chunk, entry: 0, layout: null, content: null }],
+			CONTEXT,
+			{
+				runtimeUrl: await runtimeUrl(),
+				onRendered: (rendered) => seen.push(...rendered),
+			},
+		);
+
+		expect(returned).toEqual([]);
+		expect(seen).toEqual([[0, '<b>x</b>']]);
+	});
+
+	test('a page that fails rejects with its path', async () => {
+		const chunk = await write(
+			'chunk.mjs',
+			'export const pages = [async () => ({ default: () => { throw new Error("boom"); } })];\n',
+		);
+
+		await expect(
+			renderJobs(
+				[{ page: 0, main: chunk, entry: 0, layout: null, content: null }],
+				CONTEXT,
+				{
+					runtimeUrl: await runtimeUrl(),
+				},
+			),
+		).rejects.toThrow('Failed to render /s/a.tsx: boom');
 	});
 });

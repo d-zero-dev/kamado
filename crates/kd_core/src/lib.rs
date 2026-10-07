@@ -52,7 +52,11 @@ pub fn set_core_stamp(stamp: String) {
 /// pre-release is, must not reuse what an older one wrote.
 #[must_use]
 pub fn core_id() -> String {
-	match CORE_STAMP.get() {
+	core_id_with(CORE_STAMP.get().map(String::as_str))
+}
+
+fn core_id_with(stamp: Option<&str>) -> String {
+	match stamp {
 		Some(stamp) => format!("{VERSION}+{stamp}"),
 		None => VERSION.to_owned(),
 	}
@@ -851,6 +855,13 @@ pub(crate) fn write_output(
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn the_stamp_of_the_build_is_part_of_the_id_that_keys_the_caches() {
+		assert_eq!(core_id_with(None), "0.0.0");
+		assert_eq!(core_id_with(Some("12-34")), "0.0.0+12-34");
+		assert_ne!(core_id_with(Some("12-34")), core_id_with(Some("12-35")));
+	}
 
 	struct Site {
 		root: String,
@@ -2667,18 +2678,38 @@ mod tests {
 	}
 
 	#[test]
+	fn a_build_without_the_esbuild_executable_says_the_scripts_are_not_minified() {
+		let site = Site::new("no-esbuild");
+		site.write("src/a.html", "<script>var a = 1;</script>");
+
+		let report = run_build(&site.config("")).unwrap();
+		assert_eq!(
+			report.warnings,
+			[
+				"the esbuild executable was not found: the scripts inside pages are not minified (html.minify.js)"
+			]
+		);
+
+		// Nothing to say when the minification of code is off.
+		let loaded = site.config(r#", "html": { "minify": { "js": false } }"#);
+		assert!(run_build(&loaded).unwrap().warnings.is_empty());
+	}
+
+	#[test]
 	fn on_error_decides_what_a_failing_stage_does() {
 		let page = "<p title=\"&unknown;\">x</p>";
 		let site = Site::new("on-error");
 		site.write("src/a.html", page);
 
 		// silent: the format stage is skipped and the serialized text flows on.
-		let loaded = site.config("");
+		// (`minify` is off: a build without the esbuild executable says so, and that is
+		// not what this test is about.)
+		let loaded = site.config(r#", "html": { "minify": false }"#);
 		let report = run_build(&loaded).unwrap();
 		assert!(report.warnings.is_empty());
 		assert_eq!(site.read("out/a.html"), page);
 
-		let loaded = site.config(r#", "html": { "onError": "warning" }"#);
+		let loaded = site.config(r#", "html": { "onError": "warning", "minify": false }"#);
 		let report = run_build(&loaded).unwrap();
 		assert_eq!(report.warnings.len(), 1);
 		assert!(report.warnings[0].starts_with("Transform 'format' failed on "));

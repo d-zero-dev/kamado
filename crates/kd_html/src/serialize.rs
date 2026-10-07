@@ -488,7 +488,8 @@ mod tests {
 		// `<xmp>` is read as raw text but written with the usual escaping, as
 		// linkedom does.
 		assert_eq!(rt("<xmp><b>&amp;</xmp>"), "<xmp>&lt;b&gt;&amp;amp;</xmp>");
-		// An attribute value containing `><` no longer swallows the content.
+		// An attribute value containing `><` is part of the start tag, so the
+		// content of the element is kept (linkedom drops it).
 		assert_eq!(
 			rt("<script src=\"a>b\" data-x=\"><\">x</script>"),
 			"<script src=\"a>b\" data-x=\"><\">x</script>"

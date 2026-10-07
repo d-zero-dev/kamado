@@ -23,7 +23,7 @@ Rust のコアを持つ、オンデマンドの静的サイトジェネレータ
 }
 ```
 
-`schema.json` が全オプションの型・既定値・候補を持つ。エディタに `$schema` を読ませれば補完と検証が効く。オプションの意味は RFC の §10〜§15 にある。
+`schema.json` は、設定のキーの一覧（未知のキーの検出）と、値の型・列挙できる候補を持つ。既定値を書いているのは一部（5 個）だけで、`html.rules` / `html.includes` / `html.inject` / `html.overrides` の項目は型のない `object` として通す（中身の検証は Rust 側の設定の読み込みが行う）。エディタに `$schema` を読ませれば、キーの補完と大まかな検証が効く。オプションの意味と既定値は `docs/v3/RFC.md` の §3 以降にある。
 
 | セクション  | 内容                                                                                           |
 | ----------- | ---------------------------------------------------------------------------------------------- |
@@ -42,27 +42,49 @@ Rust のコアを持つ、オンデマンドの静的サイトジェネレータ
 
 ```sh
 kamado3 build [globs...] [--incremental] [--force] [--skip-unchanged]
-                         [--jobs <n>] [--cache-dir <dir>] [--config <file>] [--verbose]
-kamado3 server           [--config <file>] [--verbose]
+                         [--jobs <n|auto>] [--cache-dir <dir>] [-c, --config <file>] [--verbose]
+kamado3 server           [--cache-dir <dir>] [-c, --config <file>] [--verbose]
+kamado3 --help           (-h)
 ```
 
-- `build` は設定の対象を全部出力する。`globs` を渡すとその入力だけ。`--incremental` は前回から変わっていないものを飛ばす（`--force` で無視）。
+- `--config` / `-c` を省略すると、カレントディレクトリの `kamado.config.jsonc` を使う。`--cache-dir` は差分ビルドの manifest などの置き場を変える（`build` と `server` の両方）。
+- `build` は設定の対象を全部出力する。`globs` を渡すとその入力だけ。`--incremental` は前回から変わっていないものを飛ばす（`--force` で無視）。`--jobs` は並列度（JSX の描画のワーカーと Rust のスレッドの数）で、`auto`（既定）は使える CPU の数から決める。
 - `server` はリクエストごとに依存ファイルを stat し、変わっていなければ前回の結果を返す。ファイルは書き出さない。ライブリロードはない。変更したコンポーネントはワーカーを作り直して反映する。
 
 ## プログラムから
 
 ```ts
+import path from 'node:path';
+
 import { build, start } from 'kamado-v3';
 
-const report = await build('kamado.config.jsonc', { incremental: true });
+// Both take the absolute path of the config file, not an object.
+const config = path.resolve('kamado.config.jsonc');
+
+const report = await build(config, { incremental: true });
 console.log(report.pages.length);
 
-const server = await start('kamado.config.jsonc');
+const server = await start(config);
 console.log(server.location);
 await server.close();
 ```
 
-`build()` のオプションは CLI のフラグと同じ（`incremental` / `force` / `skipUnchanged` / `targets` / `jobs` / `cacheDir`）。`report` は各ページの URL・入出力のパス・状態（`built` / `cached` / …）・メタデータを持つ。
+`build()` と `start()` の第 1 引数は、設定ファイルの**絶対パス**（相対パスの基準になるディレクトリが設定ファイルの場所のため）。`build()` のオプションは CLI のフラグと同じ（`incremental` / `force` / `skipUnchanged` / `targets` / `jobs` / `cacheDir`）。`report` は各ページの URL・入出力のパス・状態（`built` / `cached` / …）・メタデータを持つ。
+
+## 対応プラットフォーム
+
+Rust のアドオン（`.node`）を使うので、プラットフォームごとにビルドが要る。CI（`.github/workflows/rust.yml`）がビルドとテストをするのは次の 3 つ。
+
+| プラットフォーム          | 状態                                         |
+| ------------------------- | -------------------------------------------- |
+| macOS arm64               | CI で確認（`macOS-latest`）                  |
+| Linux x64（glibc）        | CI で確認（`ubuntu-latest`）                 |
+| Linux arm64（glibc）      | CI で確認（`ubuntu-24.04-arm`）              |
+| macOS x64                 | 対象だが CI では確認していない               |
+| Linux x64 / arm64（musl） | 対象だが CI では確認していない               |
+| Windows（ネイティブ）     | 非対応（WSL 上の Linux は Linux として扱う） |
+
+Node は 24.11 以上（`engines`）。
 
 ## 開発
 

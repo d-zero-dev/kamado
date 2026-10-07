@@ -1,6 +1,6 @@
 # kamado v3 RFC
 
-状態: **合意済み**。17 章の論点はユーザーが確認して確定した（`Html` 型の実体だけは実装して測ってから決める）。仕様の変更は、この文書を更新してから実装に反映する。
+状態: **合意済み**。17 章の論点はユーザーが確認して確定した（`Html` 型の実体は、実装して測ったうえで `Markup` クラスに決めた）。仕様の変更は、この文書を更新してから実装に反映する。
 
 関連: `docs/v3/spike-results.md`（設計判断の根拠にした実測結果）。
 
@@ -210,17 +210,17 @@ YAML のサブセット: ブロック / フローのマップとシーケンス�
 TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コンパイル後の JS は Node のワーカーが読み込んで実行する。**React・仮想 DOM は使わない**。
 
 - 要素は文字列の連結になる。静的な部分木はモジュールの定数に巻き上げる。
-- 式の値の描画: 文字列・数値は**エスケープ**して出す。コンポーネントの戻り値（`Html` 型。内部は文字列のラッパー）はそのまま出す。配列は平坦化して連結する。`null` / `undefined` / `false` / `true` は出さない。`0` は `"0"`。
+- 式の値の描画: 文字列・数値は**エスケープ**して出す。コンポーネントの戻り値（ランタイムの `Markup` クラス。文字列のラッパー）はそのまま出す。配列は平坦化して連結する。`null` / `undefined` / `false` / `true` は出さない。`0` は `"0"`。
 - 属性: `className` → `class`、`htmlFor` → `for`、`style` はオブジェクト → `prop: value;` 形式（ケバブケース、数値には React と同じ unitless の表に従い `px` を付ける）、真偽値は属性の有無、`null` / `undefined` / `false` は出さない、`dangerouslySetInnerHTML={{ __html }}` は生で出す。`key` と `ref` は無視する。関数値（`onClick` 等）は**警告して無視**する。
 - 空要素（`br` `img` `input` `meta` `link` `hr` 等）は閉じタグを出さない。`<script>` と `<style>` の子はエスケープしない。
 - JSX の空白の規則は React / TypeScript の `jsx` 変換と同じ（行頭行末の空白と改行の除去、空行の除去、`{" "}` で明示）。
-- **React との意図した違い**: ①`<html static>` の中でだけ、属性 `on*` の**文字列**をそのまま属性として出す（React は全部捨てる。テンプレートから移した静的なページは `onclick="..."` を持つ）。関数と、static でない描画では捨てる。②`<html static>`（または、`<html>` を持たないページの `meta.kdStatic: true`）は、テンプレートの書いた順を保つモード。`<head>` の `title` / `meta` / `link` / `script` を持ち上げず（`<head hoist={false}>` ならこれだけ）、`form` / `input` / `button` の属性を書いた順で出す。`html` と `head` の子はこの目的で遅延評価（thunk）にコンパイルされる。③`styleOf(text)`（`kamado-v3/jsx`）は CSS 文字列を `style` のオブジェクトにする。
+- **React との意図した違い**: ①`<html static>` の中でだけ、属性 `on*` の**文字列**をそのまま属性として出す（React は全部捨てる。テンプレートから移した静的なページは `onclick="..."` を持つ）。関数と、static でない描画では捨てる。②`<html static>`（または、`<html>` を持たないページの `meta.kdStatic: true`）は、テンプレートの書いた順を保つモード。`<head>` の `title` / `meta` / `link` / `script` を持ち上げず（`<head hoist={false}>` ならこれだけ）、`form` / `input` / `button` の属性を書いた順で出す。`html` と `head` の子はこの目的で遅延評価（thunk）にコンパイルされる。③`styleOf(text)`（`kamado-v3/jsx` が公開する、ユーザー向けの名前。もう 1 つは `html(text)`）は CSS 文字列を `style` のオブジェクトにする。
 - **描画結果の文字列は、そのまま出力されず、Rust の HTML 後処理（再パース → 融合印字）を通る**。したがって、エスケープの細かい形（`&#x27;` と `&#39;` など）は後処理で正規化され、出力に影響しない。
 
 **コンパイル結果の置き場**: `build` は、ページ（TSX）を 1 ファイル 1 モジュールとして書き出さず、**連続する 64 ページを 1 つの「チャンク」ファイル（`node_modules/.cache/kamado-v3/jsx/__chunks__/<hash>.mjs`）の関数**にまとめる。チャンクは runtime とページが import するモジュールを 1 回だけ import し、`pages[i]()` がそのページの export（`default`）を返す。ページが import するコンポーネントやレイアウトは、従来どおり 1 モジュール 1 ファイルで、全ページで共有する。
 
 - なぜ: ファイルの作成と Node の `import()` は、ページ数が数万になるとビルドの大半を占める。`import()` はファイルを開いて解決しリンクする。開発に使っている macOS では `open` が 70〜200µs かかる。チャンクにすると、ページを読み込む CPU 時間は 1 ページあたり約 440µs から約 30µs になる（20000 ページのフルビルドで 9s から 7s）。HTML の出力は、チャンクにしても 20013 ファイルがバイト一致する（その後、描画結果をバッチごとに `feed` で渡すようにして 6.2s）。
-- 副作用: チャンクはページが import するモジュールを先頭でまとめて import するので、同じチャンクのどれかのページの import が失敗すると、チャンクの全ページが失敗し、エラーは最初にチャンクを読んだページの名前で出る（壊れたページとは限らない）。前回のチャンクは「今回使わないもの」をすべて消すので、同じ `cacheDir` で 2 つのビルドを同時に走らせてはいけない。ページが別のモジュールから import されている場合、そのページは関数とモジュールの 2 つの実体になる。
+- 副作用: チャンクはページが import するモジュールを先頭でまとめて import するので、同じチャンクのどれかのページの import が失敗すると、チャンクの全ページが失敗し、エラーは最初にチャンクを読んだページの名前で出る（壊れたページとは限らない）。前回のチャンクは「今回使わないもの」をすべて消す。コンパイル結果の置き場は `build.cacheDir` に関係なく**常に `<プロジェクトのルート>/node_modules/.cache/kamado-v3/jsx`**（`node_modules` を辿ってパッケージを解決させるため、プロジェクトの中に置く）なので、同じプロジェクトで 2 つのビルド（開発サーバーを含む）を同時に走らせると互いのファイルを消し合って壊れる。また `node_modules` に書き込めなければ、JSX ページのビルドはできない。ページが別のモジュールから import されている場合、そのページは関数とモジュールの 2 つの実体になる。
 - 取り込みの意味: `import { a } from "m"` は、チャンクが取り込んだ `m` の名前空間から `const { a } = ...` で取り出す（ESM の巻き上げと同じく、ページの先頭で）。ページの `export default` は関数の `default`、それ以外の `export` は捨てる（ホストは読まない。宣言したものはローカルに残る）。
 - チャンクにできないページ（`export * from` / `export { a } from` の再 export、`import.meta`、副作用だけの `import "x"`、hashbang）は、従来どおり 1 ファイルのモジュールとして書き出す。ページが別のモジュールから import されている場合も、そのページはモジュールとして書き出す。
 - 開発サーバーはチャンクを使わない（1 ページずつ、モジュールのファイルから描画する）。環境変数 `KD_PAGE_CHUNKS=0` で `build` でも使わなくなる（出力の比較用）。
@@ -266,7 +266,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 4. `html.rules`（宣言的な DOM 操作）
 5. `html.inject`
 6. `imageSizes`
-7. 印字（`doctype`、`format`、`minify`、`entities`、`lineBreak`）。DOM を戻す書き方は `serializer`、書き出すバイト列の文字コードは `encoding`（§9.4、§9.5）。`<style>` と `style` 属性の CSS は Rust の CSS 圧縮、`<script>` は esbuild（子プロセス、内容のハッシュでキャッシュ）
+7. 印字（`doctype`、`format`、`minify`、`entities`、`lineBreak`）。DOM を戻す書き方は `serializer`、書き出すバイト列の文字コードは `encoding`（§9.5、§9.6）。`<style>` と `style` 属性の CSS は Rust の CSS 圧縮、`<script>` は esbuild（子プロセス、内容のハッシュでキャッシュ）
 8. 書き出し
 
 `<script type="application/ld+json">`（`importmap`、`speculationrules`、`json` で終わる type も同じ）の中身は、v2 と同じく prettier の JSON 整形がそのまま出力に残る（オブジェクトは `{ "a": 1 }` の 1 行、`{` の直後で改行されていれば展開、複数のオブジェクトを持つ配列は展開、数値は `1.50` → `1.5`、文字列は二重引用符、末尾カンマなし）。コメントを含む JSON と JSON として読めない中身は整形せず、書かれたまま出す（prettier も後者はそのまま出す）。
@@ -342,7 +342,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 - `entities`: `"all"` は ASCII 以外を名前付き文字参照（小文字を優先）に。オブジェクトは指定した文字だけ。`<script>` / `<style>` の中は変更しない。
 - `imageSizes`: `img` と `picture > source` に `width` / `height` を付ける（png / jpg / jpeg / webp / avif / svg）。出力ディレクトリ基準で解決し、外部 URL・`data:` URI・パスが出力ディレクトリを出るものは対象外。`exclude` は glob（ページ）、`keepAuthored: true` は手書きの値を残す。読んだ画像は依存として記録する。
 
-### 9.4 `html.encoding`
+### 9.5 `html.encoding`
 
 ページのバイト列の文字コード。`"utf8"`（既定）と `"shift_jis"`（別名 `shift-jis` `sjis` `cp932` `windows-31j`。Windows の Shift_JIS = CP932）。ページごとに `html.overrides` の `pages`（出力 URL の glob）で変えられる。ビルドだけに効き、開発サーバーは UTF-8 で返す。CSS と JS は常に UTF-8。
 
@@ -351,7 +351,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 - Shift_JIS にない文字は文字参照にする: 名前があれば名前（`©` → `&copy;`）、なければ番号（`〜` U+301C → `&#12316;`）。`<script>` と `<style>` の中は参照が文字として読まれるので `?`（`iconv-lite` と同じ）。表は CP932（NEC 行 13、IBM 拡張を含む）で、`iconv-lite` の `CP932` と BMP 全域で同じ結果（私用領域は変換しない。`¥` は 0x5C、`‾` は 0x7E）。
 - 表は `scripts/gen-cp932-table.mjs` が Node のデコーダ（WHATWG `shift_jis`）から作る。
 
-### 9.5 `html.serializer`
+### 9.6 `html.serializer`
 
 DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中間 HTML と同じ書き方で、v2 とバイト一致させるためのもの。`"spec"` は HTML 標準（ブラウザ、jsdom、parse5）の書き方で、d-zero/builder の出力と揃える。違い:
 
@@ -378,6 +378,7 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 - manifest: v2 と同じ場所（`<os.tmpdir()>/kamado/<basename>-<hash>/`、`--cache-dir` で上書き）。形式は**バイナリ**（`build-manifest.bin`、version 3）。文字列と（パス、指紋）の組を 1 回だけ書き、エントリは番号で参照する。末尾の SHA-256 で切り詰めや破損を検出し、読めなければ全ビルド。10 万ページでも数十 MB に収まる（JSON では数百 MB になる）。内容を見たいときは `Manifest::to_json`。
 - plan cache（`plan-cache.bin`、同じディレクトリ）: ページごとに、ファイルと sidecar の指紋とメタを覚える。ファイルの size と mtime が記録と同じなら、読まず・ハッシュせず・パースせずにキャッシュのメタを使う（本文はそのページをビルドするときに読む）。何も変わらない差分ビルドは、ファイルごとに stat だけで終わる。`--force` は使わない。
 - 各入力と依存の指紋は `(size, mtime_ns)` を先に比較し、変わったときだけ SHA-256 を取る（`--force` で全て再計算）。ハッシュが一致すれば（early cutoff）再ビルドしない。同じ依存（レイアウトやコンポーネント）の stat は 1 ビルドで 1 回だけ。ビルド中に変更された入力は（読んだあとに書き換えられた可能性があるので）manifest に「最新」として記録せず、次のビルドでやり直す。
+- **既知の限界**: `(size, mtime_ns)` が記録と同じなら、内容は変わっていないとみなす。ファイルシステムの時計の粒度の内に、同じサイズで書き換えられた変更は検出できない（`--force` で全て再計算する）。
 - 環境ダイジェスト: 設定ファイルの内容、kamado のバージョン、`pages.overrides`、ページごとに「読んだメタのフィールド」の値。
 - 依存ゼロのファイルはスキップしない（v2 と同じ）。manifest の version 不一致・破損は全ビルド。
 
@@ -392,9 +393,11 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 
 ## 13. CLI
 
-`kamado build [globs...]`、`kamado server`。共通: `--config/-c`、`--verbose`。build: `--incremental`、`--force`、`--cache-dir <dir>`、`--skip-unchanged`、`--jobs <n|auto>`。設定エラーは赤字で表示して exit 1。進捗表示（スピナー、done/total、`Build completed in Xs`）と色分けは v2 に準じる。
+`kamado3 build [globs...]`、`kamado3 server`。共通: `--config/-c`、`--verbose`、`--cache-dir <dir>`、`--help/-h`。build: `--incremental`、`--force`、`--skip-unchanged`、`--jobs <n|auto>`（`auto` は設定の `build.jobs` と同じく既定の数）。設定エラーは赤字で表示して exit 1。進捗表示（スピナー、done/total、`Build completed in Xs`）と色分けは v2 に準じる。
 
-プログラム API: `build(config)` と `start(config)`。引数は JSONC と同じ形のオブジェクト。
+コマンド名は `kamado3`（`package.json` の `bin`。公開時に `kamado` へ戻す）。
+
+プログラム API: `build(configPath, options?)` と `start(configPath, options?)`。第 1 引数は**設定ファイル（JSONC）の絶対パス**の文字列で、オブジェクトは受け取らない（相対パスの基準になるディレクトリが設定ファイルの場所だから）。`options` は CLI のフラグに対応する（`build` は `incremental` / `force` / `skipUnchanged` / `targets` / `jobs` / `cacheDir` / `onProgress`、`start` は `verbose` / `cacheDir` / `write`）。
 
 ## 14. ビルドの出力: `build.report`
 
@@ -404,11 +407,18 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 {
 	"version": 1,
 	"pages": [
-		{ "url": "/a/", "inputPath": "…", "outputPath": "…", "meta": {}, "status": "built" },
+		{ "url": "/a/", "inputPath": "…", "outputPath": "…", "status": "built", "meta": {} },
 	],
-	"files": [{ "inputPath": "…", "outputPath": "…", "status": "cached" }],
+	// ページ以外の出力（styles / scripts）
+	"assets": [
+		{ "kind": "style", "inputPath": "…", "outputPath": "…", "status": "cached" },
+	],
+	"warnings": [],
+	"elapsedMs": 1234,
 }
 ```
+
+`status` は `built` / `cached`（差分ビルドで飛ばした）/ `unchanged`（`skipUnchanged` で、出力が同じバイト列だった）/ `skipped`（`targets` の対象外）/ `virtual`（仮想ページ。書き出さない）。`kind` は `style` / `script`。
 
 ## 15. sitemap
 
@@ -421,10 +431,12 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 
 ## 17. 論点と決定
 
-| #   | 論点                                                           | 決定                                                                              |
-| --- | -------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Q2  | `html.rules` の `pages` は出力 URL か入力パスか                | 出力 URL（`/a/b/` や `/a/b.html`）。ユーザーが見るのは URL                        |
-| Q3  | `HTML` ページ（`.html`）での JSX                               | 不可。`.html` は HTML としてのみ扱い、レイアウトだけが JSX                        |
-| Q4  | `pages.files` の既定に `.md` を含めるか                        | 含めない（v2 にもない）                                                           |
-| Q5  | `Html` 型の実体（文字列のラッパークラス / ブランド型の文字列） | 描画の実装時に実測して決める（性能に影響する）                                    |
-| Q6  | `kamado/jsx-runtime` を公開するか                              | 型だけ公開し、ランタイムは非公開（コンパイル後の JS が使う内部 API は変更しうる） |
+| #   | 論点                                                           | 決定                                                                                                                                                                               |
+| --- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q2  | `html.rules` の `pages` は出力 URL か入力パスか                | 出力 URL（`/a/b/` や `/a/b.html`）。ユーザーが見るのは URL                                                                                                                         |
+| Q3  | `HTML` ページ（`.html`）での JSX                               | 不可。`.html` は HTML としてのみ扱い、レイアウトだけが JSX                                                                                                                         |
+| Q4  | `pages.files` の既定に `.md` を含めるか                        | 含めない（v2 にもない）                                                                                                                                                            |
+| Q5  | `Html` 型の実体（文字列のラッパークラス / ブランド型の文字列） | 文字列のラッパークラス（ランタイムの `Markup`）。型は同梱しない（§7.2）                                                                                                            |
+| Q6  | `kamado-v3/jsx` を公開するか                                   | `./jsx` として export する。ユーザー向けの名前は `html` と `styleOf` だけで、それ以外（コンパイル後の JS が使う `Markup` `el` `k` `c` `a` `render` など）は内部 API で、変更しうる |
+
+Q1 は欠番（番号の飛びで、内容は記録に残っていない）。

@@ -3,8 +3,8 @@
  *
  * Resolution order: `KAMADO_NATIVE_ADDON` (an explicit file), then the
  * workspace build output (`target/release`, then `target/debug`) relative
- * to this package. Platform packages that ship the prebuilt library are
- * looked up last. `process.dlopen` loads a shared library of any file name,
+ * to this package. Those are the only candidates: prebuilt libraries in
+ * platform packages are not looked up. `process.dlopen` loads a shared library of any file name,
  * so the Cargo artifact is used as is, without copying it to `.node`.
  */
 import { existsSync } from 'node:fs';

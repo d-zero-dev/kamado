@@ -530,6 +530,14 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		plan.warnings.push(format!("plan cache: {e}"));
 	}
 	lap(&mut lap_at, "plan");
+	// Without the executable the code inside pages is left as it is. That is not an
+	// error, but a site built that way is larger than the one a developer sees.
+	if options.esbuild_binary.is_none() && config.html.minify.as_ref().is_some_and(|m| m.js) {
+		plan.warnings.push(
+			"the esbuild executable was not found: the scripts inside pages are not minified (html.minify.js)"
+				.to_owned(),
+		);
+	}
 	let targets = compile_globs(&options.targets)?;
 	let env = page_env(loaded, options);
 	let pipeline = html::Pipeline::compile(config)?;
@@ -1075,8 +1083,13 @@ impl Prepared {
 						stale.entries.remove(&result.output_path);
 					}
 				}
-				// Best effort: the build's own error is what the caller needs.
-				let _ = stale.save(&manifest_path);
+				// The build's own error is what the caller needs, so a failure to save
+				// is not reported. But the old manifest must not stay: it claims the
+				// hashes of inputs for outputs that were rewritten, and a later build
+				// would skip them. Without it the next build is a full one.
+				if stale.save(&manifest_path).is_err() {
+					let _ = fs::remove_file(&manifest_path);
+				}
 			}
 			let error = results
 				.into_iter()

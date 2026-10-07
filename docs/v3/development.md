@@ -13,6 +13,8 @@ cargo test --locked --offline --workspace
 node scripts/check-rust-no-external-crates.mjs
 ```
 
+**前提**: `cargo test` の前に、リポジトリのルートで `yarn install` を済ませておく。一部のテストが `node_modules` の esbuild の実行ファイル（`node_modules/@esbuild/<os>-<arch>`、`crates/kd_core/src/minifiers.rs` の `esbuild_for_tests`）を呼び、無ければ「run `yarn install`」で失敗する。Node の標準機能や prettier などを比較対象（oracle）にして実行時に比べるテストもあるので、Node も要る。
+
 ツールチェーンの版は `.github/workflows/rust.yml` で固定している。`rust-toolchain.toml` は置かない。置くと、ローカルの `stable` とは別のツールチェーンが再インストールされ、環境によっては中途半端な状態で失敗する。
 
 ## クレートの構成
@@ -56,6 +58,40 @@ node packages/kamado-v3/dist/cli.js build --config path/to/kamado.config.jsonc -
 ```
 
 アドオンは `KAMADO_NATIVE_ADDON` で指定したファイル、なければ `target/release`、`target/debug` の順に探す。
+
+## 何を更新したら、何を作り直すか
+
+テーブルと golden ファイルは、v2 が使っていたライブラリ（oracle）の出力から作ってコミットしている。実行時はその依存を持たない。oracle の版を上げたら、次のスクリプトを実行して差分を確かめる（スクリプトの先頭のコメントに詳細がある）。
+
+| 契機                                                      | 実行するスクリプト                     | 書き出すもの                                                                  |
+| --------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------- |
+| `character-entities` を上げた                             | `scripts/generate-entities.mjs`        | `crates/kd_html/src/entities_table.rs`                                        |
+| `prettier` を上げた                                       | `scripts/generate-prettier-tables.mjs` | `crates/kd_html/src/print/tables.rs`（構造が変わると失敗する）                |
+| `html-minifier-terser` を上げた                           | `scripts/generate-minifier-tables.mjs` | `crates/kd_html/src/minify/tables.rs`                                         |
+| 同上                                                      | `scripts/generate-minify-golden.mjs`   | `crates/kd_html/tests/minify_golden/`                                         |
+| `cssnano` を上げた（v2 の style-compiler 経由で入る）     | `scripts/generate-css-golden.mjs`      | `crates/kd_css/tests/golden/`                                                 |
+| 同上                                                      | `scripts/generate-css-rule-tests.mjs`  | `crates/kd_css/tests/rules.rs`                                                |
+| 同上、または色名・プロパティ名の元データ（`mdn-data` 等） | `scripts/generate-css-tables.mjs`      | `crates/kd_css/src/color_table.rs`、`property_table.rs`                       |
+| `esbuild` を上げた                                        | `scripts/generate-jsx-entities.mjs`    | `crates/kd_js/src/jsx_entities.rs`                                            |
+| `react` / `react-dom` を上げた                            | `scripts/generate-jsx-tables.mjs`      | `packages/kamado-v3/src/jsx/attr-table.ts`、`crates/kd_js/src/react_attrs.rs` |
+| Node を上げた（型の除去の挙動が変わりうる）               | `scripts/generate-kd-js-golden.mjs`    | `crates/kd_js/tests/ts_golden/`                                               |
+| Node を上げた（Shift_JIS のデコーダ）                     | `scripts/gen-cp932-table.mjs`          | `crates/kd_html/src/cp932_table.rs`                                           |
+| HTML の golden のケースを足した（`linkedom` が oracle）   | `scripts/generate-html-golden.mjs`     | `crates/kd_html/tests/golden/`                                                |
+
+生成したファイルをコミットする前に、`git diff` で変化が oracle の更新によるものか確かめる。生成したあとに `cargo test --locked --offline --workspace` を通す。
+
+ランダム入力の差分テスト（`scripts/fuzz-*.mjs`）は、コーパスをコミットしない（シードで決まる）。上のテーブルを作り直したとき、または `kd_html` / `kd_css` / `kd_js` の挙動を変えたときに、その分野のものを回す。各スクリプトの先頭に、対応する `--ignored` のテストと環境変数がある。
+
+| 分野                  | スクリプト                                                                               | 対応する検証                                  |
+| --------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------- |
+| HTML のパース・直列化 | `fuzz-html-differential.mjs`（`html-fuzz.mjs` が生成器）                                 | `crates/kd_html/tests/differential.rs`        |
+| prettier の印字       | `fuzz-html-print.mjs` / `fuzz-html-json.mjs` / `fuzz-html-pipeline.mjs`                  | `crates/kd_html/tests/print_differential.rs`  |
+| 圧縮                  | `fuzz-html-minify.mjs` / `fuzz-html-minify-attrs.mjs`                                    | `crates/kd_html/tests/minify_differential.rs` |
+| HTML の連鎖全体       | `fuzz-html-chain.mjs`                                                                    | `crates/kd_core` の `chain_matches_v2`        |
+| CSS                   | `fuzz-css.mjs` と `generate-css-oracle.mjs`、`check-css.mjs`                             | `crates/kd_css/tests/differential.rs`         |
+| JS / TS / JSX         | `check-kd-js-js.mjs` / `check-kd-js-types.mjs` / `check-kd-js-jsx.mjs`（`jsx-fuzz.mjs`） | 各スクリプトを直接実行                        |
+
+`scripts/` と `benchmarks/` は、ルートの `yarn lint:eslint` の対象外（prettier と cspell だけが見る）。
 
 ## 比較ハーネスとベンチマーク
 

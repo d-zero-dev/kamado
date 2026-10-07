@@ -111,6 +111,9 @@ export function compareTrees(baselineDir: string, candidateDir: string): Compari
 	return {
 		counts,
 		results,
-		ok: counts.different + counts.missing + counts.extra + counts.larger === 0,
+		// Two empty trees agree on nothing: that is a failed comparison, not a pass.
+		ok:
+			results.length > 0 &&
+			counts.different + counts.missing + counts.extra + counts.larger === 0,
 	};
 }

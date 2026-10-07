@@ -5,13 +5,14 @@ import path from 'node:path';
 import { parseArgs, styleText } from 'node:util';
 
 import { build } from './build.js';
+import { parseJobs } from './jobs.js';
 import { start } from './server/start.js';
 import { summarize } from './summary.js';
 
 const USAGE = `Usage:
-  kamado build [globs...] [--incremental] [--force] [--skip-unchanged]
-                          [--jobs <n>] [--cache-dir <dir>] [--config <file>] [--verbose]
-  kamado server           [--config <file>] [--verbose]
+  kamado3 build [globs...] [--incremental] [--force] [--skip-unchanged]
+                           [--jobs <n|auto>] [--cache-dir <dir>] [--config <file>] [--verbose]
+  kamado3 server           [--config <file>] [--cache-dir <dir>] [--verbose]
 
 The config file defaults to ./kamado.config.jsonc.`;
 
@@ -88,10 +89,7 @@ async function main(argv: readonly string[]): Promise<number> {
 	switch (command) {
 		case 'build': {
 			const configPath = resolveConfig(values.config);
-			const jobs = values.jobs === undefined ? undefined : Number(values.jobs);
-			if (jobs !== undefined && (!Number.isInteger(jobs) || jobs < 1)) {
-				throw new Error(`--jobs must be a positive integer: ${values.jobs}`);
-			}
+			const jobs = parseJobs(values.jobs);
 			const progress = progressLine();
 			let report;
 			try {

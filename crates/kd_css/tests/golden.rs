@@ -34,6 +34,15 @@ fn every_case_gives_cssnanos_answer_or_a_listed_deliberate_one() {
 			)
 		})
 		.collect();
+	// A case cssnano rejected has `__ERROR__` as its answer, and only the idempotence of
+	// ours is checked. If the generator broke (a missing dependency throws for every case),
+	// all answers would be `__ERROR__` and this test would pass on nothing.
+	let rejected = cases.iter().filter(|(_, out)| out == "__ERROR__").count();
+	assert!(
+		rejected <= 30,
+		"{rejected} of {} cases were rejected by cssnano: regenerate the corpus and look at why",
+		cases.len()
+	);
 	let refs: Vec<(&str, &str)> = cases
 		.iter()
 		.map(|(a, b)| (a.as_str(), b.as_str()))
