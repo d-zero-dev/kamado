@@ -1,4 +1,4 @@
-/* eslint-disable import-x/no-extraneous-dependencies, @typescript-eslint/no-unused-vars, unicorn/prefer-single-call, no-console, unicorn/no-array-for-each, unicorn/no-lonely-if -- a migration helper to be read and changed per project, not a library */
+/* eslint-disable import-x/no-extraneous-dependencies, @typescript-eslint/no-unused-vars, unicorn/prefer-single-call, no-console, unicorn/no-lonely-if -- a migration helper to be read and changed per project, not a library */
 /**
  * A first pass of Pug to TSX for a migration to kamado v3 (docs/v3/MIGRATION.md).
  *
@@ -63,6 +63,7 @@ for (const [prop, attr, kind] of PROPS) {
 	kindOf.set(prop, kind);
 }
 const GLOBALS = new Set([
+	'props',
 	'undefined',
 	'null',
 	'true',
@@ -76,6 +77,23 @@ const GLOBALS = new Set([
 	'Date',
 	'console',
 	'NaN',
+	'Infinity',
+	'Boolean',
+	'Symbol',
+	'BigInt',
+	'RegExp',
+	'Error',
+	'Map',
+	'Set',
+	'Intl',
+	'parseInt',
+	'parseFloat',
+	'isNaN',
+	'isFinite',
+	'encodeURIComponent',
+	'decodeURIComponent',
+	'encodeURI',
+	'decodeURI',
 ]);
 // names every component gets from props
 const PROP_NAMES = new Set([
@@ -89,7 +107,16 @@ const PROP_NAMES = new Set([
 	'nav',
 	'meta',
 ]);
+// The names of the data files (without the extension) are variables in Pug and keys of `data`.
 const DATA_VARS = new Set(['data', 'blocks']);
+try {
+	for (const f of readdirSync(path.join(libs, 'data'))) {
+		const key = f.replace(/\.[^.]+$/, '');
+		if (/^[A-Z_$][\w$]*$/i.test(key) && !f.startsWith('.')) DATA_VARS.add(key);
+	}
+} catch {
+	// a project without a data directory
+}
 
 /**
  *
@@ -97,48 +124,108 @@ const DATA_VARS = new Set(['data', 'blocks']);
  * @param declared
  */
 function free(expr, declared) {
-	const names = new Set();
 	let ast;
 	try {
 		ast = acorn.parseExpressionAt(`(${expr})`, 0, { ecmaVersion: 'latest' });
 	} catch (error) {
 		throw new Error(`cannot parse expression: ${expr}: ${error.message}`);
 	}
-	const walk = (node, scope) => {
-		if (!node || typeof node.type !== 'string') return;
-		switch (node.type) {
-			case 'Identifier': {
-				if (!scope.has(node.name)) names.add(node.name);
-				return;
+	const names = new Set();
+	walkFree(ast, new Set(declared), names);
+	return names;
+}
+
+/**
+ * The free variables of a statement (an `if`, a loop, a block): what it reads
+ * and does not declare itself.
+ * @param node A statement of an acorn program
+ * @param declared Names that are known
+ */
+function freeStatement(node, declared) {
+	const names = new Set();
+	walkFree(node, new Set(declared), names);
+	return names;
+}
+
+/**
+ * The names a node assigns to (`x = 1`, `x += 1`, `x++`).
+ * @param node
+ * @param out
+ */
+function assignedNames(node, out = new Set()) {
+	if (!node || typeof node.type !== 'string') return out;
+	if (node.type === 'AssignmentExpression' && node.left.type === 'Identifier') {
+		out.add(node.left.name);
+	}
+	if (node.type === 'UpdateExpression' && node.argument.type === 'Identifier') {
+		out.add(node.argument.name);
+	}
+	for (const key of Object.keys(node)) {
+		const v = node[key];
+		if (Array.isArray(v)) for (const c of v) assignedNames(c, out);
+		else if (v && typeof v.type === 'string') assignedNames(v, out);
+	}
+	return out;
+}
+
+/**
+ * Collects into `names` the identifiers below `node` that `scope` does not hold.
+ * @param node
+ * @param scope A set of names, which declarations in the node add to
+ * @param names
+ */
+function walkFree(node, scope, names) {
+	if (!node || typeof node.type !== 'string') return;
+	switch (node.type) {
+		case 'Identifier': {
+			if (!scope.has(node.name)) names.add(node.name);
+			return;
+		}
+		case 'MemberExpression': {
+			walkFree(node.object, scope, names);
+			if (node.computed) walkFree(node.property, scope, names);
+			return;
+		}
+		case 'Property': {
+			if (node.computed) walkFree(node.key, scope, names);
+			walkFree(node.value, scope, names);
+			return;
+		}
+		case 'VariableDeclaration': {
+			for (const d of node.declarations) for (const n of bindingNames(d.id)) scope.add(n);
+			for (const d of node.declarations) walkFree(d.init, scope, names);
+			return;
+		}
+		case 'FunctionDeclaration':
+		case 'ArrowFunctionExpression':
+		case 'FunctionExpression': {
+			if (node.type === 'FunctionDeclaration' && node.id) scope.add(node.id.name);
+			const inner = new Set(scope);
+			for (const p of node.params) for (const n of bindingNames(p)) inner.add(n);
+			walkFree(node.body, inner, names);
+			return;
+		}
+		case 'BlockStatement':
+		case 'ForStatement':
+		case 'ForOfStatement':
+		case 'ForInStatement': {
+			// A declaration inside belongs to the block.
+			const inner = new Set(scope);
+			for (const key of Object.keys(node)) {
+				const v = node[key];
+				if (Array.isArray(v)) for (const c of v) walkFree(c, inner, names);
+				else if (v && typeof v.type === 'string') walkFree(v, inner, names);
 			}
-			case 'MemberExpression': {
-				walk(node.object, scope);
-				if (node.computed) walk(node.property, scope);
-				return;
-			}
-			case 'Property': {
-				if (node.computed) walk(node.key, scope);
-				walk(node.value, scope);
-				return;
-			}
-			case 'ArrowFunctionExpression':
-			case 'FunctionExpression': {
-				const inner = new Set(scope);
-				for (const p of node.params) if (p.type === 'Identifier') inner.add(p.name);
-				walk(node.body, inner);
-				return;
-			}
-			default: {
-				for (const key of Object.keys(node)) {
-					const v = node[key];
-					if (Array.isArray(v)) v.forEach((c) => walk(c, scope));
-					else if (v && typeof v.type === 'string') walk(v, scope);
-				}
+			return;
+		}
+		default: {
+			for (const key of Object.keys(node)) {
+				const v = node[key];
+				if (Array.isArray(v)) for (const c of v) walkFree(c, scope, names);
+				else if (v && typeof v.type === 'string') walkFree(v, scope, names);
 			}
 		}
-	};
-	walk(ast, new Set(declared));
-	return names;
+	}
 }
 
 /**
@@ -146,9 +233,14 @@ function free(expr, declared) {
  * @param expr
  */
 function mapExpr(expr) {
-	return expr
-		.replaceAll(/\bpkg\.production\./g, 'site.')
-		.replaceAll(/\bfilters\.date\(/g, 'formatDate(');
+	return (
+		expr
+			.replaceAll(/(?<![.\w$])block(?![\w$])/g, 'props.children')
+			// `locals[...]` reads a data file by a name that is not an identifier.
+			.replaceAll(/(?<![.\w$])locals(?=\[)/g, 'props.data')
+			.replaceAll(/\bpkg\.production\./g, 'site.')
+			.replaceAll(/\bfilters\.date\(/g, 'formatDate(')
+	);
 }
 
 const converted = new Map();
@@ -194,6 +286,21 @@ function isStringLiteral(source) {
 }
 
 /**
+ * Whether the code only declares (`const`, `let`, `var`, `function`).
+ * @param code
+ */
+function declaresOnly(code) {
+	try {
+		const program = acorn.parse(mapExpr(code), { ecmaVersion: 'latest' });
+		return program.body.every(
+			(n) => n.type === 'VariableDeclaration' || n.type === 'FunctionDeclaration',
+		);
+	} catch {
+		return false;
+	}
+}
+
+/**
  * pug-code-gen's `tagCanInline`: only text without a line break and inline tags inside.
  * @param nodes
  */
@@ -201,6 +308,8 @@ function canInline(nodes) {
 	return nodes.every(
 		(k) =>
 			(k.type === 'Text' && !/\n/.test(k.val)) ||
+			// `time= x` on one line is inline; `= x` on a line of its own is not.
+			(k.type === 'Code' && k.isInline === true) ||
 			(k.type === 'Tag' && PUG_INLINE.has(k.name)),
 	);
 }
@@ -258,6 +367,8 @@ function newContext(file) {
 		used: new Set(),
 		imports: new Map(),
 		rt: new Set(),
+		assigned: new Set(),
+		shadowed: new Set(),
 		named: new Map(),
 		mixins: new Map(),
 		scope: [],
@@ -330,7 +441,9 @@ function componentText(ctx, name, body, exported, params) {
 	}
 	if (external.length > 0) {
 		lines.push('\tconst _vars = { ...(props as any).meta, ...props } as any;');
-		lines.push(`\tconst { ${external.join(', ')} } = _vars;`);
+		lines.push(
+			`\t${external.some((n) => ctx.assigned.has(n)) ? 'let' : 'const'} { ${external.join(', ')} } = _vars;`,
+		);
 	}
 	for (const h of ctx.hoisted) lines.push(`\t${h}`);
 	lines.push(`\treturn (\n${body}\n\t);`);
@@ -386,10 +499,26 @@ function convertFile(file) {
 		// A file of mixins: one exported component per mixin.
 		const contexts = [];
 		const parts = [];
+		// A mixin of the file may call another one of it, whichever comes first.
+		const sameFile = new Map();
+		for (const def of defs) {
+			sameFile.set(component(def.name), {
+				name: component(def.name),
+				params: mixinParams(def.args),
+			});
+		}
+		// What the file includes at its top level (other files of mixins) is seen by
+		// every mixin of it.
+		const top = newContext(file);
+		for (const n of ast.nodes) if (n.type === 'Include') node(n, top, 0);
 		for (const def of defs) {
 			const params = mixinParams(def.args);
 			info.mixins.push({ name: component(def.name), params });
 			const ctx = newContext(file);
+			for (const [k, v] of top.mixins) ctx.mixins.set(k, v);
+			for (const [k, v] of top.named) ctx.named.set(k, v);
+			for (const [k, v] of top.imports) ctx.imports.set(k, v);
+			for (const [k, v] of sameFile) ctx.mixins.set(k, v);
 			for (const p of params) {
 				if (p.pattern) for (const n of p.names) ctx.declared.add(n);
 				else ctx.declared.add(p.name);
@@ -397,6 +526,29 @@ function convertFile(file) {
 			const body = block(def.block.nodes, ctx, 1);
 			contexts.push(ctx);
 			parts.push(componentText(ctx, component(def.name), body, 'export', params));
+		}
+		// What the file writes besides its mixins is a component of its own (the
+		// default export), which is what including the file shows.
+		const rest = ast.nodes.filter(
+			(n) =>
+				!(n.type === 'Mixin' && !n.call) &&
+				!['Include', 'Comment', 'BlockComment'].includes(n.type) &&
+				!(n.type === 'Code' && !n.buffer),
+		);
+		if (rest.length > 0) {
+			const ctx = newContext(file);
+			for (const [k, v] of top.mixins) ctx.mixins.set(k, v);
+			for (const [k, v] of top.named) ctx.named.set(k, v);
+			for (const [k, v] of top.imports) ctx.imports.set(k, v);
+			for (const [k, v] of sameFile) ctx.mixins.set(k, v);
+			const body = block(
+				ast.nodes.filter((n) => !(n.type === 'Mixin' && !n.call)),
+				ctx,
+				1,
+			);
+			contexts.push(ctx);
+			parts.push(componentText(ctx, `${pascal(file)}Body`, body, 'export default', []));
+			info.hasBody = true;
 		}
 		text = importLines(...contexts).join('\n') + '\n\n' + parts.join('\n\n') + '\n';
 	} else {
@@ -539,8 +691,10 @@ function children(nodes, ctx, depth) {
 	const out = [];
 	for (let i = 0; i < nodes.length; i++) {
 		const n = nodes[i];
-		if (n.type === 'Code' && !n.buffer && ctx.nesting === 0) {
-			// Pug code is visible to the rest of the template: it goes to the top.
+		if (n.type === 'Code' && !n.buffer && ctx.nesting === 0 && declaresOnly(n.val)) {
+			// A declaration is visible to the rest of the template: it goes to the
+			// top. An assignment stays where it is, so that what comes before it
+			// sees the old value (`- x = true` ... `- x = false` ...).
 			ctx.hoisted.push(useStmt(n.val, ctx));
 			continue;
 		}
@@ -656,16 +810,27 @@ function useStmt(stmt, ctx) {
 				read(e);
 			}
 		} else {
-			// An `if`, a loop or a function would be left with free variables that
-			// nothing looked at.
-			throw new Error(
-				`cannot convert a ${node.type} in code: ${mapped.slice(node.start, node.start + 80)}`,
-			);
+			// An `if`, a loop, a function: what it reads and does not declare is free.
+			if (node.type === 'FunctionDeclaration' && node.id) {
+				local.push(node.id.name);
+				ctx.declared.add(node.id.name);
+			}
+			for (const n of freeStatement(node, local)) ctx.used.add(n);
+			for (const n of assignedNames(node)) ctx.assigned.add(n);
 		}
 	}
-	const prefix = declare.map((n) => `let ${n}: any;`).join(' ');
+	// A variable Pug code assigns is visible to the rest of the template, wherever the
+	// assignment is: its `let` goes to the top of the component.
+	for (const n of declare) {
+		// A prop that the code assigns is a local that starts as the prop, and what
+		// an included file or a mixin gets (it would read the prop otherwise).
+		if (PROP_NAMES.has(n)) ctx.shadowed.add(n);
+		ctx.hoisted.push(
+			PROP_NAMES.has(n) ? `let ${n}: any = (props as any).${n};` : `let ${n}: any;`,
+		);
+	}
 	const text = mapped.endsWith(';') || mapped.endsWith('}') ? mapped : `${mapped};`;
-	return prefix ? `${prefix} ${text}` : text;
+	return text;
 }
 
 /**
@@ -956,9 +1121,11 @@ function node(n, ctx, depth) {
 					info.mixins.map((m) => m.name),
 				);
 				for (const m of info.mixins) ctx.mixins.set(m.name, m);
-				return [];
+				// A file that also writes markup shows it where it is included.
+				if (!info.hasBody) return [];
 			}
-			const name = pascal(abs);
+			// The default export of a file of mixins is named apart from them.
+			const name = info.hasBody ? `${pascal(abs)}Body` : pascal(abs);
 			const outFrom = path.join(
 				outRoot,
 				'__assets',
@@ -974,7 +1141,7 @@ function node(n, ctx, depth) {
 			ctx.imports.set(name, spec.replace(/\.tsx$/, '.tsx'));
 			// Locals the included file may use travel as props.
 			const locals = [...ctx.declared].filter(
-				(d) => !PROP_NAMES.has(d) && !DATA_VARS.has(d),
+				(d) => (!PROP_NAMES.has(d) || ctx.shadowed.has(d)) && !DATA_VARS.has(d),
 			);
 			const passed = locals.map((l) => `${l}={${l}}`).join(' ');
 			return [`${pad}<${name} {...props}${passed ? ' ' + passed : ''} />`];
@@ -1011,14 +1178,12 @@ function node(n, ctx, depth) {
 					`+${n.name} in ${ctx.file} is called with more arguments than it declares (or a spread): write it by hand`,
 				);
 			}
-			if ((n.block && n.block.nodes.length > 0) || (n.attributeBlocks ?? []).length > 0) {
-				throw new Error(
-					`+${n.name} in ${ctx.file} has a block or &attributes: write it by hand`,
-				);
+			if ((n.attributeBlocks ?? []).length > 0) {
+				throw new Error(`+${n.name} in ${ctx.file} has &attributes: write it by hand`);
 			}
 			const given = list.map((e) => use(source.slice(e.start, e.end), ctx));
 			const locals = [...ctx.declared].filter(
-				(d) => !PROP_NAMES.has(d) && !DATA_VARS.has(d),
+				(d) => (!PROP_NAMES.has(d) || ctx.shadowed.has(d)) && !DATA_VARS.has(d),
 			);
 			const passed = [
 				...locals.map((l) => `${l}={${l}}`),
@@ -1026,7 +1191,16 @@ function node(n, ctx, depth) {
 					mixin.params[i].pattern ? `{...(${g})}` : `${mixin.params[i].name}={${g}}`,
 				),
 			].join(' ');
-			return [`${pad}<${mixin.name} {...props}${passed ? ' ' + passed : ''} />`];
+			const open = `${mixin.name} {...props}${passed ? ' ' + passed : ''}`;
+			if (n.block && n.block.nodes.length > 0) {
+				// The block of the call is what the mixin's `block` writes.
+				const inner = children(n.block.nodes, ctx, depth + 1);
+				return [`${pad}<${open}>`, ...inner, `${pad}</${mixin.name}>`];
+			}
+			return [`${pad}<${open} />`];
+		}
+		case 'MixinBlock': {
+			return [`${pad}{(props as any).children}`];
 		}
 		default: {
 			throw new Error(`unsupported pug node ${n.type} in ${ctx.file}`);

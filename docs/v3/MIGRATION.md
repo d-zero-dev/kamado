@@ -155,7 +155,9 @@ export default ({ page, meta, data }: PageProps) => (
 - **未宣言の変数への代入**（`- isHome = false`）は、変換スクリプトが `let` を足す。
 - **`#{tag}`（動的なタグ名）** は大文字の変数に入れたコンポーネントとして書く（文字列の型を `k()` が受け取る）。
 - **`extends` / `block`**: レイアウトは `slots` の props を受け取るコンポーネント、ページは `slots={{ content: (...) }}` を渡す。`block vars` の `var opts = ...` は props の既定値と、ページから渡す値になる。
-- **変換スクリプトが止まるもの**: `block append` / `block prepend`、コード中の `if` / ループ / 関数宣言、自分自身を読む宣言（`var title = title || "x"`）。止まったら手で書く。`--pretty` は `pre` / `textarea` の中の字下げを再現しないので、その中身は出力を見て確かめる。
+- **変換スクリプトが止まるもの**: `block append` / `block prepend`、`&attributes`、引数が仮引数より多い `+mixin`、自分自身を読む宣言（`var title = title || "x"`）。止まったら手で書く。コード中の `if` / ループは、読む変数を props から取って変換する。`--pretty` は `pre` / `textarea` の中の字下げを再現しないので、その中身は出力を見て確かめる。
+- **mixin と本文が同じファイル**（`header.c-header ...` と `mixin ...` が並ぶ）は、mixin は名前つき export、本文は `export default` のコンポーネント（`〜Body`）になる。**mixin に渡すブロック**（`+pSub` の下に書いた中身と、mixin の中の `block` / `if block`）は `children` になる。`locals["blocks-v2"]` はデータファイルの値（`props.data`）。データファイルの名前（`blog_news.yml` なら `blog_news`）は、Pug の変数として読んでいた箇所が `data.blog_news` になる。
+- **Pug の代入**（`- breadcrumbs = pageBreadcrumbs`、`- x = true` ... `- x = false`）は、その位置で実行され、props の名前への代入はローカルの変数（初期値は props の値）になる。include したファイルと mixin には、その変数が渡る。
 - **`//` のコメント**（Pug が HTML コメントにする）は JSX に書けないので消える。
 - **データ**: `data.yml` と `blocks.js` のようなファイルは、Pug ではファイル名がそのまま変数（`data`、`blocks`）だった。v3 では `data.<ファイル名>`（`data.data`、`data.blocks`）。`.js` のデータは文字列を返すだけなら、中身の HTML をそのままデータのディレクトリに置く（`blocks.html`）。
 - **レイアウトの指定**は拡張子なし（`"layout": "sub.pug"` → `"sub"`）。
