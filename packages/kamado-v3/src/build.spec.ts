@@ -98,7 +98,7 @@ describe('build', () => {
 		await build('/site/kamado.config.jsonc');
 
 		expect(JSON.parse(prepare.mock.calls[0]![1])).toEqual({
-			tzOffsetMinutes: -new Date().getTimezoneOffset(),
+			tzOffsetMinutes: 0 - new Date().getTimezoneOffset(),
 			esbuildVersion: '0.0.1-test',
 			esbuildBinary: '/fake/esbuild',
 		});

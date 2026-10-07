@@ -124,7 +124,7 @@ export async function build(
 			JSON.stringify({
 				...coreOptions,
 				// The banner's dates are local time, which the core cannot tell.
-				tzOffsetMinutes: -new Date().getTimezoneOffset(),
+				tzOffsetMinutes: 0 - new Date().getTimezoneOffset(),
 				esbuildVersion: ESBUILD_VERSION,
 				esbuildBinary: findEsbuildBinary(),
 			}),

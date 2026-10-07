@@ -858,7 +858,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 			sitemap,
 			asset_decisions,
 			fingerprinter: kd_build::Fingerprinter::new(),
-			started_at: (started_at.as_secs() as i64, started_at.subsec_nanos()),
+			started_at: crate::racy_floor(started_at),
 			results: Mutex::new((0..page_count).map(|_| None).collect()),
 			asset_results: Mutex::new((0..asset_count).map(|_| None).collect()),
 		}),

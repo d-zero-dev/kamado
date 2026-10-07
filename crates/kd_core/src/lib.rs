@@ -55,6 +55,21 @@ pub fn core_id() -> String {
 	core_id_with(CORE_STAMP.get().map(String::as_str))
 }
 
+/// How far before the time a build began the modification time of a file edited just after
+/// it may lie. Why: the kernel stamps files from a coarse clock (a few milliseconds on
+/// Linux), so an edit made right after `SystemTime::now()` can carry an earlier time, and
+/// an input is taken as edited during the build only when its mtime is not before the start.
+const MTIME_GRAIN: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// The time from which a modification counts as made during a build that began at `began`
+/// (since the epoch): a little earlier, so that a coarse mtime does not hide an edit.
+/// An input that was merely changed just before the build is not recorded as current
+/// either, which costs one more build of it and nothing else.
+pub(crate) fn racy_floor(began: std::time::Duration) -> (i64, u32) {
+	let floor = began.saturating_sub(MTIME_GRAIN);
+	(floor.as_secs() as i64, floor.subsec_nanos())
+}
+
 fn core_id_with(stamp: Option<&str>) -> String {
 	match stamp {
 		Some(stamp) => format!("{VERSION}+{stamp}"),
@@ -1766,6 +1781,9 @@ mod tests {
 		site.write("src/js/app.ts", "import './util';\n");
 		site.write("src/js/util.ts", "export {};\n");
 		site.write("src/index.html", "<p>x</p>");
+		// The inputs have to be older than the build: one saved just before it began is not
+		// recorded as current (a coarse mtime could hide an edit made during the build).
+		std::thread::sleep(MTIME_GRAIN * 2);
 		let loaded =
 			site.config(r#", "scripts": { "banner": "rev. {{year}}", "ignore": ["**/util.ts"] }"#);
 		(site, loaded)
@@ -1857,6 +1875,8 @@ mod tests {
 
 		// A file the bundle read (not the entry) changed.
 		site.write("src/js/util.ts", "export const changed = 1;\n");
+		// (aged, so that it is recorded as current by the build that follows)
+		std::thread::sleep(MTIME_GRAIN * 2);
 		let edited = prepare_scripts(&loaded, "0.1.0");
 		assert!(edited.script_request_json().is_some());
 		edited

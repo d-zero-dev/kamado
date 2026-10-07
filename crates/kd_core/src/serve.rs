@@ -714,7 +714,7 @@ impl Serve {
 					token,
 					Pending::Script {
 						index,
-						started_at: (started.as_secs() as i64, started.subsec_nanos()),
+						started_at: crate::racy_floor(started),
 					},
 				);
 				Ok(Served::Script(ScriptWork { token, request }))
@@ -966,6 +966,9 @@ mod tests {
 		site.write("src/index.html", "<p>x</p>");
 		site.write("src/js/app.ts", "export {};");
 		let serve = site.serve("");
+		// An input saved just before the build began is not taken as current (a coarse
+		// mtime could hide an edit made during it): let this one age.
+		std::thread::sleep(crate::MTIME_GRAIN * 2);
 
 		let Served::Script(work) = serve.request("/js/app.js").unwrap() else {
 			panic!("a script has to be built by esbuild");

@@ -89,7 +89,7 @@ export async function start(
 			configPath,
 			JSON.stringify({
 				serving: true,
-				tzOffsetMinutes: -new Date().getTimezoneOffset(),
+				tzOffsetMinutes: 0 - new Date().getTimezoneOffset(),
 				esbuildVersion: ESBUILD_VERSION,
 				esbuildBinary: findEsbuildBinary(),
 				...(options.cacheDir === undefined ? {} : { cacheDir: options.cacheDir }),
