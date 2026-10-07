@@ -1,5 +1,10 @@
 name: Publish
 
+# `kamado` carries the addon of every platform in one package. The addons are built on
+# their own platforms, packed into one tarball, loaded from that tarball on each platform,
+# and only then is the same tarball published. A run started by hand (workflow_dispatch)
+# stops before the publish job: it is a dry run of everything else.
+
 on:
   push:
     tags:
@@ -12,40 +17,53 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
-  publish:
+  check:
     runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      dist-tag: ${{ steps.dist-tag.outputs.tag }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          fetch-depth: 0
-
-      - name: Install Corepack
-        run: npm install -g corepack
-
-      - name: Enable Corepack
-        run: corepack enable
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 26.10.0
-          registry-url: "https://registry.npmjs.org"
 
-      - name: Install dependencies
-        run: yarn install --immutable
+      - name: Read version
+        id: version
+        run: echo "version=$(node -p "require('./lerna.json').version")" >> "$GITHUB_OUTPUT"
 
-      - name: Build
-        run: yarn build
+      # `lerna version` updates Cargo.toml and Cargo.lock; a hand-made tag on a commit
+      # that skipped it would publish an addon that reports another version.
+      - name: Cargo version equals the package version
+        run: node scripts/sync-cargo-version.mjs --check
+
+      - name: Package version equals the lerna version
+        run: |
+          PACKAGE=$(node -p "require('./packages/kamado/package.json').version")
+          if [[ "$PACKAGE" != "${{ steps.version.outputs.version }}" ]]; then
+            echo "packages/kamado is $PACKAGE, lerna.json is ${{ steps.version.outputs.version }}" >&2
+            exit 1
+          fi
+
+      - name: Tag equals the version
+        if: github.ref_type == 'tag'
+        run: |
+          if [[ "$GITHUB_REF_NAME" != "v${{ steps.version.outputs.version }}" ]]; then
+            echo "tag $GITHUB_REF_NAME, version v${{ steps.version.outputs.version }}" >&2
+            exit 1
+          fi
 
       - name: Determine dist-tag
         id: dist-tag
         run: |
-          VERSION=$(node -e "console.log(require('./lerna.json').version)")
+          VERSION="${{ steps.version.outputs.version }}"
           if [[ "$VERSION" == *"-alpha"* ]]; then
             echo "tag=alpha" >> "$GITHUB_OUTPUT"
           elif [[ "$VERSION" == *"-beta"* ]]; then
@@ -58,5 +76,177 @@ jobs:
             echo "tag=latest" >> "$GITHUB_OUTPUT"
           fi
 
+  addon:
+    needs: check
+
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: darwin-arm64
+            runner: macos-latest
+          - platform: darwin-x64
+            runner: macos-15-intel
+          # The oldest glibc of the runners (2.35): a binary links against the glibc of
+          # the machine that builds it, and older systems (Ubuntu 22.04 on WSL2) must
+          # still load it.
+          - platform: linux-x64
+            runner: ubuntu-22.04
+          - platform: linux-arm64
+            runner: ubuntu-22.04-arm
+
+    runs-on: ${{ matrix.runner }}
+
+    env:
+      # The oldest macOS that Node 24 supports.
+      MACOSX_DEPLOYMENT_TARGET: "13.5"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 26.10.0
+
+      # Same pin as rust.yml.
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup default 1.98.1
+          rustc --version
+
+      - name: Build addon
+        run: cargo build --locked --offline --release -p kd_napi
+
+      - name: Load addon from Node (main thread and workers)
+        run: node --test crates/kd_napi/check/load.check.mjs
+
+      - name: Place addon
+        run: |
+          mkdir -p "native/${{ matrix.platform }}"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            cp target/release/libkd_napi.dylib "native/${{ matrix.platform }}/kd_napi.node"
+          else
+            cp target/release/libkd_napi.so "native/${{ matrix.platform }}/kd_napi.node"
+          fi
+
+      - name: Upload addon
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: addon-${{ matrix.platform }}
+          path: native/${{ matrix.platform }}/kd_napi.node
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    needs: [check, addon]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install Corepack
+        run: npm install -g corepack
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 26.10.0
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Build
+        run: yarn build
+
+      # Each artifact holds `<os>-<arch>/kd_napi.node`; they merge into `native/`.
+      - name: Download addons
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: addon-*
+          path: packages/kamado/native
+          merge-multiple: true
+
+      - name: Pack
+        run: yarn workspace kamado pack --out "$GITHUB_WORKSPACE/kamado.tgz"
+
+      - name: Upload package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package
+          path: kamado.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  # Loads the addon from the tarball that will be published, on every platform it
+  # carries, plus Ubuntu 24.04 (the build is on 22.04).
+  smoke:
+    needs: package
+
+    strategy:
+      fail-fast: true
+      matrix:
+        runner:
+          - macos-latest
+          - macos-15-intel
+          - ubuntu-22.04
+          - ubuntu-22.04-arm
+          - ubuntu-24.04
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 26.10.0
+
+      - name: Download package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: package
+          path: ${{ runner.temp }}/download
+
+      - name: Unpack
+        run: |
+          mkdir "$RUNNER_TEMP/unpacked"
+          tar -xzf "$RUNNER_TEMP/download/kamado.tgz" -C "$RUNNER_TEMP/unpacked"
+
+      # The script lives in the checkout; the unpacked package is only data.
+      - name: Load the bundled addon
+        run: node scripts/check-package-addon.mjs "$RUNNER_TEMP/unpacked/package"
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [check, smoke]
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 26.10.0
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: package
+          path: ${{ runner.temp }}/download
+
+      # OIDC Trusted Publishing: no token. npm adds the provenance itself.
       - name: Publish
-        run: npx lerna publish from-package --dist-tag ${{ steps.dist-tag.outputs.tag }} --yes
+        run: npm publish "$RUNNER_TEMP/download/kamado.tgz" --tag "${{ needs.check.outputs.dist-tag }}" --provenance
