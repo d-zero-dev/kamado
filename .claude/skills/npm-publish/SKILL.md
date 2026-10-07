@@ -22,7 +22,7 @@ v3 は、ネイティブアドオン（Rust の `kd_napi`）をプラットフ�
 4. `smoke`: tarball を 5 つの実機で展開し、同梱のアドオンが読み込めることを確認する（`scripts/check-package-addon.mjs`）
 5. `publish`: 確認した tarball そのものを `npm publish`（OIDC、provenance）。**タグの push のときだけ**。手で起動（`workflow_dispatch`）したときは 4 までの予行になる
 
-`lerna version`（`yarn release*`）は Cargo の版も揃えて、リリースコミットに含める。`kamado` の npm 側の信頼設定（リポジトリ、ワークフロー名 `publish.yml`）が合っていることは、初回の公開の前にユーザーが確認する。
+`yarn release*` は `lerna version` のあとに Cargo の版も揃え、リリースコミットに含めてタグを付け直す（`scripts/release.mjs`。lerna のフックは `.yarnrc.yml` の `enableScripts: false` で動かない）。`kamado` の npm 側の信頼設定（リポジトリ、ワークフロー名 `publish.yml`）が合っていることは、初回の公開の前にユーザーが確認する。
 
 v2 のリリースは `v2` ブランチで行う。公開済みの v2（`kamado@2.0.0-alpha.17` など）は npm に残る。
 

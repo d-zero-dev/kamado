@@ -39,7 +39,7 @@ jobs:
         id: version
         run: echo "version=$(node -p "require('./lerna.json').version")" >> "$GITHUB_OUTPUT"
 
-      # `lerna version` updates Cargo.toml and Cargo.lock; a hand-made tag on a commit
+      # `yarn release*` updates Cargo.toml and Cargo.lock; a hand-made tag on a commit
       # that skipped it would publish an addon that reports another version.
       - name: Cargo version equals the package version
         run: node scripts/sync-cargo-version.mjs --check

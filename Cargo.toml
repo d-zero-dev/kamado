@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-# Kept equal to lerna.json by scripts/sync-cargo-version.mjs (run by `lerna version`).
+# Kept equal to lerna.json by scripts/sync-cargo-version.mjs (run by `yarn release*`, which wraps `lerna version`).
 version = "3.0.0-alpha.0"
 edition = "2024"
 license = "MIT"

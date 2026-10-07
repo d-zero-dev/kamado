@@ -3,9 +3,9 @@
  * version in `lerna.json`, which is the version of the published `kamado` package.
  *
  * Why: the addon reports `kd_napi <version>` and the package carries it, so the two
- * must not drift. `lerna version` runs this through the `version` lifecycle script of the
- * root `package.json` and includes the changed files in the release commit. The
- * publish workflow runs it with `--check` and stops on a mismatch.
+ * must not drift. `scripts/release.mjs` (`yarn release*`) runs this after `lerna version`
+ * and puts the changed files into the release commit. The publish workflow runs it with
+ * `--check` and stops on a mismatch.
  *
  * Usage: node scripts/sync-cargo-version.mjs [--check]
  */

@@ -447,7 +447,7 @@ Q1 は欠番（番号の飛びで、内容は記録に残っていない）。
 
 ## 18. 配布
 
-v3 は `kamado` の 1 パッケージで公開する（v2 は `v2` ブランチで保守していて、公開済みの v2 は npm に残る）。版は `lerna.json` が正本で、Cargo（`Cargo.toml` の `[workspace.package]` と `Cargo.lock`）は `lerna version` が `scripts/sync-cargo-version.mjs` で同じ版に揃える（アドオンの `version()` は公開した版を返す）。公開のパイプラインは `.github/workflows/publish.yml`。
+v3 は `kamado` の 1 パッケージで公開する（v2 は `v2` ブランチで保守していて、公開済みの v2 は npm に残る）。版は `lerna.json` が正本で、Cargo（`Cargo.toml` の `[workspace.package]` と `Cargo.lock`）は `yarn release*`（`scripts/release.mjs`）が `lerna version` のあとに `scripts/sync-cargo-version.mjs` で同じ版に揃え、リリースコミットに含める（アドオンの `version()` は公開した版を返す）。公開のパイプラインは `.github/workflows/publish.yml`。
 
 **アドオンは `kamado` に全プラットフォーム分を同梱する**（プラットフォーム別のパッケージには分けない）。Rust のコアは、プラットフォームごとにビルドした共有ライブラリ（N-API のアドオン、`kd_napi`。`libkd_napi.dylib` / `libkd_napi.so`）で、`kamado` の中に `native/<os>-<arch>/kd_napi.node` として置き、実行時に `process.platform` と `process.arch` で選ぶ。
 

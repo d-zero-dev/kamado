@@ -28,7 +28,7 @@ Node:
 - `yarn dev` — `lerna run dev`
 - `yarn test` — Vitest でテスト（test-timeout 60000）
 - `yarn lint` — eslint / prettier / textlint / cspell を直列実行（修正あり）。CI は `yarn lint:check`（修正なし）
-- `yarn release` / `yarn release:alpha` 等 — `lerna version`（push なし。Cargo の版も `scripts/sync-cargo-version.mjs` で揃える）。リリース手順は `.claude/skills/npm-publish/SKILL.md` 参照
+- `yarn release` / `yarn release:alpha` 等 — `scripts/release.mjs` 経由の `lerna version`（push なし。lerna のあとに Cargo の版を揃え、リリースコミットとタグに含める。lerna は `.yarnrc.yml` の `enableScripts: false` で lifecycle スクリプトを実行しないので、フックではなくラッパーにしてある）。リリース手順は `.claude/skills/npm-publish/SKILL.md` 参照
 
 Rust（リポジトリルートから。`yarn install` を先に済ませる。理由は `docs/v3/development.md`）:
 
