@@ -11,7 +11,7 @@ No hydration, no client-side runtime, no magic. Just your filesystem and raw HTM
 
 Kamado is a static site build tool that aims for a simpler design, similar to 11ty but with a focus on "No Runtime". It generates pure static HTML, ensuring robustness and longevity.
 
-This is **v3**: the core is written in Rust (standard library only), with a thin Node layer for the CLI, the dev server and JSX rendering. It is under alpha development and is not published yet (tracked in [#277](https://github.com/d-zero-dev/kamado/issues/277)).
+This is **v3**: the core is written in Rust (standard library only), with a thin Node layer for the CLI, the dev server and JSX rendering. It is under alpha development; the package carries the addon of every supported platform (macOS arm64 / x64, Linux x64 / arm64 with glibc).
 
 **v2** (the `kamado` and `@kamado-io/*` packages on npm) is maintained on the [`v2` branch](https://github.com/d-zero-dev/kamado/tree/v2). The published v2 releases stay on npm.
 

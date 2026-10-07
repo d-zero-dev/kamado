@@ -41,7 +41,7 @@ const addon = require(addonPath);
 const sha = (buf) => createHash('sha256').update(buf).digest('hex');
 
 test('version', () => {
-	assert.match(addon.version(), /^kd_napi \d+\.\d+\.\d+$/);
+	assert.match(addon.version(), /^kd_napi \d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
 });
 
 test('sha256Hex matches node:crypto (empty, small, 8 MiB)', () => {

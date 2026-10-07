@@ -14,7 +14,7 @@ kamado — オンデマンド静的サイトジェネレータ（v3）。コア�
 - `lerna.json` — 版（`3.0.0-alpha.0`）と publish の設定。`packages/*`
 - `Cargo.toml` — Rust のワークスペース（`crates/*`）。外部クレートなし
 - `crates/` — Rust のコア（`kd_*`）。各クレートの担当は `docs/v3/development.md`
-- `packages/kamado/` — Node 側のパッケージ（npm 名 `kamado`、bin `kamado`、`kamado/jsx`）。`private: true`（公開の仕組みは issue #277）
+- `packages/kamado/` — Node 側のパッケージ（npm 名 `kamado`、bin `kamado`、`kamado/jsx`）。公開のパイプラインは `.github/workflows/publish.yml`（`docs/v3/RFC.md` §18）
 - `docs/v3/` — 仕様 `RFC.md`、v2 からの移行手順 `MIGRATION.md`、開発手順 `development.md`、設計判断の根拠 `spike-results.md`
 - `benchmarks/v3/` — 比較ハーネスと fixture 生成器。`benchmarks/v2-baseline/` — v2 の基準出力を作る単独のプロジェクト（自前の `yarn.lock`）
 - `scripts/` — テーブルと golden ファイルの生成、差分テスト、`check-rust-no-external-crates.mjs`
@@ -28,7 +28,7 @@ Node:
 - `yarn dev` — `lerna run dev`
 - `yarn test` — Vitest でテスト（test-timeout 60000）
 - `yarn lint` — eslint / prettier / textlint / cspell を直列実行（修正あり）。CI は `yarn lint:check`（修正なし）
-- `yarn release` / `yarn release:alpha` 等 — `lerna version`（push なし）。リリース手順は `.claude/skills/npm-publish/SKILL.md` 参照
+- `yarn release` / `yarn release:alpha` 等 — `lerna version`（push なし。Cargo の版も `scripts/sync-cargo-version.mjs` で揃える）。リリース手順は `.claude/skills/npm-publish/SKILL.md` 参照
 
 Rust（リポジトリルートから。`yarn install` を先に済ませる。理由は `docs/v3/development.md`）:
 
@@ -113,4 +113,4 @@ Rust（リポジトリルートから。`yarn install` を先に済ませる。�
 | Grill me        | `.claude/skills/grill-me/SKILL.md`        | 計画・設計の前提を掘り下げて合意形成する                    |
 | Git             | `.claude/skills/git/SKILL.md`             | コミット規約・コミット前コンテンツチェック                  |
 | PR              | `.claude/skills/pr/SKILL.md`              | PR 作成フロー（base 追従・push はユーザー実行・CI 監視）    |
-| npm publish     | `.claude/skills/npm-publish/SKILL.md`     | リリース（バージョニング・publish 監視・検証。v3 は準備中） |
+| npm publish     | `.claude/skills/npm-publish/SKILL.md`     | リリース（バージョニング・publish 監視・検証）              |

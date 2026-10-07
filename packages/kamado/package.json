@@ -5,7 +5,6 @@
 	"repository": "https://github.com/d-zero-dev/kamado.git",
 	"author": "D-ZERO Co., Ltd.",
 	"license": "MIT",
-	"private": true,
 	"type": "module",
 	"bin": "./dist/cli.js",
 	"exports": {

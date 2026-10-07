@@ -12,17 +12,25 @@ disable-model-invocation: true
 - **publish は取り消せない**。各ステップでユーザーの確認を取る
 - **`yarn release` / `git push` 系はユーザーが実行する**。エージェントは実行せず（`.claude/settings.json` で deny されている）`!` プレフィックス付きのコマンドを提示し、完了報告を待つ
 
-# v3 の公開の状態（準備中）
+# v3 の公開の流れ
 
-v3 の `packages/kamado` は `private: true` で、まだ公開していない。v3 の公開は、ネイティブアドオン（Rust の `kd_napi`）をプラットフォームごとにビルドして同梱する形になる予定で、そのパイプラインは issue #277 で扱っている。**現在の `.github/workflows/publish.yml` は v2 の構成（`yarn build` のあと `lerna publish from-package`）のままで、アドオンをビルドも同梱もしない。** したがって、パイプラインができるまでは、この手順で v3 を publish してはいけない。実行を求められたら、#277 の状況をユーザーに確認する。
+v3 は、ネイティブアドオン（Rust の `kd_napi`）をプラットフォームごとにビルドし、`kamado` に全プラットフォーム分（`native/<os>-<arch>/kd_napi.node`）を同梱して公開する（`docs/v3/RFC.md` §18。プラットフォーム別のパッケージには分けない）。`publish.yml` は次の順に進み、どこかで失敗したら公開に進まない。
 
-配布の形は、`kamado` に全プラットフォーム分のアドオン（`native/<os>-<arch>/kd_napi.node`）を同梱する（`docs/v3/RFC.md` §18。プラットフォーム別のパッケージには分けない）。以下の手順は、パイプラインができたあとも使える部分（版の決め方、タグ、dist-tag、検証、失敗時の対処）を残してあり、パイプラインの完成時に更新する。
+1. `check`: Cargo の版（`scripts/sync-cargo-version.mjs --check`）、`packages/kamado` の版、タグが `lerna.json` の版と一致しているか。dist-tag を決める
+2. `addon`: 4 プラットフォーム（darwin-arm64、darwin-x64、linux-x64、linux-arm64）の実機でアドオンをビルドし、読み込みを確認する
+3. `package`: 集めて `native/` に置き、`yarn build` と `yarn pack` で tarball を作る
+4. `smoke`: tarball を 5 つの実機で展開し、同梱のアドオンが読み込めることを確認する（`scripts/check-package-addon.mjs`）
+5. `publish`: 確認した tarball そのものを `npm publish`（OIDC、provenance）。**タグの push のときだけ**。手で起動（`workflow_dispatch`）したときは 4 までの予行になる
+
+`lerna version`（`yarn release*`）は Cargo の版も揃えて、リリースコミットに含める。`kamado` の npm 側の信頼設定（リポジトリ、ワークフロー名 `publish.yml`）が合っていることは、初回の公開の前にユーザーが確認する。
+
+v2 のリリースは `v2` ブランチで行う。公開済みの v2（`kamado@2.0.0-alpha.17` など）は npm に残る。
 
 v2 のリリースは `v2` ブランチで行う。公開済みの v2（`kamado@2.0.0-alpha.17` など）は npm に残る。
 
 # 対象パッケージ
 
-v3 の対象は `kamado`（`packages/kamado`）の 1 つで、**無スコープ**で公開する（`npm view` 等のコマンド例でスコープを付けない）。版は Lerna が `lerna.json` の `version` で管理する（プラットフォーム別のパッケージを作る場合は、それらも同じ版で上げる）。
+v3 の対象は `kamado`（`packages/kamado`）の 1 つで、**無スコープ**で公開する（`npm view` 等のコマンド例でスコープを付けない）。版は Lerna が `lerna.json` の `version` で管理する（Cargo の版も同じ値に揃う）。
 
 # 手順
 
@@ -160,7 +168,7 @@ npm view kamado dist-tags
 - **dist-tag が意図通りか**。正式リリースは `latest`、プレリリースは `alpha` / `beta` / `rc` / `next`。`publish.yml` は `lerna.json` の `version` 文字列から判定する（`-alpha` → `alpha`、`-` を含む → `next`、それ以外 → `latest`）
 - provenance が付与されているか（`npm view <package> --json` の `dist.attestations`）
 
-複数のパッケージを公開する構成（プラットフォーム別のパッケージなど）では、**一部のパッケージだけ publish される（部分 publish）**ことがある。公開した全パッケージを個別に確認し、漏れがあればユーザーに報告する。
+可能なら、公開された tarball に 4 プラットフォーム分の `native/<os>-<arch>/kd_napi.node` が入っているかも確認する（`npm pack kamado@<version>` を一時ディレクトリで展開し、`node scripts/check-package-addon.mjs <展開先>/package`）。
 
 **ここが success の判定点**。npm 上の状態を確認するまでリリース完了と判断してはいけない。
 
@@ -183,8 +191,9 @@ git merge main --no-edit
 
 ## 12. 失敗時の対処
 
-- **sigstore の transient 409**: `gh run rerun` で再実行する。`from-package` は未 publish のバージョンのみを対象にするため、成功済みパッケージは二重 publish されない
-- **部分 publish**: 成功したパッケージは publish 済みで巻き戻せない。`workflow_dispatch` で publish workflow を再実行すれば、未 publish のパッケージのみが対象になる
+- **sigstore の transient 409**: `gh run rerun --failed` で失敗したジョブだけ再実行する。公開するのは `kamado` の 1 パッケージだけなので、部分 publish は起きない
+- **`check` / `addon` / `smoke` の失敗**: 公開には進んでいない。原因を直す。タグが指すコミットに修正が要るときは、タグの付け直しになるので、ユーザーに確認する（`v*` タグの作成・削除は CODEOWNERS のみ）
+- **publish の前に確認したいとき**: `gh workflow run publish.yml --ref <branch>` で予行ができる（publish ジョブは動かない）
 - **誤ったバージョンを publish した**: unpublish は原則不可。`npm deprecate <package>@<version> "<理由>"` で非推奨化し、修正版を新バージョンとして publish する。この判断は必ずユーザーに確認を取る
 - **publish が失敗したまま中断する場合**: 手順 11 の `dev` 同期は行わない。`main` にバージョン更新コミットだけが残るため、次回リリース時にそこから再開する
 

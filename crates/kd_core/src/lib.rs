@@ -873,8 +873,8 @@ mod tests {
 
 	#[test]
 	fn the_stamp_of_the_build_is_part_of_the_id_that_keys_the_caches() {
-		assert_eq!(core_id_with(None), "0.0.0");
-		assert_eq!(core_id_with(Some("12-34")), "0.0.0+12-34");
+		assert_eq!(core_id_with(None), VERSION);
+		assert_eq!(core_id_with(Some("12-34")), format!("{VERSION}+12-34"));
 		assert_ne!(core_id_with(Some("12-34")), core_id_with(Some("12-35")));
 	}
 

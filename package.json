@@ -19,6 +19,7 @@
 		"lint:prettier:check": "npx prettier --check \"{*,./**/*}{.{md,mdc,mdx,js,jsx,ts,tsx,css,pug,html,json,yaml},*rc}\" \"!**/dist/**/*\"",
 		"lint:textlint": "npx textlint --fix \"{*,./**/*}.{md,mdc}\" && npx textlint \"{*,./**/*}.{md,mdc}\"",
 		"lint:textlint:check": "npx textlint \"{*,./**/*}.{md,mdc}\"",
+		"version": "node scripts/sync-cargo-version.mjs && git add Cargo.toml Cargo.lock",
 		"release": "lerna version --exact --conventional-commits --conventional-graduate --no-push",
 		"release:alpha": "lerna version --exact --force-publish --conventional-commits --conventional-prerelease --preid alpha --no-push",
 		"release:beta": "lerna version --exact --force-publish --conventional-commits --conventional-prerelease --preid beta --no-push",
