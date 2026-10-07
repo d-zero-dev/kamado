@@ -45,25 +45,30 @@ jobs:
         run: node scripts/sync-cargo-version.mjs --check
 
       - name: Package version equals the lerna version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           PACKAGE=$(node -p "require('./packages/kamado/package.json').version")
-          if [[ "$PACKAGE" != "${{ steps.version.outputs.version }}" ]]; then
-            echo "packages/kamado is $PACKAGE, lerna.json is ${{ steps.version.outputs.version }}" >&2
+          if [[ "$PACKAGE" != "$VERSION" ]]; then
+            echo "packages/kamado is $PACKAGE, lerna.json is $VERSION" >&2
             exit 1
           fi
 
       - name: Tag equals the version
         if: github.ref_type == 'tag'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if [[ "$GITHUB_REF_NAME" != "v${{ steps.version.outputs.version }}" ]]; then
-            echo "tag $GITHUB_REF_NAME, version v${{ steps.version.outputs.version }}" >&2
+          if [[ "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "tag $GITHUB_REF_NAME, version v$VERSION" >&2
             exit 1
           fi
 
       - name: Determine dist-tag
         id: dist-tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           if [[ "$VERSION" == *"-alpha"* ]]; then
             echo "tag=alpha" >> "$GITHUB_OUTPUT"
           elif [[ "$VERSION" == *"-beta"* ]]; then
@@ -136,7 +141,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: addon-${{ matrix.platform }}
-          path: native/${{ matrix.platform }}/kd_napi.node
+          # The directory, not the file: a single file would be stored without its
+          # `<os>-<arch>/` directory, and the four artifacts would overwrite each other.
+          path: native
           if-no-files-found: error
           retention-days: 7
 
@@ -249,4 +256,6 @@ jobs:
 
       # OIDC Trusted Publishing: no token. npm adds the provenance itself.
       - name: Publish
-        run: npm publish "$RUNNER_TEMP/download/kamado.tgz" --tag "${{ needs.check.outputs.dist-tag }}" --provenance
+        env:
+          DIST_TAG: ${{ needs.check.outputs.dist-tag }}
+        run: npm publish "$RUNNER_TEMP/download/kamado.tgz" --tag "$DIST_TAG" --provenance

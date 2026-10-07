@@ -13,8 +13,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const WORKSPACE_VERSION = /^(\[workspace\.package\][^[]*?\nversion = ")[^"]*(")/m;
-const LOCK_VERSION = /(\[\[package\]\]\nname = "[^"]+"\nversion = ")[^"]*(")/g;
+// A package of the lock file that comes from a registry or git has a `source` line right
+// after its version. Only workspace members (no `source`) take the workspace version.
+const LOCK_VERSION =
+	/(\[\[package\]\]\nname = "[^"]+"\nversion = ")[^"]*("\n)(?!source )/g;
 
 /**
  * Sets `version` in the `[workspace.package]` table of a `Cargo.toml`.
@@ -27,15 +29,22 @@ const LOCK_VERSION = /(\[\[package\]\]\nname = "[^"]+"\nversion = ")[^"]*(")/g;
  * // '[workspace.package]\nversion = "1.2.3"\n'
  */
 export function setWorkspaceVersion(toml, version) {
-	if (!WORKSPACE_VERSION.test(toml)) {
-		throw new Error('Cargo.toml: [workspace.package] has no `version`');
+	const lines = toml.split('\n');
+	const table = lines.indexOf('[workspace.package]');
+	if (table !== -1) {
+		for (let i = table + 1; i < lines.length && !lines[i].startsWith('['); i++) {
+			if (/^version\s*=/.test(lines[i])) {
+				lines[i] = `version = "${version}"`;
+				return lines.join('\n');
+			}
+		}
 	}
-	return toml.replace(WORKSPACE_VERSION, `$1${version}$2`);
+	throw new Error('Cargo.toml: [workspace.package] has no `version`');
 }
 
 /**
- * Sets the version of every package in a `Cargo.lock`. Every package of the lock file is
- * a workspace member, because the workspace has no external crates.
+ * Sets the version of every workspace member in a `Cargo.lock`. A package that has a
+ * `source` (a registry or git crate) keeps its own version.
  * @param {string} lock - Content of `Cargo.lock`
  * @param {string} version - The version to set
  * @returns {string}
@@ -47,11 +56,16 @@ export function setLockVersions(lock, version) {
 	return lock.replaceAll(LOCK_VERSION, `$1${version}$2`);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	const root = path.resolve(import.meta.dirname, '..');
+/**
+ * Brings `Cargo.toml` and `Cargo.lock` of a repository to the version of its `lerna.json`.
+ * @param {string} root - The repository root
+ * @param {{ check: boolean }} options - `check` only reports; otherwise the files are written
+ * @returns {{ version: string; stale: string[] }} The lerna version and the files that differed
+ * @example
+ * syncCargoVersion('/repo', { check: true }); // { version: '3.0.0', stale: [] }
+ */
+export function syncCargoVersion(root, { check }) {
 	const { version } = JSON.parse(readFileSync(path.join(root, 'lerna.json'), 'utf8'));
-	const check = process.argv.includes('--check');
-
 	const files = [
 		['Cargo.toml', (text) => setWorkspaceVersion(text, version)],
 		['Cargo.lock', (text) => setLockVersions(text, version)],
@@ -69,6 +83,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 			writeFileSync(file, after);
 		}
 	}
+	return { version, stale };
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	const check = process.argv.includes('--check');
+	const { version, stale } = syncCargoVersion(path.resolve(import.meta.dirname, '..'), {
+		check,
+	});
 
 	if (check && stale.length > 0) {
 		console.error(

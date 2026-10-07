@@ -3,6 +3,8 @@ name: Rust
 on:
   push:
     branches:
+      # main gets the release commit (`lerna version`), which changes Cargo.lock.
+      - main
       - dev
     paths:
       - 'crates/**'
