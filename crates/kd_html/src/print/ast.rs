@@ -234,11 +234,21 @@ fn compute_line_starts(text: &str) -> Vec<usize> {
 	starts
 }
 
-/// Replaces every character except line feeds by a space (`vt`).
+/// Replaces every character except line feeds by spaces (`vt`), as many as the
+/// character has bytes, so that a byte offset in the result is the same offset
+/// in `text` (the spans of what follows are byte positions).
 fn blank(text: &str) -> String {
-	text.chars()
-		.map(|c| if c == '\n' { '\n' } else { ' ' })
-		.collect()
+	let mut out = String::with_capacity(text.len());
+	for c in text.chars() {
+		if c == '\n' {
+			out.push('\n');
+		} else {
+			for _ in 0..c.len_utf8() {
+				out.push(' ');
+			}
+		}
+	}
+	out
 }
 
 struct Builder<'a> {
@@ -534,13 +544,41 @@ fn find_endif(after: &str) -> Option<usize> {
 	Some(data.len())
 }
 
+/// The deepest nesting that is taken. The conversion and the printer recurse once per
+/// level, and a pool thread has a stack of 2 MiB that ends at about a thousand levels,
+/// so what is deeper is refused with an error instead of overflowing the stack (no real
+/// page comes near).
+pub const MAX_DEPTH: usize = 256;
+
+/// The source offset of the first node deeper than [`MAX_DEPTH`], found without recursion.
+fn too_deep(raw: &RawTree) -> Option<usize> {
+	let mut stack: Vec<(usize, usize)> = raw.roots.iter().map(|&r| (r, 1)).collect();
+	while let Some((id, depth)) = stack.pop() {
+		let node = &raw.nodes[id];
+		if depth > MAX_DEPTH {
+			return Some(node.span.start);
+		}
+		for &child in &node.children {
+			stack.push((child, depth + 1));
+		}
+	}
+	None
+}
+
 /// Parses `text` into prettier's AST.
 ///
 /// # Errors
 ///
-/// The first error prettier's parser would throw.
+/// The first error prettier's parser would throw, and one for elements nested deeper than
+/// [`MAX_DEPTH`].
 pub fn build(text: &str) -> Result<Ast, ParseError> {
 	let raw = angular::parse(text)?;
+	if let Some(offset) = too_deep(&raw) {
+		return Err(ParseError {
+			message: format!("elements are nested deeper than {MAX_DEPTH} levels"),
+			offset,
+		});
+	}
 	let mut b = Builder {
 		text,
 		nodes: Vec::new(),

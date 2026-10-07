@@ -541,7 +541,15 @@ impl Modules {
 				continue;
 			}
 			if let Some(compiled) = state.get(&path) {
-				if !fingerprinter.unchanged(&path, &compiled.dep) {
+				// A candidate that was not there when the imports were resolved
+				// (`./card.tsx` while `./card.ts` was found) and exists now
+				// changes what they resolve to.
+				if !fingerprinter.unchanged(&path, &compiled.dep)
+					|| compiled
+						.missing
+						.iter()
+						.any(|c| std::path::Path::new(c).is_file())
+				{
 					stale.push(path.clone());
 				}
 				stack.extend(compiled.imports.iter().cloned());
@@ -750,6 +758,23 @@ mod tests {
 			.filter(|dep| **dep != kd_build::Dep::missing())
 			.count();
 		assert_eq!(present, 2);
+	}
+
+	#[test]
+	fn a_file_that_takes_precedence_over_a_resolved_import_makes_the_importer_stale() {
+		let dir = Dir::new("refresh-missing");
+		let page = dir.write(
+			"page.tsx",
+			"import card from './card';\nexport default () => card;\n",
+		);
+		dir.write("card.ts", "export default 1;\n");
+		let m = modules(&dir);
+		m.compile(&page).unwrap();
+		assert!(!m.refresh(&page));
+
+		dir.write("card.tsx", "export default 2;\n");
+
+		assert!(m.refresh(&page));
 	}
 
 	#[test]

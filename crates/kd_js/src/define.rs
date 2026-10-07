@@ -24,12 +24,17 @@ fn is_ident_byte(b: u8) -> bool {
 	b.is_ascii_alphanumeric() || b == b'_' || b == b'$' || b >= 0x80
 }
 
+/// Whether `value` stands for one operand wherever it is put, so that it needs no
+/// parentheses: a name or a number (`true`, `1.5`, `DEBUG`), or a string literal with no
+/// escape. An operator (`-1`, `a/b`, `a ? b : c`) does not: `x - FOO` with `FOO` as `-1`
+/// must not become `x--1`.
 fn is_simple(value: &str) -> bool {
-	!value.is_empty()
-		&& value
-			.bytes()
-			.all(|b| is_ident_byte(b) || matches!(b, b'.' | b'"' | b'\'' | b'-' | b'/' | b':'))
-		&& !value.contains(' ')
+	let bytes = value.as_bytes();
+	if bytes.len() >= 2 && matches!(bytes[0], b'"' | b'\'') && bytes[bytes.len() - 1] == bytes[0] {
+		let inner = &bytes[1..bytes.len() - 1];
+		return !inner.contains(&bytes[0]) && !inner.contains(&b'\\');
+	}
+	!value.is_empty() && value.bytes().all(|b| is_ident_byte(b) || b == b'.')
 }
 
 /// The end of the chain `parts[1..]` after an identifier that ends at
@@ -157,6 +162,21 @@ mod tests {
 				&defs
 			),
 			"a(process.env.OTHER, process.envx, x.process.env.NODE_ENV, 'process.env.NODE_ENV');"
+		);
+	}
+
+	#[test]
+	fn a_value_with_an_operator_is_parenthesized_so_that_it_cannot_join_its_neighbours() {
+		let defs = [
+			("NEG", "-1"),
+			("DIV", "a/b"),
+			("PICK", "x?1:2"),
+			("DEBUG", "true"),
+			("TEXT", "\"a-b/c:d\""),
+		];
+		assert_eq!(
+			run("f(x - NEG, y / DIV, PICK, DEBUG, TEXT);", false, &defs),
+			"f(x - (-1), y / (a/b), (x?1:2), true, \"a-b/c:d\");"
 		);
 	}
 

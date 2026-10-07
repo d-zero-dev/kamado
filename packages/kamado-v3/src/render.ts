@@ -38,6 +38,7 @@ type Render = (component: Component, props: Record<string, unknown>) => string;
 
 interface RuntimeModule {
 	readonly render: Render;
+	readonly html: (text: string) => unknown;
 }
 
 /** The pages of a chunk: each one a function that gives the exports of the page. */
@@ -99,7 +100,7 @@ export async function createRenderer(
 	context: RenderContext,
 	runtimeUrl: string,
 ): Promise<(job: RenderJob) => Promise<Rendered>> {
-	const { render } = (await import(runtimeUrl)) as RuntimeModule;
+	const { render, html: markup } = (await import(runtimeUrl)) as RuntimeModule;
 	return async (job) => {
 		const page = context.pages[job.page];
 		if (!page) {
@@ -115,7 +116,7 @@ export async function createRenderer(
 			}
 			if (job.layout) {
 				const layout = await loadComponent(job.layout, 'a layout');
-				html = render(layout, createProps(context, job.page, { content: html }));
+				html = render(layout, createProps(context, job.page, { content: markup(html) }));
 			}
 			return [job.page, html];
 		} catch (error) {

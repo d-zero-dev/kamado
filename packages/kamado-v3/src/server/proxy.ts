@@ -44,6 +44,22 @@ export function rewritePath(pathname: string, rewrite?: ProxyRule['rewrite']): s
 }
 
 /**
+ * Copies response headers without the ones that describe the body as it was sent
+ * (`fetch` has decoded it) and the connection, which would be wrong for what the dev
+ * server sends on.
+ * @param headers - the headers of the upstream response
+ * @example
+ * withoutEncodingHeaders(new Headers({ 'content-encoding': 'gzip', 'x-a': '1' })).has('content-encoding'); // false
+ */
+export function withoutEncodingHeaders(headers: Headers): Headers {
+	const copy = new Headers(headers);
+	for (const name of ['content-encoding', 'content-length', 'connection', 'keep-alive']) {
+		copy.delete(name);
+	}
+	return copy;
+}
+
+/**
  * Whether a method carries a request body.
  * @param method - The HTTP method
  */
@@ -106,7 +122,7 @@ export function setProxyRoutes(
 				return new Response(response.body, {
 					status: response.status,
 					statusText: response.statusText,
-					headers: response.headers,
+					headers: withoutEncodingHeaders(response.headers),
 				});
 			} catch (error) {
 				const message = error instanceof Error ? error.message : 'Unknown proxy error';

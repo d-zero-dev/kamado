@@ -145,7 +145,7 @@ pub(crate) fn page_env(loaded: &Loaded, options: &BuildOptions) -> String {
 	kd_hash::to_hex(&kd_hash::sha256(
 		format!(
 			"{}\0{}\0html-pipeline\0{}",
-			crate::VERSION,
+			crate::core_id(),
 			loaded.config_hash,
 			options.esbuild_version.as_deref().unwrap_or_default()
 		)
@@ -717,7 +717,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	let env_scripts = kd_hash::to_hex(&kd_hash::sha256(
 		format!(
 			"{}\0{}\0scripts\0{}\0{script_settings_json}",
-			crate::VERSION,
+			crate::core_id(),
 			loaded.config_hash,
 			options.esbuild_version.as_deref().unwrap_or_default()
 		)
@@ -735,7 +735,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	let env_styles = kd_hash::to_hex(&kd_hash::sha256(
 		format!(
 			"{}\0{}\0styles\0{:?}",
-			crate::VERSION,
+			crate::core_id(),
 			loaded.config_hash,
 			style_settings
 		)

@@ -68,7 +68,8 @@ async function write(name: string, text: string): Promise<string> {
 async function runtimeUrl(): Promise<string> {
 	const file = await write(
 		'runtime.mjs',
-		'export const render = (component, props) => String(component(props));\n',
+		'export const render = (component, props) => String(component(props));\n' +
+			'export const html = (text) => ({ marked: true, toString: () => text });\n',
 	);
 	return pathToFileURL(file).href;
 }
@@ -138,6 +139,22 @@ describe('createRenderer', () => {
 		await expect(
 			render({ page: 0, main: chunk, entry: 5, layout: null, content: null }),
 		).rejects.toThrow(/Failed to render \/s\/a\.tsx: the chunk .* has no page 5/);
+	});
+
+	test('the content of a layout is marked as HTML, not a plain string to escape', async () => {
+		const chunk = await write(
+			'chunk.mjs',
+			'export const pages = [async () => ({ default: () => "<b>x</b>" })];\n',
+		);
+		const layout = await write(
+			'layout.mjs',
+			'export default (p) => `${p.content.marked}:${p.content}`;\n',
+		);
+		const render = await createRenderer(CONTEXT, await runtimeUrl());
+
+		expect(
+			await render({ page: 0, main: chunk, entry: 0, layout, content: null }),
+		).toEqual([0, 'true:<b>x</b>']);
 	});
 
 	test('an html page is wrapped by its layout with its body as the content', async () => {

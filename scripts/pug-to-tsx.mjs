@@ -3,14 +3,17 @@
  * A first pass of Pug to TSX for a migration to kamado v3 (docs/v3/MIGRATION.md).
  *
  * ```sh
- * node scripts/pug-to-tsx.mjs <project> <out> [libs dir, default <project>/__assets/_libs] [--pretty]
+ * node scripts/pug-to-tsx.mjs <project> <out> [libs dir, default <project>/__assets/_libs] [--pretty] [--pages=<dir>] [--skip=<text>]...
  * ```
  *
  * `--pretty` writes out the white space that Pug's `pretty` puts between tags
  * (a line break before a tag that is not inline and before the closing tag of
  * one with a block inside). `extends` / `block` become a layout component with
  * a `slots` prop (`block append` / `prepend` are not converted). Pages are
- * written in the order of the template (`<html static>`).
+ * written in the order of the template (`<html static>`). `--pages=<dir>` names the
+ * directory (default `htdocs`) whose files are pages: a failure there fails the run, and a
+ * page without `<html>` is a fragment (`kdStatic`). `--skip=<text>` leaves out the files
+ * whose path contains the text (repeatable).
  *
  * Converts every `.pug` under `<project>/__assets` to a component (`.tsx`, same
  * paths under `<out>/__assets`). `include` becomes a component that receives the
@@ -39,6 +42,13 @@ import path from 'node:path';
 const [srcRoot, outRoot, libsArg] = process.argv
 	.slice(2)
 	.filter((a) => !a.startsWith('--'));
+const flagValues = (name) =>
+	process.argv
+		.filter((a) => a.startsWith(`--${name}=`))
+		.map((a) => a.slice(name.length + 3));
+const PAGES_DIR = flagValues('pages').at(-1) ?? 'htdocs';
+const SKIPS = flagValues('skip');
+const inPages = (file) => file.includes(`${path.sep}${PAGES_DIR}${path.sep}`);
 if (!srcRoot || !outRoot) {
 	console.error('usage: node scripts/pug-to-tsx.mjs <project> <out> [libs dir]');
 	process.exit(1);
@@ -565,8 +575,7 @@ function convertFile(file) {
 		// A page that is a fragment has no `<html static>` to say it is written in
 		// the order of the template: its meta says so.
 		const fragmentPage =
-			file.includes(`${path.sep}htdocs${path.sep}`) &&
-			!ast.nodes.some((n) => n.type === 'Tag' && n.name === 'html');
+			inPages(file) && !ast.nodes.some((n) => n.type === 'Tag' && n.name === 'html');
 		text =
 			importLines(ctx).join('\n') +
 			'\n\n' +
@@ -1253,7 +1262,7 @@ function walkDir(dir, fn) {
 }
 const failures = [];
 walkDir(path.join(srcRoot, '__assets'), (f) => {
-	if (!f.endsWith('.pug') || f.includes('/mixin/meta-example')) return;
+	if (!f.endsWith('.pug') || SKIPS.some((text) => f.includes(text))) return;
 	try {
 		convertFile(f);
 	} catch (error) {
@@ -1266,5 +1275,4 @@ walkDir(path.join(srcRoot, '__assets'), (f) => {
 console.log([...converted].length, 'files converted');
 for (const [f, message] of failures)
 	console.log(`not converted: ${path.relative(srcRoot, f)}: ${message}`);
-if (failures.some(([f]) => f.includes(`${path.sep}htdocs${path.sep}`)))
-	process.exitCode = 1;
+if (failures.some(([f]) => inPages(f))) process.exitCode = 1;

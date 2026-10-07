@@ -86,12 +86,12 @@ v3 のページは **`.html`（front matter 付き）と `.tsx` の 2 種類**�
 - `foo.pug` → `foo.tsx`。同じ場所に置く。出力パスは変わりません（拡張子だけ `.html` になる）。
 - `foo.pug` のメタ（Pug 内の変数や front matter）→ `export const meta = { ... }`（**リテラルのみ**。式や変数は書けない）。
 - 同名の `foo.json`（sidecar）はそのまま使える。優先順位は高い順に、`pages.overrides`、sidecar `.json`、ファイル内の `meta`。
-- ページは `export default` でコンポーネントを書く。
+- ページは `export default` でコンポーネントを書く。props の型は同梱しない（必要なら使う側で宣言する）。
 
 ```tsx
 export const meta = { title: 'About', layout: 'default' };
 
-export default ({ page, meta, data }: PageProps) => (
+export default ({ meta }: { meta: { title: string } }) => (
 	<main>
 		<h1>{meta.title}</h1>
 	</main>
@@ -147,7 +147,7 @@ export default ({ page, meta, data }: PageProps) => (
 - **JSX に書けない属性名**（絵文字など、`⚠️="..."` のような印）は React が出力しない。静的なマークアップなら `html.inject` に HTML 文字列として書く。
 - **React 19 は `<img>` ごとに `<link rel="preload" as="image">` を `<head>` に足す**（Pug では出ない）。`<html static>` のページでは出ない。それ以外のページで要らなければ `html.rules` で消す: `{ "selector": "link[rel=preload][as=image]", "action": "remove" }`。
 - **Pug の `pretty`**（`createCompileHooks` の既定は `true`）は、インラインでないタグの前と、ブロックを含むタグの閉じタグの前に改行を入れる。これは空白として出力に残り、インライン要素の隣では見た目も変わる。変換スクリプトに `--pretty` を付けると、同じ規則で `{"\n"}` を書き出す（付けなければ空白は入らない）。v2 の出力と揃えるなら `--pretty`、`pretty: false` の基準と比べるなら付けない。
-- **Pug の出力順をそのまま保つ**: 変換スクリプトは `<html static>` を出す。React の持ち上げ（`<head>` の `async` な `script` が `title` の前に出る）と、`form` / `input` / `button` の属性の並べ替え（`action` と `name` が後ろへ）をやめ、書いた順で出す。`<html>` を持たない、入力ディレクトリ（`htdocs`）の下のページ（フラグメント）と `extends` したページには `export const meta = { kdStatic: true }` を出す（`<html static>` の外で評価される子を持つページは、手で書くときも `kdStatic` が要る。レイアウトの外側で評価される子や、`k('html', ...)` 経由の `html` は対象外）。
+- **Pug の出力順をそのまま保つ**: 変換スクリプトは `<html static>` を出す。React の持ち上げ（`<head>` の `async` な `script` が `title` の前に出る）と、`form` / `input` / `button` の属性の並べ替え（`action` と `name` が後ろへ）をやめ、書いた順で出す。`<html>` を持たない、`--pages=<ディレクトリ>`（既定 `htdocs`）で指したディレクトリの下のページ（フラグメント）と `extends` したページには `export const meta = { kdStatic: true }` を出す（`<html static>` の外で評価される子を持つページは、手で書くときも `kdStatic` が要る。レイアウトの外側で評価される子や、`k('html', ...)` 経由の `html` は対象外）。
 - **`on*` 属性の文字列**（`oncontextmenu="return false;"`）は、`<html static>`（`kdStatic` のページ）の中でだけ出る。React と同じく、ふだんは `on*` をすべて捨てる（データ由来の props が実行可能な属性にならないように）。
 - **`style` を CSS の文字列で渡す**（`style=\`anchor-name: ${x}\``）は、`kamado-v3/jsx`の`styleOf()` を通してオブジェクトにする。
 - **`data-*` / `aria-*` に `false`**: Pug は属性を出さず、React は `"false"` と書く。変換スクリプトは `false` を `undefined` にして出す。
@@ -242,7 +242,7 @@ builder の出力と揃えるときの違い（実案件で見つけたもの）
 - **画像の寸法**: builder は属性に書いた `height` があっても画像の実寸で上書きすることがある。v3 の `html.imageSizes`（既定）は v2 と同じ（書いてあれば残す）。SVG の寸法の丸めも違う。画像は出力ディレクトリから読むので、出力ディレクトリに画像が要る。
 - **`<pre>` の中の字下げ**: 変換スクリプトの `--pretty` は再現しない。
 - **`.html` に混ざった SSI のコメント**: そのまま残る（HTML のコメントは消えない）。
-- **Pug が `include` する出力ディレクトリのファイル**（`../../../htdocs/img/icon.svg` のような SVG）: 変換スクリプトはその時点のファイルを読んで文字列にする。
+- **Pug が `include` する出力ディレクトリのファイル**（`../../../<出力ディレクトリ>/img/icon.svg` のような SVG）: 変換スクリプトはその時点のファイルを読んで文字列にする。
 - **生の HTML を書いた Pug**（`<meta ...>` の行、`| <!--#include ... -->`）は `html("...")` になる。`//` のコメントも HTML のコメントとして残る。
 - 参照できないパッケージ（`node_modules` が無い）の TS は、`scripts.files` を絞って後回しにできる。
 
@@ -269,6 +269,7 @@ yarn kamado build --incremental        # そのページだけ built
 
 - 共有のレイアウトやコンポーネントを直すと、それを使うページだけが再ビルドされる。
 - データファイル（`data.dir`）を直すと、JSX で描画するページが再ビルドされる。
+- どれかのページのメタ（front matter、sidecar、`pages.overrides`）を直すと、`pages` / `nav` などを読むかどうかにかかわらず、JSX で描画する全ページが再ビルドされる（`.html` ページは再ビルドされない）。
 
 ### 9.3 開発サーバー
 

@@ -126,6 +126,7 @@ impl Template {
 						'<' => out.push_str("&lt;"),
 						'>' => out.push_str("&gt;"),
 						'"' => out.push_str("&quot;"),
+						'\'' => out.push_str("&#39;"),
 						other => out.push(other),
 					}
 				}
@@ -1109,6 +1110,12 @@ mod tests {
 		assert_eq!(
 			run("<img src='a\"b onerror=x'>", &r),
 			"<a href=\"a&quot;b onerror=x\"><img src=\"a&quot;b onerror=x\"></a>"
+		);
+		// A template that quotes the attribute with `'` is safe as well.
+		let r = [Rule::wrap("img", HOST, "<a href='{{attr:src}}'>{{content}}</a>").unwrap()];
+		assert_eq!(
+			run("<img src=\"a'b onerror=x\">", &r),
+			"<a href=\"a'b onerror=x\"><img src=\"a'b onerror=x\"></a>"
 		);
 		let r = [Rule::insert("p", HOST, Position::After, "<i>{{attr:title}}</i>").unwrap()];
 		assert_eq!(

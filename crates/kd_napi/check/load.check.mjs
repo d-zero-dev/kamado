@@ -116,7 +116,7 @@ test('build writes HTML pages and returns a report', () => {
 	);
 	assert.equal(
 		readFileSync(path.join(site, 'out', 'about', 'index.html'), 'utf8'),
-		'<p>about</p>',
+		'<p>about</p>\n',
 	);
 });
 

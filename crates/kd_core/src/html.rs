@@ -14,7 +14,9 @@
 //! names; the rest stays as configured.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use kd_config::{Config, Entities, Html, OnError};
 use kd_glob::Pattern;
@@ -81,6 +83,7 @@ pub(crate) struct Pipeline {
 	output_dir: String,
 	base_url: String,
 	host: String,
+	memo: FileMemo,
 }
 
 /// What the page being processed is.
@@ -518,6 +521,7 @@ impl Pipeline {
 			output_dir: config.dir.output.clone(),
 			base_url: config.site.base_url.clone().unwrap_or_default(),
 			host,
+			memo: FileMemo::default(),
 		})
 	}
 }
@@ -588,14 +592,61 @@ impl Pipeline {
 /// Reads for the includes and the image sizes and remembers every file asked
 /// for, with the fingerprint of the bytes returned (a missing file is
 /// remembered as missing, so creating it later invalidates the page).
-struct Recorder {
+struct Recorder<'a> {
 	deps: RefCell<BTreeMap<String, kd_build::Dep>>,
+	memo: &'a FileMemo,
 }
 
-impl Recorder {
-	fn read_bytes(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+/// The bytes of a file and the fingerprint they were read with.
+type Memoed = (kd_build::Dep, Arc<[u8]>);
+
+/// The files that pages read (includes, images), kept for the pipeline so that a logo
+/// used by every page is read and hashed once, not once per page. An entry is used only
+/// while the file still has the size and mtime it was read with (one `stat`), so a dev
+/// server that outlives an edit reads the new bytes.
+#[derive(Default)]
+pub(crate) struct FileMemo {
+	entries: Mutex<HashMap<String, Memoed>>,
+	held: AtomicUsize,
+}
+
+impl FileMemo {
+	/// What the entries may hold in all. Why: a site of large images read by few pages
+	/// each should not grow without bound; what does not fit is read every time.
+	const BUDGET: usize = 256 * 1024 * 1024;
+
+	fn get(&self, path: &str) -> Option<Memoed> {
+		let hit = self
+			.entries
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.get(path)
+			.cloned()?;
+		kd_build::stat_matches(path, &hit.0).then_some(hit)
+	}
+
+	fn put(&self, path: &str, dep: &kd_build::Dep, bytes: &Arc<[u8]>) {
+		let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+		let old = entries.get(path).map_or(0, |(_, b)| b.len());
+		if self.held.load(Ordering::Relaxed) - old + bytes.len() > Self::BUDGET {
+			return;
+		}
+		self.held.fetch_sub(old, Ordering::Relaxed);
+		self.held.fetch_add(bytes.len(), Ordering::Relaxed);
+		entries.insert(path.to_owned(), (dep.clone(), Arc::clone(bytes)));
+	}
+}
+
+impl Recorder<'_> {
+	fn read_bytes(&self, path: &str) -> Result<Option<Arc<[u8]>>, String> {
+		if let Some((dep, bytes)) = self.memo.get(path) {
+			self.deps.borrow_mut().insert(path.to_owned(), dep);
+			return Ok(Some(bytes));
+		}
 		match kd_build::read_with_fingerprint(path) {
 			Ok((bytes, dep)) => {
+				let bytes: Arc<[u8]> = Arc::from(bytes);
+				self.memo.put(path, &dep, &bytes);
 				self.deps.borrow_mut().insert(path.to_owned(), dep);
 				Ok(Some(bytes))
 			}
@@ -610,19 +661,18 @@ impl Recorder {
 	}
 }
 
-impl Reader for Recorder {
+impl Reader for Recorder<'_> {
 	fn read(&self, path: &str) -> Result<String, String> {
 		match self.read_bytes(path)? {
-			Some(bytes) => {
-				String::from_utf8(bytes).map_err(|_| format!("{path}: file is not valid UTF-8"))
-			}
+			Some(bytes) => String::from_utf8(bytes.to_vec())
+				.map_err(|_| format!("{path}: file is not valid UTF-8")),
 			None => Err(format!("{path}: No such file")),
 		}
 	}
 }
 
-impl ImageSource for Recorder {
-	fn read(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+impl ImageSource for Recorder<'_> {
+	fn read(&self, path: &str) -> Result<Option<Arc<[u8]>>, String> {
 		self.read_bytes(path)
 	}
 }
@@ -648,7 +698,7 @@ impl Pipeline {
 		&self,
 		e: &Effective<'_>,
 		input: &PageInput<'_>,
-		recorder: &Recorder,
+		recorder: &Recorder<'_>,
 		warnings: &mut Vec<String>,
 	) -> Result<String, String> {
 		let mut page = Page::parse(input.source);
@@ -719,6 +769,7 @@ impl Pipeline {
 		let e = self.effective(input.url);
 		let recorder = Recorder {
 			deps: RefCell::new(BTreeMap::new()),
+			memo: &self.memo,
 		};
 		let mut warnings = Vec::new();
 		let mut result = input.source.to_owned();

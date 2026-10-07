@@ -39,6 +39,25 @@ use kd_site::{Candidate, Dirs, PageFile};
 /// rebuilds everything.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+static CORE_STAMP: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Sets what tells one build of the core from another (the host knows the file the core
+/// was loaded from). The first call wins.
+pub fn set_core_stamp(stamp: String) {
+	let _ = CORE_STAMP.set(stamp);
+}
+
+/// The version of the crate and the stamp of the build, which every manifest, plan cache
+/// and environment digest includes: a core that was rebuilt, as the working tree of a
+/// pre-release is, must not reuse what an older one wrote.
+#[must_use]
+pub fn core_id() -> String {
+	match CORE_STAMP.get() {
+		Some(stamp) => format!("{VERSION}+{stamp}"),
+		None => VERSION.to_owned(),
+	}
+}
+
 /// Config plus what the build needs to know about where it came from.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Loaded {

@@ -81,6 +81,23 @@ pub fn read_with_fingerprint(path: &str) -> io::Result<(Vec<u8>, Dep)> {
 	))
 }
 
+/// Whether the file at `path` still has the size and mtime that `dep` recorded (one
+/// `stat`, no read). Why: a reader that keeps the bytes of a file can ask this to know
+/// whether to read it again.
+///
+/// # Example
+///
+/// ```no_run
+/// let (_, dep) = kd_build::read_with_fingerprint("/site/logo.png").unwrap();
+/// assert!(kd_build::stat_matches("/site/logo.png", &dep));
+/// ```
+#[must_use]
+pub fn stat_matches(path: &str, dep: &Dep) -> bool {
+	stat(path).is_some_and(|(size, sec, nsec)| {
+		size == dep.size && sec == dep.mtime_sec && nsec == dep.mtime_nsec
+	})
+}
+
 impl Dep {
 	/// The fingerprint of a dependency that does not exist.
 	#[must_use]

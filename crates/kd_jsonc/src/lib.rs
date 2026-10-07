@@ -139,7 +139,10 @@ impl Value {
 }
 
 fn write_number(n: f64, out: &mut String) {
-	if n.is_finite() && n.fract() == 0.0 && n.abs() < 1e15 {
+	if !n.is_finite() {
+		// JSON has no NaN or Infinity (`.nan` of YAML gets here); `JSON.stringify` says null.
+		out.push_str("null");
+	} else if n.is_finite() && n.fract() == 0.0 && n.abs() < 1e15 {
 		// Avoid "1.0" and "-0" for integral values.
 		let i = n as i64;
 		out.push_str(&i.to_string());
@@ -550,6 +553,17 @@ mod tests {
 
 	fn s(v: &str) -> Value {
 		Value::String(v.to_string())
+	}
+
+	#[test]
+	fn numbers_that_json_cannot_hold_are_written_as_null() {
+		let list = Value::Array(vec![
+			Value::Number(f64::NAN),
+			Value::Number(f64::INFINITY),
+			Value::Number(f64::NEG_INFINITY),
+			Value::Number(1.0),
+		]);
+		assert_eq!(list.to_json(), "[null,null,null,1]");
 	}
 
 	#[test]

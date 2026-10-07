@@ -228,7 +228,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 
 ### 7.2 コンポーネントと型
 
-- 同梱の `.d.ts` が `JSX` の名前空間、`Html`、`PageProps`、`LayoutProps` を定義する。`tsconfig.json` の `"jsx": "preserve"` と `"jsxImportSource": "kamado"`（型のみ）で使う。
+- 型定義（`PageProps` などの `.d.ts`）は同梱しない。コンポーネントの props の型は、使う側が宣言する（`jsx` の型は `@types/react` など、使うプロジェクトが持つもので足りる）。`tsconfig.json` は `"jsx": "preserve"` にする。
 - hooks（`useState` など）、Context、`Suspense` は**非対応**。コンポーネントは**純粋関数**（同じ props なら同じ出力、モジュールの変数を書き換えない）。ワーカーが並列に描画するので、この契約を破ると結果が不定になる。
 - `import` できるもの: 相対パスと `pages.alias` で指定した別名の TSX / TS / JSON、npm パッケージ（Node が解決し、ESM のみ）。CSS の import は非対応。
 
@@ -242,15 +242,15 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 | `meta`                      | このページのメタ（§4 のマージ後）                                                                                                                                                                                                                                                                   |
 | `site`                      | `site.*`                                                                                                                                                                                                                                                                                            |
 | `data`                      | `data.dir` と `data.values` をマージしたオブジェクト（ファイル名がキー）                                                                                                                                                                                                                            |
-| `pages`                     | 全ページの一覧（`page` と `meta`）。**Rust のインデックスを引くアクセサ**で、コピーしない                                                                                                                                                                                                           |
+| `pages`                     | 全ページの一覧（`page` と `meta`）。ワーカーに 1 回渡した配列を、そのワーカーのすべてのページが共有する（ページごとにはコピーしない。Rust のインデックスを引くアクセサではない）                                                                                                                    |
 | `nav(options?)`             | v2 と同じ。`{ ignoreGlobs, baseDepth }`。ツリーのノードは `{ page, meta, children }`。絞り込みと並べ替えは、返ってきた配列を JSX 側で加工する                                                                                                                                                       |
 | `breadcrumbs`               | v2 と同じ。祖先の `index` ページとページ自身。`{ title, href, depth, meta }`。タイトルがなければ `__NO_TITLE__`。起点は `site.baseURL` の**パス部分**（`https://example.com/sub/` なら `/sub/`）で、それより浅い階層は含めない（v2 は値をそのまま数えたので、フル URL を書くと上位 2 階層が欠けた） |
 | `titleList(options?)`       | v2 と同じ。`{ separator, baseURL, prefix, suffix, fallback }`                                                                                                                                                                                                                                       |
 | `formatDate(value, format)` | dayjs のトークンのサブセット（`YYYY YY M MM MMM MMMM D DD d dd ddd dddd H HH h hh m mm s ss SSS A a Z ZZ X x`、`[…]` でエスケープ、英語、ローカルのタイムゾーン）。`value` は文字列・数値・Date                                                                                                     |
 
-レイアウトは追加で `content`（ページの描画結果。`Html`）を受け取る。`meta.layout` に `layouts.dir` 内のファイル名（拡張子なし）を書く。`.html` ページはこれがレイアウトを使う唯一の手段。JSX ページは `<Layout>` を直接合成してもよい。存在しないレイアウト名はエラー。
+レイアウトは追加で `content`（ページの描画結果。エスケープ済みの HTML として印字されるので、`{content}`、`dangerouslySetInnerHTML={{ __html: content }}`、`html(content)` のどれでも二重にエスケープされない）を受け取る。`meta.layout` に `layouts.dir` 内のファイル名（拡張子なし）を書く。`.html` ページはこれがレイアウトを使う唯一の手段。JSX ページは `<Layout>` を直接合成してもよい。存在しないレイアウト名はエラー。
 
-`pages` / `nav` / `breadcrumbs` / `titleList` が読んだメタのフィールドは、ページごとに記録され、差分ビルドの判定に使われる（読んでいないフィールドの変更では再描画しない）。
+差分ビルドは、全ページの URL とメタのダイジェストを JSX ページの環境に含める。`pages` / `nav` / `breadcrumbs` / `titleList` がどのフィールドを読んだかは記録しないので、**どのページのメタが変わっても、JSX で描画する全ページが再ビルドされる**（`.html` ページは影響を受けない）。フィールド単位の追跡は行わない（読んだフィールドの記録は、アクセサ化とあわせて入れるまで持たない）。
 
 ## 8. バナー
 

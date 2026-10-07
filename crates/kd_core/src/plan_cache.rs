@@ -95,7 +95,7 @@ const FORMAT: u32 = 1;
 /// What identifies the writer: a cache from another version or format is
 /// ignored.
 fn stamp() -> String {
-	format!("{}/{FORMAT}", crate::VERSION)
+	format!("{}/{FORMAT}", crate::core_id())
 }
 
 fn too_deep(value: &Value, depth: usize) -> bool {

@@ -35,6 +35,51 @@ const NAPI_OK: napi_status = 0;
 
 unsafe extern "C" {
 	fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+	fn dladdr(addr: *const c_void, info: *mut DlInfo) -> c_int;
+}
+
+/// `Dl_info` of `<dlfcn.h>`.
+#[repr(C)]
+struct DlInfo {
+	dli_fname: *const c_char,
+	dli_fbase: *mut c_void,
+	dli_sname: *const c_char,
+	dli_saddr: *mut c_void,
+}
+
+/// Tells the core which build of it this is: the size and mtime of the library file
+/// this code was loaded from. Why: the version of the crate does not change between
+/// builds, and the manifests and the plan cache of a site built with an older core
+/// must not be taken for current.
+fn set_core_stamp() {
+	static ONCE: OnceLock<()> = OnceLock::new();
+	ONCE.get_or_init(|| {
+		let mut info = DlInfo {
+			dli_fname: std::ptr::null(),
+			dli_fbase: std::ptr::null_mut(),
+			dli_sname: std::ptr::null(),
+			dli_saddr: std::ptr::null_mut(),
+		};
+		let here: fn() = set_core_stamp;
+		// SAFETY: `info` is a valid out pointer, and the address is one of this library.
+		let found = unsafe { dladdr(here as *const c_void, &raw mut info) };
+		if found == 0 || info.dli_fname.is_null() {
+			return;
+		}
+		// SAFETY: dladdr returned a NUL-terminated string that lives as long as the library.
+		let Ok(file) = unsafe { CStr::from_ptr(info.dli_fname) }.to_str() else {
+			return;
+		};
+		let Ok(meta) = std::fs::metadata(file) else {
+			return;
+		};
+		let nanos = meta
+			.modified()
+			.ok()
+			.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+			.map_or(0, |d| d.as_nanos());
+		kd_core::set_core_stamp(format!("{}-{nanos}", meta.len()));
+	});
 }
 
 #[cfg(target_os = "macos")]
@@ -559,6 +604,7 @@ unsafe fn export(api: &Api, env: napi_env, exports: napi_value, name: &CStr, cb:
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn napi_register_module_v1(env: napi_env, exports: napi_value) -> napi_value {
 	let Some(api) = api() else { return exports };
+	set_core_stamp();
 	// SAFETY: env and exports are valid for the duration of this call.
 	unsafe {
 		export(api, env, exports, c"version", version);

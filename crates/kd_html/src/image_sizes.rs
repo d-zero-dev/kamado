@@ -32,7 +32,7 @@ pub trait ImageSource {
 	/// # Errors
 	///
 	/// A message for any failure other than a missing file.
-	fn read(&self, path: &str) -> Result<Option<Vec<u8>>, String>;
+	fn read(&self, path: &str) -> Result<Option<std::sync::Arc<[u8]>>, String>;
 }
 
 /// An image that cannot be measured.
@@ -122,8 +122,8 @@ fn is_remote_or_inline(src: &str) -> bool {
 /// use kd_html::page::Page;
 /// struct One;
 /// impl ImageSource for One {
-///     fn read(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
-///         Ok((path == "/out/a.svg").then(|| b"<svg width=\"4\" height=\"3\"></svg>".to_vec()))
+///     fn read(&self, path: &str) -> Result<Option<std::sync::Arc<[u8]>>, String> {
+///         Ok((path == "/out/a.svg").then(|| std::sync::Arc::from(&b"<svg width=\"4\" height=\"3\"></svg>"[..])))
 ///     }
 /// }
 /// let mut page = Page::parse("<img src=\"/a.svg\">");
@@ -204,9 +204,12 @@ mod tests {
 	}
 
 	impl ImageSource for Files {
-		fn read(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+		fn read(&self, path: &str) -> Result<Option<std::sync::Arc<[u8]>>, String> {
 			self.asked.borrow_mut().push(path.to_owned());
-			Ok(self.files.get(path).cloned())
+			Ok(self
+				.files
+				.get(path)
+				.map(|b| std::sync::Arc::from(b.as_slice())))
 		}
 	}
 

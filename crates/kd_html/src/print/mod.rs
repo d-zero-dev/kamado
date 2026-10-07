@@ -179,6 +179,28 @@ mod tests {
 	}
 
 	#[test]
+	fn non_ascii_text_before_a_conditional_comment_does_not_shift_it() {
+		let out = fmt(
+			"<head><title>日本語</title><!--[if lt IE 9]><script src=\"/js/html5shiv.js\"></script><![endif]--></head>",
+		);
+		assert!(out.contains("<title>日本語</title>"));
+		assert!(out.contains("<!--[if lt IE 9]>"));
+		assert!(out.contains("<![endif]-->"));
+		let out = fmt("<p>日本語</p><!--[if IE]><p>日本語</p><![endif]-->");
+		assert!(out.contains("<p>日本語</p>"));
+		assert!(out.contains("<!--[if IE]>"));
+	}
+
+	#[test]
+	fn markup_nested_too_deep_is_an_error_not_a_stack_overflow() {
+		let deep = format!("{}x{}", "<div>".repeat(5000), "</div>".repeat(5000));
+		let error = format(&deep, &Options::default()).unwrap_err();
+		assert!(error.message.contains("nested deeper than 256"));
+		let fine = format!("{}x{}", "<div>".repeat(200), "</div>".repeat(200));
+		assert!(format(&fine, &Options::default()).is_ok());
+	}
+
+	#[test]
 	fn tabs_and_bracket_same_line() {
 		let options = Options {
 			use_tabs: true,

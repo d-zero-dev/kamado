@@ -1102,6 +1102,7 @@ impl Parser {
 				}
 			})
 			.collect();
+		let blank_lines = lines.len();
 		let body = if literal {
 			lines.join("\n")
 		} else {
@@ -1121,7 +1122,8 @@ impl Parser {
 			}
 			Chomp::Keep => {
 				if trimmed.is_empty() {
-					"\n".repeat(trailing)
+					// Nothing but blank lines: each of them is a newline.
+					"\n".repeat(blank_lines)
 				} else {
 					// Every content line ends with a newline, plus the kept blanks.
 					format!("{trimmed}\n{}", "\n".repeat(trailing))
@@ -1471,8 +1473,9 @@ fn fold_block(lines: &[String]) -> String {
 		prev_more_indented = more_indented;
 		blank_run = 0;
 	}
-	// Trailing blank lines become trailing newlines; chomping decides how many survive.
-	format!("{out}\n{}", "\n".repeat(blank_run))
+	// Trailing blank lines become newlines after the last line (which has none yet, like
+	// the join of a literal scalar); chomping decides how many survive.
+	format!("{out}{}", "\n".repeat(blank_run))
 }
 
 fn apply_merges(pairs: &mut Vec<(String, Value)>, merges: Vec<Value>) -> Result<(), Error> {
@@ -1661,7 +1664,7 @@ mod tests {
 	fn integers_and_floats() {
 		assert_eq!(
 			json("[1, -2, +3, 0x1F, 0o17, 1.5, -.5, 1., 1e3, 2E-2, .inf, -.inf]"),
-			"[1,-2,3,31,15,1.5,-0.5,1,1000,0.02,inf,-inf]"
+			"[1,-2,3,31,15,1.5,-0.5,1,1000,0.02,null,null]"
 		);
 		assert_eq!(
 			// YAML 1.2 core: "08" is the decimal integer 8 (YAML 1.1 treated it as a
@@ -1745,6 +1748,22 @@ mod tests {
 		assert_eq!(json("a: \"one\n  two\"\n"), r#"{"a":"one two"}"#);
 		assert_eq!(json("a: \"one\\\n  two\"\n"), r#"{"a":"onetwo"}"#);
 		assert_eq!(json("a: 'one\n  two'\n"), r#"{"a":"one two"}"#);
+	}
+
+	#[test]
+	fn keep_chomping_keeps_exactly_the_line_breaks_that_are_written() {
+		// Literal and folded alike: the last line's own break, plus one per blank line.
+		assert_eq!(json("a: |+\n  x\n"), "{\"a\":\"x\\n\"}");
+		assert_eq!(json("a: >+\n  x\n"), "{\"a\":\"x\\n\"}");
+		assert_eq!(json("a: |+\n  x\n\n"), "{\"a\":\"x\\n\\n\"}");
+		assert_eq!(json("a: >+\n  x\n\n"), "{\"a\":\"x\\n\\n\"}");
+		assert_eq!(
+			json("a: >+\n  x\n  y\n\n\nb: 1"),
+			"{\"a\":\"x y\\n\\n\\n\",\"b\":1}"
+		);
+		// Nothing but blank lines: one newline for each.
+		assert_eq!(json("a: |+\n\nb: 1"), "{\"a\":\"\\n\",\"b\":1}");
+		assert_eq!(json("a: >+\n\n\nb: 1"), "{\"a\":\"\\n\\n\",\"b\":1}");
 	}
 
 	#[test]

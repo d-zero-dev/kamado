@@ -1,7 +1,13 @@
 import { Hono } from 'hono';
 import { describe, expect, test, vi } from 'vitest';
 
-import { hasBody, normalizeRule, rewritePath, setProxyRoutes } from './proxy.js';
+import {
+	hasBody,
+	normalizeRule,
+	rewritePath,
+	setProxyRoutes,
+	withoutEncodingHeaders,
+} from './proxy.js';
 
 describe('normalizeRule', () => {
 	test('a string is a target', () => {
@@ -60,6 +66,22 @@ function setup(
 	setProxyRoutes(app, proxy, fakeFetch as unknown as typeof fetch);
 	return { app, calls };
 }
+
+describe('withoutEncodingHeaders', () => {
+	test('drops the headers that describe the encoded body and the connection', () => {
+		const headers = withoutEncodingHeaders(
+			new Headers({
+				'content-encoding': 'gzip',
+				'content-length': '12',
+				connection: 'keep-alive',
+				'keep-alive': 'timeout=5',
+				'content-type': 'text/html',
+			}),
+		);
+
+		expect([...headers.keys()]).toEqual(['content-type']);
+	});
+});
 
 describe('setProxyRoutes', () => {
 	test('forwards the prefix and everything under it with the query', async () => {

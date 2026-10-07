@@ -79,6 +79,24 @@ fn fields(t: LocalTime) -> Fields {
 	}
 }
 
+/// The length of the token at the start of `chars` (0 when it is a literal character),
+/// matched as the regular expression of dayjs does, from left to right and greedily:
+/// `YYYY|YY|M{1,4}|D{1,2}|d{1,4}|H{1,2}|h{1,2}|[aAXx]|m{1,2}|s{1,2}|Z{1,2}|SSS`. So
+/// `ddddd` is `dddd` and `d`, `AA` is `A` and `A`, `YYY` is `YY` and a literal `Y`.
+fn token_len(chars: &[char]) -> usize {
+	let c = chars[0];
+	let run = chars.iter().take_while(|&&x| x == c).count();
+	match c {
+		'Y' if run >= 4 => 4,
+		'Y' if run >= 2 => 2,
+		'M' | 'd' => run.min(4),
+		'D' | 'H' | 'h' | 'm' | 's' | 'Z' => run.min(2),
+		'a' | 'A' | 'X' | 'x' => 1,
+		'S' if run >= 3 => 3,
+		_ => 0,
+	}
+}
+
 /// Formats `time` with the tokens of dayjs' default format: `YYYY YY M MM MMM
 /// MMMM D DD d dd ddd dddd H HH h hh m mm s ss SSS A a Z ZZ X x`, with
 /// `[text]` kept as it is.
@@ -99,12 +117,13 @@ pub fn format(time: LocalTime, pattern: &str) -> String {
 	while i < chars.len() {
 		if chars[i] == '['
 			&& let Some(close) = chars[i + 1..].iter().position(|&c| c == ']')
+			&& close > 0
 		{
 			out.extend(&chars[i + 1..i + 1 + close]);
 			i += close + 2;
 			continue;
 		}
-		let run = chars[i..].iter().take_while(|&&c| c == chars[i]).count();
+		let run = token_len(&chars[i..]);
 		let token: String = chars[i..i + run].iter().collect();
 		let replaced = match token.as_str() {
 			"YYYY" => Some(format!("{:04}", f.year)),
@@ -150,8 +169,7 @@ pub fn format(time: LocalTime, pattern: &str) -> String {
 				i += run;
 			}
 			None => {
-				// Not a token (or a run longer than any token): the characters as
-				// they are.
+				// Not a token: the character as it is.
 				out.push(chars[i]);
 				i += 1;
 			}
@@ -274,6 +292,20 @@ mod tests {
 			"+00:00 +0000 1700000000 1700000000123"
 		);
 		assert_eq!(format(T, "[YYYY] YYYY [a]b"), "YYYY 2023 ab");
+	}
+
+	#[test]
+	fn a_run_of_letters_is_split_into_tokens_as_dayjs_does() {
+		// The same results as `formatDate` of the Node side (dayjs's regular expression).
+		assert_eq!(format(T, "ddddd"), "Tuesday2");
+		assert_eq!(format(T, "AA"), "PM".repeat(2));
+		assert_eq!(format(T, "xx"), "17000000001231700000000123");
+		assert_eq!(format(T, "ZZZ"), "+0000+00:00");
+		assert_eq!(format(T, "DDD"), "1414");
+		assert_eq!(format(T, "HHH"), "2222");
+		assert_eq!(format(T, "YYY Y SS S"), "23Y Y SS S");
+		assert_eq!(format(T, "SSSS"), "123S");
+		assert_eq!(format(T, "[]"), "[]");
 	}
 
 	#[test]
