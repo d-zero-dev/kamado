@@ -1,0 +1,257 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"title": "kamado.config.jsonc",
+	"description": "Configuration of kamado v3. Relative paths are resolved against the directory of this file. Unknown options are errors.",
+	"type": "object",
+	"additionalProperties": false,
+	"definitions": {
+		"globs": {
+			"description": "A glob or a list of globs. Negated globs (\"!...\") are not supported; use the matching ignore/exclude option.",
+			"oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+		},
+		"stringMap": {
+			"type": "object",
+			"additionalProperties": { "type": "string" }
+		},
+		"banner": {
+			"description": "A comment put at the top of each output. Placeholders: {{date:FORMAT}}, {{year}}, {{version}}. An empty string or false turns it off.",
+			"oneOf": [{ "type": "string" }, { "const": false }]
+		},
+		"sourcemap": {
+			"description": "true writes it always, false never, \"onServer\" (default) only for the dev server.",
+			"oneOf": [{ "type": "boolean" }, { "const": "onServer" }]
+		},
+		"objectArray": {
+			"type": "array",
+			"items": { "type": "object" }
+		},
+		"htmlOptions": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"doctype": {
+					"description": "Put <!DOCTYPE html> first.",
+					"type": "boolean"
+				},
+				"format": {
+					"description": "false leaves the markup as it is. An object sets the printing options.",
+					"oneOf": [
+						{ "type": "boolean" },
+						{
+							"type": "object",
+							"additionalProperties": false,
+							"properties": {
+								"useTabs": { "type": "boolean" },
+								"tabWidth": { "type": "integer", "minimum": 0 },
+								"printWidth": { "type": "integer", "minimum": 0 },
+								"bracketSameLine": { "type": "boolean" }
+							}
+						}
+					]
+				},
+				"minify": {
+					"description": "false turns every minification off. An object picks them.",
+					"oneOf": [
+						{ "type": "boolean" },
+						{
+							"type": "object",
+							"additionalProperties": false,
+							"properties": {
+								"booleanAttributes": { "type": "boolean" },
+								"redundantAttributes": { "type": "boolean" },
+								"scriptTypeAttributes": { "type": "boolean" },
+								"styleLinkTypeAttributes": { "type": "boolean" },
+								"css": { "type": "boolean" },
+								"js": { "type": "boolean" }
+							}
+						}
+					]
+				},
+				"lineBreak": {
+					"enum": ["\n", "lf", "\r\n", "crlf"]
+				},
+				"serializer": {
+					"description": "How the markup is written: \"linkedom\" (as v2 did) or \"spec\" (as the HTML standard says: & and no-break space escaped in attribute values, &nbsp; in text, class=\"\" kept, <path></path>).",
+					"enum": ["linkedom", "spec"]
+				},
+				"encoding": {
+					"description": "The character encoding the pages are written in: UTF-8, or Shift_JIS (Windows, CP932). A page can name its own in html.overrides.",
+					"enum": [
+						"utf8",
+						"utf-8",
+						"shift_jis",
+						"shift-jis",
+						"sjis",
+						"cp932",
+						"windows-31j"
+					]
+				},
+				"entities": {
+					"description": "\"none\", \"all\", or a map from a character to its reference.",
+					"oneOf": [{ "enum": ["none", "all"] }, { "$ref": "#/definitions/stringMap" }]
+				},
+				"imageSizes": {
+					"oneOf": [
+						{ "type": "boolean" },
+						{
+							"type": "object",
+							"additionalProperties": false,
+							"properties": {
+								"enabled": { "type": "boolean" },
+								"exclude": { "$ref": "#/definitions/globs" },
+								"keepAuthored": { "type": "boolean" }
+							}
+						}
+					]
+				},
+				"rules": { "$ref": "#/definitions/objectArray" },
+				"includes": { "$ref": "#/definitions/objectArray" },
+				"inject": { "$ref": "#/definitions/objectArray" },
+				"overrides": {
+					"description": "Options for the pages that match \"pages\".",
+					"type": "array",
+					"items": {
+						"type": "object",
+						"required": ["pages"],
+						"properties": {
+							"pages": { "$ref": "#/definitions/globs" }
+						}
+					}
+				},
+				"onError": { "enum": ["silent", "warning", "error"] }
+			}
+		}
+	},
+	"properties": {
+		"$schema": { "type": "string" },
+		"dir": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"input": { "type": "string", "default": "." },
+				"output": { "type": "string", "default": "." }
+			}
+		},
+		"site": {
+			"description": "Falls back to production.* of package.json.",
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"host": { "type": "string" },
+				"baseURL": { "type": "string" },
+				"siteName": { "type": "string" },
+				"siteNameEn": { "type": "string" }
+			}
+		},
+		"pages": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"files": { "$ref": "#/definitions/globs" },
+				"ignore": { "$ref": "#/definitions/globs" },
+				"outputExtension": { "type": "string", "default": ".html" },
+				"outputPathField": { "type": "string" },
+				"outputPathConflict": { "enum": ["error", "warning", "silent"] },
+				"layouts": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"dir": { "type": "string" }
+					}
+				},
+				"alias": { "$ref": "#/definitions/stringMap" },
+				"define": { "$ref": "#/definitions/stringMap" },
+				"overrides": {
+					"description": "Path of a JSON file with virtual pages and metadata overrides.",
+					"type": "string"
+				}
+			}
+		},
+		"data": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"dir": { "type": "string" },
+				"values": { "type": "object" }
+			}
+		},
+		"html": { "$ref": "#/definitions/htmlOptions" },
+		"sitemap": {
+			"description": "false does not write a sitemap.",
+			"oneOf": [
+				{ "const": false },
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"output": { "type": "string", "default": "sitemap.xml" },
+						"include": { "$ref": "#/definitions/globs" },
+						"exclude": { "$ref": "#/definitions/globs" },
+						"lastmod": { "enum": ["manifest", "mtime", "none"] },
+						"changefreq": { "type": "string" },
+						"priority": { "type": ["string", "number"] }
+					}
+				}
+			]
+		},
+		"styles": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"files": { "$ref": "#/definitions/globs" },
+				"ignore": { "$ref": "#/definitions/globs" },
+				"alias": { "$ref": "#/definitions/stringMap" },
+				"banner": { "$ref": "#/definitions/banner" },
+				"sourcemap": { "$ref": "#/definitions/sourcemap" },
+				"minify": { "type": "boolean" }
+			}
+		},
+		"scripts": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"files": { "$ref": "#/definitions/globs" },
+				"ignore": { "$ref": "#/definitions/globs" },
+				"alias": { "$ref": "#/definitions/stringMap" },
+				"define": { "$ref": "#/definitions/stringMap" },
+				"banner": { "$ref": "#/definitions/banner" },
+				"sourcemap": { "$ref": "#/definitions/sourcemap" },
+				"minify": { "type": "boolean" },
+				"target": { "type": "string", "default": "es2022" }
+			}
+		},
+		"devServer": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+				"host": { "type": "string" },
+				"open": { "type": "boolean" },
+				"startPath": { "type": "string" },
+				"proxy": {
+					"description": "Keyed by path prefix (starts with \"/\"). The value is a target URL or a rule object.",
+					"type": "object",
+					"additionalProperties": {
+						"oneOf": [{ "type": "string" }, { "type": "object" }]
+					}
+				}
+			}
+		},
+		"build": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"jobs": {
+					"oneOf": [{ "const": "auto" }, { "type": "integer", "minimum": 1 }]
+				},
+				"incremental": { "type": "boolean" },
+				"cacheDir": { "type": "string" },
+				"skipUnchanged": { "type": "boolean" },
+				"report": {
+					"description": "Path of the JSON file the build result is written to.",
+					"type": "string"
+				}
+			}
+		}
+	}
+}

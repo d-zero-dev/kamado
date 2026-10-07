@@ -1,0 +1,5 @@
+.a {
+	width:min(0px,1px);
+	width:max(0.50px, 1.0px);
+	width:clamp(0px,1.0px,2px);
+}

@@ -1,0 +1,1 @@
+a[href=x i]{x:1}a[href=x i]{x:2}a[href^=http]{x:3}a[data-a=a-b]{x:4}a[data-a=a_b]{x:5}

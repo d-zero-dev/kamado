@@ -12,18 +12,17 @@ disable-model-invocation: true
 - **publish は取り消せない**。各ステップでユーザーの確認を取る
 - **`yarn release` / `git push` 系はユーザーが実行する**。エージェントは実行せず（`.claude/settings.json` で deny されている）`!` プレフィックス付きのコマンドを提示し、完了報告を待つ
 
+# v3 の公開の状態（準備中）
+
+v3 の `packages/kamado` は `private: true` で、まだ公開していない。v3 の公開は、ネイティブアドオン（Rust の `kd_napi`）をプラットフォームごとにビルドして同梱する形になる予定で、そのパイプラインは issue #277 で扱っている。**現在の `.github/workflows/publish.yml` は v2 の構成（`yarn build` のあと `lerna publish from-package`）のままで、アドオンをビルドも同梱もしない。** したがって、パイプラインができるまでは、この手順で v3 を publish してはいけない。実行を求められたら、#277 の状況をユーザーに確認する。
+
+配布の形は、`kamado` に全プラットフォーム分のアドオン（`native/<os>-<arch>/kd_napi.node`）を同梱する（`docs/v3/RFC.md` §18。プラットフォーム別のパッケージには分けない）。以下の手順は、パイプラインができたあとも使える部分（版の決め方、タグ、dist-tag、検証、失敗時の対処）を残してあり、パイプラインの完成時に更新する。
+
+v2 のリリースは `v2` ブランチで行う。公開済みの v2（`kamado@2.0.0-alpha.17` など）は npm に残る。
+
 # 対象パッケージ
 
-Lerna **fixed モード**のため、全パッケージが同一バージョンで上がる。`kamado` 本体のみ**無スコープ**で公開されている点に注意（`npm view` 等のコマンド例でスコープを付けない）。
-
-| ディレクトリ                          | npm パッケージ名             |
-| ------------------------------------- | ---------------------------- |
-| `packages/kamado`                     | `kamado`                     |
-| `packages/@kamado-io/page-compiler`   | `@kamado-io/page-compiler`   |
-| `packages/@kamado-io/script-compiler` | `@kamado-io/script-compiler` |
-| `packages/@kamado-io/style-compiler`  | `@kamado-io/style-compiler`  |
-| `packages/@kamado-io/pug-compiler`    | `@kamado-io/pug-compiler`    |
-| `packages/@kamado-io/jsx-compiler`    | `@kamado-io/jsx-compiler`    |
+v3 の対象は `kamado`（`packages/kamado`）の 1 つで、**無スコープ**で公開する（`npm view` 等のコマンド例でスコープを付けない）。版は Lerna が `lerna.json` の `version` で管理する（プラットフォーム別のパッケージを作る場合は、それらも同じ版で上げる）。
 
 # 手順
 
@@ -102,7 +101,7 @@ git describe --tags --abbrev=0
 git log --oneline $(git describe --tags --abbrev=0)..HEAD
 ```
 
-fixed モードなので `lerna.json` の `version` が現行バージョンの正。`yarn release` は conventional commits からバージョンを自動決定するため、**リリース種別（graduate / alpha / beta / rc）をユーザーに確認する必要はない**。差分は「何が入るか」の確認材料として提示するだけでよい。
+`lerna.json` の `version` が現行バージョンの正。`yarn release` は conventional commits からバージョンを自動決定するため、**リリース種別（graduate / alpha / beta / rc）をユーザーに確認する必要はない**。差分は「何が入るか」の確認材料として提示するだけでよい。
 
 ## 8. バージョニングと push（ユーザー実行）
 
@@ -148,12 +147,11 @@ gh run watch --exit-status
 
 ## 10. publish 結果の検証
 
-workflow が success でも publish が意図通りとは限らない。**全パッケージについて**実際の npm 上の状態を確認する。
+workflow が success でも publish が意図通りとは限らない。**公開した全パッケージについて**実際の npm 上の状態を確認する。
 
 ```bash
 npm view kamado version
 npm view kamado dist-tags
-npm view @kamado-io/page-compiler version
 ```
 
 確認項目:
@@ -162,7 +160,7 @@ npm view @kamado-io/page-compiler version
 - **dist-tag が意図通りか**。正式リリースは `latest`、プレリリースは `alpha` / `beta` / `rc` / `next`。`publish.yml` は `lerna.json` の `version` 文字列から判定する（`-alpha` → `alpha`、`-` を含む → `next`、それ以外 → `latest`）
 - provenance が付与されているか（`npm view <package> --json` の `dist.attestations`）
 
-fixed モードでも**一部のパッケージだけ publish される（部分 publish）**ことがある。全6パッケージ（`kamado` + `@kamado-io/*` 5つ）を個別に確認し、漏れがあればユーザーに報告する。
+複数のパッケージを公開する構成（プラットフォーム別のパッケージなど）では、**一部のパッケージだけ publish される（部分 publish）**ことがある。公開した全パッケージを個別に確認し、漏れがあればユーザーに報告する。
 
 **ここが success の判定点**。npm 上の状態を確認するまでリリース完了と判断してはいけない。
 

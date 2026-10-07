@@ -1,0 +1,1 @@
+let a: A extends infer U extends string ? U : never = x;

@@ -1,0 +1,1 @@
+a{width:expression(document.body.clientWidth > 800 ? "800px":"auto")}

@@ -1,0 +1,1 @@
+const f = function (this: Window) { return 1; };

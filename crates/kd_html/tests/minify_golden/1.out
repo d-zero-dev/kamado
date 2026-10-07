@@ -1,0 +1,1 @@
+<div><?php if ($a): ?> <b>x</b> <?php endif; ?></div>

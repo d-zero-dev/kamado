@@ -1,5 +1,7 @@
 # Migrating from kamado v1.x to v2.x
 
+> **Note:** This guide is for v1 → v2. The v2 code now lives on the `v2` branch; this branch is v3 (a Rust core), so the file paths below (`ARCHITECTURE.md`, `packages/@kamado-io/*`, etc.) exist on the `v2` branch only. To move from v2 to v3, follow [`docs/v3/MIGRATION.md`](./docs/v3/MIGRATION.md).
+
 Mechanical recipe for upgrading a kamado v1 project to v2. Each section is a self-contained transformation; apply top-to-bottom. Before/after blocks are exhaustive — no prose between them. AI agents: skip sections whose Before pattern does not appear in the target project.
 
 ---

@@ -1,0 +1,1 @@
+@font-face{font-family:"A";src:url("a.woff2") format("woff2"),url('a.woff') format('woff');font-display:swap;unicode-range:U+0000-00FF,U+0131}

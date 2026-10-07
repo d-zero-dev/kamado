@@ -1,0 +1,3 @@
+.a {
+	animation:2s ease-in 1s infinite alternate both running foo;
+}

@@ -1,0 +1,1 @@
+class A<T> extends B<T> implements C<T>, D { x: T; constructor(a: T) { super(); this.x = a; } }

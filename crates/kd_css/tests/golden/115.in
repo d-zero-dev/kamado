@@ -1,0 +1,3 @@
+.a {
+	width:var(--x,0px);
+}

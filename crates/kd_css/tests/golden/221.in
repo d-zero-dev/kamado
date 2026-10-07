@@ -1,0 +1,4 @@
+.a {
+	columns:2 100px;
+	column-rule:1px solid red;
+}

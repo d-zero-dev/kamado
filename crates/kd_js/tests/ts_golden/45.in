@@ -1,0 +1,1 @@
+let a: { (x: number): string; new (x: number): A; method(): void } = x;

@@ -1,0 +1,3 @@
+.a {
+	background:radial-gradient(circle at center,red 0%,blue 100%);
+}

@@ -1,0 +1,15 @@
+[package]
+name = "kd_config"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kd_glob = { path = "../kd_glob" }
+kd_jsonc = { path = "../kd_jsonc" }
+kd_site = { path = "../kd_site" }

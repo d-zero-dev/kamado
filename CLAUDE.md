@@ -4,41 +4,63 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 概要
 
-kamado — オンデマンド静的サイトジェネレータ。Lerna + Yarn Workspaces のモノレポ構成で、コア（`kamado`）と各種コンパイラ（`@kamado-io/*-compiler`）を提供する（fixed バージョンモード）。
+kamado — オンデマンド静的サイトジェネレータ（v3）。コアは Rust（標準ライブラリのみ）で書き、Node 側は薄い層（CLI、`build()` / `start()`、JSX の描画ワーカー、開発サーバー、esbuild の呼び出し、ネイティブアドオンの読み込み）だけを持つ。npm パッケージは `kamado` の 1 つ（Lerna は版の管理と publish のために残している）。v2（`@kamado-io/*-compiler` を含む）は `v2` ブランチで保守していて、このブランチには無い。
 
 ## プロジェクト構成
 
 作業前に以下のファイルを確認し、プロジェクトの状態を把握すること:
 
-- `package.json` — scripts、devDependencies、Volta（Node 24 / Yarn 4）
-- `lerna.json` — fixed バージョンモード、`packages/*`, `packages/@kamado-io/*`
-- `README.md` — リポジトリ概要
-- `tsconfig.json` — TypeScript 設定
-- 各パッケージの構成は `packages/kamado/package.json` および `packages/@kamado-io/*/package.json` を参照
+- `package.json` — scripts、devDependencies、Volta（Node 26 / Yarn 4）。ワークスペースは `packages/*`
+- `lerna.json` — 版（`3.0.0-alpha.0`）と publish の設定。`packages/*`
+- `Cargo.toml` — Rust のワークスペース（`crates/*`）。外部クレートなし
+- `crates/` — Rust のコア（`kd_*`）。各クレートの担当は `docs/v3/development.md`
+- `packages/kamado/` — Node 側のパッケージ（npm 名 `kamado`、bin `kamado`、`kamado/jsx`）。`private: true`（公開の仕組みは issue #277）
+- `docs/v3/` — 仕様 `RFC.md`、v2 からの移行手順 `MIGRATION.md`、開発手順 `development.md`、設計判断の根拠 `spike-results.md`
+- `benchmarks/v3/` — 比較ハーネスと fixture 生成器。`benchmarks/v2-baseline/` — v2 の基準出力を作る単独のプロジェクト（自前の `yarn.lock`）
+- `scripts/` — テーブルと golden ファイルの生成、差分テスト、`check-rust-no-external-crates.mjs`
+- `README.md`、`MIGRATION.md`（v1 → v2。v2 の記録）、`tsconfig.json`
 
 ## コマンド
 
-- `yarn build` — 全パッケージビルド（`lerna run build`）
+Node:
+
+- `yarn build` — Node 側のビルド（`lerna run build`）
 - `yarn dev` — `lerna run dev`
 - `yarn test` — Vitest でテスト（test-timeout 60000）
-- `yarn lint` — eslint / prettier / textlint / cspell を直列実行
-- `yarn bench` — ビルドベンチマーク（`--pages=N` / `--runs=N` / `--full` / `--incremental`。要事前 `yarn build`。詳細は `packages/kamado/ARCHITECTURE.md` 参照）
+- `yarn lint` — eslint / prettier / textlint / cspell を直列実行（修正あり）。CI は `yarn lint:check`（修正なし）
 - `yarn release` / `yarn release:alpha` 等 — `lerna version`（push なし）。リリース手順は `.claude/skills/npm-publish/SKILL.md` 参照
+
+Rust（リポジトリルートから。`yarn install` を先に済ませる。理由は `docs/v3/development.md`）:
+
+- `cargo fmt --all` — 整形（CI は `--check`）
+- `cargo clippy --locked --offline --all-targets -- -D warnings`
+- `cargo test --locked --offline --workspace`
+- `cargo build --locked --offline --release -p kd_napi` — Node から使うアドオン。`yarn build` のあと CLI や `*.check.mjs` を動かすのに要る
+
+`yarn bench` は無い。ビルドの比較と計測は `benchmarks/v3/`（手順は `docs/v3/development.md`）。
 
 ### コマンド制約
 
-- **yarn のみ使用**: npm / pnpm / bun / deno によるコマンド実行は禁止
+- **Node 側は yarn のみ使用**: npm / pnpm / bun / deno によるコマンド実行は禁止。Rust の作業に限り `cargo` を使ってよい
 - **パッケージディレクトリに cd しない**: 常にリポジトリルートから実行
-- **ビルドは `yarn build` のみ**: `npx tsc`、`lerna run build --scope` 等の個別指定は禁止
+- **ビルドは `yarn build` のみ**: `npx tsc`、`lerna run build --scope` 等の個別指定は禁止（Rust は上の `cargo` コマンド）
 - **コマンドの連続実行禁止**: `&&`、`;`、改行によるコマンド連結をしない。1回の Bash 呼び出しで1コマンドのみ実行する。連結されたコマンドは settings.json の permissions allow/deny でパターンマッチできず、毎回ユーザーの手動承認が必要になり効率が大幅に低下する
 
-## パッケージ依存関係
+## クレート・パッケージの依存関係
 
-- `kamado`（コア） ← `@kamado-io/page-compiler` / `script-compiler` / `style-compiler`
-- `kamado` + `@kamado-io/page-compiler` ← `@kamado-io/pug-compiler` / `jsx-compiler`
+- Rust の依存の向きは一方向で、`kd_napi` が最上位（`kd_napi` → `kd_core` → `kd_config` → `kd_site` / `kd_glob` / `kd_jsonc` …）。表は `docs/v3/development.md`
+- Node の `packages/kamado` は、ビルド済みのアドオン（`kd_napi`）を読み込む。ランタイム依存は `esbuild` と `hono` / `@hono/node-server` だけ
 
 ## 依存関係の追加
 
+### Rust
+
+- **外部クレートは追加しない**（標準ライブラリのみ）。サプライチェーンを増やさないための方針で、`node scripts/check-rust-no-external-crates.mjs` が CI で検証する。ワークスペース内のクレート同士の path 依存は可
+- 標準ライブラリで足りない処理は、そのクレートに自前で実装する（テーブルや oracle との比較は `docs/v3/development.md`）
+
+### npm
+
+- ルートの `kamado-v2`（`npm:kamado@2.0.0-alpha.17`）は、v2 の出力を oracle として使うスクリプト（`kamado-v2/utils/dom`）のための別名で、パッケージとして使うものではない。上げる・外す場合は `docs/v3/development.md` の「v2 の oracle」を参照
 - バージョンは固定で追加する（`yarn add foo@1.2.3`）。`^` / `~` を付けない（`.yarnrc.yml` の `defaultSemverRangePrefix: ''` で既定化されている）
 - **追加したら `.github/renovate.json` の `packageRules` を確認する**。そのパッケージが既存の `groupName` グループに入るべきか、新しいグループを作るべきかを判断する
   - `config:recommended` は `group:monorepos` を含むため、同一 monorepo から公開されるパッケージ群は設定なしで自動的に束ねられる。手で書く必要はない
@@ -83,12 +105,12 @@ kamado — オンデマンド静的サイトジェネレータ。Lerna + Yarn Wo
 
 タスクに応じて `.claude/skills/` 配下のスキルを参照すること。
 
-| スキル          | パス                                      | 用途                                                            |
-| --------------- | ----------------------------------------- | --------------------------------------------------------------- |
-| Product Manager | `.claude/skills/product-manager/SKILL.md` | リポジトリ分析、ドキュメント整合チェック、PR レビュー           |
-| QA Engineer     | `.claude/skills/qa-engineer/SKILL.md`     | コードレビュー、テスト品質チェック、カバレッジ改善              |
-| Impl            | `.claude/skills/impl/SKILL.md`            | 合意済み計画の実装・検証・PR 作成までのオーケストレーション     |
-| Grill me        | `.claude/skills/grill-me/SKILL.md`        | 計画・設計の前提を掘り下げて合意形成する                        |
-| Git             | `.claude/skills/git/SKILL.md`             | コミット規約・コミット前コンテンツチェック                      |
-| PR              | `.claude/skills/pr/SKILL.md`              | PR 作成フロー（base 追従・push はユーザー実行・CI 監視）        |
-| npm publish     | `.claude/skills/npm-publish/SKILL.md`     | リリース（dev→main マージ・バージョニング・publish 監視・検証） |
+| スキル          | パス                                      | 用途                                                        |
+| --------------- | ----------------------------------------- | ----------------------------------------------------------- |
+| Product Manager | `.claude/skills/product-manager/SKILL.md` | リポジトリ分析、ドキュメント整合チェック、PR レビュー       |
+| QA Engineer     | `.claude/skills/qa-engineer/SKILL.md`     | コードレビュー、テスト品質チェック、カバレッジ改善          |
+| Impl            | `.claude/skills/impl/SKILL.md`            | 合意済み計画の実装・検証・PR 作成までのオーケストレーション |
+| Grill me        | `.claude/skills/grill-me/SKILL.md`        | 計画・設計の前提を掘り下げて合意形成する                    |
+| Git             | `.claude/skills/git/SKILL.md`             | コミット規約・コミット前コンテンツチェック                  |
+| PR              | `.claude/skills/pr/SKILL.md`              | PR 作成フロー（base 追従・push はユーザー実行・CI 監視）    |
+| npm publish     | `.claude/skills/npm-publish/SKILL.md`     | リリース（バージョニング・publish 監視・検証。v3 は準備中） |

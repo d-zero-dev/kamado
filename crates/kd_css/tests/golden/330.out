@@ -1,0 +1,1 @@
+@supports (--css:variables){a{color:red}}

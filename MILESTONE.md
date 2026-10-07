@@ -1,5 +1,7 @@
 # Milestone: v2.0.0
 
+> **この文書は v2 の記録です。** v2 のコードは `v2` ブランチで保守していて、このブランチ（v3）には `kamado/features`、`@kamado-io/*` などの v2 のパッケージはありません。v3 の仕様は `docs/v3/RFC.md`、v2 からの移行手順は `docs/v3/MIGRATION.md` を参照してください。
+
 ## Breaking Changes TODO
 
 - [x] `kamado/features` エクスポートを削除
@@ -108,4 +110,4 @@ export const config = {
 };
 ```
 
-詳細は [@kamado-io/page-compiler の README](./packages/@kamado-io/page-compiler/README.md) を参照してください。
+詳細は `v2` ブランチの `packages/@kamado-io/page-compiler/README.md` を参照してください。

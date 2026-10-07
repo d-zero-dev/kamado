@@ -1,0 +1,1 @@
+<a href="/a" onclick="alert(1)" tabindex="3">x</a>

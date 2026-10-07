@@ -1,0 +1,1 @@
+a:first-child{x:1}a:nth-child(odd){x:2}a:nth-child(2n){x:3}a:nth-child(odd){x:4}

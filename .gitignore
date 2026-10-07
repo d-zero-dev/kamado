@@ -5,6 +5,7 @@ npm-error.log
 package-lock.json
 yarn-error.log
 .yarn/install-state.gz
+benchmarks/v2-baseline/.yarn/
 .yarn/build-state.yml
 
 # ignore file types
@@ -20,7 +21,9 @@ yarn-error.log
 
 # build outputs
 packages/**/dist/
+packages/**/native/
 packages/**/tsconfig.build.tsbuildinfo
+packages/**/tsconfig.tsbuildinfo
 
 # benchmark fixtures
 packages/**/.bench/
@@ -28,3 +31,9 @@ packages/**/.bench/
 # incremental build cache when kept in-tree via `--cache-dir .kamado/cache`
 # (the default location is the OS temp dir; see packages/kamado/README.md)
 .kamado/
+
+# rust
+/target/
+
+# v3 benchmark fixtures
+benchmarks/**/.bench/

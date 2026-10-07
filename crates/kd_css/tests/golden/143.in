@@ -1,0 +1,5 @@
+.a {
+	transform:rotateZ(10deg);
+	transform:rotate3d(0,0,1,10deg);
+	transform:rotate3d(1,0,0,10deg);
+}

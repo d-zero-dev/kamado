@@ -1,0 +1,1 @@
+functionF(){returnnew.target;}

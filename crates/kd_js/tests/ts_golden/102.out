@@ -1,0 +1,1 @@
+consta={b,c:d,[e]:f,...g,h(){},geti(){return1;},async*j(){}};

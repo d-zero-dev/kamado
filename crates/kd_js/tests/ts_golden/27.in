@@ -1,0 +1,1 @@
+foo((a: number) => a, (b?: string) => b);

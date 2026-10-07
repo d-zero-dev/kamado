@@ -1,0 +1,1 @@
+.a{foo:0;colour:red;-x-margin:0;composes:a b from "./x.css"}

@@ -1,0 +1,3 @@
+.a {
+	animation:foo 1s steps(4, jump-end);
+}

@@ -75,8 +75,29 @@
 			"matchPackageNames": ["hono", "/^@hono\\//"]
 		},
 		{
+			"description": "react is also an oracle of v3 (see docs/v3/development.md); its generated tables must be regenerated in the same PR",
 			"groupName": "react",
 			"matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"]
+		},
+		{
+			"description": "html-minifier-terser is DefinitelyTyped-typed and an oracle of v3",
+			"groupName": "html-minifier-terser",
+			"matchPackageNames": ["html-minifier-terser", "@types/html-minifier-terser"]
+		},
+		{
+			"description": "Oracles of v3: golden files and tables are generated from them (docs/v3/development.md)",
+			"groupName": "v3 oracles",
+			"matchPackageNames": ["prettier", "character-entities", "esbuild"]
+		},
+		{
+			"description": "The v2 oracles are the published v2 on purpose and do not move (docs/v3/development.md)",
+			"matchDepNames": ["kamado-v2"],
+			"enabled": false
+		},
+		{
+			"description": "benchmarks/v2-baseline pins the published v2 and what it needs; it is not kept up to date",
+			"matchFileNames": ["benchmarks/v2-baseline/package.json"],
+			"enabled": false
 		}
 	]
 }

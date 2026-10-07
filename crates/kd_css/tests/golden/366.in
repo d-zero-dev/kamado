@@ -1,0 +1,1 @@
+a:nth-child(1){x:1}a:nth-child(2n+1){x:2}a:nth-child(even){x:3}a:nth-child( 2n + 1 ){x:4}

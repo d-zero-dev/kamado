@@ -1,0 +1,1 @@
+interface A<T> extends B<T> { a: T; b?(): void; readonly c: number }

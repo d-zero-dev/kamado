@@ -1,0 +1,5 @@
+.a {
+	font-weight:normal;
+	font-weight:bold;
+	font-weight:BOLD;
+}

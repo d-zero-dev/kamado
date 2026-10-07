@@ -1,0 +1,1 @@
+.a{width:calc(10px + .5em);height:100%}

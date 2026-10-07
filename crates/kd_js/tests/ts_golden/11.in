@@ -1,0 +1,1 @@
+const x = <const T,>(a: T) => a;

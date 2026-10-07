@@ -1,0 +1,1 @@
+let a: { [K in keyof T]?: T[K] } = x;

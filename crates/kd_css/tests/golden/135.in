@@ -1,0 +1,3 @@
+.a {
+	animation:foo 1s steps(1,start) steps(1,end) steps(4,end);
+}

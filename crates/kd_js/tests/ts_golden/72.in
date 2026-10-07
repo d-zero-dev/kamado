@@ -1,0 +1,1 @@
+function f(this: Foo, a: number): this is Bar { return true; }

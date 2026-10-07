@@ -1,0 +1,1 @@
+a::before{x:1}a::after,a::first-line{x:2}a::selection{x:3}a:BEFORE{x:4}

@@ -5,52 +5,55 @@
 **Kamado is a distinctively simple static site generator.**
 No hydration, no client-side runtime, no magic. Just your filesystem and raw HTML, baked on demand.
 
-[English Documentation](./packages/kamado/README.md) | [日本語ドキュメント](./packages/kamado/README.ja.md)
-
 ---
 
 ## About Kamado
 
 Kamado is a static site build tool that aims for a simpler design, similar to 11ty but with a focus on "No Runtime". It generates pure static HTML, ensuring robustness and longevity.
 
-For detailed usage and configuration, please refer to the documentation below:
+This is **v3**: the core is written in Rust (standard library only), with a thin Node layer for the CLI, the dev server and JSX rendering. It is under alpha development and is not published yet (tracked in [#277](https://github.com/d-zero-dev/kamado/issues/277)).
 
-- 📖 [Kamado Package README (English)](./packages/kamado/README.md)
-- 📖 [Kamado Package README (日本語)](./packages/kamado/README.ja.md)
-- 🏗️ [Kamado Architecture](./packages/kamado/ARCHITECTURE.md) | [内部アーキテクチャ](./packages/kamado/ARCHITECTURE.ja.md)
+**v2** (the `kamado` and `@kamado-io/*` packages on npm) is maintained on the [`v2` branch](https://github.com/d-zero-dev/kamado/tree/v2). The published v2 releases stay on npm.
 
-## Monorepo Structure
+- 📖 [Kamado Package README (日本語)](./packages/kamado/README.md)
+- 📐 [v3 RFC (仕様)](./docs/v3/RFC.md)
+- 🚚 [v2 → v3 移行手順](./docs/v3/MIGRATION.md)
+- 🛠️ [v3 の開発手順](./docs/v3/development.md)
 
-This repository is a monorepo managed by Lerna.
+## Repository Structure
 
-| Package                      | Description                                | Version                                                                                                                               |
-| ---------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `kamado`                     | Core static site generator engine          | [![npm version](https://badge.fury.io/js/kamado.svg)](https://www.npmjs.com/package/kamado)                                           |
-| `@kamado-io/page-compiler`   | Page/HTML compiler with transform pipeline | [![npm version](https://badge.fury.io/js/@kamado-io%2Fpage-compiler.svg)](https://www.npmjs.com/package/@kamado-io/page-compiler)     |
-| `@kamado-io/jsx-compiler`    | JSX/TSX (React SSR) compiler               | [![npm version](https://badge.fury.io/js/@kamado-io%2Fjsx-compiler.svg)](https://www.npmjs.com/package/@kamado-io/jsx-compiler)       |
-| `@kamado-io/pug-compiler`    | Pug template compiler                      | [![npm version](https://badge.fury.io/js/@kamado-io%2Fpug-compiler.svg)](https://www.npmjs.com/package/@kamado-io/pug-compiler)       |
-| `@kamado-io/script-compiler` | JavaScript/TypeScript bundler (esbuild)    | [![npm version](https://badge.fury.io/js/@kamado-io%2Fscript-compiler.svg)](https://www.npmjs.com/package/@kamado-io/script-compiler) |
-| `@kamado-io/style-compiler`  | CSS/SCSS processor (PostCSS)               | [![npm version](https://badge.fury.io/js/@kamado-io%2Fstyle-compiler.svg)](https://www.npmjs.com/package/@kamado-io/style-compiler)   |
+| Path              | Description                                                                             |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| `crates/`         | Rust workspace (`kd_*`). No external crates                                             |
+| `packages/kamado` | The Node layer: the `kamado` package (CLI, `build()` / `start()`, `kamado/jsx`)         |
+| `docs/v3`         | RFC, migration guide, development guide                                                 |
+| `benchmarks/`     | Output comparison harness and fixture generator (`v3`), the v2 baseline (`v2-baseline`) |
+| `scripts/`        | Generators for tables and golden files, differential tests                              |
+
+Lerna is kept for versioning and publishing the single workspace package.
 
 ## Development
 
 ### Prerequisites
 
-- Node.js
-- Yarn
+- Node.js 24.11 or later (Volta pins 26.x)
+- Yarn 4 (via Corepack)
+- Rust 1.98.1 (the version CI uses)
 
 ### Commands
 
 Run these commands from the root directory:
 
-- `yarn build`: Build all packages.
-- `yarn dev`: Run development scripts.
+- `yarn build`: Build the Node package.
 - `yarn test`: Run tests using Vitest.
 - `yarn lint`: Run linters (ESLint, Prettier, textlint, cspell).
+- `cargo fmt --all`, `cargo clippy --locked --offline --all-targets -- -D warnings`, `cargo test --locked --offline --workspace`: Format, lint and test the Rust workspace.
+
+See [`docs/v3/development.md`](./docs/v3/development.md) for the details (the native addon, the oracle scripts, the benchmarks).
 
 ### Contributing
 
-Please read the documentation in `packages/kamado` for details on how Kamado works.
+Please read [`docs/v3/RFC.md`](./docs/v3/RFC.md) for how Kamado v3 works.
 
 ### License
 

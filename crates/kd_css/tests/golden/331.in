@@ -1,0 +1,1 @@
+@supports selector(:has(a)){a{color:red}}

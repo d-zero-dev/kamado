@@ -1,0 +1,1 @@
+function f<T extends keyof U, U = {}>(a: T, b?: U): void {}

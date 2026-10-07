@@ -1,0 +1,13 @@
+{
+	"name": "kamado-v2-baseline",
+	"description": "kamado v2 as published, pinned: the baseline that the output of v3 is compared with (see docs/v3/development.md)",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@kamado-io/jsx-compiler": "2.0.0-alpha.17",
+		"@kamado-io/page-compiler": "2.0.0-alpha.17",
+		"kamado": "2.0.0-alpha.17",
+		"react": "19.2.8",
+		"react-dom": "19.2.8"
+	}
+}

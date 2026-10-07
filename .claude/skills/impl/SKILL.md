@@ -12,8 +12,8 @@ disable-model-invocation: true
 4. `/code-review medium` を実行し、指摘を fix all
 5. `/qa-engineer` を実行し、指摘を fix all
 6. `/product-manager` を実行し、指摘を fix all（ドキュメント整合 — JSDoc・README の役割分担との一致 — のチェックを含む）
-7. `yarn lint` を実行し、エラーを修正
-8. `yarn test` を実行し、失敗を修正
+7. `yarn lint` を実行し、エラーを修正。Rust に変更がある場合は `cargo fmt --all` と `cargo clippy --locked --offline --all-targets -- -D warnings` も実行する
+8. `yarn test` を実行し、失敗を修正。Rust に変更がある場合は `cargo test --locked --offline --workspace` も実行する
 9. `/git` の手順でコミット
 10. `/pr` の手順で PR 作成
 

@@ -7,7 +7,6 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"bench": "node packages/kamado/benchmark/run-bench.ts",
 		"build": "lerna run build",
 		"dev": "lerna run dev",
 		"test": "vitest run --test-timeout 60000",
@@ -30,8 +29,7 @@
 		"update": "yarn upgrade-interactive"
 	},
 	"workspaces": [
-		"packages/*",
-		"packages/@kamado-io/*"
+		"packages/*"
 	],
 	"config": {
 		"commitizen": {
@@ -47,12 +45,26 @@
 		"@d-zero/eslint-config": "5.0.0",
 		"@d-zero/lint-staged-config": "5.1.0",
 		"@d-zero/prettier-config": "5.1.0",
+		"@d-zero/shared": "0.23.0",
 		"@d-zero/textlint-config": "5.1.0",
 		"@d-zero/tsconfig": "2.0.0",
+		"@types/html-minifier-terser": "7.0.2",
+		"@types/react": "19.2.18",
+		"@types/react-dom": "19.2.4",
+		"character-entities": "2.0.2",
+		"cssnano": "8.0.10",
+		"dayjs": "1.11.23",
+		"esbuild": "0.28.2",
+		"html-minifier-terser": "7.2.0",
 		"husky": "9.1.7",
+		"kamado-v2": "npm:kamado@2.0.0-alpha.17",
 		"lerna": "10.0.1",
-		"memfs": "4.79.0",
 		"npm-run-all2": "9.0.3",
+		"postcss": "8.5.28",
+		"postcss-import": "16.2.0",
+		"prettier": "3.9.9",
+		"react": "19.2.8",
+		"react-dom": "19.2.8",
 		"typescript": "6.0.3",
 		"vitest": "4.1.11"
 	},

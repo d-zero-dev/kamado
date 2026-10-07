@@ -1,0 +1,6 @@
+.a {
+	display:block flow;
+	display:inline flow-root;
+	display:block flex;
+	display:list-item block flow;
+}
