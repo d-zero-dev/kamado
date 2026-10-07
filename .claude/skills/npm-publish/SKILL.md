@@ -30,7 +30,7 @@ v2 のリリースは `v2` ブランチで行う。公開済みの v2（`kamado@
 
 # 対象パッケージ
 
-v3 の対象は `kamado`（`packages/kamado`）の 1 つで、**無スコープ**で公開する（`npm view` 等のコマンド例でスコープを付けない）。版は Lerna が `lerna.json` の `version` で管理する（プラットフォーム別のパッケージを作る場合は、それらも同じ版で上げる）。
+v3 の対象は `kamado`（`packages/kamado`）の 1 つで、**無スコープ**で公開する（`npm view` 等のコマンド例でスコープを付けない）。版は Lerna が `lerna.json` の `version` で管理する（Cargo の版も同じ値に揃う）。
 
 # 手順
 

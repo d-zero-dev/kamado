@@ -2,7 +2,7 @@
 
 この文書は **AI が上から順に実行できる手順書**です。各ステップに「やること」「確認すること」を書いてあります。仕様の根拠は `docs/v3/RFC.md`（破壊的変更の一覧は §2）。
 
-v3 はこのリポジトリの `packages/kamado`（npm 名 `kamado`、bin は `kamado`、JSX のランタイムは `kamado/jsx`）です。まだ公開しておらず（alpha の開発中。公開は issue #277）、v2 は `v2` ブランチで保守しています。公開済みの v2（`kamado@2.0.0-alpha.17` など）は npm に残っています。`@kamado-io/*` の 5 つのパッケージ（page / script / style / pug / jsx のコンパイラ）は v3 にはなく、機能は `kamado` に組み込まれています（RFC §2 の #3、#22）。
+v3 はこのリポジトリの `packages/kamado`（npm 名 `kamado`、bin は `kamado`、JSX のランタイムは `kamado/jsx`）です。alpha の開発中で、dist-tag `alpha` で公開します（`docs/v3/RFC.md` §18）。v2 は `v2` ブランチで保守しています。公開済みの v2（`kamado@2.0.0-alpha.17` など）は npm に残っています。`@kamado-io/*` の 5 つのパッケージ（page / script / style / pug / jsx のコンパイラ）は v3 にはなく、機能は `kamado` に組み込まれています（RFC §2 の #3、#22）。
 
 v3 は v2 と**出力（HTML）がバイト一致**することを目標にしています。移行の合格条件は「同じ入力から、v2 と v3 の出力ディレクトリを比べて差がない（差があるなら §11 の意図した差だけ）」ことです。
 
