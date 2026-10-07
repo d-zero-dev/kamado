@@ -447,13 +447,14 @@ Q1 は欠番（番号の飛びで、内容は記録に残っていない）。
 
 ## 18. 配布
 
-v3 は `kamado` の 1 パッケージで公開する（v2 は `v2` ブランチで保守していて、公開済みの v2 は npm に残る）。`packages/kamado` は、公開の仕組みができるまで `private: true`（版は `3.0.0-alpha.0`）。公開のパイプラインは issue #277 で扱う。
+v3 は `kamado` の 1 パッケージで公開する（v2 は `v2` ブランチで保守していて、公開済みの v2 は npm に残る）。版は `lerna.json` が正本で、Cargo（`Cargo.toml` の `[workspace.package]` と `Cargo.lock`）は `lerna version` が `scripts/sync-cargo-version.mjs` で同じ版に揃える（アドオンの `version()` は公開した版を返す）。公開のパイプラインは `.github/workflows/publish.yml`。
 
 **アドオンは `kamado` に全プラットフォーム分を同梱する**（プラットフォーム別のパッケージには分けない）。Rust のコアは、プラットフォームごとにビルドした共有ライブラリ（N-API のアドオン、`kd_napi`。`libkd_napi.dylib` / `libkd_napi.so`）で、`kamado` の中に `native/<os>-<arch>/kd_napi.node` として置き、実行時に `process.platform` と `process.arch` で選ぶ。
 
-- 対象のプラットフォームは、macOS（arm64 / x64）と Linux（x64 / arm64、glibc）。WSL2 は Linux として扱う。Windows のネイティブと musl は対象外（§2 #24）。CI で確認しているのは macOS arm64、Linux x64、Linux arm64（`.github/workflows/rust.yml`）。
-- 読み込む場所は、環境変数 `KAMADO_NATIVE_ADDON` で指定したファイル（開発用）、なければ `target/release`、`target/debug` の順（`packages/kamado/src/native.ts`）。同梱した `native/<os>-<arch>/kd_napi.node` を探す処理は実装済み（開発用の指定、同梱、`target/` の順）。成果物を詰める公開のパイプラインは #277 で作る。
-- 公開は OS ごとにビルドした成果物を 1 つのジョブに集めて `kamado` に詰めて行う。npm の信頼設定と provenance は `kamado` の 1 つだけ。
+- 対象のプラットフォームは、macOS（arm64 / x64）と Linux（x64 / arm64、glibc）。WSL2 は Linux として扱う。Windows のネイティブと musl は対象外（§2 #24）。日常の CI（`.github/workflows/rust.yml`）が確認しているのは macOS arm64、Linux x64、Linux arm64。macOS x64 は公開のワークフロー（`publish.yml`）の実機（`macos-15-intel`）で、公開の前に読み込みを確認する。
+- 読み込む場所は、環境変数 `KAMADO_NATIVE_ADDON` で指定したファイル（開発用）、同梱した `native/<os>-<arch>/kd_napi.node`、`target/release`、`target/debug` の順（`packages/kamado/src/native.ts`）。
+- 公開（`publish.yml`）は、版の検査（Cargo、パッケージ、タグが `lerna.json` と一致）、OS ごとのビルドと読み込み確認、1 つのジョブでの詰め込みと `yarn pack`、できた tarball を 5 つの実機（上の 4 つと Ubuntu 24.04）で展開して読み込む確認（`scripts/check-package-addon.mjs`）、その tarball そのものの `npm publish`（OIDC Trusted Publishing、provenance、dist-tag は版から決める）の順に進む。手で起動（`workflow_dispatch`）すると、公開の手前までの予行になる。npm の信頼設定と provenance は `kamado` の 1 つだけ。
+- Linux のアドオンは glibc 2.35 の環境（`ubuntu-22.04`）でビルドする。バイナリはビルドした環境の glibc に依存するので、新しい環境でビルドすると、Ubuntu 22.04 の WSL2 などで読み込めない。macOS は `MACOSX_DEPLOYMENT_TARGET=13.5`（Node 24 の下限）でビルドする。
 
 **なぜ分けないか**: 実際のプロジェクトでは、macOS、WSL2 ほかの環境の人が同じ `package.json` とロックファイルを共有する。プラットフォーム別のパッケージを `optionalDependencies` で参照する方式（esbuild など）では、あるプラットフォームで作ったロックファイルが、別のプラットフォームでの解決に失敗することがある。同梱なら、全員が同じ 1 つのパッケージを取るだけで、ロックファイルに環境の違いが出ない。バイナリは 1 プラットフォームあたり約 2.8 MB で、全部で約 11 MB。分けるとパッケージが 5 つになり、信頼設定と公開の順序、途中で失敗したときの部分的な公開の後始末も要る。
 
