@@ -311,8 +311,9 @@ impl Serve {
 		if decoded.contains('\\') {
 			return Ok(Served::NotFound);
 		}
-		let local = kd_site::path_to_local_path(&decoded, ".html");
 		let config = &self.loaded.config;
+		// `/` is the index of the extension the pages are written with.
+		let local = kd_site::path_to_local_path(&decoded, &config.pages.output_extension);
 		let output_dir = kd_site::path::normalize(&config.dir.output);
 		let path = kd_site::path::join(&output_dir, &local);
 		if path != output_dir
@@ -865,6 +866,20 @@ mod tests {
 		assert_eq!(text(serve.request("/").unwrap()).1, "<p>two</p>\n");
 		// Nothing was written.
 		assert!(fs::metadata(format!("{}/out", site.root)).is_err());
+	}
+
+	#[test]
+	fn a_directory_url_is_the_index_of_the_configured_output_extension() {
+		let site = Site::new("htm");
+		site.write("src/index.html", "<p>one</p>");
+		site.write("src/a/index.html", "<p>a</p>");
+		let serve = site.serve(r#", "pages": { "outputExtension": ".htm" }"#);
+
+		assert_eq!(text(serve.request("/").unwrap()).1, "<p>one</p>\n");
+		assert_eq!(text(serve.request("/a/").unwrap()).1, "<p>a</p>\n");
+		assert_eq!(text(serve.request("/index.htm").unwrap()).1, "<p>one</p>\n");
+		// An extensionless path is `<path>.htm`: `a` has no page of that name.
+		assert_eq!(serve.request("/a").unwrap(), Served::NotFound);
 	}
 
 	#[test]

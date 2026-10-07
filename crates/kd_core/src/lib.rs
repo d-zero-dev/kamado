@@ -2698,6 +2698,39 @@ mod tests {
 	}
 
 	#[test]
+	fn reordering_pages_rebuilds_the_pages_that_list_them() {
+		let (site, _) = jsx_site("reorder");
+		site.write(
+			"pages.json",
+			r#"{ "version": 1, "pages": [ { "url": "/about.html" }, { "url": "/plain.html" } ] }"#,
+		);
+		let loaded = site.config_raw(
+			r#"{ "dir": { "input": "src", "output": "out" }, "pages": { "ignore": ["_lib/**"], "layouts": { "dir": "layouts" }, "overrides": "pages.json" }, "data": { "dir": "data" }, "build": { "cacheDir": ".cache", "incremental": true } }"#,
+		);
+		let rebuild = || {
+			let prepared = prepare_incremental(&loaded);
+			let count = prepared.jobs().len();
+			let rendered = prepared
+				.jobs()
+				.iter()
+				.map(|j| (j.page, "<p>x</p>".to_owned()))
+				.collect();
+			prepared.finish(rendered, Vec::new()).unwrap();
+			count
+		};
+		assert_eq!(rebuild(), 2);
+		assert_eq!(rebuild(), 0);
+
+		// The same pages in another order: what `nav()` and `pages` list changed.
+		site.write(
+			"pages.json",
+			r#"{ "version": 1, "pages": [ { "url": "/plain.html" }, { "url": "/about.html" } ] }"#,
+		);
+		assert_eq!(rebuild(), 2);
+		assert_eq!(rebuild(), 0);
+	}
+
+	#[test]
 	fn a_build_without_the_esbuild_executable_says_the_scripts_are_not_minified() {
 		let site = Site::new("no-esbuild");
 		site.write("src/a.html", "<script>var a = 1;</script>");

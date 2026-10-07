@@ -60,6 +60,30 @@ export function withoutEncodingHeaders(headers: Headers): Headers {
 }
 
 /**
+ * Copies the headers of a request that is sent on, without the ones that belong to the
+ * connection it came in on (RFC 9110 7.6.1): `fetch` refuses `transfer-encoding` (a
+ * chunked upload would be a 502) and frames the body again by itself.
+ * @param headers - the headers of the request the dev server received
+ * @example
+ * withoutHopByHopHeaders(new Headers({ 'transfer-encoding': 'chunked', 'x-a': '1' })).has('transfer-encoding'); // false
+ */
+export function withoutHopByHopHeaders(headers: Headers): Headers {
+	const copy = new Headers(headers);
+	for (const name of [
+		'connection',
+		'keep-alive',
+		'proxy-connection',
+		'te',
+		'trailer',
+		'transfer-encoding',
+		'upgrade',
+	]) {
+		copy.delete(name);
+	}
+	return copy;
+}
+
+/**
  * Whether a method carries a request body.
  * @param method - The HTTP method
  */
@@ -105,7 +129,7 @@ export function setProxyRoutes(
 				return new Response('Bad Request', { status: 400 });
 			}
 			forwarded.search = requested.search;
-			const headers = new Headers(ctx.req.raw.headers);
+			const headers = withoutHopByHopHeaders(ctx.req.raw.headers);
 			if (rule.changeOrigin === true) {
 				headers.set('host', target.host);
 				headers.set('origin', target.origin);

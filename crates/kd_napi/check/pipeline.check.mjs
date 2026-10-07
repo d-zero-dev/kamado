@@ -30,10 +30,11 @@ const { build } = await import(pathToFileURL(path.join(dist, 'build.js')).href);
 
 /**
  * A small site: a TSX page that uses a layout, a TSX page without one, an HTML page, and a
- * script. The pages are many enough to leave the inline path of the renderer.
+ * script. `many` more pages (30 are enough to leave the inline path of the renderer).
+ * @param {number} many how many more pages
  * @returns {string} the path of the config file
  */
-function makeSite() {
+function makeSite(many = 30) {
 	const site = mkdtempSync(path.join(tmpdir(), 'kd-pipeline-'));
 	mkdirSync(path.join(site, 'src', '_layouts'), { recursive: true });
 	mkdirSync(path.join(site, 'src', 'many'), { recursive: true });
@@ -42,7 +43,7 @@ function makeSite() {
 		JSON.stringify({
 			dir: { input: 'src', output: 'out' },
 			build: { cacheDir: '.cache' },
-			pages: { layouts: { dir: 'src/_layouts' }, ignore: ['_layouts/**'] },
+			pages: { layouts: { dir: 'src/_layouts' }, ignore: ['_layouts/**', '_parts/**'] },
 			html: { doctype: false, format: false, minify: false },
 			// A port of the dynamic range, so that two runs side by side rarely meet.
 			devServer: { host: '127.0.0.1', port: 49_152 + (process.pid % 16_000) },
@@ -67,7 +68,7 @@ function makeSite() {
 		path.join(site, 'src', 'static.html'),
 		'---\ntitle: Static\nlayout: default\n---\n<p>a &amp; b</p>\n',
 	);
-	for (let i = 0; i < 30; i++) {
+	for (let i = 0; i < many; i++) {
 		writeFileSync(
 			path.join(site, 'src', 'many', `p${i}.tsx`),
 			`export default () => <i>n${i}</i>;\n`,
@@ -142,6 +143,30 @@ test('the dev server renders a page on request, refuses to leave the output and 
 	} finally {
 		await server.close();
 	}
+});
+
+test('a second build in the same process renders a component edited since the first', async () => {
+	const config = makeSite(0);
+	const src = path.join(path.dirname(config), 'src');
+	mkdirSync(path.join(src, '_parts'), { recursive: true });
+	writeFileSync(
+		path.join(src, '_parts', 'box.tsx'),
+		'export const Box = () => <b>before</b>;\n',
+	);
+	writeFileSync(
+		path.join(src, 'boxed.tsx'),
+		"import { Box } from './_parts/box';\nexport default () => <p><Box /></p>;\n",
+	);
+	await build(config, { force: true });
+	assert.equal(read(config, 'boxed.html'), '<p><b>before</b></p>');
+
+	writeFileSync(
+		path.join(src, '_parts', 'box.tsx'),
+		'export const Box = () => <b>after</b>;\n',
+	);
+	await build(config, { force: true });
+
+	assert.equal(read(config, 'boxed.html'), '<p><b>after</b></p>');
 });
 
 test('a page that throws fails the build with its path', async () => {

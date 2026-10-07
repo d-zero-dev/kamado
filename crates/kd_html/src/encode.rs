@@ -4,7 +4,8 @@
 //! has them converted when they are written. This does what d-zero/builder did with
 //! `charset: { encoding: 'shift_jis' }`:
 //!
-//! - `<meta charset="utf-8">` becomes `<meta charset="shift_jis">`;
+//! - the encoding a `<meta>` names (`charset="utf-8"`, or the `charset=` of a `content`)
+//!   becomes `shift_jis`;
 //! - the text is encoded as Windows Shift_JIS (CP932, what `iconv-lite` calls `CP932`);
 //! - a character that the encoding cannot hold is written as a character reference, its
 //!   name (`&copy;`) when it has one and its number (`&#12316;`) when not, so that nothing is
@@ -74,8 +75,11 @@ fn shift_jis_of(c: char) -> Option<([u8; 2], usize)> {
 	}
 }
 
-/// Rewrites `<meta charset="utf-8">` (and `utf8`, any case, with or without the closing `/`) to
-/// name `charset`.
+/// Names `charset` where a `<meta>` says the page is UTF-8: the `charset` attribute
+/// (`<meta charset="utf-8">`, quoted either way or not at all) and the `charset=` of a
+/// `content` (`<meta http-equiv="Content-Type" content="text/html; charset=utf-8">`), in
+/// any case and whatever other attributes the tag has. Only the name of the encoding is
+/// replaced; the rest of the tag stays as it was written.
 fn rewrite_meta_charset(html: &str, charset: &str) -> String {
 	let lower = html.to_ascii_lowercase();
 	let bytes = lower.as_bytes();
@@ -84,41 +88,79 @@ fn rewrite_meta_charset(html: &str, charset: &str) -> String {
 	let mut from = 0;
 	while let Some(found) = lower[from..].find("<meta") {
 		let start = from + found;
-		from = start + 5;
-		let mut i = start + 5;
-		let mut spaces = 0;
-		while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-			i += 1;
-			spaces += 1;
-		}
-		if spaces == 0 || !lower[i..].starts_with("charset=\"") {
+		let after = start + 5;
+		from = after;
+		// `<metadata>` is not a meta.
+		if !bytes
+			.get(after)
+			.is_some_and(|b| b.is_ascii_whitespace() || *b == b'/')
+		{
 			continue;
 		}
-		i += 9;
-		let value_end = match lower[i..].find('"') {
-			Some(n) => i + n,
-			None => continue,
-		};
-		if !matches!(&lower[i..value_end], "utf-8" | "utf8") {
-			continue;
-		}
-		let mut j = value_end + 1;
-		while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+		let end = tag_end(bytes, after);
+		let mut i = after;
+		while let Some(found) = lower[i..end].find("charset") {
+			let at = i + found;
+			i = at + 7;
+			// Not the end of another name (`data-charset`): after a space, a quote or `;`.
+			if !matches!(
+				bytes[at - 1],
+				b' ' | b'\t' | b'\n' | b'\r' | b'"' | b'\'' | b';'
+			) {
+				continue;
+			}
+			let mut j = at + 7;
+			while bytes.get(j).is_some_and(|b| b.is_ascii_whitespace()) {
+				j += 1;
+			}
+			if bytes.get(j) != Some(&b'=') {
+				continue;
+			}
 			j += 1;
+			while bytes.get(j).is_some_and(|b| b.is_ascii_whitespace()) {
+				j += 1;
+			}
+			if matches!(bytes.get(j), Some(b'"' | b'\'')) {
+				j += 1;
+			}
+			let name = if lower[j..end].starts_with("utf-8") {
+				5
+			} else if lower[j..end].starts_with("utf8") {
+				4
+			} else {
+				continue;
+			};
+			// The name ends there: a longer one (`utf-8x`) is another name.
+			if bytes
+				.get(j + name)
+				.is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'-' || *b == b'_')
+			{
+				continue;
+			}
+			out.push_str(&html[last..j]);
+			out.push_str(charset);
+			last = j + name;
+			i = last;
 		}
-		if bytes.get(j) == Some(&b'/') {
-			j += 1;
-		}
-		if bytes.get(j) != Some(&b'>') {
-			continue;
-		}
-		out.push_str(&html[last..start]);
-		out.push_str(&format!("<meta charset=\"{charset}\">"));
-		last = j + 1;
-		from = last;
+		from = end;
 	}
 	out.push_str(&html[last..]);
 	out
+}
+
+/// Where the tag that has its attributes from `from` ends: the `>` that is not inside a
+/// quoted value, or the end of the text.
+fn tag_end(bytes: &[u8], from: usize) -> usize {
+	let mut quote = 0;
+	for (i, &b) in bytes.iter().enumerate().skip(from) {
+		match (quote, b) {
+			(0, b'"' | b'\'') => quote = b,
+			(q, c) if q != 0 && c == q => quote = 0,
+			(0, b'>') => return i,
+			_ => {}
+		}
+	}
+	bytes.len()
 }
 
 /// The ranges of `<script>` and `<style>` text, where a character reference is not one.
@@ -268,23 +310,49 @@ mod tests {
 
 	#[test]
 	fn the_meta_charset_names_shift_jis() {
-		for meta in [
-			"<meta charset=\"utf-8\" />",
-			"<meta charset=\"UTF-8\">",
-			"<META  charset=\"utf8\"/>",
+		for (meta, expected) in [
+			("<meta charset=\"utf-8\">", "<meta charset=\"shift_jis\">"),
+			(
+				"<meta charset=\"UTF-8\" />",
+				"<meta charset=\"shift_jis\" />",
+			),
+			(
+				"<META  charset=\"utf8\"/>",
+				"<META  charset=\"shift_jis\"/>",
+			),
+			// Other attributes, in any order, and a charset that is not quoted.
+			(
+				"<meta id=\"encoding\" charset=\"utf-8\">",
+				"<meta id=\"encoding\" charset=\"shift_jis\">",
+			),
+			("<meta charset=utf-8 id=e>", "<meta charset=shift_jis id=e>"),
+			("<meta charset='utf-8'>", "<meta charset='shift_jis'>"),
+			// The old way of saying it.
+			(
+				"<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\">",
+				"<meta http-equiv=\"Content-Type\" content=\"text/html; charset=shift_jis\">",
+			),
 		] {
 			assert_eq!(
 				encode(&format!("<head>{meta}</head>"), Encoding::ShiftJis),
-				b"<head><meta charset=\"shift_jis\"></head>"
+				format!("<head>{expected}</head>").into_bytes(),
+				"{meta}"
 			);
 		}
-		// Another charset, or another attribute, is left as it is.
+		// Another charset, another attribute and another tag are left as they are.
 		assert_eq!(
 			encode(
 				"<meta charset=\"euc-jp\"><meta name=\"charset\" content=\"utf-8\">",
 				Encoding::ShiftJis
 			),
 			b"<meta charset=\"euc-jp\"><meta name=\"charset\" content=\"utf-8\">"
+		);
+		assert_eq!(
+			encode(
+				"<meta data-charset=\"utf-8\"><metadata charset=\"utf-8\"></metadata>",
+				Encoding::ShiftJis
+			),
+			b"<meta data-charset=\"utf-8\"><metadata charset=\"utf-8\"></metadata>"
 		);
 	}
 

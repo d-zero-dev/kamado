@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
-import { createRenderer, renderJobs } from './render.js';
+import { createRenderer, renderJobs, resetInlineRendering } from './render.js';
 
 let dir = '';
 
@@ -171,6 +171,10 @@ describe('createRenderer', () => {
 });
 
 describe('renderJobs', () => {
+	beforeEach(() => {
+		resetInlineRendering();
+	});
+
 	test('a few jobs are rendered in order in this thread and returned', async () => {
 		const chunk = await write(
 			'chunk.mjs',

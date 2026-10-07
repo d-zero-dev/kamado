@@ -7,6 +7,7 @@ import {
 	rewritePath,
 	setProxyRoutes,
 	withoutEncodingHeaders,
+	withoutHopByHopHeaders,
 } from './proxy.js';
 
 describe('normalizeRule', () => {
@@ -80,6 +81,24 @@ describe('withoutEncodingHeaders', () => {
 		);
 
 		expect([...headers.keys()]).toEqual(['content-type']);
+	});
+});
+
+describe('withoutHopByHopHeaders', () => {
+	test('drops what belongs to the incoming connection and keeps the rest', () => {
+		const headers = withoutHopByHopHeaders(
+			new Headers({
+				'transfer-encoding': 'chunked',
+				connection: 'keep-alive',
+				'keep-alive': 'timeout=5',
+				te: 'trailers',
+				upgrade: 'websocket',
+				'content-type': 'application/json',
+				cookie: 'a=1',
+			}),
+		);
+
+		expect([...headers.keys()]).toEqual(['content-type', 'cookie']);
 	});
 });
 

@@ -241,6 +241,21 @@ fn only_comments(nodes: &[Node]) -> bool {
 	!nodes.iter().any(|n| !matches!(n, Node::Comment(_)))
 }
 
+/// Whether an at-rule has an `@layer` (a statement or a block) among its descendants.
+fn declares_layer(a: &AtRule) -> bool {
+	let Body::Nodes(children) = &a.body else {
+		return false;
+	};
+	children.iter().any(|n| match n {
+		Node::AtRule(inner) => inner.name == "layer" || declares_layer(inner),
+		Node::Rule(r) => r.nodes.iter().any(|n| match n {
+			Node::AtRule(inner) => inner.name == "layer" || declares_layer(inner),
+			_ => false,
+		}),
+		_ => false,
+	})
+}
+
 fn dedupe(nodes: &mut Vec<Node>) {
 	for n in nodes.iter_mut() {
 		match n {
@@ -269,7 +284,10 @@ fn dedupe(nodes: &mut Vec<Node>) {
 						remove[i] = true;
 					}
 				}
-				Node::AtRule(a) if a.name != "layer" => {
+				// A rule that declares a cascade layer, however deep, is not a duplicate
+				// of the same text before it: dropping the earlier one moves where the
+				// layer is first named, and the order of the layers is the cascade.
+				Node::AtRule(a) if a.name != "layer" && !declares_layer(a) => {
 					let mut key = String::new();
 					crate::print::print_at_rule(a, &mut key, false);
 					if !seen_at_rules.insert(key) {

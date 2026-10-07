@@ -162,6 +162,26 @@ const RENDER_BATCH = 64;
 const INLINE_BELOW = 24;
 
 /**
+ * Whether this process has rendered in the main thread already. Node keeps every module it
+ * has imported for the life of the process, so a second build in the same process (the
+ * programmatic API, a test) would render a component that was edited since with what it
+ * was. A worker starts with no modules: later renders go to one, however few the jobs.
+ */
+let renderedInThisThread = false;
+
+/**
+ * Forgets that this process rendered in the main thread. For tests, which render several
+ * sites in one process and want the main thread each time.
+ * @example
+ * ```ts
+ * beforeEach(() => resetInlineRendering());
+ * ```
+ */
+export function resetInlineRendering(): void {
+	renderedInThisThread = false;
+}
+
+/**
  * Renders every job, in worker threads when there are enough of them.
  * @param jobs - What the core asked for
  * @param context - Site, data and the page list
@@ -178,7 +198,11 @@ export async function renderJobs(
 	options: RenderOptions,
 ): Promise<Rendered[]> {
 	const parallelism = Math.max(1, options.parallelism ?? availableParallelism());
-	if (parallelism === 1 || jobs.length < INLINE_BELOW) {
+	if (jobs.length === 0) {
+		return [];
+	}
+	if (!renderedInThisThread && (parallelism === 1 || jobs.length < INLINE_BELOW)) {
+		renderedInThisThread = true;
 		const renderOne = await createRenderer(context, options.runtimeUrl);
 		const out: Rendered[] = [];
 		for (const job of jobs) {

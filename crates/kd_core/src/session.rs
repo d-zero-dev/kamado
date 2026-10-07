@@ -434,16 +434,16 @@ fn chunk_text(runtime: &str, functions: &[PageFunction]) -> String {
 /// whole page list (`nav()`, `breadcrumbs`) and the data, so a change to
 /// either rebuilds them.
 fn pages_digest(plan: &Plan, jobs: usize) -> String {
-	// One hash per page, on several threads, then the hashes in order: the
-	// digest does not depend on the order of the pages.
-	let mut hashes: Vec<[u8; 32]> = parallel::map(&plan.pages, jobs, |p| {
+	// One hash per page, on several threads, then the hashes in the order of the plan:
+	// the order is what `nav()` and `pages` list, so reordering the pages (the order of
+	// `pages.overrides`) must rebuild the pages that show them.
+	let hashes: Vec<[u8; 32]> = parallel::map(&plan.pages, jobs, |p| {
 		let mut input = String::with_capacity(p.file.url.len() + 64);
 		input.push_str(&p.file.url);
 		input.push('\0');
 		input.push_str(&Value::Object(p.meta.clone()).to_json());
 		kd_hash::sha256(input.as_bytes())
 	});
-	hashes.sort_unstable();
 	let joined: Vec<u8> = hashes.iter().flatten().copied().collect();
 	kd_hash::to_hex(&kd_hash::sha256(&joined))
 }
