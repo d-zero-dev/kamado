@@ -49,6 +49,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import {
+	blockText,
 	isIdentifierUsed,
 	jsxDeclarations,
 	literalKeys,
@@ -1103,11 +1104,12 @@ function node(n, ctx, depth) {
 			}
 			if (n.name === 'style' || n.name === 'script') {
 				if (kids.every((k) => k.type === 'Text')) {
-					// The line breaks of a `.` block are nodes of their own: Pug joins the values as
-					// they are, so a `\n` between them would make three of each.
+					// The line breaks of a `.` block are nodes of their own: pug-code-gen writes the
+					// values of the text nodes one after another, as they are, so a `\n` between
+					// them would make three of each.
 					return [
 						...lead,
-						`${pad}<${open} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(kids.map((k) => k.val).join(''))} }} />`,
+						`${pad}<${open} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(blockText(kids))} }} />`,
 					];
 				}
 			}

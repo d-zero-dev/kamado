@@ -9,6 +9,7 @@ import { describe, expect, test } from 'vitest';
 
 import { readPropNames, render } from './generate-react-prop-names.mjs';
 import {
+	blockText,
 	isIdentifierUsed,
 	jsxDeclarations,
 	literalKeys,
@@ -20,6 +21,28 @@ import {
 import { REACT_PROP_NAMES } from './react-prop-names.mjs';
 
 const program = (code: string) => acorn.parse(code, { ecmaVersion: 'latest' });
+
+describe('blockText', () => {
+	test('joins the nodes of a `script.` block as they are, without a line break of its own', () => {
+		const nodes = [{ val: 'a;' }, { val: '\n' }, { val: 'b;' }];
+		expect(blockText(nodes)).toBe('a;\nb;');
+	});
+
+	test('keeps a blank line of the block as the one line break that Pug writes for it', () => {
+		const nodes = [
+			{ val: 'a;' },
+			{ val: '\n' },
+			{ val: '' },
+			{ val: '\n' },
+			{ val: 'b;' },
+		];
+		expect(blockText(nodes)).toBe('a;\n\nb;');
+	});
+
+	test('is empty for a block without nodes', () => {
+		expect(blockText([])).toBe('');
+	});
+});
 
 describe('isIdentifierUsed', () => {
 	test('finds a name as a whole', () => {

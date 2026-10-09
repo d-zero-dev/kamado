@@ -189,6 +189,19 @@ export function typedProgram(code, program) {
 }
 
 /**
+ * The text of a `script.` or `style.` block of Pug, from its text nodes. The line breaks of
+ * such a block are nodes of their own (`a;`, `\n`, `b;`), so the values are joined as they
+ * are: a line break written between them would make three of each.
+ * @param {readonly { val: string }[]} nodes - The text nodes of the block
+ * @returns {string}
+ * @example
+ * blockText([{ val: 'a;' }, { val: '\n' }, { val: 'b;' }]); // 'a;\nb;'
+ */
+export function blockText(nodes) {
+	return nodes.map((node) => node.val).join('');
+}
+
+/**
  * The module without the imports that nothing below uses: a page imports the mixins of a
  * file that it includes, and `noUnusedLocals` refuses what it does not call. A name counts
  * as used when it appears in the code outside the import lines (see
