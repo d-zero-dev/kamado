@@ -738,6 +738,37 @@ mod tests {
 	}
 
 	#[test]
+	fn an_included_file_keeps_its_trailing_line_break() {
+		// The children of the file are placed as they are: the line break at its end is a
+		// text node of its own, next to the one that follows the comment.
+		let files = Files::new(&[
+			("/site/lib/with.html", "<p>a</p>\n"),
+			("/site/lib/without.html", "<p>b</p>"),
+		]);
+		let rules = [Include::IncludeComment {
+			root: "/site/lib".to_owned(),
+		}];
+		assert_eq!(
+			run(
+				"<div>\n<!-- @include(/with.html) -->\n<i></i></div>",
+				&rules,
+				&files
+			)
+			.unwrap(),
+			"<div>\n<p>a</p>\n\n<i></i></div>"
+		);
+		assert_eq!(
+			run(
+				"<div>\n<!-- @include(/without.html) -->\n<i></i></div>",
+				&rules,
+				&files
+			)
+			.unwrap(),
+			"<div>\n<p>b</p>\n<i></i></div>"
+		);
+	}
+
+	#[test]
 	fn included_files_that_include_themselves_fail() {
 		let files = Files::new(&[
 			("/site/src/a/x.html", "<!-- @include(y.html) -->"),
@@ -860,6 +891,57 @@ mod tests {
 			)
 			.unwrap(),
 			"<div data-include=\"/frag.html\" id=\"k\"><h2>t</h2><p>body</p></div>"
+		);
+	}
+
+	#[test]
+	fn ssi_and_a_selector_without_pick_keep_the_trailing_line_break_too() {
+		// The whole file is placed, as for includeComment; a pick takes the element only.
+		let ssi = Files::new(&[("/site/dist/inc/h.html", "<b>h</b>\n")]);
+		assert_eq!(
+			run(
+				"<div>\n<!--#include virtual=\"/inc/h.html\" -->\n<i></i></div>",
+				&[Include::Ssi { dir: None }],
+				&ssi
+			)
+			.unwrap(),
+			"<div>\n<b>h</b>\n\n<i></i></div>"
+		);
+		let files = Files::new(&[
+			("/site/src/whole.html", "<b>f</b>\n"),
+			("/site/src/part.html", "<section>s</section>\n"),
+		]);
+		let whole = [Include::Selector {
+			selector: Selector::parse("[data-include]").unwrap(),
+			attr: "data-include".to_owned(),
+			root: "/site/src".to_owned(),
+			pick: None,
+			replace: Replace::Element,
+		}];
+		assert_eq!(
+			run(
+				"<div>\n<p data-include=\"/whole.html\">old</p>\n<i></i></div>",
+				&whole,
+				&files
+			)
+			.unwrap(),
+			"<div>\n<b>f</b>\n\n<i></i></div>"
+		);
+		let part = [Include::Selector {
+			selector: Selector::parse("[data-include]").unwrap(),
+			attr: "data-include".to_owned(),
+			root: "/site/src".to_owned(),
+			pick: Some(Selector::parse("section").unwrap()),
+			replace: Replace::Element,
+		}];
+		assert_eq!(
+			run(
+				"<div>\n<p data-include=\"/part.html\">old</p>\n<i></i></div>",
+				&part,
+				&files
+			)
+			.unwrap(),
+			"<div>\n<section>s</section>\n<i></i></div>"
 		);
 	}
 

@@ -64,6 +64,20 @@ html(lang="ja")
 		+card({ lang })
 		include /component/c-static.pug
 		include /data/frag.html
+		script(type="application/ld+json").
+			{
+			  "a": 1
+			}
+		script.
+			var a = 1;
+
+			var b = 2;
+		style.
+			.a { color: red; }
+			.b { color: blue; }
+		script
+			| var p = 1;
+			| var q = 2;
 `,
 	'__assets/_libs/mixin/m.pug': `mixin a
 	p A
@@ -136,6 +150,15 @@ describe.skipIf(!available)('pug-to-tsx.mjs on a small project', () => {
 		expect(page).toContain('rel={lang === "en" ? "noopener" : undefined}');
 		// A boolean prop: its null is changed as well.
 		expect(page).toContain('disabled={lang === "en" ? true : undefined}');
+	});
+
+	test('keeps the line breaks of a script and a style block as they are written', () => {
+		const page = read('__assets/htdocs/index.tsx');
+		expect(page).toContain('__html: "{\\n  \\"a\\": 1\\n}"');
+		expect(page).toContain('__html: "var a = 1;\\n\\nvar b = 2;"');
+		expect(page).toContain('__html: ".a { color: red; }\\n.b { color: blue; }"');
+		// The lines of the form with pipes are joined by one line break.
+		expect(page).toContain('__html: "var p = 1;\\nvar q = 2;"');
 	});
 
 	test('writes a > of the text as an entity', () => {
