@@ -775,16 +775,21 @@ mod tests {
 		assert!(m("*.HTML", "index.HTML"));
 	}
 
+	/// `{0,1,...,n-1}`: a group of `n` alternatives.
+	fn numbered_group(n: usize) -> String {
+		let items: Vec<String> = (0..n).map(|i| i.to_string()).collect();
+		format!("{{{}}}", items.join(","))
+	}
+
+	/// `levels` groups one inside another: `{{{a,b,c},c},c}` for 3.
+	fn nested_groups(levels: usize) -> String {
+		format!("{}a,b{}", "{".repeat(levels), ",c}".repeat(levels))
+	}
+
 	#[test]
 	fn braces_that_expand_to_exactly_the_limit_are_accepted() {
-		// A group of ten and a group of a hundred alternatives: 10 * 100 is exactly the limit.
-		let group = |n: usize| {
-			format!(
-				"{{{}}}",
-				(0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(",")
-			)
-		};
-		let pattern = format!("{}{}", group(10), group(100));
+		// A group of ten and a group of a hundred alternatives: 10 * 100 is the limit.
+		let pattern = format!("{}{}", numbered_group(10), numbered_group(100));
 		assert_eq!(MAX_BRACE_EXPANSIONS, 10 * 100);
 		let p = Pattern::new(&pattern).unwrap();
 		assert!(p.matches("00"));
@@ -795,13 +800,8 @@ mod tests {
 	#[test]
 	fn braces_that_expand_to_one_more_than_the_limit_are_an_error() {
 		// A group of eleven and a group of a hundred: 11 * 100 = 1100.
-		let group = |n: usize| {
-			format!(
-				"{{{}}}",
-				(0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(",")
-			)
-		};
-		let err = Pattern::new(&format!("{}{}", group(11), group(100))).unwrap_err();
+		let pattern = format!("{}{}", numbered_group(11), numbered_group(100));
+		let err = Pattern::new(&pattern).unwrap_err();
 		assert_eq!(err.message, "the braces expand to more than 1000 patterns");
 	}
 
@@ -827,19 +827,21 @@ mod tests {
 
 	#[test]
 	fn a_deep_nesting_of_braces_is_an_error() {
-		let pattern = format!("{}a,b{}", "{".repeat(100_000), ",c}".repeat(100_000));
-		let err = Pattern::new(&pattern).unwrap_err();
+		let err = Pattern::new(&nested_groups(100_000)).unwrap_err();
 		assert_eq!(err.message, "more than 32 brace groups nested or in a row");
 	}
 
 	#[test]
 	fn nesting_up_to_the_depth_limit_is_accepted() {
-		// `{{{a,b},c},d}` is 3 deep: one more level per `{`.
-		let levels = 32;
-		let pattern = format!("{}a,b{}", "{".repeat(levels), ",c}".repeat(levels));
-		let p = Pattern::new(&pattern).unwrap();
+		let p = Pattern::new(&nested_groups(MAX_BRACE_DEPTH)).unwrap();
 		assert!(p.matches("a"));
 		assert!(p.matches("c"));
+	}
+
+	#[test]
+	fn nesting_one_past_the_depth_limit_is_an_error() {
+		let err = Pattern::new(&nested_groups(MAX_BRACE_DEPTH + 1)).unwrap_err();
+		assert_eq!(err.message, "more than 32 brace groups nested or in a row");
 	}
 
 	#[test]
