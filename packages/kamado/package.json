@@ -13,7 +13,7 @@
 		"./jsx": "./dist/jsx/runtime.js"
 	},
 	"engines": {
-		"node": ">=24.11.0"
+		"node": "v26.11.1"
 	},
 	"scripts": {
 		"build": "tsc --project tsconfig.build.json",
