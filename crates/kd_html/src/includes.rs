@@ -895,6 +895,57 @@ mod tests {
 	}
 
 	#[test]
+	fn ssi_and_a_selector_without_pick_keep_the_trailing_line_break_too() {
+		// The whole file is placed, as for includeComment; a pick takes the element only.
+		let ssi = Files::new(&[("/site/dist/inc/h.html", "<b>h</b>\n")]);
+		assert_eq!(
+			run(
+				"<div>\n<!--#include virtual=\"/inc/h.html\" -->\n<i></i></div>",
+				&[Include::Ssi { dir: None }],
+				&ssi
+			)
+			.unwrap(),
+			"<div>\n<b>h</b>\n\n<i></i></div>"
+		);
+		let files = Files::new(&[
+			("/site/src/whole.html", "<b>f</b>\n"),
+			("/site/src/part.html", "<section>s</section>\n"),
+		]);
+		let whole = [Include::Selector {
+			selector: Selector::parse("[data-include]").unwrap(),
+			attr: "data-include".to_owned(),
+			root: "/site/src".to_owned(),
+			pick: None,
+			replace: Replace::Element,
+		}];
+		assert_eq!(
+			run(
+				"<div>\n<p data-include=\"/whole.html\">old</p>\n<i></i></div>",
+				&whole,
+				&files
+			)
+			.unwrap(),
+			"<div>\n<b>f</b>\n\n<i></i></div>"
+		);
+		let part = [Include::Selector {
+			selector: Selector::parse("[data-include]").unwrap(),
+			attr: "data-include".to_owned(),
+			root: "/site/src".to_owned(),
+			pick: Some(Selector::parse("section").unwrap()),
+			replace: Replace::Element,
+		}];
+		assert_eq!(
+			run(
+				"<div>\n<p data-include=\"/part.html\">old</p>\n<i></i></div>",
+				&part,
+				&files
+			)
+			.unwrap(),
+			"<div>\n<section>s</section>\n<i></i></div>"
+		);
+	}
+
+	#[test]
 	fn a_pick_that_matches_nothing_inserts_nothing() {
 		let files = Files::new(&[("/site/src/frag.html", "<p>x</p>")]);
 		let rules = [Include::Selector {
