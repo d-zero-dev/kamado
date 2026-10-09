@@ -1200,7 +1200,11 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 		},
 		&shared.minifiers,
 	)?;
-	let bytes = kd_html::encode::encode(&out.html, out.encoding);
+	let (bytes, replaced) = kd_html::encode::encode_reporting(&out.html, out.encoding);
+	let mut warnings = out.warnings;
+	if !replaced.is_empty() {
+		warnings.push(replaced_warning(&page.file.input_path, &replaced));
+	}
 	let status = write_output(&page.file.output_path, &bytes, shared.skip_unchanged)?;
 	// The fingerprints were taken when the bytes were read, so an edit made
 	// after that is detected by the next build instead of being recorded as if
@@ -1220,8 +1224,31 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 		output_size: bytes.len() as u64,
 		deps,
 	};
-	Ok((result(status), Some(entry), out.warnings))
+	Ok((result(status), Some(entry), warnings))
 }
+
+/// The warning for characters that Shift_JIS cannot hold and that became `?` inside
+/// `<script>` or `<style>`, where a character reference would be read as text: the page
+/// is written, but a string of the script or a `content` of the style is not what the
+/// source said. At most [`SHOWN_REPLACED`] characters are named.
+fn replaced_warning(input_path: &str, replaced: &[char]) -> String {
+	let names: Vec<String> = replaced
+		.iter()
+		.take(SHOWN_REPLACED)
+		.map(|c| format!("U+{:04X}", u32::from(*c)))
+		.collect();
+	let more = match replaced.len().saturating_sub(SHOWN_REPLACED) {
+		0 => String::new(),
+		n => format!(" and {n} more"),
+	};
+	format!(
+		"{input_path}: Shift_JIS has no {}{more}; written as '?' inside <script> or <style>",
+		names.join(", ")
+	)
+}
+
+/// How many of the replaced characters a warning names.
+const SHOWN_REPLACED: usize = 5;
 
 /// What was built for an asset: its text, what it was read from, and whether
 /// the fingerprints can vouch for the text.
@@ -1352,4 +1379,35 @@ pub fn write_report(config: &kd_config::Config, report: &Report) -> Result<(), S
 		fs::write(path, report.to_json()).map_err(|e| format!("cannot write {path}: {e}"))?;
 	}
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn the_warning_names_the_page_and_the_characters() {
+		assert_eq!(
+			replaced_warning("src/a.html", &['〜', '⚠']),
+			"src/a.html: Shift_JIS has no U+301C, U+26A0; written as '?' inside <script> or <style>"
+		);
+	}
+
+	#[test]
+	fn the_warning_names_five_characters_and_counts_the_rest() {
+		let many = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+		assert_eq!(
+			replaced_warning("a.html", &many),
+			"a.html: Shift_JIS has no U+0061, U+0062, U+0063, U+0064, U+0065 and 2 more; written as '?' inside <script> or <style>"
+		);
+	}
+
+	#[test]
+	fn five_characters_are_all_named() {
+		let five = ['a', 'b', 'c', 'd', 'e'];
+		assert_eq!(
+			replaced_warning("a.html", &five),
+			"a.html: Shift_JIS has no U+0061, U+0062, U+0063, U+0064, U+0065; written as '?' inside <script> or <style>"
+		);
+	}
 }
