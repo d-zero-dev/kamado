@@ -336,6 +336,7 @@ yarn kamado build --incremental        # そのページだけ built
 | CSS の圧縮結果（cssnano と同じ意味で、バイトは違いうる。サイズは近い。`initial` を `normal` に縮める `reduce-initial` などは移植していない） | §10  |
 | `<script>` の圧縮結果（terser と esbuild）                                                                                                   | §10  |
 | prettier の幅（入力ごとから統一へ）                                                                                                          | #15  |
+| minify を切ったとき（`minify: false`、`minify.js: false`、esbuild が見つからない）、v2 は整形済みの JS / CSS を出し、v3 は書かれたまま出す   | #32  |
 | HTML のコメント（JSX には書けない）。`<head>` 内の並び（React 19 の持ち上げ）                                                                | §7.1 |
 | フォームの属性の並び（`action` と `method` は React が最後に出す）                                                                           | §7.1 |
 
