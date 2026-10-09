@@ -593,6 +593,13 @@ unsafe fn sha256_hex(env: napi_env, info: napi_callback_info) -> napi_value {
 	unsafe { string(api, env, &hex) }
 }
 
+/// `panicCheck()`: panics. Only with the `panic-check` feature, for the check that a
+/// panic reaches JS as an `Error` (`check/panic.check.mjs`).
+#[cfg(feature = "panic-check")]
+unsafe fn panic_check(_env: napi_env, _info: napi_callback_info) -> napi_value {
+	panic!("panic check");
+}
+
 /// The text of a panic: what `panic!("...")` or `panic!("{x}")` was given.
 fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 	if let Some(text) = payload.downcast_ref::<&str>() {
@@ -688,6 +695,8 @@ unsafe fn register(env: napi_env, exports: napi_value) -> napi_value {
 		export_guarded!(api, env, exports, c"serveFinishScript", serve_finish_script);
 		export_guarded!(api, env, exports, c"serveCancel", serve_cancel);
 		export_guarded!(api, env, exports, c"serveClose", serve_close);
+		#[cfg(feature = "panic-check")]
+		export_guarded!(api, env, exports, c"panicCheck", panic_check);
 	}
 	exports
 }
