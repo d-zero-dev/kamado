@@ -930,6 +930,36 @@ mod tests {
 		let _ = fs::remove_dir_all(&outer);
 	}
 
+	#[cfg(unix)]
+	#[test]
+	fn a_link_to_a_parent_directory_is_not_followed_in_a_circle() {
+		let tmp = std::env::temp_dir().join(format!("kd_site_loop_link_{}", std::process::id()));
+		let _ = fs::remove_dir_all(&tmp);
+		fs::create_dir_all(tmp.join("a")).unwrap();
+		fs::write(tmp.join("a/page.html"), b"").unwrap();
+		// `a/up` leads back to the input directory, which is already being walked.
+		std::os::unix::fs::symlink(&tmp, tmp.join("a/up")).unwrap();
+		let files = [kd_glob::Pattern::new("**/*.html").unwrap()];
+		let found = discover(tmp.to_str().unwrap(), &files, &[]).unwrap();
+		assert_eq!(found, ["a/page.html"]);
+		let _ = fs::remove_dir_all(&tmp);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn a_link_that_leads_nowhere_is_skipped() {
+		let tmp =
+			std::env::temp_dir().join(format!("kd_site_dangling_link_{}", std::process::id()));
+		let _ = fs::remove_dir_all(&tmp);
+		fs::create_dir_all(&tmp).unwrap();
+		fs::write(tmp.join("page.html"), b"").unwrap();
+		std::os::unix::fs::symlink(tmp.join("missing"), tmp.join("gone")).unwrap();
+		let files = [kd_glob::Pattern::new("**/*.html").unwrap()];
+		let found = discover(tmp.to_str().unwrap(), &files, &[]).unwrap();
+		assert_eq!(found, ["page.html"]);
+		let _ = fs::remove_dir_all(&tmp);
+	}
+
 	#[test]
 	fn discover_all_answers_several_searches_in_one_walk() {
 		let tmp = std::env::temp_dir().join(format!("kd_site_all_{}", std::process::id()));
