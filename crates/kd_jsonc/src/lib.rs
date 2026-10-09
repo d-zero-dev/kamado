@@ -13,7 +13,15 @@
 //! Object key order is preserved so that serialization is deterministic and
 //! can feed a content hash.
 
+use std::collections::HashSet;
 use std::fmt;
+
+/// Objects with fewer keys than this are checked for a duplicate key by a scan of the
+/// keys so far, which needs no set for the few keys of a config; from this many on the
+/// keys go into a set, so that an object of N keys costs N, not N squared (`data.dir`
+/// files can hold tens of thousands). The value is a round number, not a measurement:
+/// below it either way costs next to nothing.
+const LINEAR_KEYS: usize = 16;
 
 /// A parsed JSON value. Objects keep their key order.
 #[derive(Debug, Clone, PartialEq)]
@@ -502,6 +510,8 @@ impl Parser<'_> {
 		let start = self.pos;
 		self.pos += 1;
 		let mut pairs: Vec<(String, Value)> = Vec::new();
+		// The keys seen so far, for objects past `LINEAR_KEYS` keys (empty before that).
+		let mut seen: HashSet<String> = HashSet::new();
 		loop {
 			self.skip_trivia()?;
 			match self.peek() {
@@ -516,7 +526,17 @@ impl Parser<'_> {
 			}
 			let key_pos = self.pos;
 			let key = self.parse_string()?;
-			if pairs.iter().any(|(k, _)| *k == key) {
+			let duplicate = if pairs.len() < LINEAR_KEYS {
+				pairs.iter().any(|(k, _)| *k == key)
+			} else {
+				// `pairs` grows by one key at a time, so this is true once: the set starts
+				// with the keys of the scan, and every key after it is added below.
+				if pairs.len() == LINEAR_KEYS {
+					seen.extend(pairs.iter().map(|(k, _)| k.clone()));
+				}
+				!seen.insert(key.clone())
+			};
+			if duplicate {
 				return Err(self.error_at(key_pos, format!("duplicate key \"{key}\"")));
 			}
 			self.skip_trivia()?;
@@ -647,6 +667,61 @@ mod tests {
 		let err = parse("{\n  \"a\": 1,\n  \"a\": 2\n}").unwrap_err();
 		assert_eq!((err.line, err.column), (3, 3));
 		assert_eq!(err.message, "duplicate key \"a\"");
+	}
+
+	/// `{"k0": 0, "k1": 1, ..., "k{n-1}": n-1}` followed by `tail` (more members).
+	fn object_of(n: usize, tail: &str) -> String {
+		let members: Vec<String> = (0..n).map(|i| format!("\"k{i}\": {i}")).collect();
+		format!("{{{}{tail}}}", members.join(", "))
+	}
+
+	#[test]
+	fn a_duplicate_of_the_first_key_is_found_in_an_object_past_the_scan_limit() {
+		// 20 keys, then `k0` again: the set is built from the 16 keys seen when the limit
+		// is reached, so the first key has to be in it.
+		let err = parse(&object_of(20, r#", "k0": 1"#)).unwrap_err();
+		assert_eq!(err.message, "duplicate key \"k0\"");
+	}
+
+	#[test]
+	fn a_duplicate_of_a_key_added_after_the_scan_limit_is_found() {
+		let err = parse(&object_of(20, r#", "k19": 1"#)).unwrap_err();
+		assert_eq!(err.message, "duplicate key \"k19\"");
+	}
+
+	#[test]
+	fn a_duplicate_is_found_at_the_scan_limit_itself() {
+		// 16 keys fill the scan; the 17th is the first one that goes through the set.
+		let err = parse(&object_of(16, r#", "k15": 1"#)).unwrap_err();
+		assert_eq!(err.message, "duplicate key \"k15\"");
+		// 15 keys and a duplicate as the 16th: still the scan.
+		let err = parse(&object_of(15, r#", "k14": 1"#)).unwrap_err();
+		assert_eq!(err.message, "duplicate key \"k14\"");
+	}
+
+	#[test]
+	fn an_object_of_distinct_keys_past_the_scan_limit_is_accepted() {
+		let value = parse(&object_of(40, "")).unwrap();
+		assert_eq!(value.get("k0"), Some(&Value::Number(0.0)));
+		assert_eq!(value.get("k39"), Some(&Value::Number(39.0)));
+		assert_eq!(value.as_object().map(<[_]>::len), Some(40));
+	}
+
+	#[test]
+	fn the_same_key_in_two_objects_is_not_a_duplicate() {
+		let value = parse(&format!("[{}, {}]", object_of(20, ""), object_of(20, ""))).unwrap();
+		assert_eq!(value.as_array().map(<[_]>::len), Some(2));
+	}
+
+	#[test]
+	fn an_object_of_a_hundred_thousand_keys_parses_in_linear_time() {
+		let source = object_of(100_000, "");
+		let started = std::time::Instant::now();
+		let value = parse(&source).unwrap();
+		// A scan of the keys so far takes about 40 seconds here (debug build), the set
+		// about a tenth of a second: the bound is far from both.
+		assert!(started.elapsed() < std::time::Duration::from_secs(10));
+		assert_eq!(value.as_object().map(<[_]>::len), Some(100_000));
 	}
 
 	#[test]
