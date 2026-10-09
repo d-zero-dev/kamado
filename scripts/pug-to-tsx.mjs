@@ -27,9 +27,15 @@
  * fix the source or the output by hand. It needs the pug packages of the project
  * (`pug-lexer`, `pug-parser`, `acorn`) and a build of kamado.
  *
+ * The output is written to pass the type check of `@d-zero/tsconfig` (strictest) with
+ * `@types/react`: the attributes are spelt as React spells them (`dateTime`, `srcSet`),
+ * the parameters of the arrow functions of the Pug code are typed `any`, an import that
+ * nothing uses is left out, and `<out>/__assets/kamado-jsx.d.ts` declares what the types
+ * of React lack (`static` of `<html static>`, `command`, `commandfor`). The helpers that
+ * do this are in `pug-to-tsx-types.mjs`.
+ *
  * Read the output before using it: the names of the data variables
- * (`data`, `blocks`) follow the files of the data directory, and `charset`,
- * `itemprop` and the like have to be camel case props (see MIGRATION.md 3.4).
+ * (`data`, `blocks`) follow the files of the data directory (see MIGRATION.md 3.4).
  */
 import {
 	existsSync,
@@ -41,6 +47,16 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+
+import {
+	falseBranchesToUndefined,
+	isIdentifierUsed,
+	jsxDeclarations,
+	literalKeys,
+	pruneUnusedImports,
+	typedExpression,
+	typedProgram,
+} from './pug-to-tsx-types.mjs';
 
 const [srcRoot, outRoot, libsArg] = process.argv
 	.slice(2)
@@ -65,6 +81,7 @@ const VOID = new Set(
 	'area base br col embed hr img input link meta param source track wbr'.split(' '),
 );
 // html attribute name (lower case) -> React prop name
+const { REACT_PROP_NAMES } = await import('./react-prop-names.mjs');
 const { PROPS } = await import(
 	new URL('../packages/kamado/dist/jsx/attr-table.js', import.meta.url).href
 );
@@ -82,6 +99,22 @@ for (const [prop, attr, kind] of PROPS) {
 	propOf.set(prop.toLowerCase(), prop);
 	kindOf.set(prop, kind);
 }
+// The types of `@types/react` know only the React spelling (`dateTime`, `srcSet`), which
+// the table of the runtime has no entry for (React writes them as they are). Names of
+// React 19 that `possibleStandardNames` lacks are added by hand after them.
+for (const [attr, prop] of [
+	...REACT_PROP_NAMES,
+	['popovertarget', 'popoverTarget'],
+	['popovertargetaction', 'popoverTargetAction'],
+]) {
+	if (!propOf.has(attr)) propOf.set(attr, prop);
+}
+// The props that @types/react types as `number` and nothing else (a string is an error).
+const NUMBER_PROPS = new Set(
+	'tabIndex cols colSpan high low optimum maxLength minLength rows rowSpan size span start border marginHeight marginWidth'.split(
+		' ',
+	),
+);
 const GLOBALS = new Set([
 	'props',
 	'undefined',
@@ -358,7 +391,8 @@ function jsxText(text) {
 	// An entity (`&nbsp;`) is what Pug passed on as it was, and JSX reads it the same way.
 	const bare = text.replaceAll(/&(?:[a-zA-Z][a-zA-Z0-9]*|#\d+|#x[0-9a-fA-F]+);/g, '');
 	if (/[{}]/.test(text) || /&/.test(bare)) return `{${JSON.stringify(text)}}`;
-	return text;
+	// A `>` in JSX text is a syntax error of TypeScript: the entity reads as the same text.
+	return text.replaceAll('>', '&gt;');
 }
 
 /**
@@ -443,9 +477,7 @@ function componentText(ctx, name, body, exported, params) {
 	const fromProps = needsExt.filter((n) => PROP_NAMES.has(n) && n !== 'meta');
 	const dataVars = needsExt.filter((n) => DATA_VARS.has(n));
 	const external = needsExt.filter((n) => !PROP_NAMES.has(n) && !DATA_VARS.has(n));
-	const lines = [
-		`${exported} function ${name}(props: PageProps & Record<string, any>) {`,
-	];
+	const lines = [''];
 	const plain = params.filter((p) => !p.pattern);
 	if (plain.length > 0) {
 		const list = plain.map((p) => (p.init ? `${p.name} = ${p.init}` : p.name));
@@ -469,6 +501,10 @@ function componentText(ctx, name, body, exported, params) {
 	for (const h of ctx.hoisted) lines.push(`\t${h}`);
 	lines.push(`\treturn (\n${body}\n\t);`);
 	lines.push('}');
+	// A parameter that is not read is an error of `noUnusedParameters`: its name starts
+	// with an underscore then, which that option leaves alone.
+	const reads = isIdentifierUsed(lines.join('\n'), 'props');
+	lines[0] = `${exported} function ${name}(${reads ? '' : '_'}props: PageProps & Record<string, any>) {`;
 	return lines.join('\n');
 }
 
@@ -572,7 +608,9 @@ function convertFile(file) {
 			parts.push(componentText(ctx, `${pascal(file)}Body`, body, 'export default', []));
 			info.hasBody = true;
 		}
-		text = importLines(...contexts).join('\n') + '\n\n' + parts.join('\n\n') + '\n';
+		text = pruneUnusedImports(
+			importLines(...contexts).join('\n') + '\n\n' + parts.join('\n\n') + '\n',
+		);
 	} else {
 		const ctx = newContext(file);
 		const body = block(ast.nodes, ctx, 1);
@@ -580,12 +618,13 @@ function convertFile(file) {
 		// the order of the template: its meta says so.
 		const fragmentPage =
 			inPages(file) && !ast.nodes.some((n) => n.type === 'Tag' && n.name === 'html');
-		text =
+		text = pruneUnusedImports(
 			importLines(ctx).join('\n') +
-			'\n\n' +
-			(fragmentPage ? 'export const meta = { kdStatic: true };\n\n' : '') +
-			componentText(ctx, pascal(file), body, 'export default', []) +
-			'\n';
+				'\n\n' +
+				(fragmentPage ? 'export const meta = { kdStatic: true };\n\n' : '') +
+				componentText(ctx, pascal(file), body, 'export default', []) +
+				'\n',
+		);
 	}
 	mkdirSync(path.dirname(outFile), { recursive: true });
 	writeFileSync(outFile, text);
@@ -659,14 +698,14 @@ function convertChild(file, ast, extended) {
 	const body = `\t\t<${parentName} {...props}${given.length > 0 ? ` {...{ ${given.join(', ')} }}` : ''} slots={{\n${slots.join(',\n')},\n\t\t}} />`;
 	// A fragment of slots is evaluated before the layout's `<html static>` is
 	// reached, so the page says it is static itself.
-	return (
+	return pruneUnusedImports(
 		importLines(...contexts).join('\n') +
-		'\n\n' +
-		'export const meta = { kdStatic: true };\n\n' +
-		parts.join('\n\n') +
-		(parts.length > 0 ? '\n\n' : '') +
-		componentText(ctx, pascal(file), body, 'export default', []) +
-		'\n'
+			'\n\n' +
+			'export const meta = { kdStatic: true };\n\n' +
+			parts.join('\n\n') +
+			(parts.length > 0 ? '\n\n' : '') +
+			componentText(ctx, pascal(file), body, 'export default', []) +
+			'\n',
 	);
 }
 
@@ -686,7 +725,7 @@ function indent(n) {
 function use(expr, ctx) {
 	const mapped = mapExpr(expr);
 	for (const n of free(mapped, [...ctx.declared])) ctx.used.add(n);
-	return mapped;
+	return typedExpression(mapped, acorn);
 }
 
 /**
@@ -850,8 +889,8 @@ function useStmt(stmt, ctx) {
 			PROP_NAMES.has(n) ? `let ${n}: any = (props as any).${n};` : `let ${n}: any;`,
 		);
 	}
-	const text = mapped.endsWith(';') || mapped.endsWith('}') ? mapped : `${mapped};`;
-	return text;
+	const typedCode = typedProgram(mapped, program);
+	return typedCode.endsWith(';') || typedCode.endsWith('}') ? typedCode : `${typedCode};`;
 }
 
 /**
@@ -916,10 +955,20 @@ function attrsOf(tag, ctx) {
 			);
 			continue;
 		}
+		if (/^on[a-z]+$/i.test(name)) {
+			// An event handler takes a function in the types, and the string Pug wrote is
+			// output only by a static page: spread it, as written, so that it is not typed.
+			// It stays where it was written: the order of the attributes is the output's.
+			out.push(
+				`{...{ ${JSON.stringify(name)}: ${isString ? JSON.stringify(strValue) : val === true ? '""' : use(val, ctx)} }}`,
+			);
+			continue;
+		}
 		if (name === 'style' && val !== true) {
 			// CSS text (a string, a template literal, a variable): a static page
 			// (`<html static>`) writes a string as it is, as Pug did.
-			out.push(`style={${isString ? JSON.stringify(strValue) : use(val, ctx)}}`);
+			// The type of `style` is an object: the CSS text goes in as it is.
+			out.push(`style={(${isString ? JSON.stringify(strValue) : use(val, ctx)}) as any}`);
 			continue;
 		}
 		const prop = propOf.get(name.toLowerCase()) ?? name;
@@ -927,6 +976,16 @@ function attrsOf(tag, ctx) {
 		if (val === true) {
 			// BOOLEAN kinds are bare; others are empty strings.
 			out.push(kind === 1 || kind === 2 ? prop : `${prop}=""`);
+		} else if (
+			isString &&
+			NUMBER_PROPS.has(prop) &&
+			/^-?(?:0|[1-9]\d*)$/.test(strValue)
+		) {
+			// `maxlength="255"` of Pug: the types of these props are `number`.
+			out.push(`${prop}={${strValue}}`);
+		} else if (isString && prop === 'hidden' && strValue === 'until-found') {
+			// The type of `hidden` of @types/react has no `until-found` (it is a value of HTML).
+			out.push(`${prop}={${JSON.stringify(strValue)} as any}`);
 		} else if (isString) {
 			out.push(
 				/["&<>{}\\]/.test(strValue)
@@ -936,9 +995,16 @@ function attrsOf(tag, ctx) {
 		} else if (/^(?:data|aria)-/i.test(name)) {
 			// Pug leaves out an attribute whose value is false; React writes "false".
 			const v = use(val, ctx);
-			out.push(`${prop}={((v) => (v === false ? undefined : v))(${v})}`);
+			out.push(`${prop}={((v: any) => (v === false ? undefined : v))(${v})}`);
 		} else {
-			out.push(`${prop}={${use(val, ctx)}}`);
+			// Pug leaves out an attribute whose value is `false`, as it does for `undefined`:
+			// a `false` branch of a condition is `undefined`, which the types of a text prop take.
+			// A boolean prop and a boolean-ish one (`draggable`) mean something with `false`.
+			const value =
+				kind === 1 || kind === 2 || kind === 5
+					? val
+					: falseBranchesToUndefined(val, acorn);
+			out.push(`${prop}={${use(value, ctx)}}`);
 		}
 		if (name === 'id') id = true;
 	}
@@ -1123,7 +1189,12 @@ function node(n, ctx, depth) {
 			ctx.nesting--;
 			ctx.scope.pop();
 			ctx.declared = before;
-			const mapped = `${obj}.map((${added.join(', ')}) => (\n${inner}\n${pad}))`;
+			// A parameter that the body does not read is an error of `noUnusedParameters`: the
+			// key goes, and the value starts with an underscore.
+			const reads = (name) => isIdentifierUsed(inner, name);
+			const params = [reads(n.val) ? n.val : `_${n.val}`];
+			if (n.key && reads(n.key)) params.push(n.key);
+			const mapped = `${obj}.map((${params.map((a) => `${a}: any`).join(', ')}) => (\n${inner}\n${pad}))`;
 			if (n.alternate) {
 				// `each ... else`: the block that shows when there is nothing to loop over.
 				const other = block(n.alternate.nodes, ctx, depth + 2);
@@ -1218,12 +1289,21 @@ function node(n, ctx, depth) {
 			const locals = [...ctx.declared].filter(
 				(d) => (!PROP_NAMES.has(d) || ctx.shadowed.has(d)) && !DATA_VARS.has(d),
 			);
-			const passed = [
-				...locals.map((l) => `${l}={${l}}`),
-				...given.map((g, i) =>
-					mixin.params[i].pattern ? `{...(${g})}` : `${mixin.params[i].name}={${g}}`,
-				),
-			].join(' ');
+			// A name twice is an error of the types (and the last one wins): an argument
+			// takes the place of the local of the same name.
+			const named = new Map(locals.map((l) => [l, `${l}={${l}}`]));
+			const spreads = [];
+			for (const [i, g] of given.entries()) {
+				if (mixin.params[i].pattern) {
+					spreads.push(`{...(${g})}`);
+					// The spread comes last and sets these names: writing them before it is
+					// an error of the types (TS2783), and changes nothing.
+					for (const key of literalKeys(g, acorn)) named.delete(key);
+				} else {
+					named.set(mixin.params[i].name, `${mixin.params[i].name}={${g}}`);
+				}
+			}
+			const passed = [...named.values(), ...spreads].join(' ');
 			const open = `${mixin.name} {...props}${passed ? ' ' + passed : ''}`;
 			if (n.block && n.block.nodes.length > 0) {
 				// The block of the call is what the mixin's `block` writes.
@@ -1276,6 +1356,11 @@ walkDir(path.join(srcRoot, '__assets'), (f) => {
 		failures.push([f, error.message.split('\n')[0]]);
 	}
 });
+// The pages use `<html static>` and may use `command` / `commandfor`: the types of
+// @types/react do not know them, so they are declared next to the pages.
+const declarations = path.join(outRoot, '__assets', 'kamado-jsx.d.ts');
+mkdirSync(path.dirname(declarations), { recursive: true });
+writeFileSync(declarations, jsxDeclarations());
 console.log([...converted].length, 'files converted');
 for (const [f, message] of failures)
 	console.log(`not converted: ${path.relative(srcRoot, f)}: ${message}`);

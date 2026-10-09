@@ -212,11 +212,32 @@ export function styleOf(value: unknown): Record<string, unknown> | undefined {
 }
 
 /**
+ * The type of what {@link html} returns, so that `{html(text)}` is accepted as a child by
+ * the types of `@types/react`: its `ReactNode` takes an object of the shape of
+ * `ReactElement` and a {@link Markup} is not one.
+ *
+ * The value is a {@link Markup}. The type only has the shape of a `ReactElement`, and it
+ * is not one: `type`, `props` and `key` are never set, so there is nothing to read
+ * through them, and a child is not a thing to take apart or to build by hand.
+ * @example
+ * ```tsx
+ * import { html } from 'kamado/jsx';
+ *
+ * const Body = ({ content }: { content: string }) => <main>{html(content)}</main>;
+ * ```
+ */
+export interface HtmlChild {
+	readonly type: string;
+	readonly props: unknown;
+	readonly key: string | null;
+}
+
+/**
  * Raw HTML as a child, next to other children (`dangerouslySetInnerHTML` is
  * for an element with no other children). The text is output as it is: it
  * must be HTML you trust and have escaped.
  * @param text - HTML
- * @returns A child that is not escaped
+ * @returns A child that is not escaped (a {@link Markup} typed as {@link HtmlChild})
  * @example
  * ```tsx
  * import { html } from 'kamado/jsx';
@@ -224,8 +245,8 @@ export function styleOf(value: unknown): Record<string, unknown> | undefined {
  * const Body = ({ content }) => <div>{html(content)}<footer>end</footer></div>;
  * ```
  */
-export function html(text: string): Markup {
-	return new Markup(text == null ? '' : '' + text);
+export function html(text: string): HtmlChild {
+	return new Markup(text == null ? '' : '' + text) as unknown as HtmlChild;
 }
 
 // ---------------------------------------------------------------------------
