@@ -61,7 +61,7 @@
 		"lerna": "10.0.1",
 		"npm-run-all2": "9.0.3",
 		"postcss": "8.5.28",
-		"postcss-import": "16.2.0",
+		"postcss-import": "17.0.0",
 		"prettier": "3.9.9",
 		"react": "19.3.0",
 		"react-dom": "19.3.0",
