@@ -8,12 +8,15 @@
  *
  * `--pretty` writes out the white space that Pug's `pretty` puts between tags
  * (a line break before a tag that is not inline and before the closing tag of
- * one with a block inside). `extends` / `block` become a layout component with
- * a `slots` prop (`block append` / `prepend` are not converted). Pages are
- * written in the order of the template (`<html static>`). `--pages=<dir>` names the
- * directory (default `htdocs`) whose files are pages: a failure there fails the run, and a
- * page without `<html>` is a fragment (`kdStatic`). `--skip=<text>` leaves out the files
- * whose path contains the text (repeatable).
+ * one with a block inside). Most of those lines are redundant:
+ * `scripts/prune-jsx-newlines.mjs` removes the ones that do not change the output.
+ *
+ * `extends` / `block` become a layout component with a `slots` prop (`block append` /
+ * `prepend` are not converted). Pages are written in the order of the template
+ * (`<html static>`). `--pages=<dir>` names the directory (default `htdocs`) whose files
+ * are pages: a failure there fails the run, and a page without `<html>` is a fragment
+ * (`kdStatic`). `--skip=<text>` leaves out the files whose path contains the text
+ * (repeatable).
  *
  * Converts every `.pug` under `<project>/__assets` to a component (`.tsx`, same
  * paths under `<out>/__assets`). `include` becomes a component that receives the

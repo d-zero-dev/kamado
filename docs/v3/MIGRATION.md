@@ -149,6 +149,17 @@ export default ({ meta }: { meta: { title: string } }) => (
 - **JSX に書けない属性名**（絵文字など、`⚠️="..."` のような印）は React が出力しない。静的なマークアップなら `html.inject` に HTML 文字列として書く。
 - **React 19 は `<img>` ごとに `<link rel="preload" as="image">` を `<head>` に足す**（Pug では出ない）。`<html static>` のページでは出ない。それ以外のページで要らなければ `html.rules` で消す: `{ "selector": "link[rel=preload][as=image]", "action": "remove" }`。
 - **Pug の `pretty`**（`createCompileHooks` の既定は `true`）は、インラインでないタグの前と、ブロックを含むタグの閉じタグの前に改行を入れる。これは空白として出力に残り、インライン要素の隣では見た目も変わる。変換スクリプトに `--pretty` を付けると、同じ規則で `{"\n"}` を書き出す（付けなければ空白は入らない）。v2 の出力と揃えるなら `--pretty`、`pretty: false` の基準と比べるなら付けない。
+  - `--pretty` が出す `{"\n"}` の大半は要らない。ブロックどうしの間は、kamado の HTML 整形（`html.format`）が改行を入れるためです。
+  - 要る `{"\n"}` は 2 種類ある。Pug がインラインとしない `button` / `input` / `label` / `select` / `time` / `svg` / `picture` / `iframe` などが、テキストやインラインの隣にある箇所（描画上の空白になる）。インラインの親の中のブロックのように、整形が詰める箇所（バイトが変わる）。どちらも**規則では見分けられない**。
+  - 要らない行は `scripts/prune-jsx-newlines.mjs` が消す。**`--pretty` で変換して基準と一致させてから**、`node scripts/prune-jsx-newlines.mjs <project> --output <出力ディレクトリ> <TSX のあるディレクトリ>...` を実行する。ビルドの出力を基準にして、ファイルごとにすべて消し、ビルドして比べる。出力が変わるなら半分ずつに分け、必要な行だけを残す。`pretty: false` の基準と比べるときは `--pretty` を付けないので、このツールは要らない。
+  - 使うときの前提と注意:
+    - `<project>` は `kamado.config.jsonc` のあるディレクトリで、`--output` と各パスはそこからの相対で書く。`yarn build` で kamado を作り、native addon を用意しておく（プロジェクトの `node_modules` に `kamado` を入れるか `--cli` で指す）。オプションは `scripts/prune-jsx-newlines.mjs` の先頭の説明を読む。
+    - ソースを書き換える。作業ツリーをきれいにして実行する。エラーや中断（Ctrl-C）のときは元に戻る。
+    - 基準は実行時点の出力で、移行前の出力ではない。すでにある差は残る。ビルドが決定的でない（日時や乱数が出力に入る）と、基準にできないので止まる。
+    - ビルドに使われないファイル（未使用の部品など）は、出力が変わらないので全部消える。そのようなファイルは手で見る。
+    - ビルドの回数に比例して時間がかかる（必要な行が多いファイルほど増える）。`--incremental` は試行を速くするが、キャッシュを信頼するので、使うと必要な行を消してしまうことがある。最後の確認は常に全体のビルドで行い、一致しなければ失敗して元に戻る。
+    - プロジェクトのコードと `--cli` のコードを実行する。信頼できるプロジェクトだけで実行する。
+  - 消した結果が基準と一致するかは案件の HTML による。インラインの隣にそれらの要素が無い案件では全部消えて一致し、フォームやヘッダーに多い案件では必要な行が残る。`--pretty` なしで変換すると、描画が変わる箇所を見落とすので勧めない（`pretty: false` が基準のときを除く）。
 - **Pug の出力順をそのまま保つ**: 変換スクリプトは `<html static>` を出す。React の持ち上げ（`<head>` の `async` な `script` が `title` の前に出る）と、`form` / `input` / `button` の属性の並べ替え（`action` と `name` が後ろへ）をやめ、書いた順で出す。`<html>` を持たない、`--pages=<ディレクトリ>`（既定 `htdocs`）で指したディレクトリの下のページ（フラグメント）と `extends` したページには `export const meta = { kdStatic: true }` を出す（`<html static>` の外で評価される子を持つページは、手で書くときも `kdStatic` が要る。レイアウトの外側で評価される子や、`k('html', ...)` 経由の `html` は対象外）。
 - **`on*` 属性の文字列**（`oncontextmenu="return false;"`）は、`<html static>`（`kdStatic` のページ）の中でだけ出る。React と同じく、ふだんは `on*` をすべて捨てる（データ由来の props が実行可能な属性にならないように）。
 - **`style` を CSS の文字列で渡す**（`style=\`anchor-name: ${x}\``）は、`kamado/jsx`の`styleOf()` を通してオブジェクトにする。
@@ -295,6 +306,10 @@ yarn kamado build --incremental        # そのページだけ built
 | prettier の幅（入力ごとから統一へ）                                                                                                          | #15  |
 | HTML のコメント（JSX には書けない）。`<head>` 内の並び（React 19 の持ち上げ）                                                                | §7.1 |
 | フォームの属性の並び（`action` と `method` は React が最後に出す）                                                                           | §7.1 |
+
+v1（kamado 1.x）から直接移すと、基準が v2 の出力ではないので、v2 の挙動に合わせた次の差も出ます。
+
+- `class` の値は、解析時に正規化されます。重複するクラスと連続する空白が 1 つになり、`class="a a"` は `class="a"` に、`class="a  b"` は `class="a b"` になります。v2 が使っていた DOM 実装（linkedom）と同じ挙動で、描画には影響しません。
 
 ## 12. 困ったとき
 
