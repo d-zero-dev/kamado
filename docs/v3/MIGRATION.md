@@ -141,7 +141,15 @@ export default ({ meta }: { meta: { title: string } }) => (
 
 `node scripts/pug-to-tsx.mjs <project> <out>` は、`__assets` の `.pug` をコンポーネント（`.tsx`）に直す。`include` はコンポーネントの呼び出し（include する側の props とスコープの変数を渡す）、`each` は `map`、`if` は `&&` / `?:`、`pkg.production.*` は `site.*`、`filters.date` は `formatDate` になる。`mixin` は大文字で始まるコンポーネント、`else if` は入れ子の `?:`、`include` したテキスト（生の HTML）は `html()` になる。表現できないもの（唯一の子でない `!{}` など）は止まるので、手で直す。出力は必ず読む。変換で見つかった点:
 
-- **属性名は React の綴り**: `charset` → `charSet`、`itemprop` → `itemProp`、`itemtype` → `itemType`、`itemid` → `itemID`。小文字のままだと、`<meta charset>` は先頭に置かれず、`<meta itemprop>`（パンくずの `position`）が `<head>` に持ち上げられる。
+- **属性名は React の綴り**: `charset` → `charSet`、`itemprop` → `itemProp`、`itemtype` → `itemType`、`itemid` → `itemID`。小文字のままだと、`<meta charset>` は先頭に置かれず、`<meta itemprop>`（パンくずの `position`）が `<head>` に持ち上げられる。上のほかの属性（`datetime` → `dateTime`、`srcset` → `srcSet` など）も、`@types/react` の型が求める綴りで出す。対応表は react-dom の `possibleStandardNames` から `scripts/generate-react-prop-names.mjs` が作る。出力の HTML は、どちらの綴りでも同じになる。
+- **型検査と lint に通す**: 変換結果は、`@d-zero/tsconfig`（strictest）の型検査と、型付きの eslint に通る。project の `tsconfig.json` に次を足す。
+  - `"jsx": "preserve"` と `"allowImportingTsExtensions": true`。`include` に `**/*.tsx` を足す（`**/*.ts` が `.d.ts` も拾う）。型付きの eslint は、その `tsconfig.json` を `parserOptions.project` に使う。
+  - `@types/react` を devDependency に固定で足す。`react` 自体は要らない（型だけを読む）。kamado は React の型を同梱しない。`html()` の戻り値だけは、React の `ReactElement` と同じ形の型を宣言してある。
+  - 変換スクリプトは `<out>/__assets/kamado-jsx.d.ts` も書く。`@types/react` に無い、`<html static>` の `static` と、`command` / `commandfor`（Invoker Commands）の型の補強です。`__assets` に置きます。
+  - 数字の文字列（`maxlength="255"`）は、`maxLength={255}` のように数値で出す。`on*` の文字列属性（`oncontextmenu="return false;"`）は、型が関数なので、型のつかない展開（`{...{ oncontextmenu: "..." }}`）で出す。
+  - Pug の JavaScript の無名関数の引数は `(item: any) =>` と型を付け、オブジェクトリテラルの定数は `Record<string, any>` にする。使わない `props` の引数は `_props` にする。
+  - `style` の CSS の文字列と、`hidden="until-found"`（`@types/react` の型に無い値）は `as any` を付けて出す。条件式の `false`（`cond ? "_blank" : false`）は `undefined` にする。Pug は、`false` の属性を出さず、`undefined` と同じに扱う。
+  - 型を通すために `any` が入る。出力は必ず読み、必要なら型を付け直す。
 - **`&nbsp;` などの実体参照は、そのままテキストに書く**（`{"&nbsp;"}` と文字列にすると `&amp;nbsp;` になる）。
 - **他の子と並ぶ生の HTML**は、`kamado/jsx` の `html()` で書く（`import { html } from 'kamado/jsx'`、`{html(markup)}`）。Pug の `!{}` と `include` したテキストの置き換え先。
 - **`<option selected>`** は React が無視する。`<select defaultValue="...">` に書く。
