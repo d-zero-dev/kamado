@@ -9,10 +9,10 @@ import { describe, expect, test } from 'vitest';
 
 import { readPropNames, render } from './generate-react-prop-names.mjs';
 import {
-	falseBranchesToUndefined,
 	isIdentifierUsed,
 	jsxDeclarations,
 	literalKeys,
+	omittedBranchesToUndefined,
 	pruneUnusedImports,
 	typedExpression,
 	typedProgram,
@@ -160,41 +160,78 @@ describe('typedProgram', () => {
 	});
 });
 
-describe('falseBranchesToUndefined', () => {
+describe('omittedBranchesToUndefined', () => {
 	test('writes the false of the branches of a condition as undefined', () => {
-		expect(falseBranchesToUndefined('lang === "en" ? "_blank" : false', acorn)).toBe(
+		expect(omittedBranchesToUndefined('lang === "en" ? "_blank" : false', acorn)).toBe(
 			'lang === "en" ? "_blank" : undefined',
 		);
-		expect(falseBranchesToUndefined('a ? false : "x"', acorn)).toBe(
+		expect(omittedBranchesToUndefined('a ? false : "x"', acorn)).toBe(
 			'a ? undefined : "x"',
 		);
 	});
 
 	test('goes down the nested conditions', () => {
-		expect(falseBranchesToUndefined('a ? "x" : b ? "y" : false', acorn)).toBe(
+		expect(omittedBranchesToUndefined('a ? "x" : b ? "y" : false', acorn)).toBe(
 			'a ? "x" : b ? "y" : undefined',
 		);
 	});
 
 	test('takes a condition in parentheses and a condition with two false branches', () => {
-		expect(falseBranchesToUndefined('(a ? "x" : false)', acorn)).toBe(
+		expect(omittedBranchesToUndefined('(a ? "x" : false)', acorn)).toBe(
 			'(a ? "x" : undefined)',
 		);
-		expect(falseBranchesToUndefined('a ? false : false', acorn)).toBe(
+		expect(omittedBranchesToUndefined('a ? false : false', acorn)).toBe(
 			'a ? undefined : undefined',
 		);
 	});
 
-	test('leaves a false that is not a branch of the condition', () => {
-		expect(falseBranchesToUndefined('f(a ? 1 : false)', acorn)).toBe('f(a ? 1 : false)');
-		expect(falseBranchesToUndefined('a === false', acorn)).toBe('a === false');
-		expect(falseBranchesToUndefined('false', acorn)).toBe('false');
-		expect(falseBranchesToUndefined('a && "x"', acorn)).toBe('a && "x"');
-		expect(falseBranchesToUndefined('a ? null : "x"', acorn)).toBe('a ? null : "x"');
+	test('writes the null of the branches of a condition as undefined too', () => {
+		expect(
+			omittedBranchesToUndefined('opens ? "noopener noreferrer" : null', acorn),
+		).toBe('opens ? "noopener noreferrer" : undefined');
+		expect(omittedBranchesToUndefined('a ? null : "x"', acorn)).toBe(
+			'a ? undefined : "x"',
+		);
+		expect(omittedBranchesToUndefined('a ? "x" : b ? null : false', acorn)).toBe(
+			'a ? "x" : b ? undefined : undefined',
+		);
+	});
+
+	test('keeps the false of a boolean prop and still changes its null', () => {
+		const options = { keepFalse: true };
+		expect(omittedBranchesToUndefined('on ? "true" : false', acorn, options)).toBe(
+			'on ? "true" : false',
+		);
+		expect(omittedBranchesToUndefined('on ? true : null', acorn, options)).toBe(
+			'on ? true : undefined',
+		);
+		expect(omittedBranchesToUndefined('a ? false : null', acorn, options)).toBe(
+			'a ? false : undefined',
+		);
+	});
+
+	test('leaves a false or a null that is not a branch of the condition', () => {
+		expect(omittedBranchesToUndefined('f(a ? 1 : false)', acorn)).toBe(
+			'f(a ? 1 : false)',
+		);
+		expect(omittedBranchesToUndefined('a === false', acorn)).toBe('a === false');
+		expect(omittedBranchesToUndefined('a === null', acorn)).toBe('a === null');
+		expect(omittedBranchesToUndefined('false', acorn)).toBe('false');
+		expect(omittedBranchesToUndefined('null', acorn)).toBe('null');
+		expect(omittedBranchesToUndefined('a && "x"', acorn)).toBe('a && "x"');
+		expect(omittedBranchesToUndefined('a ? 1 : f(null)', acorn)).toBe('a ? 1 : f(null)');
+	});
+
+	test('leaves the other literals of the branches', () => {
+		expect(omittedBranchesToUndefined('a ? 0 : ""', acorn)).toBe('a ? 0 : ""');
+		expect(omittedBranchesToUndefined('a ? true : /x/', acorn)).toBe('a ? true : /x/');
+		expect(omittedBranchesToUndefined('a ? "null" : "false"', acorn)).toBe(
+			'a ? "null" : "false"',
+		);
 	});
 
 	test('leaves what is not an expression of JavaScript', () => {
-		expect(falseBranchesToUndefined('a ? (b : false', acorn)).toBe('a ? (b : false');
+		expect(omittedBranchesToUndefined('a ? (b : false', acorn)).toBe('a ? (b : false');
 	});
 });
 

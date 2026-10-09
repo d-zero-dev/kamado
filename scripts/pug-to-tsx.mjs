@@ -49,10 +49,10 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import {
-	falseBranchesToUndefined,
 	isIdentifierUsed,
 	jsxDeclarations,
 	literalKeys,
+	omittedBranchesToUndefined,
 	pruneUnusedImports,
 	typedExpression,
 	typedProgram,
@@ -997,13 +997,13 @@ function attrsOf(tag, ctx) {
 			const v = use(val, ctx);
 			out.push(`${prop}={((v: any) => (v === false ? undefined : v))(${v})}`);
 		} else {
-			// Pug leaves out an attribute whose value is `false`, as it does for `undefined`:
-			// a `false` branch of a condition is `undefined`, which the types of a text prop take.
-			// A boolean prop and a boolean-ish one (`draggable`) mean something with `false`.
-			const value =
-				kind === 1 || kind === 2 || kind === 5
-					? val
-					: falseBranchesToUndefined(val, acorn);
+			// Pug leaves out an attribute whose value is `false` or `null`, as it does for
+			// `undefined`: such a branch of a condition is `undefined`, which the types of a
+			// text prop take. A boolean prop and a boolean-ish one (`draggable`) mean something
+			// with `false`, which stays; their `null` is not written by React either.
+			const value = omittedBranchesToUndefined(val, acorn, {
+				keepFalse: kind === 1 || kind === 2 || kind === 5,
+			});
 			out.push(`${prop}={${use(value, ctx)}}`);
 		}
 		if (name === 'id') id = true;

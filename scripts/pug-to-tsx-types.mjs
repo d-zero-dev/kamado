@@ -227,19 +227,26 @@ export function pruneUnusedImports(text) {
 }
 
 /**
- * The expression with the `false` of the branches of a condition (`a ? "x" : false`)
- * written as `undefined`. Only the branches of the condition itself: a `false` inside a
- * call or an operator is another value (`a && "x"` is left as it is). Pug leaves out an
- * attribute whose value is `false` as it does for `undefined`, and the types of a text prop
- * take `undefined`.
+ * The expression with the `false` and the `null` of the branches of a condition
+ * (`a ? "x" : false`, `a ? "x" : null`) written as `undefined`. Only the branches of the
+ * condition itself: a `false` inside a call or an operator is another value (`a && "x"` is
+ * left as it is). Pug leaves out an attribute whose value is `false` or `null` as it does
+ * for `undefined`, and the types of a text prop take `undefined` only. For a boolean prop
+ * (`keepFalse`) the `false` means something and stays: React writes neither a `null` nor an
+ * `undefined`, so that one is still changed.
  * @param {string} source - An expression of JavaScript
  * @param {Parser} acorn - The parser
+ * @param {{ keepFalse?: boolean }} [options] - `keepFalse`: leave the `false` as it is
  * @returns {string}
  * @example
- * falseBranchesToUndefined('lang === "en" ? "_blank" : false', acorn);
+ * omittedBranchesToUndefined('lang === "en" ? "_blank" : false', acorn);
  * // 'lang === "en" ? "_blank" : undefined'
+ * omittedBranchesToUndefined('opens ? "noopener" : null', acorn);
+ * // 'opens ? "noopener" : undefined'
+ * omittedBranchesToUndefined('on ? "true" : false', acorn, { keepFalse: true });
+ * // 'on ? "true" : false'
  */
-export function falseBranchesToUndefined(source, acorn) {
+export function omittedBranchesToUndefined(source, acorn, { keepFalse = false } = {}) {
 	let node;
 	try {
 		node = acorn.parseExpressionAt(`(${source})`, 0, { ecmaVersion: 'latest' });
@@ -254,7 +261,12 @@ export function falseBranchesToUndefined(source, acorn) {
 			return;
 		}
 		for (const branch of [n.consequent, n.alternate]) {
-			if (branch.type === 'Literal' && branch.value === false) {
+			// The `value` of a regular expression literal that the parser does not support is
+			// `null` too: the text of the literal (`raw`) tells a `null` from it.
+			if (
+				branch.type === 'Literal' &&
+				((!keepFalse && branch.value === false) || branch.raw === 'null')
+			) {
 				literals.push(branch);
 			} else {
 				visit(branch);
