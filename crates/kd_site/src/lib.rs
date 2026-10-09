@@ -439,6 +439,11 @@ pub fn discover(
 /// directory is entered unless every search ignores it. The result has one
 /// sorted list per search.
 ///
+/// A symlinked directory is followed, and a directory is entered once however
+/// many paths lead to it. The real directories are all walked before any
+/// symlink is followed, and entries are visited by name, so the path that is
+/// kept for a file does not depend on the order the file system lists.
+///
 /// # Example
 ///
 /// ```no_run
@@ -460,7 +465,22 @@ pub fn discover_all(input_dir: &str, searches: &[Search<'_>]) -> std::io::Result
 	if let Ok(canon) = fs::canonicalize(root) {
 		visited.insert(canon);
 	}
-	walk(root, "", searches, &mut out, &mut visited)?;
+	// The symlinked directories found on the way, in the order of the walk. They
+	// are followed only after every real directory is walked, so a link never
+	// takes a directory away from its own path.
+	let mut links: Vec<(std::path::PathBuf, String)> = Vec::new();
+	walk(root, "", searches, &mut out, &mut visited, &mut links)?;
+	let mut next = 0;
+	while next < links.len() {
+		let (path, rel) = links[next].clone();
+		next += 1;
+		if let Ok(canon) = fs::canonicalize(&path)
+			&& !visited.insert(canon)
+		{
+			continue;
+		}
+		walk(&path, &rel, searches, &mut out, &mut visited, &mut links)?;
+	}
 	for list in &mut out {
 		list.sort();
 	}
@@ -473,6 +493,7 @@ fn walk(
 	searches: &[Search<'_>],
 	out: &mut [Vec<String>],
 	visited: &mut HashSet<std::path::PathBuf>,
+	links: &mut Vec<(std::path::PathBuf, String)>,
 ) -> std::io::Result<()> {
 	let ignored_everywhere = |rel: &str| {
 		searches
@@ -487,16 +508,22 @@ fn walk(
 		}
 		Err(e) => return Err(e),
 	};
+	// The listing order is the file system's; sorted by name, the walk (and the
+	// order of `links`) is the same everywhere.
+	let mut listing = Vec::new();
 	for entry in entries {
 		let entry = entry?;
-		let name = entry.file_name();
+		listing.push((entry.file_name(), entry));
+	}
+	listing.sort_by(|a, b| a.0.cmp(&b.0));
+	for (name, entry) in listing {
 		let Some(name) = name.to_str() else {
 			// Not valid UTF-8: cannot be referenced from a config; skip.
 			continue;
 		};
+		let file_type = entry.file_type()?;
 		// The type comes with the directory listing; only a symlink needs a
 		// `stat` (it is followed, so a linked directory is walked).
-		let file_type = entry.file_type()?;
 		let (is_dir, is_file) = if file_type.is_symlink() {
 			match fs::metadata(entry.path()) {
 				Ok(m) => (m.is_dir(), m.is_file()),
@@ -516,12 +543,16 @@ fn walk(
 			if ignored_everywhere(&rel) {
 				continue;
 			}
+			if file_type.is_symlink() {
+				links.push((entry.path(), rel));
+				continue;
+			}
 			if let Ok(canon) = fs::canonicalize(entry.path())
 				&& !visited.insert(canon)
 			{
 				continue;
 			}
-			walk(&entry.path(), &rel, searches, out, visited)?;
+			walk(&entry.path(), &rel, searches, out, visited, links)?;
 		} else if is_file {
 			for (search, list) in searches.iter().zip(out.iter_mut()) {
 				if search.files.iter().any(|p| p.matches(&rel))
@@ -848,6 +879,84 @@ mod tests {
 		let ignore = [kd_glob::Pattern::new("_includes/**").unwrap()];
 		let found = discover(tmp.to_str().unwrap(), &files, &ignore).unwrap();
 		assert_eq!(found, ["a/index.tsx", "b/page.html", "c/deep/er/leaf.html"]);
+		let _ = fs::remove_dir_all(&tmp);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn a_directory_reached_by_a_symlink_and_by_its_own_path_is_found_under_its_own_path() {
+		let tmp = std::env::temp_dir().join(format!("kd_site_link_{}", std::process::id()));
+		let _ = fs::remove_dir_all(&tmp);
+		fs::create_dir_all(tmp.join("z")).unwrap();
+		fs::write(tmp.join("z/page.html"), b"").unwrap();
+		// `a` sorts before `z`: by name alone, the link would be walked first.
+		std::os::unix::fs::symlink(tmp.join("z"), tmp.join("a")).unwrap();
+		let files = [kd_glob::Pattern::new("**/*.html").unwrap()];
+		let found = discover(tmp.to_str().unwrap(), &files, &[]).unwrap();
+		assert_eq!(found, ["z/page.html"]);
+		let _ = fs::remove_dir_all(&tmp);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn a_link_in_a_directory_that_sorts_first_does_not_take_a_later_directory_from_its_own_path() {
+		let tmp = std::env::temp_dir().join(format!("kd_site_nested_link_{}", std::process::id()));
+		let _ = fs::remove_dir_all(&tmp);
+		fs::create_dir_all(tmp.join("a")).unwrap();
+		fs::create_dir_all(tmp.join("b/c")).unwrap();
+		fs::write(tmp.join("b/c/page.html"), b"").unwrap();
+		std::os::unix::fs::symlink(tmp.join("b/c"), tmp.join("a/x")).unwrap();
+		let files = [kd_glob::Pattern::new("**/*.html").unwrap()];
+		let found = discover(tmp.to_str().unwrap(), &files, &[]).unwrap();
+		assert_eq!(found, ["b/c/page.html"]);
+		let _ = fs::remove_dir_all(&tmp);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn a_directory_that_only_a_link_reaches_is_still_found_under_the_link() {
+		let tmp = std::env::temp_dir().join(format!("kd_site_outer_link_{}", std::process::id()));
+		let outer = std::env::temp_dir().join(format!("kd_site_outer_dir_{}", std::process::id()));
+		let _ = fs::remove_dir_all(&tmp);
+		let _ = fs::remove_dir_all(&outer);
+		fs::create_dir_all(&tmp).unwrap();
+		fs::create_dir_all(&outer).unwrap();
+		fs::write(outer.join("page.html"), b"").unwrap();
+		std::os::unix::fs::symlink(&outer, tmp.join("shared")).unwrap();
+		let files = [kd_glob::Pattern::new("**/*.html").unwrap()];
+		let found = discover(tmp.to_str().unwrap(), &files, &[]).unwrap();
+		assert_eq!(found, ["shared/page.html"]);
+		let _ = fs::remove_dir_all(&tmp);
+		let _ = fs::remove_dir_all(&outer);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn a_link_to_a_parent_directory_is_not_followed_in_a_circle() {
+		let tmp = std::env::temp_dir().join(format!("kd_site_loop_link_{}", std::process::id()));
+		let _ = fs::remove_dir_all(&tmp);
+		fs::create_dir_all(tmp.join("a")).unwrap();
+		fs::write(tmp.join("a/page.html"), b"").unwrap();
+		// `a/up` leads back to the input directory, which is already being walked.
+		std::os::unix::fs::symlink(&tmp, tmp.join("a/up")).unwrap();
+		let files = [kd_glob::Pattern::new("**/*.html").unwrap()];
+		let found = discover(tmp.to_str().unwrap(), &files, &[]).unwrap();
+		assert_eq!(found, ["a/page.html"]);
+		let _ = fs::remove_dir_all(&tmp);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn a_link_that_leads_nowhere_is_skipped() {
+		let tmp =
+			std::env::temp_dir().join(format!("kd_site_dangling_link_{}", std::process::id()));
+		let _ = fs::remove_dir_all(&tmp);
+		fs::create_dir_all(&tmp).unwrap();
+		fs::write(tmp.join("page.html"), b"").unwrap();
+		std::os::unix::fs::symlink(tmp.join("missing"), tmp.join("gone")).unwrap();
+		let files = [kd_glob::Pattern::new("**/*.html").unwrap()];
+		let found = discover(tmp.to_str().unwrap(), &files, &[]).unwrap();
+		assert_eq!(found, ["page.html"]);
 		let _ = fs::remove_dir_all(&tmp);
 	}
 
