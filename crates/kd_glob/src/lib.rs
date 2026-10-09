@@ -191,12 +191,28 @@ impl Pattern {
 	}
 }
 
+/// The most brace-free patterns one glob may expand to. Why: every group multiplies the
+/// count (`{a,b}{c,d}{e,f}...` is 2^N), so a glob of a few hundred bytes could otherwise
+/// use up the memory and the time of the build. Real globs expand to a few dozen. The
+/// bound is also the cost per path: `matches` tries every alternative, for every file
+/// the walk meets.
+pub const MAX_BRACE_EXPANSIONS: usize = 1_000;
+
+/// The most `{` groups one inside another or one after another. Why: the expansion
+/// recurses once per group, and a long run of them would overflow the stack before the
+/// count above is reached. Groups in a row have at least two alternatives each, so more
+/// than ten of them already exceed [`MAX_BRACE_EXPANSIONS`]: the bound matters for
+/// nested groups, which multiply less.
+pub const MAX_BRACE_DEPTH: usize = 32;
+
 /// Expands `{a,b}` groups (nested allowed) into brace-free patterns.
-/// Escaped braces and braces inside classes are left alone.
+/// Escaped braces and braces inside classes are left alone. A glob that expands to more
+/// than [`MAX_BRACE_EXPANSIONS`] patterns, or has more than [`MAX_BRACE_DEPTH`] groups
+/// nested or in a row, is an error.
 fn expand_braces(source: &str) -> Result<Vec<String>, Error> {
 	let chars: Vec<char> = source.chars().collect();
 	let mut results = Vec::new();
-	expand_into(&chars, 0, String::new(), &mut results)?;
+	expand_into(&chars, 0, String::new(), &mut results, 0)?;
 	Ok(results)
 }
 
@@ -205,6 +221,7 @@ fn expand_into(
 	start: usize,
 	prefix: String,
 	out: &mut Vec<String>,
+	depth: usize,
 ) -> Result<(), Error> {
 	let mut i = start;
 	let mut current = prefix;
@@ -225,6 +242,14 @@ fn expand_into(
 				i = end + 1;
 			}
 			'{' => {
+				if depth >= MAX_BRACE_DEPTH {
+					return Err(Error {
+						offset: i,
+						message: format!(
+							"more than {MAX_BRACE_DEPTH} brace groups nested or in a row"
+						),
+					});
+				}
 				let end = find_brace_end(chars, i).ok_or(Error {
 					offset: i,
 					message: "unterminated brace group '{'".to_string(),
@@ -240,7 +265,7 @@ fn expand_into(
 				for option in options {
 					let mut branch: Vec<char> = option;
 					branch.extend_from_slice(rest);
-					expand_into(&branch, 0, current.clone(), out)?;
+					expand_into(&branch, 0, current.clone(), out, depth + 1)?;
 				}
 				return Ok(());
 			}
@@ -255,6 +280,12 @@ fn expand_into(
 				i += 1;
 			}
 		}
+	}
+	if out.len() >= MAX_BRACE_EXPANSIONS {
+		return Err(Error {
+			offset: 0,
+			message: format!("the braces expand to more than {MAX_BRACE_EXPANSIONS} patterns"),
+		});
 	}
 	out.push(current);
 	Ok(())
@@ -742,6 +773,73 @@ mod tests {
 	fn case_sensitive() {
 		assert!(!m("*.HTML", "index.html"));
 		assert!(m("*.HTML", "index.HTML"));
+	}
+
+	#[test]
+	fn braces_that_expand_to_exactly_the_limit_are_accepted() {
+		// A group of ten and a group of a hundred alternatives: 10 * 100 is exactly the limit.
+		let group = |n: usize| {
+			format!(
+				"{{{}}}",
+				(0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+			)
+		};
+		let pattern = format!("{}{}", group(10), group(100));
+		assert_eq!(MAX_BRACE_EXPANSIONS, 10 * 100);
+		let p = Pattern::new(&pattern).unwrap();
+		assert!(p.matches("00"));
+		assert!(p.matches("999"));
+		assert!(!p.matches("5"));
+	}
+
+	#[test]
+	fn braces_that_expand_to_one_more_than_the_limit_are_an_error() {
+		// A group of eleven and a group of a hundred: 11 * 100 = 1100.
+		let group = |n: usize| {
+			format!(
+				"{{{}}}",
+				(0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+			)
+		};
+		let err = Pattern::new(&format!("{}{}", group(11), group(100))).unwrap_err();
+		assert_eq!(err.message, "the braces expand to more than 1000 patterns");
+	}
+
+	#[test]
+	fn groups_in_a_row_that_multiply_past_the_limit_are_an_error() {
+		// 2^10 = 1024 alternatives, from a pattern of 50 characters.
+		let err = Pattern::new(&"{a,b}".repeat(10)).unwrap_err();
+		assert_eq!(err.message, "the braces expand to more than 1000 patterns");
+	}
+
+	#[test]
+	fn groups_in_a_row_under_the_limit_are_accepted() {
+		// 2^9 = 512 alternatives.
+		let p = Pattern::new(&"{a,b}".repeat(9)).unwrap();
+		assert!(p.matches("ababababa"));
+	}
+
+	#[test]
+	fn a_hundred_thousand_groups_end_in_an_error_not_in_a_stack_overflow() {
+		let err = Pattern::new(&"{a,b}".repeat(100_000)).unwrap_err();
+		assert_eq!(err.message, "more than 32 brace groups nested or in a row");
+	}
+
+	#[test]
+	fn a_deep_nesting_of_braces_is_an_error() {
+		let pattern = format!("{}a,b{}", "{".repeat(100_000), ",c}".repeat(100_000));
+		let err = Pattern::new(&pattern).unwrap_err();
+		assert_eq!(err.message, "more than 32 brace groups nested or in a row");
+	}
+
+	#[test]
+	fn nesting_up_to_the_depth_limit_is_accepted() {
+		// `{{{a,b},c},d}` is 3 deep: one more level per `{`.
+		let levels = 32;
+		let pattern = format!("{}a,b{}", "{".repeat(levels), ",c}".repeat(levels));
+		let p = Pattern::new(&pattern).unwrap();
+		assert!(p.matches("a"));
+		assert!(p.matches("c"));
 	}
 
 	#[test]
