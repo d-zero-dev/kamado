@@ -1244,6 +1244,21 @@ mod tests {
 	}
 
 	#[test]
+	fn a_glob_whose_braces_expand_past_the_limit_is_rejected_with_its_key() {
+		let e = fail(&format!(
+			r#"{{ "pages": {{ "files": [{:?}] }} }}"#,
+			"{a,b}".repeat(10)
+		));
+		assert_eq!(e.path, "pages.files");
+		assert!(
+			e.message
+				.ends_with("the braces expand to more than 1000 patterns"),
+			"{}",
+			e.message
+		);
+	}
+
+	#[test]
 	fn invalid_jsonc_reports_position() {
 		// Parsed without the test helper's `dir`, so the position is the file's own.
 		let e = parse("{ \"a\": }", "/site", None).unwrap_err();
