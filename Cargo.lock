@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "kd_build"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 dependencies = [
  "kd_hash",
  "kd_jsonc",
@@ -12,7 +12,7 @@ dependencies = [
 
 [[package]]
 name = "kd_config"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 dependencies = [
  "kd_glob",
  "kd_jsonc",
@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "kd_core"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 dependencies = [
  "kd_build",
  "kd_config",
@@ -38,38 +38,38 @@ dependencies = [
 
 [[package]]
 name = "kd_css"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 
 [[package]]
 name = "kd_glob"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 
 [[package]]
 name = "kd_hash"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 
 [[package]]
 name = "kd_html"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 dependencies = [
  "kd_image",
 ]
 
 [[package]]
 name = "kd_image"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 
 [[package]]
 name = "kd_js"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 
 [[package]]
 name = "kd_jsonc"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 
 [[package]]
 name = "kd_napi"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 dependencies = [
  "kd_core",
  "kd_hash",
@@ -78,11 +78,11 @@ dependencies = [
 
 [[package]]
 name = "kd_pool"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 
 [[package]]
 name = "kd_site"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 dependencies = [
  "kd_glob",
  "kd_jsonc",
@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "kd_yaml"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 dependencies = [
  "kd_jsonc",
 ]
