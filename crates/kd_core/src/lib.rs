@@ -2409,6 +2409,67 @@ mod tests {
 	}
 
 	#[test]
+	fn a_character_that_became_a_question_mark_in_a_script_is_a_warning_of_its_page() {
+		let site = Site::new("sjis_warning");
+		site.write(
+			"src/a.html",
+			"<html><body><p>〜</p><script>var s = '〜⚠';</script></body></html>",
+		);
+		// `minify` is off so that the one warning is not joined by "esbuild was not found".
+		let loaded = site
+			.config(r#", "html": { "encoding": "shift_jis", "format": false, "minify": false }"#);
+		let report = run_build(&loaded).unwrap();
+		assert_eq!(report.warnings.len(), 1);
+		assert!(
+			report.warnings[0].ends_with(
+				"a.html: Shift_JIS has no U+301C, U+26A0; written as '?' inside <script> or <style>"
+			),
+			"{}",
+			report.warnings[0]
+		);
+		// The reference that the text got is not a loss, so it is not in the warning.
+		assert!(
+			site.read_bytes("out/a.html")
+				.starts_with(b"<!DOCTYPE html>")
+		);
+	}
+
+	#[test]
+	fn a_page_that_is_not_rebuilt_does_not_repeat_the_warning_of_the_build_that_wrote_it() {
+		let site = Site::new("sjis_warning_cached");
+		site.write(
+			"src/a.html",
+			"<html><body><script>var s = '〜';</script></body></html>",
+		);
+		let loaded = site
+			.config(r#", "html": { "encoding": "shift_jis", "format": false, "minify": false }"#);
+		let opts = BuildOptions {
+			incremental: true,
+			jobs: Some(1),
+			..Default::default()
+		};
+		let first = build(&loaded, &opts).unwrap();
+		assert_eq!(first.warnings.len(), 1);
+		let second = build(&loaded, &opts).unwrap();
+		assert_eq!(statuses(&second), [("/a.html", "cached")]);
+		assert_eq!(second.warnings, Vec::<String>::new());
+	}
+
+	#[test]
+	fn characters_that_became_references_or_a_page_in_utf8_raise_no_warning() {
+		let site = Site::new("sjis_no_warning");
+		site.write("src/a.html", "<html><body><p>〜⚠</p></body></html>");
+		site.write(
+			"src/modern/b.html",
+			"<html><body><script>var s = '〜';</script></body></html>",
+		);
+		let loaded = site.config(
+			r#", "html": { "encoding": "shift_jis", "format": false, "minify": false, "overrides": [ { "pages": ["/modern/**"], "encoding": "utf8" } ] }"#,
+		);
+		assert_eq!(run_build(&loaded).unwrap().warnings, Vec::<String>::new());
+	}
+
+	#[test]
 	fn an_override_replaces_only_the_options_it_names_for_the_pages_it_matches() {
 		let site = Site::new("overrides");
 		site.write("src/a.html", DOCUMENT);
