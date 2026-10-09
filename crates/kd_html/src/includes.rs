@@ -28,6 +28,7 @@
 use crate::dom::{Document, NodeId, NodeKind, ROOT};
 use crate::parser::parse;
 use crate::selector::Selector;
+use std::sync::OnceLock;
 
 /// How deep includes may nest: a page may include a file that includes a file
 /// ... [`MAX_DEPTH`] times, and not one more.
@@ -308,17 +309,18 @@ fn find_sites(doc: &Document, scope: NodeId, rules: &[Include], bge: &BgeSelecto
 struct BgeSelectors {
 	container: Selector,
 	import: Selector,
-	picked: Selector,
 }
 
-fn bge_selectors() -> BgeSelectors {
+/// The selectors of `burgerEditorImport`, parsed once for the process (`apply` runs for
+/// every page that has include rules).
+fn bge_selectors() -> &'static BgeSelectors {
+	static BGE: OnceLock<BgeSelectors> = OnceLock::new();
 	// Constant, valid selectors: a failure here is a bug in this file.
-	BgeSelectors {
+	BGE.get_or_init(|| BgeSelectors {
 		container: Selector::parse("[data-bge-container]").expect("valid selector"),
 		import: Selector::parse("[data-bge-container] [data-bgi=import] bge-import")
 			.expect("valid selector"),
-		picked: Selector::parse("[data-bge-container]").expect("valid selector"),
-	}
+	})
 }
 
 // ----- resolving and replacing -----
@@ -504,7 +506,7 @@ fn expand(
 		};
 		let source = parse(&text);
 		let nodes = match rule {
-			Include::BurgerEditorImport { .. } => burger_nodes(doc, &source, &bge.picked),
+			Include::BurgerEditorImport { .. } => burger_nodes(doc, &source, &bge.container),
 			Include::Selector { pick, replace, .. } => {
 				picked_nodes(doc, &source, pick.as_ref(), *replace == Replace::Element)?
 			}
@@ -585,7 +587,7 @@ pub fn apply(doc: &mut Document, rules: &[Include], env: &Env<'_>) -> Result<Rep
 		doc,
 		ROOT,
 		rules,
-		&bge,
+		bge,
 		env,
 		&normalize(env.page_file),
 		&mut stack,
@@ -600,6 +602,11 @@ mod tests {
 	use crate::serialize::document_html;
 	use std::cell::RefCell;
 	use std::collections::BTreeMap;
+
+	#[test]
+	fn the_burger_editor_selectors_are_parsed_once_and_shared() {
+		assert!(std::ptr::eq(bge_selectors(), bge_selectors()));
+	}
 
 	struct Files {
 		files: BTreeMap<&'static str, &'static str>,
