@@ -92,6 +92,14 @@ jobs:
       - name: Load addon from Node (main thread and workers)
         run: node --test crates/kd_napi/check/load.check.mjs
 
+      # The shipped addon has no way to panic on purpose; this build adds one. A panic
+      # has to be an Error in JS, which only a release build can show (`cargo test` unwinds).
+      - name: Build the addon with the panic check
+        run: cargo build --locked --offline --release -p kd_napi --features panic-check --target-dir target/panic-check
+
+      - name: A panic in the addon is a JS Error
+        run: node --test crates/kd_napi/check/panic.check.mjs
+
       - name: Build the Node package
         run: yarn build
 
