@@ -8,21 +8,17 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { html, Markup } from './runtime.js';
 
 // The type of what `html()` returns is checked by the compiler on a small TSX file, with
-// the types of React that a project has, against the declarations of the build.
+// the types of React that a project has, against the source of the runtime (not the build,
+// which may be missing or old). The JSX of the file is typed by `@types/react`: without
+// them every element is an error (TS7026) of the strict settings, so a pass proves that
+// `{html(text)}` fits the type of a child.
 const repo = path.resolve(import.meta.dirname, '..', '..', '..', '..');
-const declarations = path.resolve(
-	import.meta.dirname,
-	'..',
-	'..',
-	'dist',
-	'jsx',
-	'runtime.d.ts',
-);
+const runtime = path.resolve(import.meta.dirname, 'runtime.ts');
 const compiler = path.join(repo, 'node_modules', 'typescript', 'bin', 'tsc');
 const available =
-	existsSync(declarations) &&
 	existsSync(compiler) &&
-	existsSync(path.join(repo, 'node_modules', '@types', 'react'));
+	existsSync(path.join(repo, 'node_modules', '@types', 'react')) &&
+	existsSync(path.join(repo, 'node_modules', '@types', 'node'));
 
 describe('the value of html()', () => {
 	test('is a Markup that holds the text as it is', () => {
@@ -74,10 +70,11 @@ describe.skipIf(!available)('the type of html() on a TSX file', () => {
 					module: 'NodeNext',
 					moduleResolution: 'NodeNext',
 					typeRoots: [path.join(repo, 'node_modules', '@types')],
-					types: ['react'],
+					// `node` for the source of the runtime, which uses `node:crypto`.
+					types: ['react', 'node'],
 					paths: {
 						react: [path.join(repo, 'node_modules', '@types', 'react')],
-						'kamado/jsx': [declarations],
+						'kamado/jsx': [runtime],
 					},
 				},
 				include: ['check.tsx'],
@@ -101,8 +98,7 @@ export const page = (text: string) => <div>{html(text)}<footer>end</footer></div
 export const page = <div>{new Markup('x')}</div>;
 `);
 		expect(result.ok).toBe(false);
-		expect(result.output).toMatch(
-			/check\.tsx.*TS2322: Type 'Markup' is not assignable to type 'ReactNode'/,
-		);
+		// The code and the name of the type: the rest of the message follows the compiler.
+		expect(result.output).toMatch(/check\.tsx.*TS2322.*'Markup'/);
 	}, 120_000);
 });
