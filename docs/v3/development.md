@@ -49,6 +49,13 @@ node --test crates/kd_napi/check/load.check.mjs
 
 `*.check.mjs` は、ネイティブのビルドが必要なので vitest の対象にしていない（`yarn test` では動かない）。
 
+panic の確認（`panic.check.mjs`）だけは、わざと panic する `panicCheck()` を足した別のビルドを使う。出荷するアドオンには、この関数は入れない（Cargo の feature `panic-check`）。
+
+```sh
+cargo build --locked --offline --release -p kd_napi --features panic-check --target-dir target/panic-check
+node --test crates/kd_napi/check/panic.check.mjs
+```
+
 アドオンの関数が panic すると、Node のプロセスごと落ちるのではなく、`kamado: internal error (a panic in the native core): <メッセージ>` という JS の `Error` として投げられる（`crates/kd_napi/src/lib.rs` の `guard`）。そのために、リリースのプロファイルは `panic = "unwind"` で、ハンドラは `extern "C"` ではなく通常の Rust の関数にしてある（`extern "C"` の境界で panic すると、`guard` に届く前に abort する）。`unwind` にしたことによるアドオンのサイズは約 19% 増え（2.85 MB から 3.40 MB、macOS arm64）、3000 ページのビルド時間はばらつきの範囲で変わらなかった。panic は、そのプロセスの共有状態（ロックなど）を壊しうるので、投げられたあとのプロセスは、再起動するのが安全。
 
 ## Node 側のパッケージ（`packages/kamado`）
