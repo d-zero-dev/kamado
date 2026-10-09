@@ -148,8 +148,32 @@ export default ({ meta }: { meta: { title: string } }) => (
   - 変換スクリプトは `<out>/__assets/kamado-jsx.d.ts` も書く。`@types/react` に無い、`<html static>` の `static` と、`command` / `commandfor`（Invoker Commands）の型の補強です。`__assets` に置きます。
   - 数字の文字列（`maxlength="255"`）は、`maxLength={255}` のように数値で出す。`on*` の文字列属性（`oncontextmenu="return false;"`）は、型が関数なので、型のつかない展開（`{...{ oncontextmenu: "..." }}`）で出す。
   - Pug の JavaScript の無名関数の引数は `(item: any) =>` と型を付け、オブジェクトリテラルの定数は `Record<string, any>` にする。使わない `props` の引数は `_props` にする。
-  - `style` の CSS の文字列と、`hidden="until-found"`（`@types/react` の型に無い値）は `as any` を付けて出す。条件式の `false`（`cond ? "_blank" : false`）は `undefined` にする。Pug は、`false` の属性を出さず、`undefined` と同じに扱う。
+  - `style` の CSS の文字列と、`hidden="until-found"`（`@types/react` の型に無い値）は `as any` を付けて出す。条件式の枝の `false` と `null`（`cond ? "_blank" : false`、`cond ? "noopener" : null`）は `undefined` にする。Pug は、`false` や `null` の属性を出さず、`undefined` と同じに扱う。`disabled` のような真偽値の prop は、`false` に意味があるので残し、`null` だけを `undefined` にする。
   - 型を通すために `any` が入る。出力は必ず読み、必要なら型を付け直す。
+  - eslint には、変換結果の TSX にだけ当てる設定を足す（flat config）。次の規則は、変換結果と合わない。
+    - `@typescript-eslint/no-explicit-any`: 外す。`--fix`（lint-staged の pre-commit も）が `any` を `unknown` に書き換えて、型が通らなくなる。
+    - `@typescript-eslint/no-unused-vars`: `argsIgnorePattern: '^_'` にする。使わない `props` の引数は `_props` で出る。あとから `props` を使わなくなった部品も、`_props` に直す。
+    - `unicorn/no-unreadable-iife`: 外す。条件式を含む出力が、即時実行関数になる。
+    - `unicorn/filename-case`: ページ（`__assets/htdocs/` の下）だけ外す。ファイル名が出力の URL になるので、変えられない。
+    - `no-irregular-whitespace`: `skipJSXText: true` にする。全角空白がテキストに入る。
+    - Pug のコードの書き方に当たる規則（`unicorn/explicit-length-check`、`unicorn/no-array-for-each`、`regexp/no-unused-capturing-group` など）: 案件に合わせて外すか、コードを直す。変換前は lint の対象外だった。
+
+```js
+{
+	files: ['__assets/**/*.tsx'],
+	rules: {
+		'@typescript-eslint/no-explicit-any': 'off',
+		'@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+		'unicorn/no-unreadable-iife': 'off',
+		'no-irregular-whitespace': ['error', { skipJSXText: true }],
+	},
+},
+{
+	files: ['__assets/htdocs/**/*.tsx'],
+	rules: { 'unicorn/filename-case': 'off' },
+},
+```
+
 - **`&nbsp;` などの実体参照は、そのままテキストに書く**（`{"&nbsp;"}` と文字列にすると `&amp;nbsp;` になる）。
 - **他の子と並ぶ生の HTML**は、`kamado/jsx` の `html()` で書く（`import { html } from 'kamado/jsx'`、`{html(markup)}`）。Pug の `!{}` と `include` したテキストの置き換え先。
 - **`<option selected>`** は React が無視する。`<select defaultValue="...">` に書く。
