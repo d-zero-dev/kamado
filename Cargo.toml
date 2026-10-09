@@ -17,6 +17,9 @@ unsafe_op_in_unsafe_fn = "deny"
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-panic = "abort"
+# Not `abort`: a panic has to unwind to the edge of the addon (`kd_napi::guard`), where it
+# becomes a JS exception; `abort` would end the whole Node process (and the dev server
+# with it). `kd_pool` also hands a panic of a job to the thread that waits for it.
+panic = "unwind"
 strip = "symbols"
 debug = false

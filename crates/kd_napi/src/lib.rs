@@ -270,7 +270,7 @@ fn build_options_from_json(json: &str) -> Result<kd_core::BuildOptions, String> 
 
 /// `build(configPath, optionsJson)` -> report JSON string. Throws on any
 /// configuration or build error.
-unsafe extern "C" fn build(env: napi_env, info: napi_callback_info) -> napi_value {
+unsafe fn build(env: napi_env, info: napi_callback_info) -> napi_value {
 	let Some(api) = api() else {
 		return std::ptr::null_mut();
 	};
@@ -330,7 +330,7 @@ unsafe fn throw_message(api: &Api, env: napi_env, message: String) -> napi_value
 
 /// `prepare(configPath, optionsJson, runtimeUrl)` -> JSON with the handle, the
 /// render jobs and the context. Throws on any configuration or plan error.
-unsafe extern "C" fn prepare(env: napi_env, info: napi_callback_info) -> napi_value {
+unsafe fn prepare(env: napi_env, info: napi_callback_info) -> napi_value {
 	let Some(api) = api() else {
 		return std::ptr::null_mut();
 	};
@@ -351,7 +351,7 @@ unsafe extern "C" fn prepare(env: napi_env, info: napi_callback_info) -> napi_va
 }
 
 /// `finish(handle, renderedJson)` -> report JSON.
-unsafe extern "C" fn finish(env: napi_env, info: napi_callback_info) -> napi_value {
+unsafe fn finish(env: napi_env, info: napi_callback_info) -> napi_value {
 	let Some(api) = api() else {
 		return std::ptr::null_mut();
 	};
@@ -366,7 +366,7 @@ unsafe extern "C" fn finish(env: napi_env, info: napi_callback_info) -> napi_val
 }
 
 /// `abort(handle)`: forgets a prepared build.
-unsafe extern "C" fn abort(env: napi_env, info: napi_callback_info) -> napi_value {
+unsafe fn abort(env: napi_env, info: napi_callback_info) -> napi_value {
 	let Some(api) = api() else {
 		return std::ptr::null_mut();
 	};
@@ -400,7 +400,7 @@ unsafe fn string_call<const N: usize>(
 
 /// `serveOpen(configPath, optionsJson, runtimeUrl)` -> JSON with the handle and
 /// what the HTTP side needs to know.
-unsafe extern "C" fn serve_open(env: napi_env, info: napi_callback_info) -> napi_value {
+unsafe fn serve_open(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
 	unsafe {
 		string_call::<3>(
@@ -417,7 +417,7 @@ unsafe extern "C" fn serve_open(env: napi_env, info: napi_callback_info) -> napi
 /// pages are kept until `finish`; handing them over while the other workers
 /// still render takes the cost of moving them (and of JSON, which has to
 /// escape every quote and line break) out of the time after the last page.
-unsafe extern "C" fn feed(env: napi_env, info: napi_callback_info) -> napi_value {
+unsafe fn feed(env: napi_env, info: napi_callback_info) -> napi_value {
 	let Some(api) = api() else {
 		return std::ptr::null_mut();
 	};
@@ -451,7 +451,7 @@ unsafe extern "C" fn feed(env: napi_env, info: napi_callback_info) -> napi_value
 
 /// `serveRequest(handle, urlPath, rendererStarted)` -> JSON answer
 /// (`rendererStarted` is `"1"` or `"0"`).
-unsafe extern "C" fn serve_request(env: napi_env, info: napi_callback_info) -> napi_value {
+unsafe fn serve_request(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
 	unsafe {
 		string_call::<3>(
@@ -464,7 +464,7 @@ unsafe extern "C" fn serve_request(env: napi_env, info: napi_callback_info) -> n
 }
 
 /// `serveFinishRender(handle, token, html)` -> JSON answer.
-unsafe extern "C" fn serve_finish_render(env: napi_env, info: napi_callback_info) -> napi_value {
+unsafe fn serve_finish_render(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
 	unsafe {
 		string_call::<3>(
@@ -477,7 +477,7 @@ unsafe extern "C" fn serve_finish_render(env: napi_env, info: napi_callback_info
 }
 
 /// `serveFinishScript(handle, token, outputJson)` -> JSON answer.
-unsafe extern "C" fn serve_finish_script(env: napi_env, info: napi_callback_info) -> napi_value {
+unsafe fn serve_finish_script(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
 	unsafe {
 		string_call::<3>(
@@ -490,7 +490,7 @@ unsafe extern "C" fn serve_finish_script(env: napi_env, info: napi_callback_info
 }
 
 /// `serveCancel(handle, token)`: the JavaScript behind an answer failed.
-unsafe extern "C" fn serve_cancel(env: napi_env, info: napi_callback_info) -> napi_value {
+unsafe fn serve_cancel(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
 	unsafe {
 		string_call::<2>(
@@ -503,7 +503,7 @@ unsafe extern "C" fn serve_cancel(env: napi_env, info: napi_callback_info) -> na
 }
 
 /// `serveClose(handle)`: forgets a dev server.
-unsafe extern "C" fn serve_close(env: napi_env, info: napi_callback_info) -> napi_value {
+unsafe fn serve_close(env: napi_env, info: napi_callback_info) -> napi_value {
 	let Some(api) = api() else {
 		return std::ptr::null_mut();
 	};
@@ -530,7 +530,7 @@ unsafe fn string(api: &Api, env: napi_env, s: &str) -> napi_value {
 }
 
 /// `version()` -> string
-unsafe extern "C" fn version(env: napi_env, _info: napi_callback_info) -> napi_value {
+unsafe fn version(env: napi_env, _info: napi_callback_info) -> napi_value {
 	let Some(api) = api() else {
 		return std::ptr::null_mut();
 	};
@@ -540,7 +540,7 @@ unsafe extern "C" fn version(env: napi_env, _info: napi_callback_info) -> napi_v
 
 /// `counter()` -> number. Process-wide: the same value sequence is observed
 /// from the main thread and from every worker.
-unsafe extern "C" fn counter(env: napi_env, _info: napi_callback_info) -> napi_value {
+unsafe fn counter(env: napi_env, _info: napi_callback_info) -> napi_value {
 	let Some(api) = api() else {
 		return std::ptr::null_mut();
 	};
@@ -552,7 +552,7 @@ unsafe extern "C" fn counter(env: napi_env, _info: napi_callback_info) -> napi_v
 }
 
 /// `sha256Hex(buffer)` -> string. Reads the Buffer's bytes in place (no copy).
-unsafe extern "C" fn sha256_hex(env: napi_env, info: napi_callback_info) -> napi_value {
+unsafe fn sha256_hex(env: napi_env, info: napi_callback_info) -> napi_value {
 	let Some(api) = api() else {
 		return std::ptr::null_mut();
 	};
@@ -593,6 +593,58 @@ unsafe extern "C" fn sha256_hex(env: napi_env, info: napi_callback_info) -> napi
 	unsafe { string(api, env, &hex) }
 }
 
+/// The text of a panic: what `panic!("...")` or `panic!("{x}")` was given.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+	if let Some(text) = payload.downcast_ref::<&str>() {
+		(*text).to_string()
+	} else if let Some(text) = payload.downcast_ref::<String>() {
+		text.clone()
+	} else {
+		"no message".to_string()
+	}
+}
+
+/// Runs a callback of the addon; a panic in it is returned as a message instead of
+/// unwinding out of the `extern "C"` function (which would abort the process).
+fn run_guarded<T>(f: impl FnOnce() -> T) -> Result<T, String> {
+	std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+		.map_err(|payload| panic_message(payload.as_ref()))
+}
+
+/// The body of every exported function: a panic becomes a thrown JS `Error` and the
+/// process lives on. Why: a Rust panic that reaches the edge of the addon would abort
+/// Node, losing the state of a dev server and escaping the `try` / `catch` of the caller.
+///
+/// The handlers it runs are plain `unsafe fn`s, not `extern "C"`: a panic that leaves an
+/// `extern "C"` function aborts at that boundary, before it reaches this guard (the
+/// exported wrappers of [`export_guarded`] are the only `extern "C"` frames).
+unsafe fn guard(env: napi_env, f: impl FnOnce() -> napi_value) -> napi_value {
+	match run_guarded(f) {
+		Ok(value) => value,
+		Err(message) => {
+			let message = format!("kamado: internal error (a panic in the native core): {message}");
+			let Some(api) = api() else {
+				// Nothing can be thrown without the Node-API; the text is not lost.
+				eprintln!("{message}");
+				return std::ptr::null_mut();
+			};
+			// SAFETY: env is the live environment of this call.
+			unsafe { throw_message(api, env, message) }
+		}
+	}
+}
+
+/// Exports `$f` as `$name`, wrapped by [`guard`].
+macro_rules! export_guarded {
+	($api:expr, $env:expr, $exports:expr, $name:expr, $f:ident) => {{
+		unsafe extern "C" fn guarded(env: napi_env, info: napi_callback_info) -> napi_value {
+			// SAFETY: env and info belong to this call, and are passed on untouched.
+			unsafe { guard(env, || $f(env, info)) }
+		}
+		export($api, $env, $exports, $name, guarded);
+	}};
+}
+
 unsafe fn export(api: &Api, env: napi_env, exports: napi_value, name: &CStr, cb: napi_callback) {
 	let mut f: napi_value = std::ptr::null_mut();
 	// SAFETY: name is NUL-terminated (length given as usize::MAX = NAPI_AUTO_LENGTH).
@@ -609,27 +661,33 @@ unsafe fn export(api: &Api, env: napi_env, exports: napi_value, name: &CStr, cb:
 	}
 }
 
-/// Called by Node once per environment (main thread and each worker).
+/// Called by Node once per environment (main thread and each worker). Guarded like the
+/// exported functions: a panic while registering would otherwise abort Node at `require()`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn napi_register_module_v1(env: napi_env, exports: napi_value) -> napi_value {
+	// SAFETY: env and exports are valid for the duration of this call.
+	unsafe { guard(env, || register(env, exports)) }
+}
+
+unsafe fn register(env: napi_env, exports: napi_value) -> napi_value {
 	let Some(api) = api() else { return exports };
 	set_core_stamp();
 	// SAFETY: env and exports are valid for the duration of this call.
 	unsafe {
-		export(api, env, exports, c"version", version);
-		export(api, env, exports, c"counter", counter);
-		export(api, env, exports, c"sha256Hex", sha256_hex);
-		export(api, env, exports, c"build", build);
-		export(api, env, exports, c"prepare", prepare);
-		export(api, env, exports, c"feed", feed);
-		export(api, env, exports, c"finish", finish);
-		export(api, env, exports, c"abort", abort);
-		export(api, env, exports, c"serveOpen", serve_open);
-		export(api, env, exports, c"serveRequest", serve_request);
-		export(api, env, exports, c"serveFinishRender", serve_finish_render);
-		export(api, env, exports, c"serveFinishScript", serve_finish_script);
-		export(api, env, exports, c"serveCancel", serve_cancel);
-		export(api, env, exports, c"serveClose", serve_close);
+		export_guarded!(api, env, exports, c"version", version);
+		export_guarded!(api, env, exports, c"counter", counter);
+		export_guarded!(api, env, exports, c"sha256Hex", sha256_hex);
+		export_guarded!(api, env, exports, c"build", build);
+		export_guarded!(api, env, exports, c"prepare", prepare);
+		export_guarded!(api, env, exports, c"feed", feed);
+		export_guarded!(api, env, exports, c"finish", finish);
+		export_guarded!(api, env, exports, c"abort", abort);
+		export_guarded!(api, env, exports, c"serveOpen", serve_open);
+		export_guarded!(api, env, exports, c"serveRequest", serve_request);
+		export_guarded!(api, env, exports, c"serveFinishRender", serve_finish_render);
+		export_guarded!(api, env, exports, c"serveFinishScript", serve_finish_script);
+		export_guarded!(api, env, exports, c"serveCancel", serve_cancel);
+		export_guarded!(api, env, exports, c"serveClose", serve_close);
 	}
 	exports
 }
@@ -638,4 +696,38 @@ pub unsafe extern "C" fn napi_register_module_v1(env: napi_env, exports: napi_va
 #[unsafe(no_mangle)]
 pub extern "C" fn node_api_module_get_api_version_v1() -> i32 {
 	8
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn a_value_that_the_callback_returns_passes_through() {
+		assert_eq!(run_guarded(|| 7), Ok(7));
+	}
+
+	#[test]
+	fn a_panic_with_a_literal_becomes_its_text() {
+		let outcome: Result<(), String> = run_guarded(|| panic!("boom"));
+		assert_eq!(outcome, Err("boom".to_string()));
+	}
+
+	#[test]
+	fn a_panic_with_a_formatted_message_becomes_its_text() {
+		let outcome: Result<(), String> = run_guarded(|| panic!("bad index {}", 3));
+		assert_eq!(outcome, Err("bad index 3".to_string()));
+	}
+
+	#[test]
+	fn a_panic_with_another_payload_still_becomes_a_message() {
+		let outcome: Result<(), String> = run_guarded(|| std::panic::panic_any(42_u8));
+		assert_eq!(outcome, Err("no message".to_string()));
+	}
+
+	#[test]
+	fn the_callback_after_a_panic_runs_as_usual() {
+		let _: Result<(), String> = run_guarded(|| panic!("first"));
+		assert_eq!(run_guarded(|| "second"), Ok("second"));
+	}
 }
