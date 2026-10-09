@@ -4,7 +4,7 @@ members = ["crates/*"]
 
 [workspace.package]
 # Kept equal to lerna.json by scripts/sync-cargo-version.mjs (run by `yarn release*`, which wraps `lerna version`).
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 edition = "2024"
 license = "MIT"
 publish = false

@@ -48,8 +48,8 @@ html(lang="ja")
 			tr
 				td(colspan="2" style="color: red") c
 		time(datetime="2026-01-02") d
-		a(href="/x/" target=lang === "en" ? "_blank" : false) a
-		input(maxlength="255" size="10")
+		a(href="/x/" target=lang === "en" ? "_blank" : false rel=lang === "en" ? "noopener" : null) a
+		input(maxlength="255" size="10" disabled=lang === "en" ? true : null)
 		p(hidden="until-found") h
 		p tbody > tr
 		each item, index in items
@@ -115,7 +115,7 @@ describe.skipIf(!available)('pug-to-tsx.mjs on a small project', () => {
 		const page = read('__assets/htdocs/index.tsx');
 		expect(page).toContain('tabIndex={-1}');
 		expect(page).toContain('<table border={0}>');
-		expect(page).toContain('<input maxLength={255} size={10} />');
+		expect(page).toContain('<input maxLength={255} size={10} ');
 	});
 
 	test('keeps an event handler in its place, outside of the types', () => {
@@ -130,10 +130,12 @@ describe.skipIf(!available)('pug-to-tsx.mjs on a small project', () => {
 		expect(page).toContain('hidden={"until-found" as any}');
 	});
 
-	test('writes the false of a branch as undefined', () => {
-		expect(read('__assets/htdocs/index.tsx')).toContain(
-			'target={lang === "en" ? "_blank" : undefined}',
-		);
+	test('writes the false and the null of a branch as undefined', () => {
+		const page = read('__assets/htdocs/index.tsx');
+		expect(page).toContain('target={lang === "en" ? "_blank" : undefined}');
+		expect(page).toContain('rel={lang === "en" ? "noopener" : undefined}');
+		// A boolean prop: its null is changed as well.
+		expect(page).toContain('disabled={lang === "en" ? true : undefined}');
 	});
 
 	test('writes a > of the text as an entity', () => {

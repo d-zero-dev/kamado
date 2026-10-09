@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [3.0.0-alpha.2](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.1...v3.0.0-alpha.2) (2026-10-09)
+
+### Features
+
+- **kamado:** type the result of html() as a child that React accepts ([78ed12a](https://github.com/d-zero-dev/kamado/commit/78ed12a1040ced0207e46faaddb1cea3e24e2b3d))
+- **repo:** add a script that prunes the newline expressions of converted TSX ([53a0375](https://github.com/d-zero-dev/kamado/commit/53a0375eddd079ad2e87da5885a88442f126f9e3))
+- **repo:** make the converted TSX of pug-to-tsx pass the strictest type check ([1af36f0](https://github.com/d-zero-dev/kamado/commit/1af36f0df370eec31ab1773aa890bf38b05fa6dd))
+
 # [3.0.0-alpha.1](https://github.com/d-zero-dev/kamado/compare/v2.0.0-alpha.17...v3.0.0-alpha.1) (2026-10-07)
 
 - feat(repo)!: make v3 the kamado package and move v2 to its own branch ([945f10a](https://github.com/d-zero-dev/kamado/commit/945f10ade55c996755b6d7348572a2588833896e)), closes [#277](https://github.com/d-zero-dev/kamado/issues/277)
