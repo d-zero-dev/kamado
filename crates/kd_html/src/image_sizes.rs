@@ -20,6 +20,14 @@
 use crate::dom::NodeId;
 use crate::page::Page;
 use crate::selector::Selector;
+use std::sync::OnceLock;
+
+/// `img, picture > source`, parsed once for the process (`apply` runs for every page).
+fn image_selector() -> &'static Selector {
+	static IMAGES: OnceLock<Selector> = OnceLock::new();
+	// Constant, valid selector: a failure here is a bug in this file.
+	IMAGES.get_or_init(|| Selector::parse("img, picture > source").expect("valid selector"))
+}
 
 /// What `src` extensions are measured by default.
 pub const DEFAULT_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "avif", "svg"];
@@ -136,9 +144,7 @@ pub fn apply(
 	options: &Options<'_>,
 	source: &dyn ImageSource,
 ) -> Result<(), ImageSizeError> {
-	// Constant, valid selector: a failure here is a bug in this file.
-	let images = Selector::parse("img, picture > source").expect("valid selector");
-	let nodes: Vec<NodeId> = images.select_all(&page.doc);
+	let nodes: Vec<NodeId> = image_selector().select_all(&page.doc);
 	for node in nodes {
 		let Some(element) = page.doc.element(node) else {
 			continue;
@@ -188,6 +194,11 @@ mod tests {
 	use super::*;
 	use std::cell::RefCell;
 	use std::collections::BTreeMap;
+
+	#[test]
+	fn the_image_selector_is_parsed_once_and_shared() {
+		assert!(std::ptr::eq(image_selector(), image_selector()));
+	}
 
 	struct Files {
 		files: BTreeMap<&'static str, Vec<u8>>,
