@@ -16,3 +16,9 @@ crate-type = ["cdylib"]
 kd_core = { path = "../kd_core" }
 kd_hash = { path = "../kd_hash" }
 kd_jsonc = { path = "../kd_jsonc" }
+
+[features]
+# Adds the export `panicCheck`, which panics, so that crates/kd_napi/check/panic.check.mjs
+# can prove from Node that a panic is a JS Error and not the end of the process. Off in
+# every build that is shipped.
+panic-check = []
