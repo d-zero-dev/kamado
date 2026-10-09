@@ -738,6 +738,37 @@ mod tests {
 	}
 
 	#[test]
+	fn an_included_file_keeps_its_trailing_line_break() {
+		// The children of the file are placed as they are: the line break at its end is a
+		// text node of its own, next to the one that follows the comment.
+		let files = Files::new(&[
+			("/site/lib/with.html", "<p>a</p>\n"),
+			("/site/lib/without.html", "<p>b</p>"),
+		]);
+		let rules = [Include::IncludeComment {
+			root: "/site/lib".to_owned(),
+		}];
+		assert_eq!(
+			run(
+				"<div>\n<!-- @include(/with.html) -->\n<i></i></div>",
+				&rules,
+				&files
+			)
+			.unwrap(),
+			"<div>\n<p>a</p>\n\n<i></i></div>"
+		);
+		assert_eq!(
+			run(
+				"<div>\n<!-- @include(/without.html) -->\n<i></i></div>",
+				&rules,
+				&files
+			)
+			.unwrap(),
+			"<div>\n<p>b</p>\n<i></i></div>"
+		);
+	}
+
+	#[test]
 	fn included_files_that_include_themselves_fail() {
 		let files = Files::new(&[
 			("/site/src/a/x.html", "<!-- @include(y.html) -->"),
