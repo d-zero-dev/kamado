@@ -21,6 +21,7 @@ import { buildScripts } from '../scripts.js';
 
 import { contentTypeOf } from './mime.js';
 import { setProxyRoutes } from './proxy.js';
+import { byteRange } from './range.js';
 import { ServeRenderer } from './renderer.js';
 
 /** What the core answers to a request. */
@@ -192,14 +193,36 @@ export function createApp(
 						log(404, 'file');
 						return ctx.notFound();
 					}
-					log(200, 'file');
+					// The files carry no validator (`ETag`, `Last-Modified`), so an
+					// `If-Range` cannot be matched: the whole file is sent, as RFC 9110
+					// says for one that does not match.
+					const range =
+						ctx.req.header('If-Range') === undefined
+							? byteRange(ctx.req.header('Range'), info.size)
+							: null;
+					if (range === 'unsatisfiable') {
+						log(416, 'file');
+						return ctx.body(null, 416, { 'Content-Range': `bytes */${info.size}` });
+					}
+					const status = range ? 206 : 200;
+					log(status, 'file');
+					const headers = {
+						'Content-Type': contentTypeOf(result.path),
+						'Content-Length': String(range ? range.end - range.start + 1 : info.size),
+						'Accept-Ranges': 'bytes',
+						...(range
+							? { 'Content-Range': `bytes ${range.start}-${range.end}/${info.size}` }
+							: {}),
+					};
+					// Hono answers HEAD with this handler and drops the body: a stream
+					// opened for it would hold the file open until it is collected.
+					if (ctx.req.method === 'HEAD') {
+						return ctx.body(null, status, headers);
+					}
 					return ctx.body(
-						Readable.toWeb(createReadStream(result.path)) as ReadableStream,
-						200,
-						{
-							'Content-Type': contentTypeOf(result.path),
-							'Content-Length': String(info.size),
-						},
+						Readable.toWeb(createReadStream(result.path, range ?? {})) as ReadableStream,
+						status,
+						headers,
 					);
 				}
 				case 'forbidden': {

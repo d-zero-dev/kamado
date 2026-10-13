@@ -1,7 +1,12 @@
+import type * as FS from 'node:fs';
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { createAdaptorServer } from '@hono/node-server';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 const serveRequest =
@@ -26,6 +31,12 @@ vi.mock('../native.js', () => ({
 vi.mock('../scripts.js', () => ({
 	buildScripts: (request: unknown) => buildScripts(request),
 }));
+// The real one, watched: a HEAD must not open the file.
+vi.mock('node:fs', async (importOriginal) => {
+	const fs = await importOriginal<typeof FS>();
+	return { ...fs, createReadStream: vi.fn(fs.createReadStream) };
+});
+const { createReadStream } = await import('node:fs');
 
 const { createApp } = await import('./app.js');
 
@@ -74,6 +85,7 @@ describe('createApp', () => {
 		serveCancel.mockReset();
 		serveClose.mockReset();
 		buildScripts.mockReset();
+		vi.mocked(createReadStream).mockClear();
 	});
 
 	afterEach(async () => {
@@ -106,6 +118,90 @@ describe('createApp', () => {
 		expect(response.headers.get('content-type')).toBe('image/svg+xml');
 		expect(response.headers.get('content-length')).toBe('6');
 		expect(await response.text()).toBe('<svg/>');
+	});
+
+	// `@hono/node-server` fills in `text/plain` for a response without a type,
+	// which Firefox will not play as a video (#220), so this goes over real HTTP.
+	test('a video is served over HTTP with its type, its size and its parts', async () => {
+		const file = path.join(dir, 'clip.mp4');
+		await writeFile(file, '0123456789');
+		serveRequest.mockReturnValue(JSON.stringify({ kind: 'file', path: file }));
+		const { app } = createApp(DESCRIPTION, 'file:///rt.js', { renderer: fakeRenderer() });
+		const server = createAdaptorServer({ fetch: app.fetch }) as Server;
+		await new Promise<void>((resolve, reject) => {
+			server.once('error', reject);
+			server.listen(0, '127.0.0.1', resolve);
+		});
+		try {
+			const { port } = server.address() as AddressInfo;
+
+			const whole = await fetch(`http://127.0.0.1:${port}/clip.mp4`);
+			const part = await fetch(`http://127.0.0.1:${port}/clip.mp4`, {
+				headers: { Range: 'bytes=2-5' },
+			});
+
+			expect(whole.status).toBe(200);
+			expect(whole.headers.get('content-type')).toBe('video/mp4');
+			expect(whole.headers.get('content-length')).toBe('10');
+			expect(whole.headers.get('accept-ranges')).toBe('bytes');
+			expect(await whole.text()).toBe('0123456789');
+			expect(part.status).toBe(206);
+			expect(part.headers.get('content-type')).toBe('video/mp4');
+			expect(part.headers.get('content-length')).toBe('4');
+			expect(part.headers.get('content-range')).toBe('bytes 2-5/10');
+			expect(await part.text()).toBe('2345');
+		} finally {
+			// The keep-alive connection of `fetch` would hold `close` for seconds.
+			server.closeAllConnections();
+			await new Promise((resolve) => server.close(resolve));
+		}
+	});
+
+	/** An app whose every request is the ten bytes of `clip.mp4`. */
+	async function videoApp() {
+		const file = path.join(dir, 'clip.mp4');
+		await writeFile(file, '0123456789');
+		serveRequest.mockReturnValue(JSON.stringify({ kind: 'file', path: file }));
+		return createApp(DESCRIPTION, 'file:///rt.js', { renderer: fakeRenderer() }).app;
+	}
+
+	test('a range past the end of a file is a 416 that says the size', async () => {
+		const app = await videoApp();
+
+		const response = await app.request('/clip.mp4', { headers: { Range: 'bytes=10-' } });
+
+		expect(response.status).toBe(416);
+		expect(response.headers.get('content-range')).toBe('bytes */10');
+		expect(await response.text()).toBe('');
+	});
+
+	test.each([
+		['several ranges', { Range: 'bytes=0-1,4-5' }],
+		// No validator is sent, so none can match.
+		['a range under If-Range', { Range: 'bytes=0-1', 'If-Range': '"x"' }],
+	])('%s is ignored and the whole file is sent', async (_, headers) => {
+		const app = await videoApp();
+
+		const response = await app.request('/clip.mp4', { headers });
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get('content-range')).toBeNull();
+		expect(await response.text()).toBe('0123456789');
+	});
+
+	test('a HEAD of a file has its headers and does not open it', async () => {
+		const app = await videoApp();
+
+		const response = await app.request('/clip.mp4', {
+			method: 'HEAD',
+			headers: { Range: 'bytes=2-5' },
+		});
+
+		expect(response.status).toBe(206);
+		expect(response.headers.get('content-length')).toBe('4');
+		expect(response.headers.get('content-range')).toBe('bytes 2-5/10');
+		expect(await response.text()).toBe('');
+		expect(createReadStream).not.toHaveBeenCalled();
 	});
 
 	test('a file that vanished is a 404', async () => {
