@@ -21,7 +21,8 @@
  * Converts every `.pug` under `<project>/__assets` to a component (`.tsx`, same
  * paths under `<out>/__assets`). `include` becomes a component that receives the
  * props of the file that includes it and the variables in scope; `each` and `if` become
- * `map` and `&&` / `?:`; `pkg.production.*` becomes `site.*` and `filters.date`
+ * `map` (over `_eachOf()`, which loops over an array by index and over an object by
+ * key as Pug does, and is written in the file that needs it) and `&&` / `?:`; `pkg.production.*` becomes `site.*` and `filters.date`
  * `formatDate`; comments and the doctype are dropped. What it cannot express it
  * stops on (an unescaped value that is not the only child, `&attributes`):
  * fix the source or the output by hand. It needs the pug packages of the project
@@ -110,6 +111,18 @@ const isWritableName = (name) => {
 	}
 	return writableNames.get(name);
 };
+// What `each` loops over in Pug: a value with a numeric `length` by index, any other by key
+// (`for in`, as Pug compiles it). It is written in each file that has an `each`, so that the
+// output needs nothing of kamado for it.
+const EACH_OF = `function _eachOf(source: any): [any, any][] {
+	const entries: [any, any][] = [];
+	if (typeof source.length === 'number') {
+		for (let index = 0; index < source.length; index++) entries.push([source[index], index]);
+	} else {
+		for (const key in source) entries.push([source[key], key]);
+	}
+	return entries;
+}`;
 // A name JSX takes as it is: an identifier, with `-`, and one `:` between two such parts
 // (`xlink:href`). `:foo`, `x.y`, `$a` (JSX takes it, an XML Name does not), `@click`, `[x]`
 // and an emoji are written in a spread.
@@ -463,6 +476,7 @@ function newContext(file) {
 		imports: new Map(),
 		rt: new Set(),
 		assigned: new Set(),
+		usesEach: false,
 		shadowed: new Set(),
 		named: new Map(),
 		mixins: new Map(),
@@ -575,6 +589,7 @@ function importLines(...contexts) {
 	for (const [name, spec] of imports) head.push(`import ${name} from '${spec}';`);
 	for (const [spec, names] of named)
 		head.push(`import { ${[...names].join(', ')} } from '${spec}';`);
+	if (contexts.some((ctx) => ctx.usesEach)) head.push('', EACH_OF);
 	return head;
 }
 
@@ -1311,13 +1326,20 @@ function node(n, ctx, depth) {
 			const reads = (name) => isIdentifierUsed(inner, name);
 			const params = [reads(n.val) ? n.val : `_${n.val}`];
 			if (n.key && reads(n.key)) params.push(n.key);
-			const mapped = `${obj}.map((${params.map((a) => `${a}: any`).join(', ')}) => (\n${inner}\n${pad}))`;
+			// What is looped over is known at the run: Pug loops over an array by index and
+			// over an object by key, and `.map` is the array's alone.
+			ctx.usesEach = true;
+			const mapped = (entries) =>
+				`${entries}.map(([${params.join(', ')}]: any) => (\n${inner}\n${pad}))`;
 			if (n.alternate) {
 				// `each ... else`: the block that shows when there is nothing to loop over.
+				// What is looped over is read once.
 				const other = block(n.alternate.nodes, ctx, depth + 2);
-				return [`${pad}{(${obj}).length ? ${mapped} : (\n${other}\n${pad})}`];
+				return [
+					`${pad}{(() => {\n${pad}\tconst _entries = _eachOf(${obj});\n${pad}\treturn _entries.length ? ${mapped('_entries')} : (\n${other}\n${pad}\t);\n${pad}})()}`,
+				];
 			}
-			return [`${pad}{${mapped}}`];
+			return [`${pad}{${mapped(`_eachOf(${obj})`)}}`];
 		}
 		case 'Include': {
 			const p = path.extname(n.file.path) ? n.file.path : `${n.file.path}.pug`;

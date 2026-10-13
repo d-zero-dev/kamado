@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
 // The converter is run on a small project, as it is run on a real one. It reads the Pug
@@ -51,8 +52,16 @@ html(lang="ja")
 			span= item
 		each item in items
 			span x
+		each v, k in { a: "item", b: "label" }
+			p #{k}=#{v}
+		each v, i in ["x", "y"]
+			p #{i}=#{v}
 		- const sources = { a: 1 }
 		p= sources.a
+		each v in sources
+			p= v
+		else
+			p none
 		p= "x => y"
 		- const fn = items.map(x => x)
 		+a
@@ -113,6 +122,12 @@ mixin swap(a, b)
 	p= a
 mixin keep(label)
 	p= label
+mixin list(items)
+	each v in items
+		p= v
+mixin table(rows)
+	each v, k in rows
+		p #{k}=#{v}
 `,
 	'__assets/_libs/data/frag.html': '<hr>\n',
 	'package.json': '{ "name": "fixture", "private": true }\n',
@@ -255,9 +270,62 @@ describe.skipIf(!available && !process.env.CI)(
 
 		test('leaves out the key of an each that the body does not read, and marks an unused value', () => {
 			const page = read('__assets/htdocs/index.tsx');
-			expect(page).toContain('items.map((item: any) => (');
+			expect(page).toContain('_eachOf(items).map(([item]: any) => (');
 			expect(page).not.toContain('index: any');
-			expect(page).toContain('items.map((_item: any) => (');
+			expect(page).toContain('_eachOf(items).map(([_item]: any) => (');
+		});
+
+		test('loops over an object by its keys and over an array by its indexes, as Pug does', () => {
+			const page = read('__assets/htdocs/index.tsx');
+			expect(page).toContain('_eachOf({ a: "item", b: "label" }).map(([v, k]: any) => (');
+			expect(page).toContain('_eachOf(["x", "y"]).map(([v, i]: any) => (');
+			// The `else` shows when there is nothing to loop over, for an object too, and what
+			// is looped over is read once.
+			expect(page).toContain('const _entries = _eachOf(sources);');
+			expect(page).toContain('return _entries.length ? _entries.map(([v]: any) => (');
+			// The helper is written once for the file, and the output needs nothing of kamado for it.
+			expect(page.match(/function _eachOf\(/g)).toHaveLength(1);
+		});
+
+		test('writes the helper of each once in a file of mixins that loop in more than one', () => {
+			const mixins = read('__assets/_libs/mixin/r.tsx');
+			expect(mixins.match(/function _eachOf\(/g)).toHaveLength(1);
+			expect(mixins).toContain('_eachOf(items).map(([v]: any) => (');
+			expect(mixins).toContain('_eachOf(rows).map(([v, k]: any) => (');
+		});
+
+		test('does not write the helper of each in a file that has no each', () => {
+			expect(read('__assets/_libs/mixin/m.tsx')).not.toContain('_eachOf');
+		});
+
+		test('gives the pairs of what each loops over in the order and the form Pug has', () => {
+			const page = read('__assets/htdocs/index.tsx');
+			const source = /function _eachOf[\s\S]*?\n\}\n/.exec(page)?.[0] ?? '';
+			// The cut ends with the function, not before it.
+			expect(source).toContain('return entries;\n}\n');
+			const eachOf = new Function(
+				`${ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText}\nreturn _eachOf;`,
+			)() as (value: unknown) => unknown[];
+			expect(eachOf(['x', 'y'])).toEqual([
+				['x', 0],
+				['y', 1],
+			]);
+			expect(eachOf({ a: 'item', b: 'label' })).toEqual([
+				['item', 'a'],
+				['label', 'b'],
+			]);
+			expect(eachOf('ab')).toEqual([
+				['a', 0],
+				['b', 1],
+			]);
+			// By index up to `length`, as Pug does, not by the code points of an iterator.
+			expect(eachOf('\u{1F600}a')).toEqual([
+				['\uD83D', 0],
+				['\uDE00', 1],
+				['a', 2],
+			]);
+			expect(eachOf([])).toEqual([]);
+			expect(eachOf({})).toEqual([]);
 		});
 
 		test('imports only the mixins that the page calls', () => {
