@@ -131,7 +131,7 @@ export default ({ meta }: { meta: { title: string } }) => (
 
 ### 3.3 ページに渡されるもの
 
-`page`、`meta`、`site`、`data`、`pages`、`nav(options)`、`breadcrumbs`、`titleList(options)`、`formatDate(value, format)`。レイアウトは加えて `content`。v2 の `pageList` は `pages`、`filters.date` は `formatDate`、`pkg` は `site` です（`pkg.production.*` の値は `site.*`）。
+`page`、`meta`、`site`、`data`、`pages`、`nav(options)`、`breadcrumbs`、`titleList(options)`、`formatDate(value, format)`。レイアウトは加えて `content`。v2 の `pageList` は `pages`、`filters.date` は `formatDate`、`pkg` は `site` です（`pkg.production.*` の値は `site.*`）。`titleList` は v2 と同じで、トップページを titles から除き、`fallback`（既定は siteName）に `suffix`（既定は siteName）を区切りなしで続けるので、トップページは既定で `siteName` が 2 回並びます（`SITESITE`）。v2 のサイトでこれを避けていたなら、v3 でも同じ引数を渡せば同じ `<title>` になります（1 回にするなら `suffix: ''`）。
 
 - `nav` の `filter` / `comparator`、`breadcrumbs` の変換（`transformBreadcrumbItem`）は廃止。返ってきた配列を JSX 側で加工する。
 - `breadcrumbs` の起点は `site.baseURL` の**パス部分**（`https://example.com/sub/` なら `/sub/`）。v2 は値をそのまま数えたので、フル URL を書くと上位 2 階層が欠けていた（出力が変わる）。
@@ -354,11 +354,14 @@ yarn kamado build --incremental        # そのページだけ built
 | `breadcrumbs` の起点（`site.baseURL` のパス部分）                                                                                            | §7.3 |
 | YAML の日付が文字列                                                                                                                          | #19  |
 | CSS の圧縮結果（cssnano と同じ意味で、バイトは違いうる。サイズは近い。`initial` を `normal` に縮める `reduce-initial` などは移植していない） | §10  |
+| HTML 内の CSS（`<style>` と `style` 属性）の引用符。下の注を参照                                                                             | #32  |
 | `<script>` の圧縮結果（terser と esbuild）                                                                                                   | §10  |
 | prettier の幅（入力ごとから統一へ）                                                                                                          | #15  |
 | minify を切ったとき（`minify: false`、`minify.js: false`、esbuild が見つからない）、v2 は整形済みの JS / CSS を出し、v3 は書かれたまま出す   | #32  |
 | HTML のコメント（JSX には書けない）。`<head>` 内の並び（React 19 の持ち上げ）                                                                | §7.1 |
 | フォームの属性の並び（`action` と `method` は React が最後に出す）                                                                           | §7.1 |
+
+HTML 内の CSS の引用符（上の表）: v2 は prettier で整形してから html-minifier-terser（clean-css）で圧縮する。prettier が引用符を `'` から `"` に変える（属性内は `&quot;`）ので、`url('x')` は `url(&quot;x&quot;)` に変わり、`style="font-family:'Helvetica Neue', Arial"` は `font-family:&quot` に壊れる。v3 は Rust の圧縮器で、引用符が要らない値は外す（`url(x)`、`font-family:Helvetica Neue,Arial`、`<style>` 内は `font-family:Foo Bar`）。見た目は変わらないので、出力の比較で差が出たら、この差かを先に確かめる。
 
 v1（kamado 1.x）から直接移すと、基準が v2 の出力ではないので、v2 の挙動に合わせた次の差も出ます。
 
