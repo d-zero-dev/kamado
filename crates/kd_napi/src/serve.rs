@@ -182,17 +182,18 @@ pub(crate) fn request(
 	url_path: &str,
 	renderer_started: &str,
 ) -> Result<String, Thrown> {
+	// The answer is made into JSON outside `with`: a panic there leaves the
+	// server's state as it was.
 	with(handle, |serve| {
-		serve
-			.request_as(url_path, renderer_started == "1")
-			.map(answer)
+		serve.request_as(url_path, renderer_started == "1")
 	})
+	.map(answer)
 }
 
 /// Takes the HTML JavaScript rendered for a `render` answer.
 pub(crate) fn finish_render(handle: &str, tok: &str, html: &str) -> Result<String, Thrown> {
 	let tok = token(tok)?;
-	with(handle, |serve| serve.finish_render(tok, html).map(answer))
+	with(handle, |serve| serve.finish_render(tok, html)).map(answer)
 }
 
 /// Takes what esbuild built for a `script` answer:
@@ -214,7 +215,7 @@ pub(crate) fn finish_script(handle: &str, tok: &str, output_json: &str) -> Resul
 	})()
 	.ok_or_else(|| "script output: expected { code, inputs: [path, …] }".to_owned())?;
 	let tok = token(tok)?;
-	with(handle, |serve| serve.finish_script(tok, output).map(answer))
+	with(handle, |serve| serve.finish_script(tok, output)).map(answer)
 }
 
 /// Forgets the request behind a `render` or `script` answer that failed.
