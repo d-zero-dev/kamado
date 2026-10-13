@@ -9,6 +9,9 @@ on:
       - main
       - dev
       - v3
+  # The merge queue of dev runs this check on the PR put on top of the latest
+  # dev, so a PR does not have to be brought up to date by hand.
+  merge_group:
 
 jobs:
   test:
