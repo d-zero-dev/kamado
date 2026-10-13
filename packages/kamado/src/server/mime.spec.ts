@@ -14,6 +14,9 @@ describe('contentTypeOf', () => {
 		['/site/photo.webp', 'image/webp'],
 		['/site/font.woff2', 'font/woff2'],
 		['/site/clip.mp4', 'video/mp4'],
+		['/site/clip.mov', 'video/quicktime'],
+		['/site/subs.vtt', 'text/vtt; charset=utf-8'],
+		['/site/voice.m4a', 'audio/mp4'],
 		['/site/doc.pdf', 'application/pdf'],
 	])('%s is %s', (file, type) => {
 		expect(contentTypeOf(file)).toBe(type);
