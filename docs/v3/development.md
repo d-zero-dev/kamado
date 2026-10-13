@@ -56,7 +56,9 @@ cargo build --locked --offline --release -p kd_napi --features panic-check --tar
 node --test crates/kd_napi/check/panic.check.mjs
 ```
 
-アドオンの関数が panic すると、Node のプロセスごと落ちるのではなく、`kamado: internal error (a panic in the native core): <メッセージ>` という JS の `Error` として投げられる（`crates/kd_napi/src/lib.rs` の `guard`）。そのために、リリースのプロファイルは `panic = "unwind"` で、ハンドラは `extern "C"` ではなく通常の Rust の関数にしてある（`extern "C"` の境界で panic すると、`guard` に届く前に abort する）。`unwind` にしたことによるアドオンのサイズは約 19% 増え（2.85 MB から 3.40 MB、macOS arm64）、3000 ページのビルド時間はばらつきの範囲で変わらなかった。panic は、そのプロセスの共有状態（ロックなど）を壊しうるので、投げられたあとのプロセスは、再起動するのが安全。
+アドオンの関数が panic すると、Node のプロセスごと落ちるのではなく、`kamado: internal error (a panic in the native core): <メッセージ>` という JS の `Error` として投げられる（`crates/kd_napi/src/lib.rs` の `guard`）。そのために、リリースのプロファイルは `panic = "unwind"` で、ハンドラは `extern "C"` ではなく通常の Rust の関数にしてある（`extern "C"` の境界で panic すると、`guard` に届く前に abort する）。`unwind` にしたことによるアドオンのサイズは約 19% 増え（2.85 MB から 3.40 MB、macOS arm64）、3000 ページのビルド時間はばらつきの範囲で変わらなかった。この `Error` の `code` は `KAMADO_PANIC`。
+
+panic は、途中まで更新した状態を残しうる。開発サーバーのハンドルで panic すると「使えない」印が付き、その呼び出しと以降の呼び出しは `code` が `KAMADO_SERVE_POISONED` の `Error` を投げる（`crates/kd_napi/src/serve.rs`。使えないかどうかはここだけが決める）。開発サーバー（`packages/kamado/src/server/app.ts`）は、この `code` を受けると `serveOpen` でハンドルを開き直す。描画ワーカーも止めて、全文脈を送り直させる。その要求は 500 で、同時に失敗した要求があっても、開き直すのは 1 回。開き直せなかったとき（設定を編集中で読めない等）は、1 秒の間は同じ失敗を返し、そのたびにサイトを計画し直すことはしない。ほかのハンドル（別のプロジェクトの開発サーバーやビルド）は、そのまま使える。ビルドのハンドル（`crates/kd_napi/src/session.rs`）には印を付けない。`prepare` は最後に表へ入れ、`finish` は最初に表から外すので、panic で中途半端な状態が残らない。ビルドの JS 側は、失敗したら `abort` で表から外す。
 
 ## Node 側のパッケージ（`packages/kamado`）
 
