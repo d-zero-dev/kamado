@@ -84,22 +84,26 @@ export async function start(
 ): Promise<RunningServer> {
 	const write = options.write ?? ((text: string) => process.stdout.write(text));
 	const core = native();
-	const description = JSON.parse(
-		core.serveOpen(
-			configPath,
-			JSON.stringify({
-				serving: true,
-				tzOffsetMinutes: 0 - new Date().getTimezoneOffset(),
-				esbuildVersion: ESBUILD_VERSION,
-				esbuildBinary: findEsbuildBinary(),
-				...(options.cacheDir === undefined ? {} : { cacheDir: options.cacheDir }),
-			}),
-			RUNTIME_URL,
-		),
-	) as ServeDescription;
+	const open = () =>
+		JSON.parse(
+			core.serveOpen(
+				configPath,
+				JSON.stringify({
+					serving: true,
+					tzOffsetMinutes: 0 - new Date().getTimezoneOffset(),
+					esbuildVersion: ESBUILD_VERSION,
+					esbuildBinary: findEsbuildBinary(),
+					...(options.cacheDir === undefined ? {} : { cacheDir: options.cacheDir }),
+				}),
+				RUNTIME_URL,
+			),
+		) as ServeDescription;
+	const description = open();
 	const { host, port, startPath, proxy } = description.devServer;
 
 	const { app, close } = createApp(description, RUNTIME_URL, {
+		// The port, the host and the proxy stay those of the first opening.
+		reopen: () => open().handle,
 		onRequest: (log) => {
 			if (options.verbose === true || log.kind !== 'file' || log.status >= 400) {
 				write(formatRequest(log) + '\n');

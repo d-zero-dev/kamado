@@ -390,4 +390,221 @@ describe('createApp', () => {
 		expect(renderer.close).toHaveBeenCalledOnce();
 		expect(serveClose).toHaveBeenCalledExactlyOnceWith('h1');
 	});
+
+	/**
+	 * An error of the native core with a code.
+	 * @param code - `error.code`
+	 */
+	function coreError(code: string) {
+		return Object.assign(new Error(`failed (${code})`), { code });
+	}
+
+	describe('after a panic in the native core', () => {
+		const page = JSON.stringify({ kind: 'text', contentType: 'text/html', body: 'ok' });
+
+		test('a server the core gave up opens again and the next request uses it', async () => {
+			serveRequest.mockImplementation((handle) => {
+				if (handle === 'h1') {
+					throw coreError('KAMADO_SERVE_POISONED');
+				}
+				return page;
+			});
+			const renderer = fakeRenderer();
+			const reopen = vi.fn(() => 'h2');
+			const { app, close } = createApp(DESCRIPTION, 'file:///rt.js', {
+				renderer,
+				reopen,
+			});
+
+			const failed = await app.request('/a/');
+			const next = await app.request('/a/');
+
+			expect(failed.status).toBe(500);
+			expect(await failed.text()).toBe(
+				'failed (KAMADO_SERVE_POISONED)\nThe dev server was opened again; reload the page.',
+			);
+			expect(reopen).toHaveBeenCalledOnce();
+			expect(serveClose).toHaveBeenCalledExactlyOnceWith('h1');
+			// The new server sends the whole context to a renderer started again.
+			expect(renderer.close).toHaveBeenCalledOnce();
+			expect(next.status).toBe(200);
+			expect(serveRequest).toHaveBeenLastCalledWith('h2', '/a/', '0');
+			await close();
+			expect(serveClose).toHaveBeenLastCalledWith('h2');
+		});
+
+		// The core marks the server; a panic outside it (`KAMADO_PANIC` alone)
+		// left the server as it was.
+		test('another panic does not open the server again', async () => {
+			serveRequest.mockImplementation(() => {
+				throw coreError('KAMADO_PANIC');
+			});
+			const reopen = vi.fn(() => 'h2');
+			const { app } = createApp(DESCRIPTION, 'file:///rt.js', {
+				renderer: fakeRenderer(),
+				reopen,
+			});
+
+			const response = await app.request('/a/');
+
+			expect(await response.text()).toBe('failed (KAMADO_PANIC)');
+			expect(reopen).not.toHaveBeenCalled();
+		});
+
+		test('a request that waited on the old server says it was opened again', async () => {
+			let rejectRender: (error: Error) => void = () => {};
+			const renderer = {
+				...fakeRenderer(),
+				started: true,
+				render: vi.fn(
+					() =>
+						new Promise<string>((_, reject) => {
+							rejectRender = reject;
+						}),
+				),
+				close: vi.fn(() => {
+					rejectRender(new Error('the renderer was closed'));
+					return Promise.resolve();
+				}),
+			};
+			serveRequest.mockImplementation((_, pathname) => {
+				if (pathname === '/b/') {
+					throw coreError('KAMADO_SERVE_POISONED');
+				}
+				return JSON.stringify({
+					kind: 'render',
+					token: '1',
+					job: { page: 0 },
+					restart: false,
+					context: null,
+					update: null,
+				});
+			});
+			// The server it would tell is gone; that is not what the request reports.
+			serveCancel.mockImplementation(() => {
+				throw new Error('no dev server for handle h1');
+			});
+			const { app } = createApp(DESCRIPTION, 'file:///rt.js', {
+				renderer,
+				reopen: () => 'h2',
+			});
+
+			const waiting = app.request('/a/');
+			await vi.waitFor(() => expect(renderer.render).toHaveBeenCalled());
+			await app.request('/b/');
+			const response = await waiting;
+
+			expect(await response.text()).toBe(
+				'the renderer was closed\nMeanwhile the dev server was opened again after a panic in another request.',
+			);
+		});
+
+		test('a panic while telling the core to forget an answer opens the server again', async () => {
+			serveRequest.mockReturnValue(
+				JSON.stringify({
+					kind: 'render',
+					token: '1',
+					job: { page: 0 },
+					restart: false,
+					context: null,
+					update: null,
+				}),
+			);
+			serveCancel.mockImplementation(() => {
+				throw coreError('KAMADO_SERVE_POISONED');
+			});
+			const renderer = {
+				...fakeRenderer(),
+				started: true,
+				render: vi.fn(() => Promise.reject(new Error('the page threw'))),
+			};
+			const reopen = vi.fn(() => 'h2');
+			const { app } = createApp(DESCRIPTION, 'file:///rt.js', { renderer, reopen });
+
+			const response = await app.request('/a/');
+
+			// The page's own error is kept, and the server is opened again.
+			expect(await response.text()).toBe(
+				'the page threw\nThe dev server was opened again; reload the page.',
+			);
+			expect(reopen).toHaveBeenCalledOnce();
+		});
+
+		test('requests that fail together open it again once', async () => {
+			serveRequest.mockImplementation(() => {
+				throw coreError('KAMADO_SERVE_POISONED');
+			});
+			const reopen = vi.fn(() => 'h2');
+			const { app } = createApp(DESCRIPTION, 'file:///rt.js', {
+				renderer: fakeRenderer(),
+				reopen,
+			});
+
+			const responses = await Promise.all([app.request('/a/'), app.request('/b/')]);
+
+			expect(responses.map((r) => r.status)).toEqual([500, 500]);
+			expect(reopen).toHaveBeenCalledOnce();
+		});
+
+		test('an error without the code does not open it again', async () => {
+			serveRequest.mockImplementation(() => {
+				throw new Error('a page error');
+			});
+			const reopen = vi.fn(() => 'h2');
+			const { app } = createApp(DESCRIPTION, 'file:///rt.js', {
+				renderer: fakeRenderer(),
+				reopen,
+			});
+
+			const response = await app.request('/a/');
+
+			expect(await response.text()).toBe('a page error');
+			expect(reopen).not.toHaveBeenCalled();
+		});
+
+		test('a server that cannot be opened again says why, and is not tried at once again', async () => {
+			vi.useFakeTimers();
+			try {
+				serveRequest.mockImplementation(() => {
+					throw coreError('KAMADO_SERVE_POISONED');
+				});
+				const reopen = vi.fn(() => {
+					throw new Error('kamado.config.jsonc: unknown option');
+				});
+				const { app } = createApp(DESCRIPTION, 'file:///rt.js', {
+					renderer: fakeRenderer(),
+					reopen,
+				});
+				const why =
+					'failed (KAMADO_SERVE_POISONED)\nThe dev server could not be opened again: kamado.config.jsonc: unknown option';
+
+				const first = await app.request('/a/');
+				const soon = await app.request('/a.css');
+				vi.advanceTimersByTime(1000);
+				const later = await app.request('/a/');
+
+				expect([first.status, await first.text()]).toEqual([500, why]);
+				// The second request says the same without planning the site again.
+				expect(await soon.text()).toBe(why);
+				expect(await later.text()).toBe(why);
+				expect(reopen).toHaveBeenCalledTimes(2);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		test('without a way to open it again the request is a 500', async () => {
+			serveRequest.mockImplementation(() => {
+				throw coreError('KAMADO_SERVE_POISONED');
+			});
+			const { app } = createApp(DESCRIPTION, 'file:///rt.js', {
+				renderer: fakeRenderer(),
+			});
+
+			const response = await app.request('/a/');
+
+			expect(await response.text()).toBe('failed (KAMADO_SERVE_POISONED)');
+			expect(serveClose).not.toHaveBeenCalled();
+		});
+	});
 });

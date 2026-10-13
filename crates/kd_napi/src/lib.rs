@@ -323,9 +323,37 @@ unsafe fn string_args<const N: usize>(
 
 /// Turns a build error into a thrown JS `Error`.
 unsafe fn throw_message(api: &Api, env: napi_env, message: String) -> napi_value {
-	let message = std::ffi::CString::new(message.replace('\0', " ")).unwrap_or_default();
 	// SAFETY: env is live.
-	unsafe { throw(api, env, &message) }
+	unsafe { throw_thrown(api, env, Thrown::from(message)) }
+}
+
+/// An error to throw, with the `code` property the JavaScript side can test
+/// (`error.code`), when the error is one it does something about.
+#[derive(Debug)]
+pub(crate) struct Thrown {
+	pub code: Option<&'static CStr>,
+	pub message: String,
+}
+
+impl From<String> for Thrown {
+	fn from(message: String) -> Thrown {
+		Thrown {
+			code: None,
+			message,
+		}
+	}
+}
+
+/// `error.code` of the `Error` thrown for a panic in the native core.
+pub(crate) const PANIC_CODE: &CStr = c"KAMADO_PANIC";
+
+unsafe fn throw_thrown(api: &Api, env: napi_env, thrown: Thrown) -> napi_value {
+	let message = std::ffi::CString::new(thrown.message.replace('\0', " ")).unwrap_or_default();
+	let code = thrown.code.map_or(std::ptr::null(), CStr::as_ptr);
+	// SAFETY: env is live; both strings are NUL-terminated (a NULL code means
+	// "no code property").
+	unsafe { (api.throw_error)(env, code, message.as_ptr()) };
+	std::ptr::null_mut()
 }
 
 /// `prepare(configPath, optionsJson, runtimeUrl)` -> JSON with the handle, the
@@ -383,7 +411,7 @@ unsafe fn string_call<const N: usize>(
 	env: napi_env,
 	info: napi_callback_info,
 	usage: &CStr,
-	f: impl FnOnce([String; N]) -> Result<String, String>,
+	f: impl FnOnce([String; N]) -> Result<String, Thrown>,
 ) -> napi_value {
 	let Some(api) = api() else {
 		return std::ptr::null_mut();
@@ -394,7 +422,7 @@ unsafe fn string_call<const N: usize>(
 	};
 	match f(args) {
 		Ok(text) => unsafe { string(api, env, &text) },
-		Err(message) => unsafe { throw_message(api, env, message) },
+		Err(error) => unsafe { throw_thrown(api, env, error) },
 	}
 }
 
@@ -407,7 +435,9 @@ unsafe fn serve_open(env: napi_env, info: napi_callback_info) -> napi_value {
 			env,
 			info,
 			c"serveOpen: expected (configPath, optionsJson, runtimeUrl) strings",
-			|[config, options, runtime]| serve::open(&config, &options, &runtime),
+			|[config, options, runtime]| {
+				serve::open(&config, &options, &runtime).map_err(Thrown::from)
+			},
 		)
 	}
 }
@@ -601,7 +631,7 @@ unsafe fn panic_check(_env: napi_env, _info: napi_callback_info) -> napi_value {
 }
 
 /// The text of a panic: what `panic!("...")` or `panic!("{x}")` was given.
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 	if let Some(text) = payload.downcast_ref::<&str>() {
 		(*text).to_string()
 	} else if let Some(text) = payload.downcast_ref::<String>() {
@@ -636,7 +666,16 @@ unsafe fn guard(env: napi_env, f: impl FnOnce() -> napi_value) -> napi_value {
 				return std::ptr::null_mut();
 			};
 			// SAFETY: env is the live environment of this call.
-			unsafe { throw_message(api, env, message) }
+			unsafe {
+				throw_thrown(
+					api,
+					env,
+					Thrown {
+						code: Some(PANIC_CODE),
+						message,
+					},
+				)
+			}
 		}
 	}
 }

@@ -48,6 +48,9 @@ test('a panic is thrown as an Error that names the panic', () => {
 				error.message,
 				'kamado: internal error (a panic in the native core): panic check',
 			);
+			// A panic outside a dev server's call; one inside it is
+			// `KAMADO_SERVE_POISONED` (crates/kd_napi/src/serve.rs).
+			assert.equal(error.code, 'KAMADO_PANIC');
 			return true;
 		},
 	);
