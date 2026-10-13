@@ -163,38 +163,59 @@ fn tag_end(bytes: &[u8], from: usize) -> usize {
 	bytes.len()
 }
 
-/// The ranges of `<script>` and `<style>` text, where a character reference is not one.
+/// The ranges of `<script>` and `<style>` text, where a character reference is not one, in
+/// order and apart from each other.
+///
+/// The two tags are looked for in one pass: the text of a `<script>` ends only at its
+/// `</script`, so a `<style>` inside it (in a string, say) is text, as it is for the browser,
+/// and does not start a range of its own.
 fn raw_text_ranges(html: &str) -> Vec<(usize, usize)> {
 	let lower = html.to_ascii_lowercase();
+	let bytes = lower.as_bytes();
 	let mut ranges = Vec::new();
-	for tag in ["script", "style"] {
-		let open = format!("<{tag}");
-		let close = format!("</{tag}");
-		let mut from = 0;
-		while let Some(found) = lower[from..].find(&open) {
-			let start = from + found;
-			let after = start + open.len();
-			// `<scripts>` is not a script.
-			if !matches!(
-				lower.as_bytes().get(after),
-				Some(b'>' | b' ' | b'\t' | b'\n' | b'\r' | b'/')
-			) {
-				from = after;
-				continue;
-			}
-			let Some(gt) = lower[after..].find('>') else {
-				break;
-			};
-			let text_start = after + gt + 1;
-			let text_end = lower[text_start..]
-				.find(&close)
-				.map_or(lower.len(), |n| text_start + n);
-			ranges.push((text_start, text_end));
-			from = text_end;
+	let mut from = 0;
+	while let Some(found) = lower[from..].find('<') {
+		let start = from + found;
+		let Some((tag, close)) = [("script", "</script"), ("style", "</style")]
+			.into_iter()
+			.find(|(tag, _)| lower[start + 1..].starts_with(tag))
+		else {
+			from = start + 1;
+			continue;
+		};
+		let after = start + 1 + tag.len();
+		// `<scripts>` is not a script.
+		if !ends_a_tag_name(bytes, after) {
+			from = after;
+			continue;
 		}
+		let gt = tag_end(bytes, after);
+		if gt == bytes.len() {
+			break;
+		}
+		let text_start = gt + 1;
+		let mut text_end = lower.len();
+		let mut at = text_start;
+		while let Some(found) = lower[at..].find(close) {
+			// `</scripts>` does not end a script either.
+			if ends_a_tag_name(bytes, at + found + close.len()) {
+				text_end = at + found;
+				break;
+			}
+			at += found + close.len();
+		}
+		ranges.push((text_start, text_end));
+		from = text_end;
 	}
-	ranges.sort_unstable();
 	ranges
+}
+
+/// Whether the name of a tag ends at `at`: what follows it is a space, `/` or `>`.
+fn ends_a_tag_name(bytes: &[u8], at: usize) -> bool {
+	matches!(
+		bytes.get(at),
+		Some(b'>' | b' ' | b'\t' | b'\n' | b'\r' | b'/')
+	)
 }
 
 /// Encodes `html` as the bytes to write.
@@ -239,7 +260,11 @@ pub fn encode_reporting(html: &str, encoding: Encoding) -> (Vec<u8>, Vec<char>) 
 
 fn to_shift_jis(html: &str) -> (Vec<u8>, Vec<char>) {
 	let rewritten;
-	let html = if html.contains("<meta") || html.contains("<META") {
+	let html = if html
+		.as_bytes()
+		.windows(5)
+		.any(|w| w.eq_ignore_ascii_case(b"<meta"))
+	{
 		rewritten = rewrite_meta_charset(html, "shift_jis");
 		rewritten.as_str()
 	} else {
@@ -368,6 +393,58 @@ mod tests {
 	}
 
 	#[test]
+	fn a_style_tag_inside_a_script_is_text_and_the_body_after_it_gets_references() {
+		let (bytes, replaced) = encode_reporting(
+			"<script>var s = '<style>';</script><p>〜</p></style>",
+			Encoding::ShiftJis,
+		);
+		assert_eq!(
+			bytes,
+			b"<script>var s = '<style>';</script><p>&#12316;</p></style>"
+		);
+		assert_eq!(replaced, Vec::<char>::new());
+	}
+
+	#[test]
+	fn a_script_tag_inside_a_style_is_text_and_the_body_after_it_gets_references() {
+		let (bytes, replaced) = encode_reporting(
+			"<style>/* <script> ⚠ */</style><p>〜</p></script>",
+			Encoding::ShiftJis,
+		);
+		assert_eq!(
+			bytes,
+			b"<style>/* <script> ? */</style><p>&#12316;</p></script>"
+		);
+		assert_eq!(replaced, ['⚠']);
+	}
+
+	#[test]
+	fn a_longer_end_tag_name_does_not_end_a_script() {
+		let (bytes, replaced) = encode_reporting(
+			"<script>a = '</scripts>〜';</script><p>〜</p>",
+			Encoding::ShiftJis,
+		);
+		assert_eq!(bytes, b"<script>a = '</scripts>?';</script><p>&#12316;</p>");
+		assert_eq!(replaced, ['〜']);
+	}
+
+	#[test]
+	fn a_greater_than_sign_in_a_quoted_attribute_does_not_end_the_start_tag() {
+		let (bytes, replaced) =
+			encode_reporting("<script data-x=\"a>〜\">'⚠'</script>", Encoding::ShiftJis);
+		assert_eq!(bytes, b"<script data-x=\"a>&#12316;\">'?'</script>");
+		assert_eq!(replaced, ['⚠']);
+	}
+
+	#[test]
+	fn a_start_tag_that_never_ends_starts_no_script() {
+		let (bytes, replaced) =
+			encode_reporting("<p>〜</p><script data-x=\"〜", Encoding::ShiftJis);
+		assert_eq!(bytes, b"<p>&#12316;</p><script data-x=\"&#12316;");
+		assert_eq!(replaced, Vec::<char>::new());
+	}
+
+	#[test]
 	fn the_meta_charset_names_shift_jis() {
 		for (meta, expected) in [
 			("<meta charset=\"utf-8\">", "<meta charset=\"shift_jis\">"),
@@ -379,6 +456,7 @@ mod tests {
 				"<META  charset=\"utf8\"/>",
 				"<META  charset=\"shift_jis\"/>",
 			),
+			("<Meta Charset=\"UTF-8\">", "<Meta Charset=\"shift_jis\">"),
 			// Other attributes, in any order, and a charset that is not quoted.
 			(
 				"<meta id=\"encoding\" charset=\"utf-8\">",
