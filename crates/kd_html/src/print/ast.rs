@@ -522,7 +522,8 @@ impl Builder<'_> {
 		{
 			let n = &mut self.nodes[first];
 			n.span.start = offset.min(n.span.end);
-			n.value = n.value.chars().skip(offset).collect();
+			// `blank` pads one ASCII byte per source byte, so `offset` counts bytes.
+			n.value = n.value.get(offset..).unwrap_or_default().to_owned();
 		}
 		Some(ids)
 	}
