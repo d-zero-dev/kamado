@@ -513,36 +513,48 @@ pub(crate) fn plan_cached(
 			.collect();
 		for url in &overrides.order {
 			let o = &overrides.by_url[url];
-			match at.get(url).copied() {
-				Some(i) => {
-					let page = &mut pages[i];
-					page.meta = kd_site::meta::merge(&[&page.meta, &o.meta]);
-					page.lastmod = o.lastmod.clone();
-				}
-				None if o.is_virtual => {
-					at.insert(url.clone(), pages.len());
-					let rel = kd_site::url_to_local_path(url, &config.pages.output_extension);
-					let file = kd_site::page_file(
-						&format!("{}/{rel}", config.dir.input.trim_end_matches('/')),
-						&dirs,
-					);
-					pages.push(Page {
-						file,
-						kind: PageKind::Html,
-						meta: o.meta.clone(),
-						body: None,
-						body_pending: false,
-						deps: BTreeMap::new(),
-						is_virtual: true,
-						lastmod: o.lastmod.clone(),
-					});
-				}
-				None => {
-					return Err(format!(
-						"{path}: {url:?} does not match any page; add \"virtual\": true to declare a page without an input file"
-					));
-				}
+			if let Some(i) = at.get(url).copied() {
+				let page = &mut pages[i];
+				page.meta = kd_site::meta::merge(&[&page.meta, &o.meta]);
+				page.lastmod = o.lastmod.clone();
+				continue;
 			}
+			// The page the URL would be. A URL written another way than the page's own
+			// (`/a/index.html` for `/a/`) is an error rather than read as that page: the
+			// entries are matched, ordered and told apart by the string as written.
+			let rel = kd_site::url_to_local_path(url, &config.pages.output_extension);
+			let file = kd_site::page_file(
+				&format!("{}/{rel}", config.dir.input.trim_end_matches('/')),
+				&dirs,
+			);
+			if file.url != *url {
+				let ext = &config.pages.output_extension;
+				let file_form = if ext.is_empty() {
+					"a file without an extension".to_string()
+				} else {
+					format!("a file with {ext:?}")
+				};
+				return Err(format!(
+					"{path}: {url:?} is not written as a page URL (it would be read as {:?}); write the URL the page has: a directory with its trailing \"/\", {file_form}",
+					file.url
+				));
+			}
+			if !o.is_virtual {
+				return Err(format!(
+					"{path}: {url:?} does not match any page; add \"virtual\": true to declare a page without an input file"
+				));
+			}
+			at.insert(url.clone(), pages.len());
+			pages.push(Page {
+				file,
+				kind: PageKind::Html,
+				meta: o.meta.clone(),
+				body: None,
+				body_pending: false,
+				deps: BTreeMap::new(),
+				is_virtual: true,
+				lastmod: o.lastmod.clone(),
+			});
 		}
 		// The file lists the pages in the order they are shown in (navigation,
 		// `pages`): its pages come first in its order, the others follow. The
@@ -1099,6 +1111,97 @@ mod tests {
 				.unwrap_err()
 				.contains("does not match any page")
 		);
+	}
+
+	#[test]
+	fn an_override_url_written_another_way_than_the_page_url_is_an_error() {
+		let site = Site::new("override-url");
+		site.write("src/about/index.html", "<p>about</p>");
+		for (url, is_virtual, page) in [
+			// A page that exists, written with its file name.
+			("/about/index.html", false, "/about/"),
+			// Virtual pages: the file name of a directory, no trailing slash, another
+			// extension than the output one.
+			("/a/index.html", true, "/a/"),
+			("/a", true, "/a.html"),
+			("/a.htm", true, "/a.html"),
+		] {
+			site.write(
+				"pages.json",
+				&format!(
+					r#"{{ "version": 1, "pages": [ {{ "url": "{url}", "virtual": {is_virtual} }} ] }}"#
+				),
+			);
+			let loaded = site.config(r#", "pages": { "overrides": "pages.json" }"#);
+			assert_eq!(
+				super::plan(&loaded.config).unwrap_err(),
+				format!(
+					"{}/pages.json: {url:?} is not written as a page URL (it would be read as {page:?}); write the URL the page has: a directory with its trailing \"/\", a file with \".html\"",
+					site.root
+				),
+				"{url}"
+			);
+		}
+
+		// Without an output extension, the advice says so.
+		site.write(
+			"pages.json",
+			r#"{ "version": 1, "pages": [ { "url": "/b.html", "virtual": true } ] }"#,
+		);
+		let loaded =
+			site.config(r#", "pages": { "overrides": "pages.json", "outputExtension": "" }"#);
+		assert_eq!(
+			super::plan(&loaded.config).unwrap_err(),
+			format!(
+				"{}/pages.json: \"/b.html\" is not written as a page URL (it would be read as \"/b\"); write the URL the page has: a directory with its trailing \"/\", a file without an extension",
+				site.root
+			)
+		);
+
+		// A URL that is no page path at all is refused when the file is read.
+		site.write(
+			"pages.json",
+			r#"{ "version": 1, "pages": [ { "url": "/../x/", "virtual": true } ] }"#,
+		);
+		let loaded = site.config(r#", "pages": { "overrides": "pages.json" }"#);
+		assert_eq!(
+			super::plan(&loaded.config).unwrap_err(),
+			format!(
+				"{}/pages.json: pages.overrides: pages[0]: \"url\" must not have a '.' or '..' segment: \"/../x/\"",
+				site.root
+			)
+		);
+	}
+
+	#[test]
+	fn an_override_url_is_the_page_url_for_the_output_extension() {
+		let site = Site::new("override-url-ext");
+		site.write("src/index.html", "<p>home</p>");
+		site.write(
+			"pages.json",
+			r#"{ "version": 1, "pages": [
+				{ "url": "/b.html", "virtual": true },
+				{ "url": "/a/", "virtual": true },
+				{ "url": "/", "meta": { "title": "Home" } }
+			] }"#,
+		);
+		let loaded = site.config(r#", "pages": { "overrides": "pages.json" }"#);
+		let plan = super::plan(&loaded.config).unwrap();
+		let urls: Vec<&str> = plan.pages.iter().map(|p| p.file.url.as_str()).collect();
+		// The order of the file is kept: every entry matched its page by the string.
+		assert_eq!(urls, ["/b.html", "/a/", "/"]);
+
+		// Without an output extension a file has none in its URL either.
+		site.write(
+			"pages.json",
+			r#"{ "version": 1, "pages": [ { "url": "/b", "virtual": true } ] }"#,
+		);
+		let loaded =
+			site.config(r#", "pages": { "overrides": "pages.json", "outputExtension": "" }"#);
+		let plan = super::plan(&loaded.config).unwrap();
+		let b = plan.pages.iter().find(|p| p.is_virtual).unwrap();
+		assert_eq!(b.file.url, "/b");
+		assert_eq!(b.file.output_path, format!("{}/out/b", site.root));
 	}
 
 	#[test]

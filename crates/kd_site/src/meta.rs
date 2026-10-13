@@ -120,6 +120,9 @@ impl Overrides {
 			if !url.starts_with('/') {
 				return Err(format!("{at}: \"url\" must start with '/': {url:?}"));
 			}
+			if let Some(why) = not_a_page_path(url) {
+				return Err(format!("{at}: \"url\" {why}: {url:?}"));
+			}
 			let is_virtual = match page.get("virtual") {
 				None => false,
 				Some(Value::Bool(b)) => *b,
@@ -150,6 +153,26 @@ impl Overrides {
 		}
 		Ok(out)
 	}
+}
+
+/// Why a `/`-prefixed URL cannot be the URL of a page, whatever the output
+/// extension: a query or a fragment, an empty segment (`//`), or a `.` / `..`
+/// segment. A page URL is the path of its output file as it is, so none of
+/// these could be matched to a page; they are refused rather than read as
+/// another URL.
+fn not_a_page_path(url: &str) -> Option<&'static str> {
+	if url.contains(['?', '#']) {
+		return Some("must not have a query or a fragment ('?' or '#')");
+	}
+	let segments: Vec<&str> = url[1..].split('/').collect();
+	let (last, dirs) = segments.split_last().unwrap_or((&"", &[]));
+	if dirs.iter().any(|s| s.is_empty()) {
+		return Some("must not have an empty segment ('//')");
+	}
+	if dirs.iter().chain([last]).any(|s| matches!(*s, "." | "..")) {
+		return Some("must not have a '.' or '..' segment");
+	}
+	None
 }
 
 #[cfg(test)]
@@ -244,6 +267,24 @@ mod tests {
 			Overrides::parse(r#"{"version":1,"pages":[{"url":"about/"}]}"#).unwrap_err(),
 			"pages.overrides: pages[0]: \"url\" must start with '/': \"about/\""
 		);
+		for (url, why) in [
+			("/a?x=1", "must not have a query or a fragment ('?' or '#')"),
+			(
+				"/a/#top",
+				"must not have a query or a fragment ('?' or '#')",
+			),
+			("//a/", "must not have an empty segment ('//')"),
+			("/a//b/", "must not have an empty segment ('//')"),
+			("/../x/", "must not have a '.' or '..' segment"),
+			("/a/./", "must not have a '.' or '..' segment"),
+			("/a/..", "must not have a '.' or '..' segment"),
+		] {
+			assert_eq!(
+				Overrides::parse(&format!(r#"{{"version":1,"pages":[{{"url":"{url}"}}]}}"#))
+					.unwrap_err(),
+				format!("pages.overrides: pages[0]: \"url\" {why}: {url:?}"),
+			);
+		}
 		assert_eq!(
 			Overrides::parse(r#"{"version":1,"pages":[{"url":"/a/","virtual":"yes"}]}"#)
 				.unwrap_err(),
