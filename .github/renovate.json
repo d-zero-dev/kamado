@@ -85,6 +85,11 @@
 			"matchPackageNames": ["html-minifier-terser", "@types/html-minifier-terser"]
 		},
 		{
+			"description": "The parser reads the tokens of the lexer, so they move together; acorn, the converter's third package, is independent of them",
+			"groupName": "pug",
+			"matchPackageNames": ["pug-lexer", "pug-parser"]
+		},
+		{
 			"description": "Oracles of v3: golden files and tables are generated from them (docs/v3/development.md)",
 			"groupName": "v3 oracles",
 			"matchPackageNames": ["prettier", "character-entities", "esbuild"]

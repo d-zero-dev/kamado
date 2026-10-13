@@ -1,4 +1,4 @@
-/* eslint-disable import-x/no-extraneous-dependencies, @typescript-eslint/no-unused-vars, unicorn/prefer-single-call, no-console, unicorn/no-lonely-if -- a migration helper to be read and changed per project, not a library */
+/* eslint-disable @typescript-eslint/no-unused-vars, unicorn/prefer-single-call, no-console, unicorn/no-lonely-if -- a migration helper to be read and changed per project, not a library */
 /**
  * A first pass of Pug to TSX for a migration to kamado v3 (docs/v3/MIGRATION.md).
  *
@@ -75,6 +75,14 @@ if (!srcRoot || !outRoot) {
 }
 const require = createRequire(path.join(path.resolve(srcRoot), 'package.json'));
 const acorn = require('acorn');
+// The acorn that Pug pulls in (through is-expression) is 7, which reads `ecmaVersion:
+// 'latest'` as ES5 and fails on the code of today with a bare syntax error.
+if (Number.parseInt(acorn.version, 10) < 8) {
+	console.error(
+		`acorn ${acorn.version} is too old: the converter needs acorn 8 or later in ${srcRoot} (add it to its devDependencies)`,
+	);
+	process.exit(1);
+}
 const lex = require('pug-lexer');
 const parse = require('pug-parser');
 const libs = libsArg ?? path.join(srcRoot, '__assets', '_libs');
