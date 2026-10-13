@@ -94,7 +94,7 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 
 ランダム入力の差分テスト（`scripts/fuzz-*.mjs`）は、コーパスをコミットしない（シードで決まる）。上のテーブルを作り直したとき、または `kd_html` / `kd_css` / `kd_js` の挙動を変えたときに、その分野のものを回す。各スクリプトの先頭に、対応する `--ignored` のテストと環境変数がある。
 
-Pug から TSX への変換器（`scripts/pug-to-tsx.mjs`）は、小さな Pug のプロジェクトを変換して、出力を確かめ、`@d-zero/tsconfig`（strictest）の型検査に通す回帰テスト（`scripts/pug-to-tsx.spec.ts`）を持つ。変換器は、変換するプロジェクトの `pug-lexer` / `pug-parser` / `acorn` を読む。このリポジトリは `pug-parser` を持たないので、そのテストは `node_modules` にそれらがあり、`yarn build` が済んでいるときだけ動く（なければスキップする）。変換器を変えたときは、Pug のパッケージを一時的に `node_modules` に置いて動かす。
+Pug から TSX への変換器（`scripts/pug-to-tsx.mjs`）は、小さな Pug のプロジェクトを変換して、出力を確かめ、`@d-zero/tsconfig`（strictest）の型検査に通す回帰テスト（`scripts/pug-to-tsx.spec.ts`）を持つ。変換器は、変換するプロジェクトの `pug-lexer` / `pug-parser` / `acorn` を読む。テストのために、このリポジトリはそれらを devDependencies に持つ（変換器そのものは、パッケージに入らない。`docs/v3/MIGRATION.md` §3.4）。テストは `yarn build` が済んでいるときに動く。済んでいなければ、手元ではスキップし、CI では失敗する。この依存を足す前の `node_modules` のままだと失敗するので、`yarn install` を済ませる。テストが使うのは、このリポジトリが固定した版（`acorn` 8 など）で、利用者のプロジェクトの版ではない。変換器は `acorn` 7（Pug が引く版）なら、理由を出して止まる。
 
 | 分野                  | スクリプト                                                                               | 対応する検証                                  |
 | --------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------- |
