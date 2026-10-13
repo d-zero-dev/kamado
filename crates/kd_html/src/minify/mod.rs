@@ -56,24 +56,34 @@ pub enum CssKind {
 	Media,
 }
 
-/// The code minifiers.
+/// The code minifiers. An `Err` says why a text could not be minified; the
+/// text is then kept as it was, the rest of the page is still minified, and
+/// [`minify_reporting`] reports the message.
 pub trait Hooks {
 	/// Minifies CSS.
-	fn css(&self, text: &str, kind: CssKind) -> String;
+	///
+	/// # Errors
+	///
+	/// Why the text could not be minified.
+	fn css(&self, text: &str, kind: CssKind) -> Result<String, String>;
 	/// Minifies JavaScript; `inline` for an event handler attribute.
-	fn js(&self, text: &str, inline: bool) -> String;
+	///
+	/// # Errors
+	///
+	/// Why the text could not be minified.
+	fn js(&self, text: &str, inline: bool) -> Result<String, String>;
 }
 
 /// Hooks that change nothing.
 pub struct NoMinification;
 
 impl Hooks for NoMinification {
-	fn css(&self, text: &str, _kind: CssKind) -> String {
-		text.to_owned()
+	fn css(&self, text: &str, _kind: CssKind) -> Result<String, String> {
+		Ok(text.to_owned())
 	}
 
-	fn js(&self, text: &str, _inline: bool) -> String {
-		text.to_owned()
+	fn js(&self, text: &str, _inline: bool) -> Result<String, String> {
+		Ok(text.to_owned())
 	}
 }
 
@@ -734,12 +744,33 @@ struct Minifier<'a> {
 	last_tag: String,
 	/// Where html-minifier-terser throws, the first such failure.
 	failure: std::cell::RefCell<Option<MinifyError>>,
+	/// What the hooks could not minify, and why: those texts are kept as they
+	/// were, and the page is still minified.
+	hook_failures: std::cell::RefCell<Vec<String>>,
 	/// The custom fragments taken out of the page and the id of their tokens.
 	fragments: &'a [String],
 	fragment_uid: &'a str,
 }
 
 impl Minifier<'_> {
+	/// `text` through a hook (`minify`); what it cannot minify stays as it was
+	/// given, and the reason is kept for the report with `what`, where the
+	/// text is (made only then: most texts minify).
+	fn through_hook(
+		&self,
+		text: &str,
+		minify: impl FnOnce(&dyn Hooks, &str) -> Result<String, String>,
+		what: impl FnOnce() -> String,
+	) -> String {
+		let text = self.with_fragment_whitespace(text);
+		minify(self.hooks, &text).unwrap_or_else(|why| {
+			self.hook_failures
+				.borrow_mut()
+				.push(format!("{}: {why}", what()));
+			text
+		})
+	}
+
 	/// What a code minifier is given: the placeholder of each custom fragment
 	/// (`<?php ... ?>`) that sits in the code gets back the white space that
 	/// surrounded the fragment, in place of the tabs that marked it. Without
@@ -792,8 +823,11 @@ impl Minifier<'_> {
 			let trimmed = trim_whitespace(value);
 			let stripped = strip_javascript_prefix(trimmed);
 			return if self.options.minify_js {
-				self.hooks
-					.js(&self.with_fragment_whitespace(stripped), true)
+				self.through_hook(
+					stripped,
+					|hooks, text| hooks.js(text, true),
+					|| format!("the {name} attribute of <{tag}>"),
+				)
 			} else {
 				stripped.to_owned()
 			};
@@ -816,9 +850,11 @@ impl Minifier<'_> {
 					v = format!("{without};");
 				}
 				if self.options.minify_css {
-					v = self
-						.hooks
-						.css(&self.with_fragment_whitespace(&v), CssKind::Inline);
+					v = self.through_hook(
+						&v,
+						|hooks, text| hooks.css(text, CssKind::Inline),
+						|| format!("the style attribute of <{tag}>"),
+					);
 				}
 			}
 			return v;
@@ -843,8 +879,11 @@ impl Minifier<'_> {
 		{
 			let v = trim_whitespace(value);
 			return if self.options.minify_css {
-				self.hooks
-					.css(&self.with_fragment_whitespace(v), CssKind::Media)
+				self.through_hook(
+					v,
+					|hooks, text| hooks.css(text, CssKind::Media),
+					|| format!("the media attribute of <{tag}>"),
+				)
 			} else {
 				v.to_owned()
 			};
@@ -953,12 +992,18 @@ impl Minifier<'_> {
 	fn handle_chars(&mut self, text: &str) {
 		let mut text = text.to_owned();
 		if is_executable_script(&self.current_tag, &self.current_attrs) && self.options.minify_js {
-			text = self.hooks.js(&self.with_fragment_whitespace(&text), false);
+			text = self.through_hook(
+				&text,
+				|hooks, text| hooks.js(text, false),
+				|| "a <script>".to_owned(),
+			);
 		}
 		if is_style_sheet(&self.current_tag, &self.current_attrs) && self.options.minify_css {
-			text = self
-				.hooks
-				.css(&self.with_fragment_whitespace(&text), CssKind::Block);
+			text = self.through_hook(
+				&text,
+				|hooks, text| hooks.css(text, CssKind::Block),
+				|| "a <style>".to_owned(),
+			);
 		}
 		self.buffer.push(text);
 	}
@@ -1217,6 +1262,47 @@ fn restore_ignored(s: &str, chunks: &[String], uid: &str) -> String {
 /// assert_eq!(out, "<input disabled>\n");
 /// ```
 pub fn minify(html: &str, options: &Options, hooks: &dyn Hooks) -> Result<String, MinifyError> {
+	minify_reporting(html, options, hooks).map(|(html, _)| html)
+}
+
+/// Like [`minify`], and also what the hooks could not minify, in the order the
+/// minifier met them: each message says where the text is and why
+/// (`a <script>: …`).
+/// Those texts are kept as they were; the rest of the page is minified.
+///
+/// # Errors
+///
+/// As [`minify`].
+///
+/// # Example
+///
+/// ```
+/// use kd_html::minify::{minify_reporting, CssKind, Hooks, Options};
+///
+/// struct NoScripts;
+/// impl Hooks for NoScripts {
+///     fn css(&self, text: &str, _: CssKind) -> Result<String, String> {
+///         Ok(text.replace(' ', ""))
+///     }
+///     fn js(&self, _: &str, _: bool) -> Result<String, String> {
+///         Err("no".to_owned())
+///     }
+/// }
+///
+/// let (html, failures) = minify_reporting(
+///     "<p style=\"a: b\">x</p><script>go( )</script>",
+///     &Options::default(),
+///     &NoScripts,
+/// )
+/// .unwrap();
+/// assert_eq!(html, "<p style=\"a:b\">x</p><script>go( )</script>");
+/// assert_eq!(failures, ["a <script>: no"]);
+/// ```
+pub fn minify_reporting(
+	html: &str,
+	options: &Options,
+	hooks: &dyn Hooks,
+) -> Result<(String, Vec<String>), MinifyError> {
 	let (value, ignored, uid_ignore) = extract_ignored(html);
 	let (value, fragments, uid_attr) = extract_fragments(&value);
 	let mut m = Minifier {
@@ -1229,6 +1315,7 @@ pub fn minify(html: &str, options: &Options, hooks: &dyn Hooks) -> Result<String
 		stack: Vec::new(),
 		last_tag: String::new(),
 		failure: std::cell::RefCell::new(None),
+		hook_failures: std::cell::RefCell::new(Vec::new()),
 		fragments: &fragments,
 		fragment_uid: &uid_attr,
 	};
@@ -1309,7 +1396,10 @@ pub fn minify(html: &str, options: &Options, hooks: &dyn Hooks) -> Result<String
 	}
 	let joined = m.buffer.concat();
 	let joined = restore_fragments(&joined, &fragments, &uid_attr);
-	Ok(restore_ignored(&joined, &ignored, &uid_ignore))
+	Ok((
+		restore_ignored(&joined, &ignored, &uid_ignore),
+		m.hook_failures.into_inner(),
+	))
 }
 
 #[cfg(test)]
@@ -1320,12 +1410,15 @@ mod tests {
 	struct Marking;
 
 	impl Hooks for Marking {
-		fn css(&self, text: &str, kind: CssKind) -> String {
-			format!("css-{kind:?}({text})")
+		fn css(&self, text: &str, kind: CssKind) -> Result<String, String> {
+			Ok(format!("css-{kind:?}({text})"))
 		}
 
-		fn js(&self, text: &str, inline: bool) -> String {
-			format!("js-{}({text})", if inline { "inline" } else { "block" })
+		fn js(&self, text: &str, inline: bool) -> Result<String, String> {
+			Ok(format!(
+				"js-{}({text})",
+				if inline { "inline" } else { "block" }
+			))
 		}
 	}
 
@@ -1378,13 +1471,71 @@ mod tests {
 	struct Echo;
 
 	impl Hooks for Echo {
-		fn css(&self, text: &str, _kind: CssKind) -> String {
-			text.replace('\t', "<TAB>")
+		fn css(&self, text: &str, _kind: CssKind) -> Result<String, String> {
+			Ok(text.replace('\t', "<TAB>"))
 		}
 
-		fn js(&self, text: &str, _inline: bool) -> String {
-			text.replace('\t', "<TAB>")
+		fn js(&self, text: &str, _inline: bool) -> Result<String, String> {
+			Ok(text.replace('\t', "<TAB>"))
 		}
+	}
+
+	/// Refuses every text that says `bad`, and marks the others.
+	struct RefusingBad;
+
+	impl Hooks for RefusingBad {
+		fn css(&self, text: &str, kind: CssKind) -> Result<String, String> {
+			if text.contains("bad") {
+				return Err(format!("css {kind:?}"));
+			}
+			Marking.css(text, kind)
+		}
+
+		fn js(&self, text: &str, inline: bool) -> Result<String, String> {
+			if text.contains("bad") {
+				return Err(format!("js inline={inline}"));
+			}
+			Marking.js(text, inline)
+		}
+	}
+
+	#[test]
+	fn what_a_hook_cannot_minify_is_kept_and_reported_and_the_rest_is_minified() {
+		let (html, failures) = minify_reporting(
+			concat!(
+				"<style>bad{}</style><style>a{}</style>",
+				"<script>bad()</script><script>b()</script>",
+				r#"<p style="bad: 1" onclick="bad()">x</p>"#,
+				r#"<link rel="stylesheet" media="bad" href="a.css">"#,
+			),
+			&Options::default(),
+			&RefusingBad,
+		)
+		.unwrap();
+		assert_eq!(
+			html,
+			concat!(
+				"<style>bad{}</style><style>css-Block(a{})</style>",
+				"<script>bad()</script><script>js-block(b())</script>",
+				r#"<p style="bad: 1" onclick="bad()">x</p>"#,
+				r#"<link rel="stylesheet" media="bad" href="a.css">"#,
+			)
+		);
+		assert_eq!(
+			failures,
+			[
+				"a <style>: css Block",
+				"a <script>: js inline=false",
+				"the onclick attribute of <p>: js inline=true",
+				"the style attribute of <p>: css Inline",
+				"the media attribute of <link>: css Media",
+			]
+		);
+		// `minify` gives the same page and no reason.
+		assert_eq!(
+			minify("<script>bad()</script>", &Options::default(), &RefusingBad).unwrap(),
+			"<script>bad()</script>"
+		);
 	}
 
 	#[test]
