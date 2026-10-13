@@ -7213,10 +7213,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:4.13.12":
-  version: 4.13.12
-  resolution: "hono@npm:4.13.12"
-  checksum: 10c0/6f883c0e7cee9c9e56dff5b6f6aa27208c7e98dc7c74074b0a2d1c10ea524212be32e7157ff12161edbf8905d7aa505307850aef1ba34521da2cfecfcc194e1f
+"hono@npm:4.13.13":
+  version: 4.13.13
+  resolution: "hono@npm:4.13.13"
+  checksum: 10c0/c8524e685a59b4f23a9bea15385eeac5622218949db251cb871b20fd9ef673b751b44ccdee6c22b3df56e5ed4c1b1cebad17b518bdc1823039da39b53ef9c1cf
   languageName: node
   linkType: hard
 
@@ -8201,7 +8201,7 @@ __metadata:
     "@hono/node-server": "npm:2.1.3"
     "@types/node": "npm:24.19.1"
     esbuild: "npm:0.28.2"
-    hono: "npm:4.13.12"
+    hono: "npm:4.13.13"
   bin:
     kamado: ./dist/cli.js
   languageName: unknown
