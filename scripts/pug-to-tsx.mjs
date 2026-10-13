@@ -611,10 +611,38 @@ function convertFile(file) {
 		// every mixin of it.
 		const top = newContext(file);
 		for (const n of ast.nodes) if (n.type === 'Include') node(n, top, 0);
+		// What it declares at its top level (`- const X = ...`) is a constant of the
+		// module, which every mixin sees. Code that reads what a page passes cannot be
+		// one: it is left to the reader.
+		const constants = new Set();
+		const constantCode = [];
+		for (const n of ast.nodes) {
+			if (n.type !== 'Code' || n.buffer || !declaresOnly(n.val)) continue;
+			const read = newContext(file);
+			for (const name of constants) read.declared.add(name);
+			const code = useStmt(n.val, read);
+			// `props` is a global of the component, and `block` and `locals` are written as
+			// reads of it: none of them exists at the top of the module.
+			const unknown = [...read.used].filter(
+				(u) => !read.declared.has(u) && (!GLOBALS.has(u) || u === 'props'),
+			);
+			if (unknown.length > 0) {
+				warnings.add(
+					`${path.relative(srcRoot, file)}: the code at the top of a file of mixins reads ${unknown.join(', ')}, which only a page gives: it is not written; write it by hand`,
+				);
+				continue;
+			}
+			const names = [...read.declared].filter((name) => !constants.has(name));
+			constantCode.push({ code, names });
+			for (const name of names) constants.add(name);
+			// What the code needs of the runtime (`html()`, `formatDate()`) is imported.
+			contexts.push(read);
+		}
 		for (const def of defs) {
 			const params = mixinParams(def.args);
 			info.mixins.push({ name: component(def.name), params });
 			const ctx = newContext(file);
+			for (const n of constants) ctx.declared.add(n);
 			for (const [k, v] of top.mixins) ctx.mixins.set(k, v);
 			for (const [k, v] of top.named) ctx.named.set(k, v);
 			for (const [k, v] of top.imports) ctx.imports.set(k, v);
@@ -626,7 +654,33 @@ function convertFile(file) {
 			const body = block(def.block.nodes, ctx, 1);
 			contexts.push(ctx);
 			parts.push(componentText(ctx, component(def.name), body, 'export', params));
+			for (const name of constants) {
+				if (ctx.assigned.has(name)) {
+					warnings.add(
+						`${path.relative(srcRoot, file)}: the mixin ${def.name} assigns to ${name}, which the top of the file declares for all of them as a constant: write it by hand`,
+					);
+				}
+			}
 		}
+		// A constant that no mixin reads is not written at the top of the module (the
+		// types would call it unused); the body below declares its own.
+		// One that only another constant reads is kept with it.
+		const usedConstants = [];
+		let reachable = parts.join('\n');
+		for (let grew = true; grew;) {
+			grew = false;
+			for (const constant of constantCode) {
+				if (
+					!usedConstants.includes(constant) &&
+					constant.names.some((name) => isIdentifierUsed(reachable, name))
+				) {
+					usedConstants.push(constant);
+					reachable += `\n${constant.code}`;
+					grew = true;
+				}
+			}
+		}
+		usedConstants.sort((a, b) => constantCode.indexOf(a) - constantCode.indexOf(b));
 		// What the file writes besides its mixins is a component of its own (the
 		// default export), which is what including the file shows.
 		const rest = ast.nodes.filter(
@@ -651,7 +705,11 @@ function convertFile(file) {
 			info.hasBody = true;
 		}
 		text = pruneUnusedImports(
-			importLines(...contexts).join('\n') + '\n\n' + parts.join('\n\n') + '\n',
+			importLines(...contexts).join('\n') +
+				'\n\n' +
+				usedConstants.map(({ code }) => `${code}\n\n`).join('') +
+				parts.join('\n\n') +
+				'\n',
 		);
 	} else {
 		const ctx = newContext(file);

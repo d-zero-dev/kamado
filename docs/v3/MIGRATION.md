@@ -220,6 +220,7 @@ yarn build
 - **`extends` / `block`**: レイアウトは `slots` の props を受け取るコンポーネント、ページは `slots={{ content: (...) }}` を渡す。`block vars` の `var opts = ...` は props の既定値と、ページから渡す値になる。
 - **変換スクリプトが止まるもの**: `block append` / `block prepend`、`&attributes`、引数が仮引数より多い `+mixin`、自分自身を読む宣言（`var title = title || "x"`）。止まったら手で書く。コード中の `if` / ループは、読む変数を props から取って変換する。`--pretty` は `pre` / `textarea` の中の字下げを再現しないので、その中身は出力を見て確かめる。
 - **mixin と本文が同じファイル**（`header.c-header ...` と `mixin ...` が並ぶ）は、mixin は名前つき export、本文は `export default` のコンポーネント（`〜Body`）になる。**mixin に渡すブロック**（`+pSub` の下に書いた中身と、mixin の中の `block` / `if block`）は `children` になる。`locals["blocks-v2"]` はデータファイルの値（`props.data`）。データファイルの名前（`blog_news.yml` なら `blog_news`）は、Pug の変数として読んでいた箇所が `data.blog_news` になる。
+- **mixin だけのファイルの先頭にある宣言**（`- const TABLE = { ... }`）は、モジュールのトップレベルの定数になり、どの mixin からも読める。どの mixin も読まない宣言は書かない。ページが渡す値や `locals` / `block` を読む宣言（`- const t = pageTitle`）は定数にできないので、`warning:` を出して書かない。手で書く。mixin がその定数に代入する（`- X = ...`）ときも `warning:` を出す。
 - **Pug の代入**（`- breadcrumbs = pageBreadcrumbs`、`- x = true` ... `- x = false`）は、その位置で実行され、props の名前への代入はローカルの変数（初期値は props の値）になる。include したファイルと mixin には、その変数が渡る。
 - **`//` のコメント**（Pug が HTML コメントにする）は JSX に書けないので消える。
 - **データ**: `data.yml` と `blocks.js` のようなファイルは、Pug ではファイル名がそのまま変数（`data`、`blocks`）だった。v3 では `data.<ファイル名>`（`data.data`、`data.blocks`）。`.js` のデータは文字列を返すだけなら、中身の HTML をそのままデータのディレクトリに置く（`blocks.html`）。

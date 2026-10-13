@@ -83,6 +83,20 @@ mixin card({ lang = "ja" } = {})
 `,
 	'__assets/_libs/component/c-static.pug': `.c-static static
 `,
+	'__assets/_libs/mixin/k.pug': `- const X = { a: "item", b: "label" }
+- const FROM = fromPage
+- const PAIR = [X.a, X.b]
+- const FROM_BLOCK = locals["x"]
+- const UNUSED = { z: 1 }
+- function pick(key) { return X[key] }
+mixin lookup(k)
+	p= X[k]
+	p= pick(k)
+mixin pair
+	p= PAIR
+mixin fromPageOnly
+	p= FROM
+`,
 	'__assets/_libs/mixin/r.pug': `mixin reassign(options, size = 1)
 	- options = options || {}
 	- size += 1
@@ -269,6 +283,33 @@ describe.skipIf(!available && !process.env.CI)(
 			expect(mixins).toContain('let { label } = props as any;');
 			expect(mixins).toContain('const { label } = props as any;');
 			expect(mixins).not.toContain('const { options');
+		});
+
+		test('writes a constant at the top of a file of mixins at the top of the module', () => {
+			const mixins = read('__assets/_libs/mixin/k.tsx');
+			expect(mixins).toMatch(/\nconst X\b[^\n]*= \{ a: "item", b: "label" \};?\n/);
+			expect(mixins.indexOf('const X')).toBeLessThan(
+				mixins.indexOf('export function Lookup'),
+			);
+			// The mixin reads it as it is, and does not ask the props for it.
+			expect(mixins).not.toContain('{ X }');
+			// A constant that reads another, and a function, are written as well.
+			expect(mixins).toMatch(/\nconst PAIR\b[^\n]*= \[X\.a, X\.b\];?\n/);
+			expect(mixins).toContain('function pick(');
+		});
+
+		test('leaves out a constant at the top of a file of mixins that no mixin reads', () => {
+			expect(read('__assets/_libs/mixin/k.tsx')).not.toContain('UNUSED');
+		});
+
+		test('warns of the top code of a file of mixins that reads what only a page gives', () => {
+			expect(stdout).toContain(
+				'warning: __assets/_libs/mixin/k.pug: the code at the top of a file of mixins reads fromPage, which only a page gives: it is not written; write it by hand',
+			);
+			// `block` and `locals` are reads of the props, which a module has none of.
+			expect(stdout).toContain(
+				'warning: __assets/_libs/mixin/k.pug: the code at the top of a file of mixins reads props, which only a page gives: it is not written; write it by hand',
+			);
 		});
 
 		test('names the parameter that a component does not read with an underscore', () => {
