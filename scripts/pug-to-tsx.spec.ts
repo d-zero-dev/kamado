@@ -83,6 +83,23 @@ mixin card({ lang = "ja" } = {})
 `,
 	'__assets/_libs/component/c-static.pug': `.c-static static
 `,
+	'__assets/_libs/mixin/r.pug': `mixin reassign(options, size = 1)
+	- options = options || {}
+	- size += 1
+	p= options.label
+	p= size
+mixin reassignPattern({ label = "a" } = {})
+	- label = label + "b"
+	p= label
+mixin guard(label)
+	- if (!label) label = "x"
+	p= label
+mixin swap(a, b)
+	- [a, b] = [b, a]
+	p= a
+mixin keep(label)
+	p= label
+`,
 	'__assets/_libs/data/frag.html': '<hr>\n',
 	'package.json': '{ "name": "fixture", "private": true }\n',
 };
@@ -241,6 +258,17 @@ describe.skipIf(!available && !process.env.CI)(
 				.find((line) => line.includes('<Card '));
 			expect(call).toContain('{...({ lang })}');
 			expect(call).not.toContain('lang={lang}');
+		});
+
+		test('writes a mixin argument that the body assigns to with let, and the others with const', () => {
+			const mixins = read('__assets/_libs/mixin/r.tsx');
+			expect(mixins).toContain('let { options, size = 1 } = props as any;');
+			expect(mixins).toContain('let { label = "a" } = props as any;');
+			// An assignment inside an `if`, and a destructuring one, count as well.
+			expect(mixins).toContain('let { a, b } = props as any;');
+			expect(mixins).toContain('let { label } = props as any;');
+			expect(mixins).toContain('const { label } = props as any;');
+			expect(mixins).not.toContain('const { options');
 		});
 
 		test('names the parameter that a component does not read with an underscore', () => {

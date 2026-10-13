@@ -242,8 +242,13 @@ function freeStatement(node, declared) {
  */
 function assignedNames(node, out = new Set()) {
 	if (!node || typeof node.type !== 'string') return out;
-	if (node.type === 'AssignmentExpression' && node.left.type === 'Identifier') {
-		out.add(node.left.name);
+	if (node.type === 'AssignmentExpression') {
+		// `x = 1`, and `[a, b] = [b, a]` / `({ a } = o)`: the names of the target.
+		for (const n of bindingNames(node.left)) out.add(n);
+	}
+	if ((node.type === 'ForInStatement' || node.type === 'ForOfStatement') && node.left) {
+		// `for (x of list)`: a declaration (`for (const x ...)`) has none to give.
+		for (const n of bindingNames(node.left)) out.add(n);
 	}
 	if (node.type === 'UpdateExpression' && node.argument.type === 'Identifier') {
 		out.add(node.argument.name);
@@ -513,13 +518,17 @@ function componentText(ctx, name, body, exported, params) {
 	const dataVars = needsExt.filter((n) => DATA_VARS.has(n));
 	const external = needsExt.filter((n) => !PROP_NAMES.has(n) && !DATA_VARS.has(n));
 	const lines = [''];
+	// The body may assign to an argument (`- options = options || {}`): a `let` then.
+	const keyword = (names) => (names.some((n) => ctx.assigned.has(n)) ? 'let' : 'const');
 	const plain = params.filter((p) => !p.pattern);
 	if (plain.length > 0) {
 		const list = plain.map((p) => (p.init ? `${p.name} = ${p.init}` : p.name));
-		lines.push(`\tconst { ${list.join(', ')} } = props as any;`);
+		lines.push(
+			`\t${keyword(plain.map((p) => p.name))} { ${list.join(', ')} } = props as any;`,
+		);
 	}
 	for (const p of params.filter((q) => q.pattern)) {
-		lines.push(`\tconst ${p.pattern} = props as any;`);
+		lines.push(`\t${keyword(p.names)} ${p.pattern} = props as any;`);
 	}
 	if (fromProps.length > 0)
 		lines.push(`\tconst { ${fromProps.join(', ')} } = props as any;`);
@@ -529,9 +538,7 @@ function componentText(ctx, name, body, exported, params) {
 	}
 	if (external.length > 0) {
 		lines.push('\tconst _vars = { ...(props as any).meta, ...props } as any;');
-		lines.push(
-			`\t${external.some((n) => ctx.assigned.has(n)) ? 'let' : 'const'} { ${external.join(', ')} } = _vars;`,
-		);
+		lines.push(`\t${keyword(external)} { ${external.join(', ')} } = _vars;`);
 	}
 	for (const h of ctx.hoisted) lines.push(`\t${h}`);
 	lines.push(`\treturn (\n${body}\n\t);`);
@@ -903,6 +910,8 @@ function useStmt(stmt, ctx) {
 				ctx.declared.add(e.left.name);
 			} else {
 				read(e);
+				// `options = options || {}` of a mixin argument: it cannot be a `const`.
+				for (const n of assignedNames(e)) ctx.assigned.add(n);
 			}
 		} else {
 			// An `if`, a loop, a function: what it reads and does not declare is free.
