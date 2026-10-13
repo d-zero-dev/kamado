@@ -6,30 +6,79 @@
 //! `text` (`contentType`, `body`), `file` (`path`), `render` (`token`, `job`,
 //! `restart`, `context`, `update`), `script` (`token`, `request`),
 //! `forbidden` and `notFound`. A failure to build the answer is an error.
+//!
+//! A panic while a server answers may leave its state half updated (what it
+//! waits for, its caches), so the server is not used again: its handle stays
+//! in the table as poisoned. The call that panicked and every later one
+//! throw an `Error` whose `code` is `KAMADO_SERVE_POISONED`, for the
+//! JavaScript side to open a new server; this module alone decides that a
+//! server is gone (a panic outside a server, in reading the arguments, leaves
+//! it as it was). Why not the other handles: the state of a server is its
+//! own, and the servers of other projects (or a build) in the same process
+//! are untouched.
 
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use kd_core::serve::{Serve, Served};
 use kd_jsonc::Value;
 
+use crate::Thrown;
+
+/// `error.code` of the `Error` thrown for a server a panic left unusable.
+const POISONED_CODE: &CStr = c"KAMADO_SERVE_POISONED";
+
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
-static SERVERS: Mutex<Option<HashMap<u64, Arc<Serve>>>> = Mutex::new(None);
+/// The servers by handle; `None` for one a panic left unusable.
+type Servers = HashMap<u64, Option<Arc<Serve>>>;
 
-fn servers() -> std::sync::MutexGuard<'static, Option<HashMap<u64, Arc<Serve>>>> {
+static SERVERS: Mutex<Option<Servers>> = Mutex::new(None);
+
+fn servers() -> std::sync::MutexGuard<'static, Option<Servers>> {
 	SERVERS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn get(handle: &str) -> Result<Arc<Serve>, String> {
-	let id: u64 = handle
+fn id_of(handle: &str) -> Result<u64, String> {
+	handle
 		.parse()
-		.map_err(|_| format!("{handle:?} is not a handle"))?;
-	servers()
-		.as_ref()
-		.and_then(|s| s.get(&id).cloned())
-		.ok_or_else(|| format!("no dev server for handle {handle}"))
+		.map_err(|_| format!("{handle:?} is not a handle"))
+}
+
+fn poisoned(handle: &str, why: &str) -> Thrown {
+	Thrown {
+		code: Some(POISONED_CODE),
+		message: format!(
+			"dev server {handle} stopped after a panic in the native core ({why}); open it again"
+		),
+	}
+}
+
+/// The server of `handle`, with the id it is kept under.
+fn get(handle: &str) -> Result<(u64, Arc<Serve>), Thrown> {
+	let id = id_of(handle)?;
+	match servers().as_ref().and_then(|s| s.get(&id)) {
+		Some(Some(serve)) => Ok((id, Arc::clone(serve))),
+		Some(None) => Err(poisoned(handle, "an earlier call")),
+		None => Err(format!("no dev server for handle {handle}").into()),
+	}
+}
+
+/// Runs `f` on the server of `handle`. A panic in it marks the handle as
+/// poisoned and is the error of the call.
+fn with<T>(handle: &str, f: impl FnOnce(&Serve) -> Result<T, String>) -> Result<T, Thrown> {
+	let (id, serve) = get(handle)?;
+	match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&serve))) {
+		Ok(result) => result.map_err(Thrown::from),
+		Err(payload) => {
+			if let Some(slot) = servers().as_mut().and_then(|s| s.get_mut(&id)) {
+				*slot = None;
+			}
+			Err(poisoned(handle, &crate::panic_message(payload.as_ref())))
+		}
+	}
 }
 
 fn opt(s: &Option<String>) -> Value {
@@ -70,7 +119,7 @@ pub(crate) fn open(config_path: &str, options_json: &str, runtime: &str) -> Resu
 	let handle = NEXT.fetch_add(1, Ordering::SeqCst);
 	servers()
 		.get_or_insert_with(HashMap::new)
-		.insert(handle, Arc::new(serve));
+		.insert(handle, Some(Arc::new(serve)));
 	let Value::Object(mut members) = inputs else {
 		unreachable!("an object was built above");
 	};
@@ -132,20 +181,23 @@ pub(crate) fn request(
 	handle: &str,
 	url_path: &str,
 	renderer_started: &str,
-) -> Result<String, String> {
-	get(handle)?
-		.request_as(url_path, renderer_started == "1")
-		.map(answer)
+) -> Result<String, Thrown> {
+	with(handle, |serve| {
+		serve
+			.request_as(url_path, renderer_started == "1")
+			.map(answer)
+	})
 }
 
 /// Takes the HTML JavaScript rendered for a `render` answer.
-pub(crate) fn finish_render(handle: &str, tok: &str, html: &str) -> Result<String, String> {
-	get(handle)?.finish_render(token(tok)?, html).map(answer)
+pub(crate) fn finish_render(handle: &str, tok: &str, html: &str) -> Result<String, Thrown> {
+	let tok = token(tok)?;
+	with(handle, |serve| serve.finish_render(tok, html).map(answer))
 }
 
 /// Takes what esbuild built for a `script` answer:
 /// `{ "code": "...", "inputs": ["..."] }`.
-pub(crate) fn finish_script(handle: &str, tok: &str, output_json: &str) -> Result<String, String> {
+pub(crate) fn finish_script(handle: &str, tok: &str, output_json: &str) -> Result<String, Thrown> {
 	let value = kd_jsonc::parse(output_json).map_err(|e| format!("script output: {e}"))?;
 	let output = (|| {
 		let inputs = value
@@ -160,17 +212,21 @@ pub(crate) fn finish_script(handle: &str, tok: &str, output_json: &str) -> Resul
 			inputs,
 		})
 	})()
-	.ok_or("script output: expected { code, inputs: [path, …] }")?;
-	get(handle)?.finish_script(token(tok)?, output).map(answer)
+	.ok_or_else(|| "script output: expected { code, inputs: [path, …] }".to_owned())?;
+	let tok = token(tok)?;
+	with(handle, |serve| serve.finish_script(tok, output).map(answer))
 }
 
 /// Forgets the request behind a `render` or `script` answer that failed.
-pub(crate) fn cancel(handle: &str, tok: &str) -> Result<(), String> {
-	get(handle)?.cancel(token(tok)?);
-	Ok(())
+pub(crate) fn cancel(handle: &str, tok: &str) -> Result<(), Thrown> {
+	let tok = token(tok)?;
+	with(handle, |serve| {
+		serve.cancel(tok);
+		Ok(())
+	})
 }
 
-/// Forgets a dev server.
+/// Forgets a dev server, a poisoned one too.
 pub(crate) fn close(handle: &str) {
 	if let Ok(id) = handle.parse::<u64>()
 		&& let Some(s) = servers().as_mut()
@@ -266,47 +322,98 @@ mod tests {
 		);
 
 		close(&handle);
-		assert!(
-			request(&handle, "/", "1")
-				.unwrap_err()
-				.contains("no dev server")
-		);
+		let gone = request(&handle, "/", "1").unwrap_err();
+		assert_eq!(gone.message, format!("no dev server for handle {handle}"));
+		assert_eq!(gone.code, None);
 		let _ = fs::remove_dir_all(&root);
 	}
 
-	#[test]
-	fn bad_handles_tokens_and_outputs_are_reported() {
-		assert!(request("x", "/", "1").unwrap_err().contains("not a handle"));
-		assert!(
-			request("999999", "/", "1")
-				.unwrap_err()
-				.contains("no dev server")
-		);
-		assert!(token("x").unwrap_err().contains("not a token"));
-		close("not a handle");
-		let root = site("bad");
+	fn open_site(root: &str) -> String {
 		let opened = open(
 			&format!("{root}/kamado.config.jsonc"),
 			"{}",
 			"file:///rt.js",
 		)
 		.unwrap();
-		let handle = kd_jsonc::parse(&opened)
+		kd_jsonc::parse(&opened)
 			.unwrap()
 			.get("handle")
 			.and_then(|h| h.as_str())
 			.unwrap()
-			.to_owned();
+			.to_owned()
+	}
+
+	#[test]
+	fn bad_handles_tokens_and_outputs_are_reported() {
+		assert!(
+			request("x", "/", "1")
+				.unwrap_err()
+				.message
+				.contains("not a handle")
+		);
+		assert!(
+			request("999999", "/", "1")
+				.unwrap_err()
+				.message
+				.contains("no dev server")
+		);
+		assert!(token("x").unwrap_err().contains("not a token"));
+		close("not a handle");
+		let root = site("bad");
+		let handle = open_site(&root);
 		assert!(
 			finish_script(&handle, "1", "{}")
 				.unwrap_err()
+				.message
 				.contains("expected { code")
 		);
 		assert!(
 			finish_render(&handle, "7", "<p/>")
 				.unwrap_err()
+				.message
 				.contains("no page is waiting")
 		);
+		let _ = fs::remove_dir_all(&root);
+	}
+
+	#[test]
+	fn a_panic_leaves_the_server_unusable_with_a_code_and_the_others_untouched() {
+		let root = site("poisoned");
+		let broken = open_site(&root);
+		let other = open_site(&root);
+
+		// The call that panicked says so, with the code and what the panic said.
+		let panicked =
+			with(&broken, |_| -> Result<(), String> { panic!("in the core") }).unwrap_err();
+		assert_eq!(
+			panicked.message,
+			format!(
+				"dev server {broken} stopped after a panic in the native core (in the core); open it again"
+			)
+		);
+		assert_eq!(panicked.code, Some(POISONED_CODE));
+
+		// So does every later call on the handle, whatever it asks.
+		let poisoned = format!(
+			"dev server {broken} stopped after a panic in the native core (an earlier call); open it again"
+		);
+		for error in [
+			request(&broken, "/", "1").unwrap_err(),
+			finish_render(&broken, "1", "<p/>").unwrap_err(),
+			finish_script(&broken, "1", r#"{"code":"","inputs":[]}"#).unwrap_err(),
+			cancel(&broken, "1").unwrap_err(),
+		] {
+			assert_eq!(error.message, poisoned);
+			assert_eq!(error.code, Some(POISONED_CODE));
+		}
+		// Another server answers as before.
+		let page = kd_jsonc::parse(&request(&other, "/", "1").unwrap()).unwrap();
+		assert_eq!(page.get("kind").and_then(|k| k.as_str()), Some("text"));
+
+		// Closing forgets it like any other.
+		close(&broken);
+		assert_eq!(request(&broken, "/", "1").unwrap_err().code, None);
+		close(&other);
 		let _ = fs::remove_dir_all(&root);
 	}
 }
