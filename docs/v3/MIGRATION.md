@@ -349,6 +349,7 @@ yarn kamado build --incremental        # そのページだけ built
 | `<script>` の開始タグの属性値に `><` を含むとき、v2 は本文が壊れた                                                                           | #28  |
 | `characterEntities` を v2 は `<script>` / `<style>` の中も置換した。v3 は置換しない                                                          | #29  |
 | 断片の途中の `<!doctype>` で v2 は内容を落とした                                                                                             | #30  |
+| 先頭の `<?xml ... ?>` を v2 は**削除**した。v3 は先頭に保持し、そのあとに doctype を補う                                                     | #33  |
 | `breadcrumbs` の起点（`site.baseURL` のパス部分）                                                                                            | §7.3 |
 | YAML の日付が文字列                                                                                                                          | #19  |
 | CSS の圧縮結果（cssnano と同じ意味で、バイトは違いうる。サイズは近い。`initial` を `normal` に縮める `reduce-initial` などは移植していない） | §10  |

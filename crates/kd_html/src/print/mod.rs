@@ -55,7 +55,9 @@ impl Default for Options {
 }
 
 /// v2's `doctype` transform: a document that starts with `<html` and has no
-/// doctype gets `<!DOCTYPE html>` and a line break in front.
+/// doctype gets `<!DOCTYPE html>` and a line break in front. An XML
+/// declaration (`<?xml ... ?>`) at the start is looked past, as v2 never saw
+/// it, and stays first: the doctype goes after it.
 ///
 /// # Example
 ///
@@ -64,9 +66,23 @@ impl Default for Options {
 /// assert_eq!(add_doctype("<html><body></body></html>"), "<!DOCTYPE html>\n<html><body></body></html>");
 /// assert_eq!(add_doctype("<!doctype html><html></html>"), "<!doctype html><html></html>");
 /// assert_eq!(add_doctype("<p>x</p>"), "<p>x</p>");
+/// assert_eq!(
+///     add_doctype("<?xml version=\"1.0\"?><html></html>"),
+///     "<?xml version=\"1.0\"?>\n<!DOCTYPE html>\n<html></html>"
+/// );
 /// ```
 #[must_use]
 pub fn add_doctype(content: &str) -> String {
+	if let Some((declaration, rest)) = crate::parser::split_xml_declaration(content) {
+		let lead = &content[..content.len() - declaration.len() - rest.len()];
+		let rest = rest.trim_start_matches(crate::parser::is_js_space);
+		let added = add_doctype(rest);
+		return if added == rest {
+			content.to_owned()
+		} else {
+			format!("{lead}{declaration}\n{added}")
+		};
+	}
 	let trimmed = content.trim_matches(crate::parser::is_js_space);
 	let lower_prefix = |n: usize| trimmed.as_bytes().get(..n).map(|b| b.to_ascii_lowercase());
 	let starts_html = lower_prefix(5).is_some_and(|b| b == b"<html")
@@ -144,6 +160,41 @@ mod tests {
 
 	fn fmt(src: &str) -> String {
 		format(src, &Options::default()).unwrap()
+	}
+
+	#[test]
+	fn the_doctype_goes_after_an_xml_declaration() {
+		assert_eq!(
+			add_doctype("<?xml version=\"1.0\"?>\n<html></html>"),
+			"<?xml version=\"1.0\"?>\n<!DOCTYPE html>\n<html></html>"
+		);
+	}
+
+	#[test]
+	fn what_stands_before_an_xml_declaration_is_kept() {
+		assert_eq!(
+			add_doctype("\u{FEFF}<?xml version=\"1.0\"?><html></html>"),
+			"\u{FEFF}<?xml version=\"1.0\"?>\n<!DOCTYPE html>\n<html></html>"
+		);
+	}
+
+	#[test]
+	fn a_document_with_an_xml_declaration_and_a_doctype_is_formatted() {
+		assert_eq!(
+			fmt("<?xml version=\"1.0\"?>\n<!DOCTYPE html>\n<html><body><p>x</p></body></html>"),
+			"<?xml version=\"1.0\"?>\n<!DOCTYPE html>\n<html>\n  <body>\n    <p>x</p>\n  </body>\n</html>\n"
+		);
+	}
+
+	#[test]
+	fn an_xml_declaration_in_front_of_a_doctype_or_other_content_changes_nothing() {
+		for input in [
+			"<?xml version=\"1.0\"?><!doctype html><html></html>",
+			"<?xml version=\"1.0\"?><p>x</p>",
+			"<?xml-stylesheet href=\"a.css\"?><html></html>",
+		] {
+			assert_eq!(add_doctype(input), input);
+		}
 	}
 
 	// Expected values below were produced by prettier 3.9.9 with
