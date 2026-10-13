@@ -71,7 +71,7 @@ v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは `p
 
 `pageList()` でページ一覧を返し、`transformBreadcrumbItem` / `filterNavigationNode` で整える構成は、次のように置き換える。
 
-- **一覧は prebuild で JSON にする**（`pages.overrides`、RFC §6）。`meta` には**一覧に値があるキーだけ**を書く。`null` を書くと、ページ自身の front matter の同じキーを隠す（v2 は一覧のメタをナビゲーション用にだけ使い、ページ自身の変数は front matter から取った）。ファイルに書いたページが、書いた順で `pages` の先頭に並び、`nav()` の表示順になる。
+- **一覧は prebuild で JSON にする**（`pages.overrides`、RFC §6）。`url` はページの URL と同じ書き方（`/a/index.html` ではなく `/a/`、ファイルは `/a.html`）で、違う書き方は設定エラーになる。`meta` には**一覧に値があるキーだけ**を書く。`null` を書くと、ページ自身の front matter の同じキーを隠す（v2 は一覧のメタをナビゲーション用にだけ使い、ページ自身の変数は front matter から取った）。ファイルに書いたページが、書いた順で `pages` の先頭に並び、`nav()` の表示順になる。
 - **一覧にないページ**: v2 は一覧に載らないページを `nav()` と `breadcrumbs` に出さなかった。v3 は常にすべてのページを索引に入れる。ナビゲーションから隠すなら、そのページに `{ "url": "/x/", "meta": { "navHidden": true } }` を書く。ページのタイトル（`<title>` とパンくず）は v3 では自分の front matter の値になる（v2 は一覧になければサイト名）。
 - **`transformBreadcrumbItem`** はコンポーネントに書く（`link.href` を `link.meta.realHref ?? link.href` に）。**`filterNavigationNode`** は `nav()` の結果を再帰で絞るヘルパーを書く（子から先に絞り、`keep(node)` が偽なら捨てる）。
 - **`<!-- @include(...) -->` のコメントを出力する transform** は `html.includes` の `includeComment`（`root` は `/` 始まりの基準ディレクトリ）に、**BurgerEditor の `importBlock`** は `burgerEditorImport`（`root` は入力ディレクトリ）に、`data-bgi-ver` を消す正規表現は `html.rules` の `removeAttr` に、`©` などを実体参照にする transform は `html.entities` に置き換える。`manipulateDOM` が全ページから要素を消していたなら `html.rules` の `remove`。
