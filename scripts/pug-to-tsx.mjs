@@ -124,6 +124,10 @@ const NUMBER_PROPS = new Set(
 		' ',
 	),
 );
+// The HTML props that React writes as the words "true" and "false" (the table calls them
+// booleanish strings): Pug writes a true as an empty attribute and leaves a false out.
+// `value` and the SVG props of that kind take other values as well, so they are not here.
+const ENUMERATED_BOOLEAN_PROPS = new Set(['contentEditable', 'draggable', 'spellCheck']);
 const GLOBALS = new Set([
 	'props',
 	'undefined',
@@ -1001,14 +1005,18 @@ function attrsOf(tag, ctx) {
 					? `${prop}={${JSON.stringify(strValue)}}`
 					: `${prop}="${strValue}"`,
 			);
-		} else if (/^(?:data|aria)-/i.test(name)) {
-			// Pug leaves out an attribute whose value is false; React writes "false".
+		} else if (/^(?:data|aria)-/i.test(name) || ENUMERATED_BOOLEAN_PROPS.has(prop)) {
+			// A value of true is an empty attribute in Pug (an HTML5 page, as the bare
+			// attribute above), and false leaves it out; React writes "true" and "false" for
+			// `data-*`, `aria-*` and the props whose values are those words (`draggable`).
 			const v = use(val, ctx);
-			out.push(`${prop}={((v: any) => (v === false ? undefined : v))(${v})}`);
+			out.push(
+				`${prop}={((v: any) => (v === true ? "" : v === false ? undefined : v))(${v})}`,
+			);
 		} else {
 			// Pug leaves out an attribute whose value is `false` or `null`, as it does for
 			// `undefined`: such a branch of a condition is `undefined`, which the types of a
-			// text prop take. A boolean prop and a boolean-ish one (`draggable`) mean something
+			// text prop take. A boolean prop and a boolean-ish one (`value`) mean something
 			// with `false`, which stays; their `null` is not written by React either.
 			const value = omittedBranchesToUndefined(val, acorn, {
 				keepFalse: kind === 1 || kind === 2 || kind === 5,

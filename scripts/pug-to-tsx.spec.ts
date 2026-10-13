@@ -39,6 +39,11 @@ html(lang="ja")
 		a(href="/x/" target=lang === "en" ? "_blank" : false rel=lang === "en" ? "noopener" : null) a
 		input(maxlength="255" size="10" disabled=lang === "en" ? true : null)
 		p(hidden="until-found") h
+		- var on = true
+		- var off = false
+		div(data-x=true data-y=false aria-hidden=true aria-pressed=false data-z=on ? true : undefined data-w=off ? true : undefined data-n=0)
+		div(hidden=on draggable=true spellcheck=false contenteditable=on)
+		input(value=lang)
 		p tbody > tr
 		each item, index in items
 			span= item
@@ -141,6 +146,30 @@ describe.skipIf(!available && !process.env.CI)(
 			expect(page).toContain('rel={lang === "en" ? "noopener" : undefined}');
 			// A boolean prop: its null is changed as well.
 			expect(page).toContain('disabled={lang === "en" ? true : undefined}');
+		});
+
+		test('writes a true of data-*, aria-* and draggable as an empty attribute, and a false as none', () => {
+			const page = read('__assets/htdocs/index.tsx');
+			const toEmpty = (name: string, value: string) =>
+				`${name}={((v: any) => (v === true ? "" : v === false ? undefined : v))(${value})}`;
+			expect(page).toContain(toEmpty('data-x', 'true'));
+			expect(page).toContain(toEmpty('data-y', 'false'));
+			expect(page).toContain(toEmpty('aria-hidden', 'true'));
+			expect(page).toContain(toEmpty('aria-pressed', 'false'));
+			expect(page).toContain(toEmpty('data-z', 'on ? true : undefined'));
+			expect(page).toContain(toEmpty('data-w', 'off ? true : undefined'));
+			expect(page).toContain(toEmpty('data-n', '0'));
+			expect(page).toContain(toEmpty('draggable', 'true'));
+			expect(page).toContain(toEmpty('spellCheck', 'false'));
+			expect(page).toContain(toEmpty('contentEditable', 'on'));
+		});
+
+		test('keeps the true of a boolean prop, which React writes as an empty attribute', () => {
+			expect(read('__assets/htdocs/index.tsx')).toContain('hidden={on}');
+		});
+
+		test('leaves the value prop, which takes any text, as it is', () => {
+			expect(read('__assets/htdocs/index.tsx')).toContain('<input value={lang} />');
 		});
 
 		test('keeps the line breaks of a script and a style block as they are written', () => {
