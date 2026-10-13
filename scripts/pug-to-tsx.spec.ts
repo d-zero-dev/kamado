@@ -44,6 +44,8 @@ html(lang="ja")
 		div(data-x=true data-y=false aria-hidden=true aria-pressed=false data-z=on ? true : undefined data-w=off ? true : undefined data-n=0)
 		div(hidden=on draggable=true spellcheck=false contenteditable=on)
 		input(value=lang)
+		link(⚠️="note" rel="stylesheet" href="/a.css")
+		div(@click="go" :foo="x" 日本語="y" $foo="z")
 		p tbody > tr
 		each item, index in items
 			span= item
@@ -91,6 +93,7 @@ describe.skipIf(!available && !process.env.CI)(
 	() => {
 		let root: string;
 		let out: string;
+		let stdout: string;
 		const read = (file: string) => readFileSync(path.join(out, file), 'utf8');
 
 		beforeAll(() => {
@@ -103,7 +106,7 @@ describe.skipIf(!available && !process.env.CI)(
 			}
 			// The converter finds the Pug packages from the project.
 			symlinkSync(path.join(repo, 'node_modules'), path.join(project, 'node_modules'));
-			execFileSync(
+			stdout = execFileSync(
 				process.execPath,
 				[path.join(repo, 'scripts', 'pug-to-tsx.mjs'), project, out],
 				{ encoding: 'utf8', stdio: 'pipe' },
@@ -130,7 +133,7 @@ describe.skipIf(!available && !process.env.CI)(
 
 		test('keeps an event handler in its place, outside of the types', () => {
 			expect(read('__assets/htdocs/index.tsx')).toContain(
-				'<button type="button" {...{ "onclick": "return false;" }} tabIndex={-1}>',
+				'<button type="button" {...({ "onclick": "return false;" } as any)} tabIndex={-1}>',
 			);
 		});
 
@@ -170,6 +173,33 @@ describe.skipIf(!available && !process.env.CI)(
 
 		test('leaves the value prop, which takes any text, as it is', () => {
 			expect(read('__assets/htdocs/index.tsx')).toContain('<input value={lang} />');
+		});
+
+		test('warns of each attribute name that the runtime does not write', () => {
+			const note =
+				'is not written by the runtime (as React does not): write the element with html() or html.inject';
+			expect(stdout).toContain(
+				`warning: __assets/htdocs/index.pug: the attribute "⚠️" of <link> ${note}`,
+			);
+			expect(stdout).toContain(
+				`warning: __assets/htdocs/index.pug: the attribute "@click" of <div> ${note}`,
+			);
+			expect(stdout).toContain(
+				`warning: __assets/htdocs/index.pug: the attribute "$foo" of <div> ${note}`,
+			);
+		});
+
+		test('does not warn of a name that the runtime writes', () => {
+			expect(stdout).not.toContain('":foo"');
+			expect(stdout).not.toContain('"日本語"');
+		});
+
+		test('keeps the attribute with a name that JSX cannot write in a spread, as it was', () => {
+			const page = read('__assets/htdocs/index.tsx');
+			expect(page).toContain('{...({ "⚠️": "note" } as any)}');
+			expect(page).toContain(
+				'<div {...({ "@click": "go", ":foo": "x", "日本語": "y", "$foo": "z" } as any)}>',
+			);
 		});
 
 		test('keeps the line breaks of a script and a style block as they are written', () => {

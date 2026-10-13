@@ -34,6 +34,9 @@
  * of React lack (`static` of `<html static>`, `command`, `commandfor`). The helpers that
  * do this are in `pug-to-tsx-types.mjs`.
  *
+ * An attribute name that the runtime does not write (`@click`, an emoji) is printed as
+ * `warning: <file>: ...` after the count of files; the page would lose the attribute.
+ *
  * Read the output before using it: the names of the data variables
  * (`data`, `blocks`) follow the files of the data directory (see MIGRATION.md 3.4).
  */
@@ -94,6 +97,25 @@ const { REACT_PROP_NAMES } = await import('./react-prop-names.mjs');
 const { PROPS } = await import(
 	new URL('../packages/kamado/dist/jsx/attr-table.js', import.meta.url).href
 );
+const { el } = await import(
+	new URL('../packages/kamado/dist/jsx/runtime.js', import.meta.url).href
+);
+// Whether the runtime writes an attribute of that name. It does not for a name that is not
+// an XML Name (`@click`, `[x]`, an emoji), as React does not: asking it keeps this
+// from copying its rule.
+const writableNames = new Map();
+const isWritableName = (name) => {
+	if (!writableNames.has(name)) {
+		writableNames.set(name, String(el('i', { [name]: '' })) !== '<i></i>');
+	}
+	return writableNames.get(name);
+};
+// A name JSX takes as it is: an identifier, with `-`, and one `:` between two such parts
+// (`xlink:href`). `:foo`, `x.y`, `$a` (JSX takes it, an XML Name does not), `@click`, `[x]`
+// and an emoji are written in a spread.
+const JSX_ATTRIBUTE_NAME = /^[A-Z_][\w-]*(?::[A-Z_][\w-]*)?$/i;
+// What the converter leaves to the reader, printed after the count of files.
+const warnings = new Set();
 // Props React spells in camel case that its own table does not list.
 const propOf = new Map([
 	['charset', 'charSet'],
@@ -961,8 +983,14 @@ function attrsOf(tag, ctx) {
 			else classes.push({ expr: use(val, ctx) });
 			continue;
 		}
-		if (/[^\w:.-]/.test(name)) {
-			// A name JSX cannot write (and React would not render): spread an object.
+		if (!JSX_ATTRIBUTE_NAME.test(name)) {
+			// A name JSX cannot write: spread an object. The runtime drops the ones that are
+			// not an XML Name, so the page loses the attribute without a word at the build.
+			if (!isWritableName(name)) {
+				warnings.add(
+					`${path.relative(srcRoot, ctx.file)}: the attribute ${JSON.stringify(name)} of <${tag.name}> is not written by the runtime (as React does not): write the element with html() or html.inject`,
+				);
+			}
 			spread.push(
 				`${JSON.stringify(name)}: ${isString ? JSON.stringify(strValue) : val === true ? '""' : use(val, ctx)}`,
 			);
@@ -973,7 +1001,7 @@ function attrsOf(tag, ctx) {
 			// output only by a static page: spread it, as written, so that it is not typed.
 			// It stays where it was written: the order of the attributes is the output's.
 			out.push(
-				`{...{ ${JSON.stringify(name)}: ${isString ? JSON.stringify(strValue) : val === true ? '""' : use(val, ctx)} }}`,
+				`{...({ ${JSON.stringify(name)}: ${isString ? JSON.stringify(strValue) : val === true ? '""' : use(val, ctx)} } as any)}`,
 			);
 			continue;
 		}
@@ -1033,7 +1061,9 @@ function attrsOf(tag, ctx) {
 				`className={[${classes.map((c) => (typeof c === 'string' ? JSON.stringify(c) : c.expr)).join(', ')}].filter(Boolean).join(' ')}`,
 			);
 	}
-	if (spread.length > 0) out.push(`{...{ ${spread.join(', ')} }}`);
+	// Cast, so that an element whose only attribute is one of these is not an error of the
+	// types ("no properties in common").
+	if (spread.length > 0) out.push(`{...({ ${spread.join(', ')} } as any)}`);
 	return out;
 }
 
@@ -1382,6 +1412,7 @@ const declarations = path.join(outRoot, '__assets', 'kamado-jsx.d.ts');
 mkdirSync(path.dirname(declarations), { recursive: true });
 writeFileSync(declarations, jsxDeclarations());
 console.log([...converted].length, 'files converted');
+for (const warning of warnings) console.log(`warning: ${warning}`);
 for (const [f, message] of failures)
 	console.log(`not converted: ${path.relative(srcRoot, f)}: ${message}`);
 if (failures.some(([f]) => inPages(f))) process.exitCode = 1;
