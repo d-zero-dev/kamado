@@ -93,8 +93,8 @@ JSONC（`//` と `/* */` のコメント、末尾カンマ可）。`$schema` で
 			"js": true,
 		},
 		"lineBreak": "\n",
-		"encoding": "utf8", // "utf8" | "shift_jis"（§9.4）
-		"serializer": "linkedom", // "linkedom" | "spec"（§9.5）
+		"encoding": "utf8", // "utf8" | "shift_jis"（§9.5）
+		"serializer": "linkedom", // "linkedom" | "spec"（§9.6）
 		"entities": "none", // "none" | "all" | { "©": "&copy;" }
 		"imageSizes": { "enabled": true, "exclude": [], "keepAuthored": false },
 		"rules": [], // §9.1
@@ -350,7 +350,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 
 - 入力は UTF-8 のまま書く。印字のあと（`lineBreak` のあと）に、1 回だけ変換する。
 - `<meta charset="utf-8">`（`utf8`、大文字小文字、閉じの `/` の有無は問わない）は `<meta charset="shift_jis">` に書き換える（d-zero/builder と同じ）。
-- Shift_JIS にない文字は文字参照にする: 名前があれば名前（`©` → `&copy;`）、なければ番号（`〜` U+301C → `&#12316;`）。`<script>` と `<style>` の中は参照が文字として読まれるので `?`（`iconv-lite` と同じ）。中身は、同じ名前の閉じタグ（`</script>` 等。`</scripts>` は含まない）までで、その中に書かれたもう一方の開始タグ（JS の文字列の中の `<style>` 等）は、ブラウザと同じく文字として扱う。`?` にした文字があるページは、ビルドの警告に、そのページと文字（`U+301C` のように、最大 5 つ）が出る（JS の文字列や CSS の `content` が書いたものと変わるため。`html.onError` には依らず、常に出る。文字参照にした文字は、書いたとおりに読めるので警告しない。差分ビルドで再ビルドしなかったページは、警告を繰り返さない）。表は CP932（NEC 行 13、IBM 拡張を含む）で、`iconv-lite` の `CP932` と BMP 全域で同じ結果（私用領域は変換しない。`¥` は 0x5C、`‾` は 0x7E）。
+- Shift_JIS にない文字は文字参照にする: 名前があれば名前（`©` → `&copy;`）、なければ番号（`〜` U+301C → `&#12316;`）。`<script>` と `<style>` の中は参照が文字として読まれるので `?`（`iconv-lite` と同じ）。中身は、同じ名前の閉じタグ（`</script>` 等。`</scripts>` は含まない）までで、その中に書かれたもう一方の開始タグ（JS の文字列の中の `<style>` 等）は、ブラウザと同じく文字として扱う。`?` にした文字は、ビルドの警告に出る（JS の文字列や CSS の `content` が書いたものと変わるため。`html.onError` には依らず、常に出る。文字参照にした文字は、書いたとおりに読めるので警告しない）。警告は文字ごとに 1 件で、その文字を `?` にした最初のページ（`pages` の順）と残りのページ数を出す（`src/a.html and 119 more pages: Shift_JIS has no U+301C; …`）。layout の script の文字を、ページごとに繰り返し警告しないためで、別の文字を持つページがあっても同じ。ページ数は、そのビルドで組み立てたページの数で、差分ビルドで再ビルドしなかったページは数えず、警告も繰り返さない。警告を止める設定はない。表は CP932（NEC 行 13、IBM 拡張を含む）で、`iconv-lite` の `CP932` と BMP 全域で同じ結果（私用領域は変換しない。`¥` は 0x5C、`‾` は 0x7E）。
 - 表は `scripts/gen-cp932-table.mjs` が Node のデコーダ（WHATWG `shift_jis`）から作る。
 
 ### 9.6 `html.serializer`

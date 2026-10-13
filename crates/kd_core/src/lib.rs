@@ -2565,18 +2565,55 @@ mod tests {
 		let loaded = site
 			.config(r#", "html": { "encoding": "shift_jis", "format": false, "minify": false }"#);
 		let report = run_build(&loaded).unwrap();
-		assert_eq!(report.warnings.len(), 1);
-		assert!(
-			report.warnings[0].ends_with(
-				"a.html: Shift_JIS has no U+301C, U+26A0; written as '?' inside <script> or <style>"
-			),
-			"{}",
-			report.warnings[0]
+		assert_eq!(
+			report.warnings,
+			[
+				format!(
+					"{}/src/a.html: Shift_JIS has no U+301C; written as '?' inside <script> or <style>",
+					site.root
+				),
+				format!(
+					"{}/src/a.html: Shift_JIS has no U+26A0; written as '?' inside <script> or <style>",
+					site.root
+				),
+			]
 		);
 		// The reference that the text got is not a loss, so it is not in the warning.
 		assert!(
 			site.read_bytes("out/a.html")
 				.starts_with(b"<!DOCTYPE html>")
+		);
+	}
+
+	#[test]
+	fn pages_that_lose_the_same_character_share_one_warning() {
+		let site = Site::new("sjis_warning_shared");
+		// A script every page has (a layout's), and a page with a character of its own.
+		for name in ["a", "b", "c"] {
+			site.write(
+				&format!("src/{name}.html"),
+				"<html><body><script>var s = '〜';</script></body></html>",
+			);
+		}
+		site.write(
+			"src/d.html",
+			"<html><body><script>var s = '〜';</script><script>var t = '⚠';</script></body></html>",
+		);
+		let loaded = site
+			.config(r#", "html": { "encoding": "shift_jis", "format": false, "minify": false }"#);
+		let report = run_build(&loaded).unwrap();
+		assert_eq!(
+			report.warnings,
+			[
+				format!(
+					"{}/src/a.html and 3 more pages: Shift_JIS has no U+301C; written as '?' inside <script> or <style>",
+					site.root
+				),
+				format!(
+					"{}/src/d.html: Shift_JIS has no U+26A0; written as '?' inside <script> or <style>",
+					site.root
+				),
+			]
 		);
 	}
 

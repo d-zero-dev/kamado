@@ -118,8 +118,10 @@ struct Shared {
 	asset_results: Mutex<Vec<Option<AssetOutcome>>>,
 }
 
-/// A page result, its manifest entry and the warnings it raised.
-type Outcome = Result<(PageResult, Option<kd_build::Entry>, Vec<String>), String>;
+/// A page result, its manifest entry, the warnings it raised and the
+/// characters that became `?` in it (warned once for all the pages that share
+/// them, by [`replaced_warnings`]).
+type Outcome = Result<(PageResult, Option<kd_build::Entry>, Vec<String>, Vec<char>), String>;
 
 /// An asset result and its manifest entry.
 type AssetOutcome = Result<(AssetResult, Option<kd_build::Entry>), String>;
@@ -1073,7 +1075,7 @@ impl Prepared {
 		if failed {
 			if incremental {
 				let mut stale = on_disk;
-				for (result, _, _) in results.iter().flatten().flatten() {
+				for (result, ..) in results.iter().flatten().flatten() {
 					if matches!(result.status, Status::Built | Status::Unchanged) {
 						stale.entries.remove(&result.output_path);
 					}
@@ -1116,9 +1118,14 @@ impl Prepared {
 		// Whether the manifest differs from the one on disk: an up-to-date build
 		// leaves it alone instead of writing the same tens of megabytes again.
 		let mut dirty = false;
+		// The characters that became `?`, by the index of their page in the report.
+		let mut replaced = Vec::new();
 		for outcome in results.into_iter().flatten() {
-			let (result, entry, warnings) = outcome?;
+			let (result, entry, warnings, chars) = outcome?;
 			report.warnings.extend(warnings);
+			if !chars.is_empty() {
+				replaced.push((report.pages.len(), chars));
+			}
 			match entry {
 				Some(entry) => {
 					dirty = true;
@@ -1135,6 +1142,12 @@ impl Prepared {
 			}
 			report.pages.push(result);
 		}
+		let replaced_warnings = replaced_warnings(
+			replaced
+				.iter()
+				.map(|(i, chars)| (report.pages[*i].input_path.as_str(), chars.as_slice())),
+		);
+		report.warnings.extend(replaced_warnings);
 		for outcome in asset_results.into_iter().flatten() {
 			let (result, entry) = outcome?;
 			match entry {
@@ -1180,10 +1193,15 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 		meta: page.meta.clone(),
 	};
 	let render = match decision {
-		Decision::Virtual => return Ok((result(Status::Virtual), None, Vec::new())),
-		Decision::Skipped => return Ok((result(Status::Skipped), None, Vec::new())),
+		Decision::Virtual => return Ok((result(Status::Virtual), None, Vec::new(), Vec::new())),
+		Decision::Skipped => return Ok((result(Status::Skipped), None, Vec::new(), Vec::new())),
 		Decision::Cached(entry) => {
-			return Ok((result(Status::Cached), entry.clone(), Vec::new()));
+			return Ok((
+				result(Status::Cached),
+				entry.clone(),
+				Vec::new(),
+				Vec::new(),
+			));
 		}
 		Decision::Build { render } => render,
 	};
@@ -1201,10 +1219,6 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 		&shared.minifiers,
 	)?;
 	let (bytes, replaced) = kd_html::encode::encode_reporting(&out.html, out.encoding);
-	let mut warnings = out.warnings;
-	if !replaced.is_empty() {
-		warnings.push(replaced_warning(&page.file.input_path, &replaced));
-	}
 	let status = write_output(&page.file.output_path, &bytes, shared.skip_unchanged)?;
 	// The fingerprints were taken when the bytes were read, so an edit made
 	// after that is detected by the next build instead of being recorded as if
@@ -1224,31 +1238,53 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 		output_size: bytes.len() as u64,
 		deps,
 	};
-	Ok((result(status), Some(entry), warnings))
+	Ok((result(status), Some(entry), out.warnings, replaced))
 }
 
-/// The warning for characters that Shift_JIS cannot hold and that became `?` inside
+/// The warnings for characters that Shift_JIS cannot hold and that became `?` inside
 /// `<script>` or `<style>`, where a character reference would be read as text: the page
 /// is written, but a string of the script or a `content` of the style is not what the
-/// source said. At most [`SHOWN_REPLACED`] characters are named.
-fn replaced_warning(input_path: &str, replaced: &[char]) -> String {
-	let names: Vec<String> = replaced
-		.iter()
-		.take(SHOWN_REPLACED)
-		.map(|c| format!("U+{:04X}", u32::from(*c)))
-		.collect();
-	let more = match replaced.len().saturating_sub(SHOWN_REPLACED) {
-		0 => String::new(),
-		n => format!(" and {n} more"),
-	};
-	format!(
-		"{input_path}: Shift_JIS has no {}{more}; written as '?' inside <script> or <style>",
-		names.join(", ")
-	)
+/// source said.
+///
+/// One warning for each character, not for each page: a script of the layout would
+/// otherwise repeat the same warning on every page, and a page with a character of its
+/// own would repeat the characters of the layout. A warning names the first page (in
+/// the order of `pages`) and how many more there are; the warnings are in the order the
+/// characters were first met.
+fn replaced_warnings<'a>(pages: impl IntoIterator<Item = (&'a str, &'a [char])>) -> Vec<String> {
+	// The character, its first page and how many pages.
+	let mut found: Vec<(char, &str, usize)> = Vec::new();
+	let mut at: HashMap<char, usize> = HashMap::new();
+	for (input_path, chars) in pages {
+		for &c in chars {
+			match at.get(&c) {
+				Some(&i) => found[i].2 += 1,
+				None => {
+					at.insert(c, found.len());
+					found.push((c, input_path, 1));
+				}
+			}
+		}
+	}
+	found
+		.into_iter()
+		.map(|(c, input_path, count)| replaced_warning(input_path, count - 1, c))
+		.collect()
 }
 
-/// How many of the replaced characters a warning names.
-const SHOWN_REPLACED: usize = 5;
+/// One warning of [`replaced_warnings`]: the first page, how many more pages
+/// lost the character, and the character.
+fn replaced_warning(input_path: &str, more_pages: usize, c: char) -> String {
+	let pages = match more_pages {
+		0 => String::new(),
+		1 => " and 1 more page".to_owned(),
+		n => format!(" and {n} more pages"),
+	};
+	format!(
+		"{input_path}{pages}: Shift_JIS has no U+{:04X}; written as '?' inside <script> or <style>",
+		u32::from(c)
+	)
+}
 
 /// What was built for an asset: its text, what it was read from, and whether
 /// the fingerprints can vouch for the text.
@@ -1386,28 +1422,38 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn the_warning_names_the_page_and_the_characters() {
+	fn the_warning_names_the_page_the_other_pages_and_the_character() {
 		assert_eq!(
-			replaced_warning("src/a.html", &['〜', '⚠']),
-			"src/a.html: Shift_JIS has no U+301C, U+26A0; written as '?' inside <script> or <style>"
+			replaced_warning("src/a.html", 0, '〜'),
+			"src/a.html: Shift_JIS has no U+301C; written as '?' inside <script> or <style>"
+		);
+		assert_eq!(
+			replaced_warning("src/a.html", 1, '〜'),
+			"src/a.html and 1 more page: Shift_JIS has no U+301C; written as '?' inside <script> or <style>"
+		);
+		assert_eq!(
+			replaced_warning("src/a.html", 119, '〜'),
+			"src/a.html and 119 more pages: Shift_JIS has no U+301C; written as '?' inside <script> or <style>"
 		);
 	}
 
 	#[test]
-	fn the_warning_names_five_characters_and_counts_the_rest() {
-		let many = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+	fn each_character_is_one_warning_that_counts_its_pages() {
+		// `〜` is in every page (a layout's); `⚠` and `①` only in some.
+		let pages: [(&str, &[char]); 4] = [
+			("a.html", &['〜']),
+			("b.html", &['⚠', '〜']),
+			("c.html", &['〜', '①']),
+			("d.html", &['〜', '⚠']),
+		];
 		assert_eq!(
-			replaced_warning("a.html", &many),
-			"a.html: Shift_JIS has no U+0061, U+0062, U+0063, U+0064, U+0065 and 2 more; written as '?' inside <script> or <style>"
+			replaced_warnings(pages),
+			[
+				"a.html and 3 more pages: Shift_JIS has no U+301C; written as '?' inside <script> or <style>",
+				"b.html and 1 more page: Shift_JIS has no U+26A0; written as '?' inside <script> or <style>",
+				"c.html: Shift_JIS has no U+2460; written as '?' inside <script> or <style>",
+			]
 		);
-	}
-
-	#[test]
-	fn five_characters_are_all_named() {
-		let five = ['a', 'b', 'c', 'd', 'e'];
-		assert_eq!(
-			replaced_warning("a.html", &five),
-			"a.html: Shift_JIS has no U+0061, U+0062, U+0063, U+0064, U+0065; written as '?' inside <script> or <style>"
-		);
+		assert_eq!(replaced_warnings([]), Vec::<String>::new());
 	}
 }
