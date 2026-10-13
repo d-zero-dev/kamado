@@ -192,6 +192,21 @@ mod tests {
 	}
 
 	#[test]
+	fn non_ascii_before_a_conditional_comment_keeps_its_leading_text() {
+		let out = fmt("<p>日本語</p><!--[if IE]>please upgrade your browser<![endif]-->");
+		assert!(out.contains("<!--[if IE]>please upgrade your browser<![endif]-->"));
+	}
+
+	#[test]
+	fn non_ascii_before_a_conditional_comment_keeps_its_leading_whitespace_split() {
+		let out = fmt(
+			"<html lang=\"ja\"><head>\n<title>日本語</title>\n<!--[if lt IE 9]>\n<script src=\"/js/html5shiv.js\"></script>\n<![endif]-->\n</head></html>",
+		);
+		assert!(out.contains("<!--[if lt IE 9]>"));
+		assert!(!out.contains("<!--[if lt IE 9\n"));
+	}
+
+	#[test]
 	fn markup_nested_too_deep_is_an_error_not_a_stack_overflow() {
 		let deep = format!("{}x{}", "<div>".repeat(5000), "</div>".repeat(5000));
 		let error = format(&deep, &Options::default()).unwrap_err();
