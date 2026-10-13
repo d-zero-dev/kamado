@@ -78,7 +78,37 @@ export interface AppOptions {
 	readonly fetch?: typeof fetch;
 	/** The renderer of pages, replaceable for tests. */
 	readonly renderer?: Renderer;
+	/**
+	 * Opens the server of the project again and returns its handle. Called when
+	 * a panic in the native core left the server unusable; without it, that
+	 * request and every later one are a 500.
+	 */
+	readonly reopen?: () => string;
 }
+
+/**
+ * Whether an error says that a panic left the server of the native core
+ * unusable (the core decides it: the call that panicked and every later one
+ * on that server have this `code`).
+ * @param error - What was thrown
+ */
+function leftServerUnusable(error: unknown): boolean {
+	return (
+		error instanceof Error &&
+		(error as NodeJS.ErrnoException).code === 'KAMADO_SERVE_POISONED'
+	);
+}
+
+/**
+ * The message of what was thrown.
+ * @param error - What was thrown
+ */
+function messageOf(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/** How long a failure to open the server again stands before the next try. */
+const REOPEN_RETRY_MS = 1000;
 
 /**
  * Creates the application. The caller serves `app.fetch` and calls `close`
@@ -99,16 +129,67 @@ export function createApp(
 	options: AppOptions = {},
 ): { readonly app: Hono; readonly close: () => Promise<void> } {
 	const core = native();
-	const { handle } = description;
+	// The handle of the server of the core; replaced when a panic left it unusable.
+	let server = description.handle;
 	const renderer: Renderer = options.renderer ?? new ServeRenderer(runtimeUrl);
 	const app = new Hono();
 	setProxyRoutes(app, description.devServer.proxy, options.fetch);
 
+	// The last failure to open the server again, so that the requests of one
+	// page (its assets) do not each plan the whole site again.
+	let reopenFailure:
+		{ readonly used: string; readonly at: number; readonly reason: string } | undefined;
+
+	/**
+	 * Opens the server of the core again after `used` was left unusable, once
+	 * for all the requests that saw it fail: the first one replaces the handle,
+	 * the others find it replaced. The renderer is stopped too, so that the new
+	 * server sends it the whole context.
+	 * @param used - The handle the failed request used
+	 * @throws {Error} when the server cannot be opened (the project's config no
+	 *   longer loads, say); the same failure stands for {@link REOPEN_RETRY_MS}
+	 */
+	const reopen = async (used: string): Promise<void> => {
+		if (!options.reopen || server !== used) {
+			return;
+		}
+		if (reopenFailure?.used === used && Date.now() - reopenFailure.at < REOPEN_RETRY_MS) {
+			throw new Error(reopenFailure.reason);
+		}
+		try {
+			server = options.reopen();
+		} catch (error) {
+			reopenFailure = { used, at: Date.now(), reason: messageOf(error) };
+			throw error;
+		}
+		core.serveClose(used);
+		await renderer.close();
+	};
+
+	/**
+	 * Tells the core that the JavaScript behind an answer failed. A failure to
+	 * tell it is not reported: the request reports its own failure, and a
+	 * server that is gone (closed, or opened again) has nothing to forget.
+	 * @param handle - The server the request used
+	 * @param token - The token of the answer
+	 */
+	const cancel = (handle: string, token: string): void => {
+		try {
+			core.serveCancel(handle, token);
+		} catch {
+			// See above: the error of the request is the one that matters.
+		}
+	};
+
 	/**
 	 * Asks the core and does what it asks until there is something to send.
 	 * @param pathname - The path of the request
+	 * @param handle - The server of the core to ask, the same for the whole request
 	 */
-	const answer = async (pathname: string): Promise<{ answer: Answer; kind: string }> => {
+	const answer = async (
+		pathname: string,
+		handle: string,
+	): Promise<{ answer: Answer; kind: string }> => {
 		let current = JSON.parse(
 			core.serveRequest(handle, pathname, renderer.started ? '1' : '0'),
 		) as Answer;
@@ -130,7 +211,7 @@ export function createApp(
 					html = await renderer.render(current.job);
 				} catch (error) {
 					// The core keeps what it needs to finish the page until told.
-					core.serveCancel(handle, token);
+					cancel(handle, token);
 					throw error;
 				}
 				current = JSON.parse(core.serveFinishRender(handle, token, html)) as Answer;
@@ -144,7 +225,7 @@ export function createApp(
 				try {
 					[built] = await buildScripts(current.request);
 				} catch (error) {
-					core.serveCancel(handle, token);
+					cancel(handle, token);
 					throw error;
 				}
 				current = JSON.parse(
@@ -178,8 +259,9 @@ export function createApp(
 				ms: Math.round(performance.now() - started),
 				...(error === undefined ? {} : { error }),
 			});
+		const used = server;
 		try {
-			const { answer: result, kind } = await answer(pathname);
+			const { answer: result, kind } = await answer(pathname, used);
 			switch (result.kind) {
 				case 'text': {
 					log(200, kind);
@@ -238,7 +320,23 @@ export function createApp(
 				}
 			}
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			let message = messageOf(error);
+			let notReopened: string | undefined;
+			if (leftServerUnusable(error)) {
+				try {
+					await reopen(used);
+				} catch (reopenError) {
+					notReopened = messageOf(reopenError);
+				}
+			}
+			// Whether the server is another one now is what the page needs to know,
+			// whichever request opened it (one that was waiting on the old server
+			// fails with an error of its own).
+			if (server !== used) {
+				message += '\nThe dev server was opened again; reload the page.';
+			} else if (notReopened !== undefined) {
+				message += `\nThe dev server could not be opened again: ${notReopened}`;
+			}
 			log(500, 'error', message);
 			return ctx.text(message, 500);
 		}
@@ -248,7 +346,7 @@ export function createApp(
 		app,
 		close: async () => {
 			await renderer.close();
-			core.serveClose(handle);
+			core.serveClose(server);
 		},
 	};
 }
