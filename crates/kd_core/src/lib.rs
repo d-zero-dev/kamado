@@ -2097,6 +2097,49 @@ mod tests {
 		assert!(plain.contains("window.a  =  1;"), "{plain}");
 	}
 
+	#[test]
+	fn a_script_esbuild_cannot_read_is_kept_and_on_error_decides_what_the_page_does() {
+		let site = Site::new("broken-script");
+		site.write(
+			"src/index.html",
+			"<script>var = ;</script>\n<script>window.a  =  1;</script>\n",
+		);
+		let run = |on_error: &str| {
+			let loaded = site.config(&format!(
+				r#", "html": {{ "minify": {{ "js": true }}, "onError": "{on_error}" }}"#
+			));
+			let prepared = prepare(
+				&loaded,
+				&BuildOptions {
+					jobs: Some(1),
+					esbuild_version: Some("1".to_owned()),
+					esbuild_binary: Some(minifiers::esbuild_for_tests()),
+					..Default::default()
+				},
+				"file:///runtime.js",
+			)
+			.unwrap();
+			prepared.finish(Vec::new(), Vec::new())
+		};
+		let failure = format!(
+			"Transform 'minify' failed on {}/src/index.html: a <script>: esbuild cannot read it: Expected identifier but found \"=\"",
+			site.root
+		);
+
+		// silent: the broken script stays as the format stage left it, the rest
+		// of the page is minified.
+		let kept = "<script>\n\tvar = ;\n</script>\n<script>window.a=1;</script>\n";
+		let report = run("silent").unwrap();
+		assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+		assert_eq!(site.read("out/index.html"), kept);
+
+		let report = run("warning").unwrap();
+		assert_eq!(report.warnings, std::slice::from_ref(&failure));
+		assert_eq!(site.read("out/index.html"), kept);
+
+		assert_eq!(run("error").unwrap_err(), failure);
+	}
+
 	fn style_site(name: &str) -> (Site, Loaded) {
 		let site = Site::new(name);
 		site.write("src/index.html", "<p>x</p>");

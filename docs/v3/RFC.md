@@ -275,7 +275,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 
 `html.overrides` は、`pages` の glob（出力 URL に対して）に一致するページに限り、`html` の任意のオプションを上書きする。上書きするのは、そのエントリが**書いたオプションだけ**で（`rules` を書けば `rules` 全体が置き換わる）、書かなかったオプションは `html` の値のまま。一致するエントリが複数あれば、書かれた順に適用する。たとえば整形と圧縮を切る、`imageSizes` を切る、といった使い方ができる。エントリの中に `overrides` は書けない。
 
-**ステージの失敗と `html.onError`**: 手順 2〜6（パース・取り込み・ルール・inject・画像）は 1 つの「DOM ステージ」で、`doctype`、`format`、`minify` はそれぞれ別のステージ。v2 の `formatOptions.parseError` と同じく、ステージが失敗したとき `silent`（既定）は何も報告せずそのステージを飛ばして直前の文字列を次のステージに渡し、`warning` は警告を出して同じく飛ばし、`error` はそのページのビルドを失敗にする。DOM ステージの失敗（たとえば取り込みの path traversal）で、ルールや inject も一緒に飛ばされるので、CI では `warning` か `error` にする。警告はそのビルドで組み立てたページ分だけ出る（差分ビルドで `cached` になったページの警告は再掲されない）。
+**ステージの失敗と `html.onError`**: 手順 2〜6（パース・取り込み・ルール・inject・画像）は 1 つの「DOM ステージ」で、`doctype`、`format`、`minify` はそれぞれ別のステージ。v2 の `formatOptions.parseError` と同じく、ステージが失敗したとき `silent`（既定）は何も報告せずそのステージを飛ばして直前の文字列を次のステージに渡し、`warning` は警告を出して同じく飛ばし、`error` はそのページのビルドを失敗にする。DOM ステージの失敗（たとえば取り込みの path traversal）で、ルールや inject も一緒に飛ばされるので、CI では `warning` か `error` にする。`minify` の中で CSS / JS の 1 か所が圧縮できなかったとき（esbuild が読めない JS、esbuild が起動できない・途中で落ちた、`kd_css` が諦めた CSS）は、ステージを飛ばさず、その箇所だけを元のまま残して残りを圧縮する。`html.onError` は、その報告だけを決める（`silent` は何も言わない、`warning` は箇所と理由を警告、`error` はページの失敗）。警告はそのビルドで組み立てたページ分だけ出る（差分ビルドで `cached` になったページの警告は再掲されない）。
 
 ### 9.1 `html.rules`
 
@@ -373,7 +373,7 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
   - `<style>` 要素・`style` 属性・`media` 属性も同じ圧縮器を通す（HTML 後処理の一部）。
   - `sourcemap`: `true`、または `onServer` で開発サーバー経由のとき、末尾に inline の source map（`/*# sourceMappingURL=data:application/json;base64,… */`）を付ける。ルールと宣言の単位で、`@import` で取り込んだ元のファイルを指す（トークン単位ではない）。
 - `scripts`: esbuild（固定バージョン）。`alias` / `define` / `target`（既定 `es2022`）/ `minify` / `sourcemap` / `banner`。esbuild は JavaScript 側で `bundle: true` として呼び、どのファイルを読んだかをコアに返して差分ビルドの依存にする。v2 は `target` と `define` を渡さないので、既定の `es2022` と esnext で出力が違う構文を使うコードでは v2 と一致しない（`scripts.target` に `esnext` を指定すれば揃う）。
-- HTML 内の `<script>` の中身とイベントハンドラ属性は、コアが esbuild の実行ファイルを子プロセスとして直接呼んで圧縮する（JavaScript のスレッドを経由しない）。同じ内容は 1 回だけ圧縮し、結果はキャッシュディレクトリに残す（キー: esbuild のバージョンと内容）。esbuild が読めないコードはそのまま残す。結果は terser（v2）と同一ではないが意味は同じ。esbuild の実行ファイルが見つからないときは圧縮しない。
+- HTML 内の `<script>` の中身とイベントハンドラ属性は、コアが esbuild の実行ファイルを子プロセスとして直接呼んで圧縮する（JavaScript のスレッドを経由しない）。同じ内容は 1 回だけ圧縮し、結果はキャッシュディレクトリに残す（キー: esbuild のバージョンと内容）。esbuild が読めないコードはそのまま残し、`html.onError` に従って報告する（§9 のステージの失敗。読めなかったことも理由と一緒にキャッシュに残すので、次のビルドも同じく報告する）。結果は terser（v2）と同一ではないが意味は同じ。esbuild の実行ファイルが見つからないときは圧縮せず、`kamado build` では 1 回だけ警告する（ページごとの失敗にはしない。開発サーバーは何も言わない）。
 
 ## 11. 差分ビルド
 

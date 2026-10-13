@@ -805,8 +805,16 @@ impl Pipeline {
 			}
 		}
 		if let Some(options) = e.minify {
-			match minify::minify(&result, options, hooks) {
-				Ok(html) => result = html,
+			match minify::minify_reporting(&result, options, hooks) {
+				// A CSS or JS text the hooks could not minify is kept as it was and
+				// the rest of the page is minified: `html.onError` decides only
+				// whether that is reported, or fails the page.
+				Ok((html, hook_failures)) => {
+					result = html;
+					for failure in hook_failures {
+						failed("minify", failure, &mut warnings)?;
+					}
+				}
 				Err(error) => failed("minify", error.to_string(), &mut warnings)?,
 			}
 		}
