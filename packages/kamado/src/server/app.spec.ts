@@ -495,8 +495,39 @@ describe('createApp', () => {
 			const response = await waiting;
 
 			expect(await response.text()).toBe(
-				'the renderer was closed\nThe dev server was opened again; reload the page.',
+				'the renderer was closed\nMeanwhile the dev server was opened again after a panic in another request.',
 			);
+		});
+
+		test('a panic while telling the core to forget an answer opens the server again', async () => {
+			serveRequest.mockReturnValue(
+				JSON.stringify({
+					kind: 'render',
+					token: '1',
+					job: { page: 0 },
+					restart: false,
+					context: null,
+					update: null,
+				}),
+			);
+			serveCancel.mockImplementation(() => {
+				throw coreError('KAMADO_SERVE_POISONED');
+			});
+			const renderer = {
+				...fakeRenderer(),
+				started: true,
+				render: vi.fn(() => Promise.reject(new Error('the page threw'))),
+			};
+			const reopen = vi.fn(() => 'h2');
+			const { app } = createApp(DESCRIPTION, 'file:///rt.js', { renderer, reopen });
+
+			const response = await app.request('/a/');
+
+			// The page's own error is kept, and the server is opened again.
+			expect(await response.text()).toBe(
+				'the page threw\nThe dev server was opened again; reload the page.',
+			);
+			expect(reopen).toHaveBeenCalledOnce();
 		});
 
 		test('requests that fail together open it again once', async () => {

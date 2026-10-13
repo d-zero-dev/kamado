@@ -153,31 +153,42 @@ export function createApp(
 		if (!options.reopen || server !== used) {
 			return;
 		}
-		if (reopenFailure?.used === used && Date.now() - reopenFailure.at < REOPEN_RETRY_MS) {
+		if (
+			reopenFailure?.used === used &&
+			performance.now() - reopenFailure.at < REOPEN_RETRY_MS
+		) {
 			throw new Error(reopenFailure.reason);
 		}
 		try {
 			server = options.reopen();
 		} catch (error) {
-			reopenFailure = { used, at: Date.now(), reason: messageOf(error) };
+			reopenFailure = { used, at: performance.now(), reason: messageOf(error) };
 			throw error;
 		}
 		core.serveClose(used);
 		await renderer.close();
 	};
 
+	// The handles the core gave up while telling it to forget an answer: the
+	// request reports its own error, and is still the one to open the server
+	// again.
+	const goneWhileCancelling = new Set<string>();
+
 	/**
 	 * Tells the core that the JavaScript behind an answer failed. A failure to
-	 * tell it is not reported: the request reports its own failure, and a
-	 * server that is gone (closed, or opened again) has nothing to forget.
+	 * tell it is not thrown: the request reports its own failure, and a server
+	 * that is gone (closed, or opened again) has nothing to forget. A server
+	 * that the telling itself left unusable is remembered for the request.
 	 * @param handle - The server the request used
 	 * @param token - The token of the answer
 	 */
 	const cancel = (handle: string, token: string): void => {
 		try {
 			core.serveCancel(handle, token);
-		} catch {
-			// See above: the error of the request is the one that matters.
+		} catch (error) {
+			if (leftServerUnusable(error)) {
+				goneWhileCancelling.add(handle);
+			}
 		}
 	};
 
@@ -321,21 +332,24 @@ export function createApp(
 			}
 		} catch (error) {
 			let message = messageOf(error);
+			const gone = leftServerUnusable(error) || goneWhileCancelling.delete(used);
 			let notReopened: string | undefined;
-			if (leftServerUnusable(error)) {
+			if (gone) {
 				try {
 					await reopen(used);
 				} catch (reopenError) {
 					notReopened = messageOf(reopenError);
 				}
 			}
-			// Whether the server is another one now is what the page needs to know,
-			// whichever request opened it (one that was waiting on the old server
-			// fails with an error of its own).
-			if (server !== used) {
+			if (gone && server !== used) {
 				message += '\nThe dev server was opened again; reload the page.';
-			} else if (notReopened !== undefined) {
+			} else if (gone && notReopened !== undefined) {
 				message += `\nThe dev server could not be opened again: ${notReopened}`;
+			} else if (server !== used) {
+				// Its own error (a page that throws, say) is what to fix; the server
+				// it waited on was replaced meanwhile, which may have cut it short.
+				message +=
+					'\nMeanwhile the dev server was opened again after a panic in another request.';
 			}
 			log(500, 'error', message);
 			return ctx.text(message, 500);
