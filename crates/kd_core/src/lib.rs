@@ -2524,6 +2524,24 @@ mod tests {
 	}
 
 	#[test]
+	fn a_page_that_starts_with_an_xml_declaration_gets_its_doctype_after_it() {
+		let site = Site::new("xml_declaration");
+		site.write(
+			"src/a.html",
+			"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>x</title></head><body><p>t</p></body></html>",
+		);
+		site.write(
+			"src/b.html",
+			"<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\"><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>x</title></head><body><p>t</p></body></html>",
+		);
+		let loaded = site.config("");
+		run_build(&loaded).unwrap();
+		let expected = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">\n\t<head>\n\t\t<title>x</title>\n\t</head>\n\t<body>\n\t\t<p>t</p>\n\t</body>\n</html>\n";
+		assert_eq!(site.read("out/a.html"), expected);
+		assert_eq!(site.read("out/b.html"), expected);
+	}
+
+	#[test]
 	fn line_break_crlf_applies_to_the_whole_page() {
 		let site = Site::new("crlf");
 		site.write("src/a.html", "<p>a</p><p>b</p>");

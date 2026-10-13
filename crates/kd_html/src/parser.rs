@@ -133,6 +133,23 @@ fn is_html_integration_element(name: &str) -> bool {
 	)
 }
 
+/// Splits an XML declaration (`<?xml ... ?>`) off the start of `s`, after
+/// leading white space. `<?xml-stylesheet ?>` and an unclosed `<?xml` are not
+/// one. Returns the declaration and what follows it.
+///
+/// Why it exists: v2 (linkedom) dropped the declaration, so a page that began
+/// with it began with `<html` as far as the document rules went. The parser
+/// keeps it as a processing instruction, so those rules have to look past it.
+pub(crate) fn split_xml_declaration(s: &str) -> Option<(&str, &str)> {
+	let s = s.trim_start_matches(is_js_space);
+	let head = s.as_bytes().get(..5)?;
+	if !head.eq_ignore_ascii_case(b"<?xml") || !s[5..].chars().next().is_some_and(is_js_space) {
+		return None;
+	}
+	let end = s.find("?>")? + 2;
+	Some(s.split_at(end))
+}
+
 /// JavaScript's `\s`: used by `classList`, which normalizes `class` values.
 pub(crate) fn is_js_space(c: char) -> bool {
 	matches!(

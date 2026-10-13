@@ -6,7 +6,9 @@
 //!   (like linkedom) only closes a comment on `-->`.
 //! - Leading comments and whitespace are skipped to classify the input. It is
 //!   a document when what follows starts with `<html` or `<!doctype`,
-//!   otherwise a fragment.
+//!   otherwise a fragment. A leading `<?xml ?>` is looked past the same way
+//!   (v2 never saw it, so a page that started with it was a document) and is
+//!   written back in front of the element.
 //! - A fragment serializes all its children (text and comments included).
 //! - A document serializes its first element child only (`documentElement`),
 //!   so a doctype is not part of the output and a bare doctype gives an empty
@@ -14,7 +16,7 @@
 //!   insert into the head always have an anchor.
 
 use crate::dom::{Document, NodeId, ROOT};
-use crate::parser::{is_js_space, parse};
+use crate::parser::{is_js_space, parse, split_xml_declaration};
 use crate::serialize::{Options, inner_html_with, outer_html_with};
 
 /// A parsed page.
@@ -23,6 +25,10 @@ pub struct Page {
 	pub doc: Document,
 	/// Whether the input was a fragment.
 	pub is_fragment: bool,
+	/// The `<?xml ... ?>` a document starts with. It is written back in front
+	/// of `<html>`: `#21` keeps processing instructions, and XHTML served as
+	/// XML is invalid without it.
+	pub xml_declaration: Option<String>,
 	/// The element rules start from: `<html>` for a document, `None` for a
 	/// document with no element.
 	pub root: Option<NodeId>,
@@ -91,12 +97,17 @@ impl Page {
 	#[must_use]
 	pub fn parse(html: &str) -> Page {
 		let normalized = normalize_comment_ends(html);
-		let is_fragment = !is_document(strip_leading_comments(&normalized));
+		let declaration = split_xml_declaration(&normalized)
+			.filter(|(_, rest)| is_document(strip_leading_comments(rest)))
+			.map(|(decl, _)| decl.to_owned());
+		let is_fragment =
+			declaration.is_none() && !is_document(strip_leading_comments(&normalized));
 		let mut doc = parse(&normalized);
 		if is_fragment {
 			return Page {
 				doc,
 				is_fragment,
+				xml_declaration: None,
 				root: None,
 			};
 		}
@@ -113,6 +124,7 @@ impl Page {
 		Page {
 			doc,
 			is_fragment,
+			xml_declaration: declaration,
 			root,
 		}
 	}
@@ -129,9 +141,13 @@ impl Page {
 		if self.is_fragment {
 			return inner_html_with(&self.doc, ROOT, options);
 		}
-		self.root.map_or_else(String::new, |root| {
+		let element = self.root.map_or_else(String::new, |root| {
 			outer_html_with(&self.doc, root, options)
-		})
+		});
+		match &self.xml_declaration {
+			Some(declaration) if !element.is_empty() => format!("{declaration}{element}"),
+			_ => element,
+		}
 	}
 }
 
@@ -229,6 +245,38 @@ mod tests {
 	fn doctype_needs_whitespace_after_it_to_count() {
 		assert!(Page::parse("<!doctypehtml>").is_fragment);
 		assert!(!Page::parse("<!DocType\thtml>").is_fragment);
+	}
+
+	#[test]
+	fn an_xml_declaration_in_front_of_html_keeps_the_page_a_document() {
+		let page = Page::parse("<?xml version=\"1.0\"?>\n<html><body>x</body></html>");
+		assert!(!page.is_fragment);
+		assert_eq!(
+			page.serialize(),
+			"<?xml version=\"1.0\"?><html><head></head><body>x</body></html>"
+		);
+	}
+
+	#[test]
+	fn an_xml_declaration_in_front_of_a_doctype_drops_only_the_doctype() {
+		let page = Page::parse(
+			"<?xml version=\"1.0\"?><!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\"><html><body>x</body></html>",
+		);
+		assert!(!page.is_fragment);
+		assert_eq!(
+			page.serialize(),
+			"<?xml version=\"1.0\"?><html><head></head><body>x</body></html>"
+		);
+	}
+
+	#[test]
+	fn an_xml_declaration_in_front_of_other_content_stays_a_fragment() {
+		assert!(Page::parse("<?xml version=\"1.0\"?><p>x</p>").is_fragment);
+		assert_eq!(
+			rt("<?xml version=\"1.0\"?><p>x</p>"),
+			"<?xml version=\"1.0\"?><p>x</p>"
+		);
+		assert!(Page::parse("<?xml-stylesheet href=\"a.css\"?><html></html>").is_fragment);
 	}
 
 	#[test]
