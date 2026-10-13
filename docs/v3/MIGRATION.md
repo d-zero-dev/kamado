@@ -196,7 +196,7 @@ yarn build
 - **他の子と並ぶ生の HTML**は、`kamado/jsx` の `html()` で書く（`import { html } from 'kamado/jsx'`、`{html(markup)}`）。Pug の `!{}` と `include` したテキストの置き換え先。
 - **`<option selected>`** は React が無視する。`<select defaultValue="...">` に書く。
 - **`<link media="all">`** は空にならず `all` のまま出る（v2 と同じ）。
-- **JSX に書けない属性名**（絵文字など、`⚠️="..."` のような印）は React が出力しない。静的なマークアップなら `html.inject` に HTML 文字列として書く。
+- **JSX に書けない属性名**（絵文字など、`⚠️="..."` のような印）は React が出力しない。静的なマークアップなら `html.inject` に HTML 文字列として書く。`@click` や `[x]` のように XML の Name でない名前は、変換スクリプトが `warning:` を出す（変換結果は spread のまま残るが、描画では属性が消える）。`:foo` や `日本語` は XML の Name なので書かれる。
 - **React 19 は `<img>` ごとに `<link rel="preload" as="image">` を `<head>` に足す**（Pug では出ない）。`<html static>` のページでは出ない。それ以外のページで要らなければ `html.rules` で消す: `{ "selector": "link[rel=preload][as=image]", "action": "remove" }`。
 - **Pug の `pretty`**（`createCompileHooks` の既定は `true`）は、インラインでないタグの前と、ブロックを含むタグの閉じタグの前に改行を入れる。これは空白として出力に残り、インライン要素の隣では見た目も変わる。変換スクリプトに `--pretty` を付けると、同じ規則で `{"\n"}` を書き出す（付けなければ空白は入らない）。v2 の出力と揃えるなら `--pretty`、`pretty: false` の基準と比べるなら付けない。
   - `--pretty` が出す `{"\n"}` の大半は要らない。ブロックどうしの間は、kamado の HTML 整形（`html.format`）が改行を入れるためです。
