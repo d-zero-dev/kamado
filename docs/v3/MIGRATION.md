@@ -139,7 +139,25 @@ export default ({ meta }: { meta: { title: string } }) => (
 
 ### 3.4 変換スクリプトと、変換で見つかった注意点
 
-`node scripts/pug-to-tsx.mjs <project> <out>` は、`__assets` の `.pug` をコンポーネント（`.tsx`）に直す。`include` はコンポーネントの呼び出し（include する側の props とスコープの変数を渡す）、`each` は `map`、`if` は `&&` / `?:`、`pkg.production.*` は `site.*`、`filters.date` は `formatDate` になる。`mixin` は大文字で始まるコンポーネント、`else if` は入れ子の `?:`、`include` したテキスト（生の HTML）は `html()` になる。表現できないもの（唯一の子でない `!{}` など）は止まるので、手で直す。出力は必ず読む。変換で見つかった点:
+変換スクリプト（`scripts/pug-to-tsx.mjs`）と改行を消すツール（`scripts/prune-jsx-newlines.mjs`）は、npm パッケージ `kamado` に入っていない。案件ごとに読んで直しながら使う道具なので、このリポジトリを clone して使う。clone には Node 26 と Yarn 4（Volta か corepack）が要る。
+
+```sh
+# プロジェクトで、入っている kamado の版を見る（例: 3.0.0-alpha.2）
+node -p "require('kamado/package.json').version"
+
+git clone https://github.com/d-zero-dev/kamado.git
+cd kamado
+git checkout v<その版>
+yarn install
+yarn build
+```
+
+- 変換スクリプトは、clone の `packages/kamado/dist`（`yarn build` が作る）を読む。版によって変換の規則が違うので、この節も、checkout したタグの `docs/v3/MIGRATION.md` を読む。
+- Pug と JavaScript のパーサ（`pug-lexer`、`pug-parser`、`acorn` 8 以上）は、**変換するプロジェクト**から読む。v2 の Pug の構成なら、`pug-lexer` と `pug-parser` は、たいてい依存の依存として入っている。`acorn` は、Pug が引く 7 系しか無いことがあり、それでは新しい構文を読めない。その場合は、プロジェクトの devDependencies に `acorn` 8 以上を足す。pnpm や Yarn の PnP のように依存の依存を `node` から見せない構成では、3 つとも devDependencies に足す。PnP なら `nodeLinker: node-modules` にするか、`yarn node` で実行する。
+- 改行を消すツールが動かす kamado は、既定で**プロジェクト**の `node_modules/kamado`（`--cli` で変えられる）。
+- この節の `scripts/...` は clone の中のパスで、`<clone>` は clone したディレクトリ。
+
+`node <clone>/scripts/pug-to-tsx.mjs <project> <out>` は、`__assets` の `.pug` をコンポーネント（`.tsx`）に直す。`include` はコンポーネントの呼び出し（include する側の props とスコープの変数を渡す）、`each` は `map`、`if` は `&&` / `?:`、`pkg.production.*` は `site.*`、`filters.date` は `formatDate` になる。`mixin` は大文字で始まるコンポーネント、`else if` は入れ子の `?:`、`include` したテキスト（生の HTML）は `html()` になる。表現できないもの（唯一の子でない `!{}` など）は止まるので、手で直す。出力は必ず読む。変換で見つかった点:
 
 - **属性名は React の綴り**: `charset` → `charSet`、`itemprop` → `itemProp`、`itemtype` → `itemType`、`itemid` → `itemID`。小文字のままだと、`<meta charset>` は先頭に置かれず、`<meta itemprop>`（パンくずの `position`）が `<head>` に持ち上げられる。上のほかの属性（`datetime` → `dateTime`、`srcset` → `srcSet` など）も、`@types/react` の型が求める綴りで出す。対応表は react-dom の `possibleStandardNames` から `scripts/generate-react-prop-names.mjs` が作る。出力の HTML は、どちらの綴りでも同じになる。
 - **型検査と lint に通す**: 変換結果は、`@d-zero/tsconfig`（strictest）の型検査と、型付きの eslint に通る。project の `tsconfig.json` に次を足す。
@@ -183,9 +201,9 @@ export default ({ meta }: { meta: { title: string } }) => (
 - **Pug の `pretty`**（`createCompileHooks` の既定は `true`）は、インラインでないタグの前と、ブロックを含むタグの閉じタグの前に改行を入れる。これは空白として出力に残り、インライン要素の隣では見た目も変わる。変換スクリプトに `--pretty` を付けると、同じ規則で `{"\n"}` を書き出す（付けなければ空白は入らない）。v2 の出力と揃えるなら `--pretty`、`pretty: false` の基準と比べるなら付けない。
   - `--pretty` が出す `{"\n"}` の大半は要らない。ブロックどうしの間は、kamado の HTML 整形（`html.format`）が改行を入れるためです。
   - 要る `{"\n"}` は 2 種類ある。Pug がインラインとしない `button` / `input` / `label` / `select` / `time` / `svg` / `picture` / `iframe` などが、テキストやインラインの隣にある箇所（描画上の空白になる）。インラインの親の中のブロックのように、整形が詰める箇所（バイトが変わる）。どちらも**規則では見分けられない**。
-  - 要らない行は `scripts/prune-jsx-newlines.mjs` が消す。**`--pretty` で変換して基準と一致させてから**、`node scripts/prune-jsx-newlines.mjs <project> --output <出力ディレクトリ> <TSX のあるディレクトリ>...` を実行する。ビルドの出力を基準にして、ファイルごとにすべて消し、ビルドして比べる。出力が変わるなら半分ずつに分け、必要な行だけを残す。`pretty: false` の基準と比べるときは `--pretty` を付けないので、このツールは要らない。
+  - 要らない行は `scripts/prune-jsx-newlines.mjs` が消す。**`--pretty` で変換して基準と一致させてから**、`node <clone>/scripts/prune-jsx-newlines.mjs <project> --output <出力ディレクトリ> <TSX のあるディレクトリ>...` を実行する。ビルドの出力を基準にして、ファイルごとにすべて消し、ビルドして比べる。出力が変わるなら半分ずつに分け、必要な行だけを残す。`pretty: false` の基準と比べるときは `--pretty` を付けないので、このツールは要らない。
   - 使うときの前提と注意:
-    - `<project>` は `kamado.config.jsonc` のあるディレクトリで、`--output` と各パスはそこからの相対で書く。`yarn build` で kamado を作り、native addon を用意しておく（プロジェクトの `node_modules` に `kamado` を入れるか `--cli` で指す）。オプションは `scripts/prune-jsx-newlines.mjs` の先頭の説明を読む。
+    - `<project>` は `kamado.config.jsonc` のあるディレクトリで、`--output` と各パスはそこからの相対で書く。動かす kamado は、既定ではプロジェクトの `node_modules/kamado`（npm から入れたもので、native addon も入っている）。clone の kamado を使うなら `--cli <clone>/packages/kamado/dist/cli.js` で指し、clone で `yarn build` に加えて native addon も作っておく（Rust が要る。`cargo build --locked --offline --release -p kd_napi`。`docs/v3/development.md`）。その場合も、変換した TSX は `kamado/jsx` をプロジェクトから読むので、プロジェクトに同じ版の `kamado` が要る。オプションは `scripts/prune-jsx-newlines.mjs` の先頭の説明を読む。
     - ソースを書き換える。作業ツリーをきれいにして実行する。エラーや中断（Ctrl-C）のときは元に戻る。
     - 基準は実行時点の出力で、移行前の出力ではない。すでにある差は残る。ビルドが決定的でない（日時や乱数が出力に入る）と、基準にできないので止まる。
     - ビルドに使われないファイル（未使用の部品など）は、出力が変わらないので全部消える。そのようなファイルは手で見る。

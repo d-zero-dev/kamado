@@ -3568,21 +3568,21 @@ __metadata:
   languageName: node
   linkType: hard
 
+"acorn@npm:8.16.0, acorn@npm:^8.15.0":
+  version: 8.16.0
+  resolution: "acorn@npm:8.16.0"
+  bin:
+    acorn: bin/acorn
+  checksum: 10c0/c9c52697227661b68d0debaf972222d4f622aa06b185824164e153438afa7b08273432ca43ea792cadb24dada1d46f6f6bb1ef8de9956979288cc1b96bf9914e
+  languageName: node
+  linkType: hard
+
 "acorn@npm:^7.1.1":
   version: 7.4.1
   resolution: "acorn@npm:7.4.1"
   bin:
     acorn: bin/acorn
   checksum: 10c0/bd0b2c2b0f334bbee48828ff897c12bd2eb5898d03bf556dcc8942022cec795ac5bb5b6b585e2de687db6231faf07e096b59a361231dd8c9344d5df5f7f0e526
-  languageName: node
-  linkType: hard
-
-"acorn@npm:^8.15.0":
-  version: 8.16.0
-  resolution: "acorn@npm:8.16.0"
-  bin:
-    acorn: bin/acorn
-  checksum: 10c0/c9c52697227661b68d0debaf972222d4f622aa06b185824164e153438afa7b08273432ca43ea792cadb24dada1d46f6f6bb1ef8de9956979288cc1b96bf9914e
   languageName: node
   linkType: hard
 
@@ -8150,6 +8150,7 @@ __metadata:
     "@types/html-minifier-terser": "npm:7.0.2"
     "@types/react": "npm:19.3.0"
     "@types/react-dom": "npm:19.3.0"
+    acorn: "npm:8.16.0"
     character-entities: "npm:2.0.2"
     cssnano: "npm:8.0.10"
     dayjs: "npm:1.11.23"
@@ -8162,6 +8163,8 @@ __metadata:
     postcss: "npm:8.5.29"
     postcss-import: "npm:16.2.0"
     prettier: "npm:3.9.9"
+    pug-lexer: "npm:5.0.1"
+    pug-parser: "npm:6.0.0"
     react: "npm:19.3.0"
     react-dom: "npm:19.3.0"
     typescript: "npm:6.0.3"
@@ -10952,7 +10955,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"pug-lexer@npm:^5.0.1":
+"pug-lexer@npm:5.0.1, pug-lexer@npm:^5.0.1":
   version: 5.0.1
   resolution: "pug-lexer@npm:5.0.1"
   dependencies:
@@ -10960,6 +10963,16 @@ __metadata:
     is-expression: "npm:^4.0.0"
     pug-error: "npm:^2.0.0"
   checksum: 10c0/24195a5681953ab91c6a3ccd80a643f760dddb65e2f266bf8ccba145018ba0271536efe1572de2c2224163eb00873c2f1df0ad7ea7aa8bcbf79a66b586ca8435
+  languageName: node
+  linkType: hard
+
+"pug-parser@npm:6.0.0":
+  version: 6.0.0
+  resolution: "pug-parser@npm:6.0.0"
+  dependencies:
+    pug-error: "npm:^2.0.0"
+    token-stream: "npm:1.0.0"
+  checksum: 10c0/faa6cec43afdeb2705eb8c68dfdb2e65836238df8043ae55295ffb72450b8c7a990ea1be60adbde19f58988b9e1d18a84ea42453e2c4f104d0031f78fda737b2
   languageName: node
   linkType: hard
 
@@ -12723,6 +12736,13 @@ __metadata:
   version: 1.0.1
   resolution: "toidentifier@npm:1.0.1"
   checksum: 10c0/93937279934bd66cc3270016dd8d0afec14fb7c94a05c72dc57321f8bd1fa97e5bea6d1f7c89e728d077ca31ea125b78320a616a6c6cd0e6b9cb94cb864381c1
+  languageName: node
+  linkType: hard
+
+"token-stream@npm:1.0.0":
+  version: 1.0.0
+  resolution: "token-stream@npm:1.0.0"
+  checksum: 10c0/c1924a89686fc035d579cbe856da12306571d5fe7408eeeebe80df7c25c5cc644b8ae102d5cbc0f085d0e105f391d1a48dc0e568520434c5b444ea6c7de2b822
   languageName: node
   linkType: hard
 
