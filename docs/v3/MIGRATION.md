@@ -168,7 +168,7 @@ yarn build
   - Pug の JavaScript の無名関数の引数は `(item: any) =>` と型を付け、オブジェクトリテラルの定数は `Record<string, any>` にする。使わない `props` の引数は `_props` にする。
   - `style` の CSS の文字列と、`hidden="until-found"`（`@types/react` の型に無い値）は `as any` を付けて出す。条件式の枝の `false` と `null`（`cond ? "_blank" : false`、`cond ? "noopener" : null`）は `undefined` にする。Pug は、`false` や `null` の属性を出さず、`undefined` と同じに扱う。`disabled` のような真偽値の prop は、`false` に意味があるので残し、`null` だけを `undefined` にする。
   - 型を通すために `any` が入る。出力は必ず読み、必要なら型を付け直す。
-  - import は `@d-zero/eslint-config` の `import-x/order` の並び（パッケージ、`../`、`./` の順で、グループの間は空行、中はパスの昇順）で出し、`type PageProps` はその後ろに置く。分割代入は、再代入される名前だけを `let` にして `const` と分ける（オブジェクトパターンの引数も同じ。プロパティごとに分け、`...rest` を含む階層や、分けられない塊は、`let` にする名前を別名で受けて後から `let a = _a;` と宣言する）。
+  - import は `@d-zero/eslint-config` の `import-x/order` の並び（組み込み、パッケージ、`../`、`./`、index の順で、グループの間は空行、中はパスの昇順。index は `.` / `./` / `./index` / `./index.js` だけで、`./index.tsx` は `./` に入る）で出し、`type PageProps` はその後ろに置く。分割代入は、再代入される名前だけを `let` にして `const` と分ける（オブジェクトパターンの引数も同じ。プロパティごとに分け、`...rest` を含む階層や、分けられない塊は、`let` にする名前を別名で受けて後から `let a = _a;` と宣言する）。
   - eslint には、変換結果の TSX にだけ当てる設定を足す（flat config）。次の規則は、変換結果と合わない。
     - `@typescript-eslint/no-explicit-any`: 外す。`--fix`（lint-staged の pre-commit も）が `any` を `unknown` に書き換えて、型が通らなくなる。
     - `@typescript-eslint/no-unused-vars`: `argsIgnorePattern: '^_'` にする。使わない `props` の引数は `_props` で出る。あとから `props` を使わなくなった部品も、`_props` に直す。
