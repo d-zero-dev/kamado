@@ -1083,6 +1083,31 @@ mod tests {
 	}
 
 	#[test]
+	fn plan_builds_a_page_whose_output_path_ends_in_htm_as_html_without_its_front_matter() {
+		let site = Site::new("htm-output");
+		site.write(
+			"src/100.html",
+			"---\npath: \"/legacy/page.htm\"\ntitle: T\n---\n<p>a</p>",
+		);
+		let loaded = site.config(r#", "pages": { "outputPathField": "path" }"#);
+		let plan = plan(&loaded.config).unwrap();
+		assert_eq!(plan.pages.len(), 1);
+		let page = &plan.pages[0];
+		assert_eq!(page.file.url, "/legacy/page.htm");
+		assert_eq!(
+			page.file.output_path,
+			format!("{}/out/legacy/page.htm", site.root)
+		);
+		assert_eq!(page.kind, PageKind::Html);
+		// The front matter is metadata, not part of the output.
+		assert_eq!(page.body.as_deref(), Some("<p>a</p>"));
+		assert_eq!(
+			Value::Object(page.meta.clone()).to_json(),
+			r#"{"path":"/legacy/page.htm","title":"T"}"#
+		);
+	}
+
+	#[test]
 	fn plan_errors_are_specific() {
 		let site = Site::new("errors");
 		site.write("src/a.html", "---\ntitle: [unclosed\n---\n");
@@ -2519,6 +2544,21 @@ mod tests {
 		run_build(&loaded).unwrap();
 		assert_eq!(
 			site.read("out/a.html"),
+			"<!DOCTYPE html>\n<html>\n\t<head>\n\t\t<title>t</title>\n\t</head>\n\t<body>\n\t\t<input disabled>\n\t\t<p>x</p>\n\t</body>\n</html>\n"
+		);
+	}
+
+	#[test]
+	fn a_page_written_to_an_htm_path_gets_the_same_doctype_format_and_minify_as_html() {
+		let site = Site::new("htm_pipeline");
+		site.write(
+			"src/100.html",
+			&format!("---\npath: \"/legacy/page.htm\"\n---\n{DOCUMENT}"),
+		);
+		let loaded = site.config(r#", "pages": { "outputPathField": "path" }"#);
+		run_build(&loaded).unwrap();
+		assert_eq!(
+			site.read("out/legacy/page.htm"),
 			"<!DOCTYPE html>\n<html>\n\t<head>\n\t\t<title>t</title>\n\t</head>\n\t<body>\n\t\t<input disabled>\n\t\t<p>x</p>\n\t</body>\n</html>\n"
 		);
 	}
