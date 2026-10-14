@@ -8,9 +8,9 @@ export type TitleListOptions = {
 	readonly separator?: string;
 	/** Base URL; items with this URL (and `/`) are excluded. Default `'/'`. */
 	readonly baseURL?: string;
-	/** String prepended to the title. Default `''`. */
+	/** String prepended to the title, trimmed. Default `''`. */
 	readonly prefix?: string;
-	/** String appended to the title. Default `siteName`. */
+	/** String appended to the title with no separator, trimmed. Default `siteName`. */
 	readonly suffix?: string;
 	/** Site name. */
 	readonly siteName?: string;
@@ -20,13 +20,23 @@ export type TitleListOptions = {
 
 /**
  * Generates the title string from a breadcrumb list, deepest page first.
+ *
+ * The top page (`baseURL` and `/`) is excluded from the titles. A page
+ * with no title left falls back to `fallback`, and `suffix` is appended
+ * with no separator, so the top page gets `siteName` twice by default
+ * (`SITESITE`); pass `suffix: ''` to avoid it. `prefix` and `suffix` are
+ * trimmed, so put the leading separator in the title, not in them.
  * @param breadcrumbs - Breadcrumb items.
  * @param options - Title options.
  * @returns The title.
  * @example
  * ```ts
  * titleList(breadcrumbs, { separator: ' | ', siteName: 'My Site', prefix: '📄 ' });
- * // "📄 Page Title | SectionMy Site"
+ * // "📄Page Title | SectionMy Site"
+ * titleList([{ href: '/', title: 'Top' }], { siteName: 'My Site' });
+ * // "My SiteMy Site"
+ * titleList([{ href: '/', title: 'Top' }], { siteName: 'My Site', suffix: '' });
+ * // "My Site"
  * ```
  */
 export function titleList(
