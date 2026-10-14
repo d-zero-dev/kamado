@@ -54,10 +54,12 @@ import path from 'node:path';
 
 import {
 	blockText,
+	booleanCondition,
 	isIdentifierUsed,
 	jsxDeclarations,
 	literalKeys,
 	omittedBranchesToUndefined,
+	orderImports,
 	pruneUnusedImports,
 	typedExpression,
 	typedProgram,
@@ -534,13 +536,30 @@ function componentText(ctx, name, body, exported, params) {
 	const lines = [''];
 	// The body may assign to an argument (`- options = options || {}`): a `let` then.
 	const keyword = (names) => (names.some((n) => ctx.assigned.has(n)) ? 'let' : 'const');
-	const plain = params.filter((p) => !p.pattern);
-	if (plain.length > 0) {
-		const list = plain.map((p) => (p.init ? `${p.name} = ${p.init}` : p.name));
-		lines.push(
-			`\t${keyword(plain.map((p) => p.name))} { ${list.join(', ')} } = props as any;`,
+	// Only the names that it assigns to are `let` (`prefer-const` refuses the others in the
+	// same declaration, and `--fix` cannot split it): one declaration for each run of the
+	// same keyword, in the order of the names, as a default may read a name before it.
+	const declare = (names, source) => {
+		const runs = [];
+		for (const entry of names) {
+			const kind = keyword([entry.name]);
+			if (runs.at(-1)?.kind === kind) runs.at(-1).texts.push(entry.text);
+			else runs.push({ kind, texts: [entry.text] });
+		}
+		return runs.map(
+			({ kind, texts }) => `\t${kind} { ${texts.join(', ')} } = ${source};`,
 		);
-	}
+	};
+	const plain = params.filter((p) => !p.pattern);
+	lines.push(
+		...declare(
+			plain.map((p) => ({
+				name: p.name,
+				text: p.init ? `${p.name} = ${p.init}` : p.name,
+			})),
+			'props as any',
+		),
+	);
 	for (const p of params.filter((q) => q.pattern)) {
 		lines.push(`\t${keyword(p.names)} ${p.pattern} = props as any;`);
 	}
@@ -551,8 +570,15 @@ function componentText(ctx, name, body, exported, params) {
 		for (const v of dataVars) lines.push(`\tconst ${v} = _data.${v};`);
 	}
 	if (external.length > 0) {
-		lines.push('\tconst _vars = { ...(props as any).meta, ...props } as any;');
-		lines.push(`\t${keyword(external)} { ${external.join(', ')} } = _vars;`);
+		// The spread of an `any` is an `any`: a cast to it is an error of
+		// `no-unnecessary-type-assertion`.
+		lines.push('\tconst _vars = { ...(props as any).meta, ...props };');
+		lines.push(
+			...declare(
+				external.map((name) => ({ name, text: name })),
+				'_vars',
+			),
+		);
 	}
 	for (const h of ctx.hoisted) lines.push(`\t${h}`);
 	lines.push(`\treturn (\n${body}\n\t);`);
@@ -583,12 +609,22 @@ function importLines(...contexts) {
 			named.set(spec, set);
 		}
 	}
-	// The package ships no props types: the page props are declared where they are used.
-	const head = ['type PageProps = Record<string, any>;'];
-	if (rt.size > 0) head.push(`import { ${[...rt].join(', ')} } from 'kamado/jsx';`);
-	for (const [name, spec] of imports) head.push(`import ${name} from '${spec}';`);
+	const entries = [];
+	if (rt.size > 0) {
+		entries.push({
+			spec: 'kamado/jsx',
+			line: `import { ${[...rt].join(', ')} } from 'kamado/jsx';`,
+		});
+	}
+	for (const [name, spec] of imports)
+		entries.push({ spec, line: `import ${name} from '${spec}';` });
 	for (const [spec, names] of named)
-		head.push(`import { ${[...names].join(', ')} } from '${spec}';`);
+		entries.push({ spec, line: `import { ${[...names].join(', ')} } from '${spec}';` });
+	// The package ships no props types: the page props are declared where they are used,
+	// after the imports (a declaration before them is an error of `import-x/order`).
+	const head = orderImports(entries);
+	if (head.length > 0) head.push('');
+	head.push('type PageProps = Record<string, any>;');
 	if (contexts.some((ctx) => ctx.usesEach)) head.push('', EACH_OF);
 	return head;
 }
@@ -1290,13 +1326,16 @@ function node(n, ctx, depth) {
 			];
 		}
 		case 'Conditional': {
-			const test = '(' + use(n.test, ctx) + ')';
+			const condition = use(n.test, ctx);
+			const test = `(${condition})`;
 			ctx.nesting++;
 			const cons = block(n.consequent.nodes, ctx, depth + 1);
 			if (!n.alternate) {
 				ctx.nesting--;
-				// `!!`: a Pug `if` prints nothing for `0`, while `0 && x` is `0` in JSX.
-				return [`${pad}{!!${test} && (\n${cons}\n${pad})}`];
+				// `!!`: a Pug `if` prints nothing for `0`, while `0 && x` is `0` in JSX. A
+				// condition that is a boolean already needs none.
+				const bool = booleanCondition(condition, acorn);
+				return [`${pad}{${bool ?? `!!${test}`} && (\n${cons}\n${pad})}`];
 			}
 			// `else if` is another conditional: its expression, without the braces
 			// that would make it a child.
