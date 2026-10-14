@@ -10,10 +10,12 @@ import { describe, expect, test } from 'vitest';
 import { readPropNames, render } from './generate-react-prop-names.mjs';
 import {
 	blockText,
+	booleanCondition,
 	isIdentifierUsed,
 	jsxDeclarations,
 	literalKeys,
 	omittedBranchesToUndefined,
+	orderImports,
 	pruneUnusedImports,
 	typedExpression,
 	typedProgram,
@@ -305,14 +307,14 @@ describe('pruneUnusedImports', () => {
 		const text = ["import { Meta } from './m.tsx';", '', 'const x = MetaBody;'].join(
 			'\n',
 		);
-		expect(pruneUnusedImports(text)).toBe(['', 'const x = MetaBody;'].join('\n'));
+		expect(pruneUnusedImports(text)).toBe('const x = MetaBody;');
 	});
 
 	test('a name that is only the property of an object is not used', () => {
 		const text = ["import { Meta } from './m.tsx';", '', 'const x = props.Meta;'].join(
 			'\n',
 		);
-		expect(pruneUnusedImports(text)).toBe(['', 'const x = props.Meta;'].join('\n'));
+		expect(pruneUnusedImports(text)).toBe('const x = props.Meta;');
 	});
 
 	test('a name with a dollar sign is read as it is', () => {
@@ -330,6 +332,140 @@ describe('pruneUnusedImports', () => {
 			'const x = F;',
 		].join('\n');
 		expect(pruneUnusedImports(text)).toBe(text);
+	});
+
+	test('takes the blank line of a group with no name left, and keeps one between the others', () => {
+		const text = [
+			"import { html } from 'kamado/jsx';",
+			'',
+			"import A from '../a.tsx';",
+			'',
+			"import B from './b.tsx';",
+			'',
+			'const x = [html, B];',
+		].join('\n');
+		expect(pruneUnusedImports(text)).toBe(
+			[
+				"import { html } from 'kamado/jsx';",
+				'',
+				"import B from './b.tsx';",
+				'',
+				'const x = [html, B];',
+			].join('\n'),
+		);
+	});
+
+	test('takes the blank line of the first group when it has no name left', () => {
+		const text = [
+			"import { html } from 'kamado/jsx';",
+			'',
+			"import A from './a.tsx';",
+			'',
+			'const x = A;',
+		].join('\n');
+		expect(pruneUnusedImports(text)).toBe(
+			["import A from './a.tsx';", '', 'const x = A;'].join('\n'),
+		);
+	});
+
+	test('leaves the blank lines of the code below the imports', () => {
+		const text = [
+			"import A from './a.tsx';",
+			'',
+			'const x = A;',
+			'',
+			'',
+			'const y = 1;',
+		].join('\n');
+		expect(pruneUnusedImports(text)).toBe(text);
+	});
+});
+
+describe('orderImports', () => {
+	const line = (spec: string) => `import X from '${spec}';`;
+	const entry = (spec: string) => ({ spec, line: line(spec) });
+
+	test('puts the packages, the parents, the siblings and the index in this order, a blank line apart', () => {
+		expect(
+			orderImports(
+				['./index.tsx', './a.tsx', '../b.tsx', 'kamado/jsx', '../../c.tsx'].map((spec) =>
+					entry(spec),
+				),
+			),
+		).toEqual([
+			line('kamado/jsx'),
+			'',
+			line('../../c.tsx'),
+			line('../b.tsx'),
+			'',
+			line('./a.tsx'),
+			'',
+			line('./index.tsx'),
+		]);
+	});
+
+	test('sorts a group by the module path, a segment at a time', () => {
+		expect(
+			orderImports(
+				[
+					'../mixin/meta.tsx',
+					'../component/c-header.tsx',
+					'../component/c-footer.tsx',
+				].map((spec) => entry(spec)),
+			),
+		).toEqual([
+			line('../component/c-footer.tsx'),
+			line('../component/c-header.tsx'),
+			line('../mixin/meta.tsx'),
+		]);
+	});
+
+	test('keeps the order of the lines of one module', () => {
+		const lines = [
+			{ spec: './a.tsx', line: "import A from './a.tsx';" },
+			{ spec: './a.tsx', line: "import { B } from './a.tsx';" },
+		];
+		expect(orderImports(lines)).toEqual(lines.map((l) => l.line));
+	});
+
+	test('writes nothing for no import', () => {
+		expect(orderImports([])).toEqual([]);
+	});
+});
+
+describe('booleanCondition', () => {
+	test('gives a negation and a comparison as they are', () => {
+		expect(booleanCondition('!options.hideOriginal', acorn)).toBe(
+			'!options.hideOriginal',
+		);
+		expect(booleanCondition('!(a || b)', acorn)).toBe('!(a || b)');
+		expect(booleanCondition('lang === "en"', acorn)).toBe('lang === "en"');
+		expect(booleanCondition('a.length >= 1', acorn)).toBe('a.length >= 1');
+		expect(booleanCondition('"x" in obj', acorn)).toBe('"x" in obj');
+		expect(booleanCondition('a instanceof B', acorn)).toBe('a instanceof B');
+	});
+
+	test('gives the booleans joined by && or || in parentheses, as the left side of a &&', () => {
+		expect(booleanCondition('a === 1 || b === 2', acorn)).toBe('(a === 1 || b === 2)');
+		expect(booleanCondition('!a && b > 1', acorn)).toBe('(!a && b > 1)');
+	});
+
+	test('leaves a condition that may not be a boolean to the caller', () => {
+		expect(booleanCondition('items.length', acorn)).toBeUndefined();
+		expect(booleanCondition('a && b', acorn)).toBeUndefined();
+		expect(booleanCondition('a === 1 || b', acorn)).toBeUndefined();
+		expect(booleanCondition('a ?? !b', acorn)).toBeUndefined();
+		expect(booleanCondition('a ? !b : !c', acorn)).toBeUndefined();
+		expect(booleanCondition('f(!a)', acorn)).toBeUndefined();
+		expect(booleanCondition('a, !b', acorn)).toBeUndefined();
+	});
+
+	test('leaves a source that is wrapped in parentheses of its own to the caller', () => {
+		expect(booleanCondition('(!a)', acorn)).toBeUndefined();
+	});
+
+	test('leaves a source that is not an expression to the caller', () => {
+		expect(booleanCondition('a ===', acorn)).toBeUndefined();
 	});
 });
 

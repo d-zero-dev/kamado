@@ -48,6 +48,12 @@ html(lang="ja")
 		link(⚠️="note" rel="stylesheet" href="/a.css")
 		div(@click="go" :foo="x" 日本語="y" $foo="z")
 		p tbody > tr
+		if !off
+			p negation
+		if lang === "en" || lang === "ja"
+			p comparison
+		if items
+			p any
 		each item, index in items
 			span= item
 		each item in items
@@ -120,6 +126,15 @@ mixin guard(label)
 mixin swap(a, b)
 	- [a, b] = [b, a]
 	p= a
+mixin partial(a, b = 2, options)
+	- options = options || {}
+	p= a
+	p= b
+	p= options.label
+mixin chained(a, b = a, c)
+	- a = a + 1
+	p= b
+	p= c
 mixin keep(label)
 	p= label
 mixin list(items)
@@ -351,6 +366,51 @@ describe.skipIf(!available && !process.env.CI)(
 			expect(mixins).toContain('let { label } = props as any;');
 			expect(mixins).toContain('const { label } = props as any;');
 			expect(mixins).not.toContain('const { options');
+		});
+
+		test('declares with let only the mixin arguments that the body assigns to', () => {
+			const mixins = read('__assets/_libs/mixin/r.tsx');
+			expect(mixins).toContain(
+				'\tconst { a, b = 2 } = props as any;\n\tlet { options } = props as any;\n',
+			);
+			// A default reads the names before it: the declarations keep the order of the arguments.
+			expect(mixins).toContain(
+				'\tlet { a } = props as any;\n\tconst { b = a, c } = props as any;\n',
+			);
+		});
+
+		test('declares the variables that the page gets from its props with const unless it assigns to them', () => {
+			const page = read('__assets/htdocs/index.tsx');
+			expect(page).toMatch(/\n\tconst \{ [^}]*\bitems\b[^}]* \} = _vars;\n/);
+			expect(page).not.toContain('let {');
+		});
+
+		test('does not cast the variables of the props, which are an any already', () => {
+			const page = read('__assets/htdocs/index.tsx');
+			expect(page).toContain('const _vars = { ...(props as any).meta, ...props };');
+		});
+
+		test('writes a condition that is a boolean with no double negation, and any other with one', () => {
+			const page = read('__assets/htdocs/index.tsx');
+			expect(page).toContain('{!off && (');
+			expect(page).toContain('{(lang === "en" || lang === "ja") && (');
+			expect(page).toContain('{!!(items) && (');
+			expect(page).not.toContain('!!(!');
+		});
+
+		test('puts the type of the props after the imports, which go in the order of import-x/order', () => {
+			const page = read('__assets/htdocs/index.tsx');
+			const head = page.slice(0, page.indexOf('\n\n', page.indexOf('type PageProps')));
+			expect(head).toBe(
+				[
+					"import { html } from 'kamado/jsx';",
+					'',
+					"import CStatic from '../_libs/component/c-static.tsx';",
+					"import { A, Card } from '../_libs/mixin/m.tsx';",
+					'',
+					'type PageProps = Record<string, any>;',
+				].join('\n'),
+			);
 		});
 
 		test('writes a constant at the top of a file of mixins at the top of the module', () => {

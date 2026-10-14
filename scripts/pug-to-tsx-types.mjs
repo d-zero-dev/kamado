@@ -206,7 +206,9 @@ export function blockText(nodes) {
  * file that it includes, and `noUnusedLocals` refuses what it does not call. A name counts
  * as used when it appears in the code outside the import lines (see
  * {@link isIdentifierUsed}). Only the forms that the converter writes are read:
- * `import { A, B } from '...';` and `import A from '...';`.
+ * `import { A, B } from '...';` and `import A from '...';`. The blank lines that the dropped
+ * lines leave in the block of imports (a group with nothing left) go with them, so that the
+ * groups that {@link orderImports} writes stay one blank line apart.
  * @param {string} text - The module
  * @returns {string}
  * @example
@@ -214,6 +216,15 @@ export function blockText(nodes) {
  * // "import { A } from './a.tsx';\nconst x = A;"
  */
 export function pruneUnusedImports(text) {
+	return tidyImportBlock(pruneImportLines(text));
+}
+
+/**
+ * The import lines of the module without the names that nothing uses.
+ * @param {string} text - The module
+ * @returns {string}
+ */
+function pruneImportLines(text) {
 	const lines = text.split('\n');
 	const code = lines.filter((line) => !line.startsWith('import ')).join('\n');
 	/** @type {string[]} */
@@ -237,6 +248,123 @@ export function pruneUnusedImports(text) {
 		kept.push(line);
 	}
 	return kept.join('\n');
+}
+
+/**
+ * The module with no blank line at its top and no two in a row among its imports: only the
+ * block before the first line that is neither blank nor an import is touched.
+ * @param {string} text - The module
+ * @returns {string}
+ */
+function tidyImportBlock(text) {
+	const lines = text.split('\n');
+	let end = lines.findIndex((line) => line !== '' && !line.startsWith('import '));
+	if (end === -1) end = lines.length;
+	/** @type {string[]} */
+	const tidy = [];
+	for (const line of lines.slice(0, end)) {
+		if (line === '' && (tidy.length === 0 || tidy.at(-1) === '')) continue;
+		tidy.push(line);
+	}
+	return [...tidy, ...lines.slice(end)].join('\n');
+}
+
+/**
+ * The import lines in the order that `import-x/order` of `@d-zero/eslint-config` asks for:
+ * the packages, then the parent directories (`../`), then the siblings (`./`), then the
+ * index (`./index`), one blank line between the groups. Inside a group the module paths go
+ * in the alphabetical order, compared a segment at a time, and the lines of one module keep
+ * the order they came in. Only the module paths that the converter writes are told apart:
+ * `kamado/jsx` stands for the packages, and the rest are relative paths.
+ * @param {readonly { spec: string; line: string }[]} entries - The lines and their module paths
+ * @returns {string[]} The lines, the blank ones between the groups included
+ * @example
+ * orderImports([
+ * 	{ spec: './a.tsx', line: "import A from './a.tsx';" },
+ * 	{ spec: '../z.tsx', line: "import Z from '../z.tsx';" },
+ * 	{ spec: 'kamado/jsx', line: "import { html } from 'kamado/jsx';" },
+ * ]);
+ * // ["import { html } from 'kamado/jsx';", '', "import Z from '../z.tsx';", '', "import A from './a.tsx';"]
+ */
+export function orderImports(entries) {
+	/** @param {string} spec */
+	const groupOf = (spec) => {
+		if (!spec.startsWith('.')) return 0;
+		if (spec.startsWith('..')) return 1;
+		return /^\.\/?(?:index(?:\.\w+)?)?$/.test(spec) ? 3 : 2;
+	};
+	/**
+	 * @param {string} a @param {string} b
+	 * @param b
+	 */
+	const compareSpec = (a, b) => {
+		const left = a.split('/');
+		const right = b.split('/');
+		for (let i = 0; i < Math.min(left.length, right.length); i++) {
+			if (left[i] !== right[i]) return left[i] < right[i] ? -1 : 1;
+		}
+		return left.length - right.length;
+	};
+	/** @type {string[]} */
+	const out = [];
+	for (let group = 0; group < 4; group++) {
+		const lines = entries
+			.filter(({ spec }) => groupOf(spec) === group)
+			.toSorted((a, b) => compareSpec(a.spec, b.spec))
+			.map(({ line }) => line);
+		if (lines.length === 0) continue;
+		if (out.length > 0) out.push('');
+		out.push(...lines);
+	}
+	return out;
+}
+
+/**
+ * The condition of a Pug `if` as the left side of a `&&` in JSX, when it is a boolean
+ * already: `!x`, a comparison, or such expressions joined by `&&` / `||`. Pug prints nothing
+ * for `0` and `""`, while `0 && x` is `0` in JSX, so any other condition gets a `!!` from the
+ * caller; for a boolean one the `!!` is no change, and the eslint rule
+ * `no-extra-boolean-cast` reports it.
+ * @param {string} source - The condition, an expression of JavaScript
+ * @param {Parser} acorn - The parser
+ * @returns {string | undefined} The condition to write before the `&&`, or `undefined` when it may not be a boolean
+ * @example
+ * booleanCondition('!options.hideOriginal', acorn); // '!options.hideOriginal'
+ * booleanCondition('a === 1', acorn); // 'a === 1'
+ * booleanCondition('a === 1 || b === 2', acorn); // '(a === 1 || b === 2)'
+ * booleanCondition('items.length', acorn); // undefined
+ */
+export function booleanCondition(source, acorn) {
+	let node;
+	try {
+		node = acorn.parseExpressionAt(`(${source})`, 0, { ecmaVersion: 'latest' });
+	} catch {
+		return;
+	}
+	const comparisons = new Set([
+		'==',
+		'===',
+		'!=',
+		'!==',
+		'<',
+		'<=',
+		'>',
+		'>=',
+		'in',
+		'instanceof',
+	]);
+	/** @param {any} n */
+	const isBoolean = (n) =>
+		(n.type === 'UnaryExpression' && n.operator === '!') ||
+		(n.type === 'BinaryExpression' && comparisons.has(n.operator)) ||
+		(n.type === 'LogicalExpression' &&
+			(n.operator === '&&' || n.operator === '||') &&
+			isBoolean(n.left) &&
+			isBoolean(n.right));
+	// The parser stops after the first expression: a source it did not read to the end (or
+	// one that is wrapped in parentheses of its own) is left to the caller.
+	if (node.end !== source.trimEnd().length + 1 || !isBoolean(node)) return;
+	return node.type === 'LogicalExpression' ? `(${source})` : source;
 }
 
 /**

@@ -168,6 +168,7 @@ yarn build
   - Pug の JavaScript の無名関数の引数は `(item: any) =>` と型を付け、オブジェクトリテラルの定数は `Record<string, any>` にする。使わない `props` の引数は `_props` にする。
   - `style` の CSS の文字列と、`hidden="until-found"`（`@types/react` の型に無い値）は `as any` を付けて出す。条件式の枝の `false` と `null`（`cond ? "_blank" : false`、`cond ? "noopener" : null`）は `undefined` にする。Pug は、`false` や `null` の属性を出さず、`undefined` と同じに扱う。`disabled` のような真偽値の prop は、`false` に意味があるので残し、`null` だけを `undefined` にする。
   - 型を通すために `any` が入る。出力は必ず読み、必要なら型を付け直す。
+  - import は `@d-zero/eslint-config` の `import-x/order` の並び（パッケージ、`../`、`./` の順で、グループの間は空行、中はパスの昇順）で出し、`type PageProps` はその後ろに置く。分割代入は、再代入される名前だけを `let` にして `const` と分ける。
   - eslint には、変換結果の TSX にだけ当てる設定を足す（flat config）。次の規則は、変換結果と合わない。
     - `@typescript-eslint/no-explicit-any`: 外す。`--fix`（lint-staged の pre-commit も）が `any` を `unknown` に書き換えて、型が通らなくなる。
     - `@typescript-eslint/no-unused-vars`: `argsIgnorePattern: '^_'` にする。使わない `props` の引数は `_props` で出る。あとから `props` を使わなくなった部品も、`_props` に直す。
@@ -214,7 +215,7 @@ yarn build
 - **`on*` 属性の文字列**（`oncontextmenu="return false;"`）は、`<html static>`（`kdStatic` のページ）の中でだけ出る。React と同じく、ふだんは `on*` をすべて捨てる（データ由来の props が実行可能な属性にならないように）。
 - **`style` を CSS の文字列で渡す**（`style=\`anchor-name: ${x}\``）は、`kamado/jsx`の`styleOf()` を通してオブジェクトにする。
 - **`data-*` / `aria-*` と `draggable` / `spellcheck` / `contenteditable` に `true` と `false`**: Pug は `true` を空の属性（`data-x=""`）で出し、`false` は属性を出さない。React は `"true"` と `"false"` と書く。変換スクリプトは `true` を `""`、`false` を `undefined` にして出し、最終の HTML を移行前に合わせる。
-- **`if (x)` が `0` を返す式**: Pug は何も出さず、JSX の `x && <b/>` は `0` を出す。変換スクリプトは `!!` を付ける。
+- **`if (x)` が `0` を返す式**: Pug は何も出さず、JSX の `x && <b/>` は `0` を出す。変換スクリプトは `!!` を付ける（`!x` や比較のように、条件がすでに真偽値の式なら付けない）。
 - **未宣言の変数への代入**（`- isHome = false`）は、変換スクリプトが `let` を足す。
 - **`#{tag}`（動的なタグ名）** は大文字の変数に入れたコンポーネントとして書く（文字列の型を `k()` が受け取る）。
 - **`extends` / `block`**: レイアウトは `slots` の props を受け取るコンポーネント、ページは `slots={{ content: (...) }}` を渡す。`block vars` の `var opts = ...` は props の既定値と、ページから渡す値になる。
