@@ -344,28 +344,33 @@ yarn kamado build --incremental        # そのページだけ built
 
 意図した差です（`docs/v3/RFC.md` §2 の番号つき）。これ以外の差は、v3 の不具合か移行の誤りです。
 
-| 内容                                                                                                                                         | RFC  |
-| -------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| 本文中の `<?php ... ?>` を v2 は**削除**した。v3 は保持する                                                                                  | #21  |
-| `<title>` 中の `&amp;` と `&lt;` の扱い（展開すると意味が変わる並びだけ、展開しない）                                                        | #27  |
-| `<script>` の開始タグの属性値に `><` を含むとき、v2 は本文が壊れた                                                                           | #28  |
-| `characterEntities` を v2 は `<script>` / `<style>` の中も置換した。v3 は置換しない                                                          | #29  |
-| 断片の途中の `<!doctype>` で v2 は内容を落とした                                                                                             | #30  |
-| 先頭の `<?xml ... ?>` を v2 は**削除**した。v3 は先頭に保持し、そのあとに doctype を補う                                                     | #33  |
-| `outputPathField` が `.html` 以外の拡張子（`.htm` など）を指すページを、v2 は処理せず front matter 付きの入力のまま書いた。v3 は処理する     | #34  |
-| `breadcrumbs` の起点（`site.baseURL` のパス部分）                                                                                            | §7.3 |
-| YAML の日付が文字列                                                                                                                          | #19  |
-| CSS の圧縮結果（cssnano と同じ意味で、バイトは違いうる。サイズは近い。`initial` を `normal` に縮める `reduce-initial` などは移植していない） | §10  |
-| HTML 内の CSS（`<style>` と `style` 属性）の引用符。下の注を参照                                                                             | #32  |
-| `<script>` の圧縮結果（terser と esbuild）                                                                                                   | §10  |
-| prettier の幅（入力ごとから統一へ）                                                                                                          | #15  |
-| minify を切ったとき（`minify: false`、`minify.js: false`、esbuild が見つからない）、v2 は整形済みの JS / CSS を出し、v3 は書かれたまま出す   | #32  |
-| HTML のコメント（JSX には書けない）。`<head>` 内の並び（React 19 の持ち上げ）                                                                | §7.1 |
-| フォームの属性の並び（`action` と `method` は React が最後に出す）                                                                           | §7.1 |
+| 内容                                                                                                                                                                                                                                                            | RFC  |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 本文中の `<?php ... ?>` を v2 は**削除**した。v3 は保持する                                                                                                                                                                                                     | #21  |
+| `<title>` 中の `&amp;` と `&lt;` の扱い（展開すると意味が変わる並びだけ、展開しない）                                                                                                                                                                           | #27  |
+| `<script>` の開始タグの属性値に `><` を含むとき、v2 は本文が壊れた                                                                                                                                                                                              | #28  |
+| `characterEntities` を v2 は `<script>` / `<style>` の中も置換した。v3 は置換しない                                                                                                                                                                             | #29  |
+| 断片の途中の `<!doctype>` で v2 は内容を落とした                                                                                                                                                                                                                | #30  |
+| 先頭の `<?xml ... ?>` を v2 は**削除**した。v3 は先頭に保持し、そのあとに doctype を補う                                                                                                                                                                        | #33  |
+| `outputPathField` が `.html` 以外の拡張子（`.htm` など）を指すページを、v2 は処理せず front matter 付きの入力のまま書いた。v3 は処理する                                                                                                                        | #34  |
+| `breadcrumbs` の起点（`site.baseURL` のパス部分）                                                                                                                                                                                                               | §7.3 |
+| YAML の日付が文字列                                                                                                                                                                                                                                             | #19  |
+| CSS の圧縮結果（cssnano と同じ意味で、バイトは違いうる。サイズは近い。`initial` を `normal` に縮める `reduce-initial` などは移植していない）。値の形、隣り合う `@media` の結合、custom property の値、プレフィックス（autoprefixer の足し引きをしない）は下の注 | §10  |
+| HTML 内の CSS（`<style>` と `style` 属性）の引用符。下の注を参照                                                                                                                                                                                                | #32  |
+| `<script>` の圧縮結果（terser と esbuild）                                                                                                                                                                                                                      | §10  |
+| prettier の幅（入力ごとから統一へ）                                                                                                                                                                                                                             | #15  |
+| minify を切ったとき（`minify: false`、`minify.js: false`、esbuild が見つからない）、v2 は整形済みの JS / CSS を出し、v3 は書かれたまま出す                                                                                                                      | #32  |
+| HTML のコメント（JSX には書けない）。`<head>` 内の並び（React 19 の持ち上げ）                                                                                                                                                                                   | §7.1 |
+| フォームの属性の並び（`action` と `method` は React が最後に出す）                                                                                                                                                                                              | §7.1 |
 
 HTML 内の CSS の引用符（上の表）: v2 は prettier で整形してから html-minifier-terser（clean-css）で圧縮する。prettier が引用符を `'` から `"` に変える（属性内は `&quot;`）ので、`url('x')` は `url(&quot;x&quot;)` に変わり、`style="font-family:'Helvetica Neue', Arial"` は `font-family:&quot` に壊れる。v3 は Rust の圧縮器で、引用符が要らない値は外す（`url(x)`、`font-family:Helvetica Neue,Arial`、`<style>` 内は `font-family:Foo Bar`）。v3 は元の CSS の意味を保つ。v2 の出力と比べて差が出たら、まずこの差かを確かめる（v2 で壊れていたものは、v3 では直る）。
 
-CSS の圧縮結果の違い（表の「CSS の圧縮結果」の行）は、値の形の違いで、意味は同じです。v2 の出力と比べて見つかる例: `border: #ccc solid 1px` は `1px solid #ccc` に、`animation: spin 1s infinite linear` は `1s linear infinite` に、`rotate(360deg)` は `rotate(1turn)` に、`unicode-range: U+0000-00FF` は `u+00??` になる。
+CSS の圧縮結果の違い（表の「CSS の圧縮結果」の行）は、値の形の違いで、意味は同じです。v2 の出力と比べて見つかる例: `border: #ccc solid 1px` は `1px solid #ccc` に、`animation: spin 1s infinite linear` は `1s linear infinite` に、`rotate(360deg)` は `rotate(1turn)` に、`unicode-range: U+0000-00FF` は `u+00??` になる。ほかに次の違いが出る。
+
+- `display: block flow` は `block` に、`display: inline flow-root` は `inline-block` になる。v3 はどこに書かれていても（CSS ファイル、`<style>`、`style` 属性）この形にする。v2 は HTML の `<style>` の中では、書かれたまま残した。
+- 間にほかのルールがなく隣り合う、同じ条件の `@media` は 1 つにまとめる（`@media screen and (min-width:769px){A}@media screen and (min-width:769px){B}` は `{AB}`）。規則の順序は変わらない。間にルールがあるものはまとめない（RFC §10 の、隣接する同一ブロックのルールの結合と同じ）。
+- custom property の値は、v3 は書かれたまま出す（`--x: rgba(0, 0, 0, 0.24)`、`calc(3 / 18 * 1em)`）。v2 は値を縮める（`#0000003d`、`0.16667em`）。
+- プレフィックス: v2 は autoprefixer が、依存パッケージの CSS に書かれた古いもの（`-moz-column-gap`、`-o-object-fit`、`-moz-appearance: auto`）を消し、足りないもの（`-webkit-text-decoration-skip-ink` など）を足した。v3 は書かれたまま出し、足しも消しもしない。**移行の作業**: ソースの CSS が v2 の autoprefixer に頼ってプレフィックスを書いていなかったなら、v3 の出力からプレフィックスが消える。対象のブラウザで要るものは、ソースに書くか、別の工程（npm scripts）で足す（§6）。
 
 `.htm` のページ（表の #34 の行）: v2 は、出力の拡張子で処理を選ぶので、`.html` 以外の出力（`.htm` など）は処理せず、入力をそのまま書く。v2 の出力に `---` で囲んだ front matter が残っているページがそれにあたる。v3 は拡張子によらずページとして処理するので、front matter が消え、doctype の規則と、整形と圧縮が働く。`.htm` をほかのテンプレートエンジンの入力にしているときは、出力を確かめる。なお、`<style>` の中の `<![CDATA[ ... ]]>` は、ブラウザもスタイルシート全体を捨てる。`[` の中に `{}` が入り、規則が閉じないためで、v3 は `<style></style>` にする。
 

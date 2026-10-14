@@ -1109,6 +1109,20 @@ fn duplicates_and_empty_rules() {
 }
 
 #[test]
+fn adjacent_media_blocks_with_the_same_condition_become_one() {
+	common::check_all(&[
+		(
+			"@media a{.a{x:1}}@media a{.b{y:2}}",
+			"@media a{.a{x:1}.b{y:2}}",
+		),
+		(
+			"@media a{.a{x:1}}.c{z:3}@media a{.d{w:4}}",
+			"@media a{.a{x:1}}.c{z:3}@media a{.d{w:4}}",
+		),
+	]);
+}
+
+#[test]
 fn selectors() {
 	common::check_all(&[
 		("a b > c + d ~ e{x:1}", "a b>c+d~e{x:1}"),
