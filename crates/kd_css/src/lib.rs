@@ -16,7 +16,8 @@
 //! does, this crate does less. Output is kept within a few percent of
 //! cssnano's size; `crates/kd_css/tests` and `scripts/check-css.mjs` measure
 //! both. Not ported (a size cost, never a safety one): `calc()` constant
-//! folding, merging of adjacent rules and of longhands, `reduce-initial`,
+//! folding, merging of rules that are not neighbours and of some declarations of
+//! neighbouring rules, merging of longhands, `reduce-initial`,
 //! svgo on inline SVG, reordering of shorthand components.
 
 mod color_table;
