@@ -88,6 +88,22 @@ html(lang="ja")
 		script
 			| var p = 1;
 			| var q = 2;
+		pre.
+			line1
+			  indented
+			line3
+		pre
+			| a
+			| b
+		textarea.
+			x
+			  y
+		pre
+			| &lt;b&gt; a
+		pre
+			code.
+				c1
+				  c2
 `,
 	'__assets/_libs/mixin/m.pug': `mixin a
 	p A
@@ -325,6 +341,51 @@ describe.skipIf(!available && !process.env.CI)(
 			expect(page).toContain('__html: ".a { color: red; }\\n.b { color: blue; }"');
 			// The lines of the form with pipes are joined by one line break.
 			expect(page).toContain('__html: "var p = 1;\\nvar q = 2;"');
+		});
+
+		test('keeps the line breaks and the indentation of a pre and a textarea as strings', () => {
+			const page = read('__assets/htdocs/index.tsx');
+			const lines = (s: string) => s.split('\n').map((l) => l.trim());
+			const block = (open: RegExp, close: string) => {
+				const start = page.search(open);
+				return lines(page.slice(start, page.indexOf(close, start) + close.length));
+			};
+			// `pre.`: the common indentation is dropped, the relative one stays, and each
+			// line break is a text node of its own.
+			expect(block(/<pre>\s*\{"line1"\}/, '</pre>')).toEqual([
+				'<pre>',
+				'{"line1"}',
+				'{"\\n"}',
+				'{"  indented"}',
+				'{"\\n"}',
+				'{"line3"}',
+				'</pre>',
+			]);
+			// The lines of the form with pipes.
+			expect(block(/<pre>\s*\{"a"\}/, '</pre>')).toEqual([
+				'<pre>',
+				'{"a"}',
+				'{"\\n"}',
+				'{"b"}',
+				'</pre>',
+			]);
+			expect(block(/<textarea>/, '</textarea>')).toEqual([
+				'<textarea>',
+				'{"x"}',
+				'{"\\n"}',
+				'{"  y"}',
+				'</textarea>',
+			]);
+			// A tag inside of a pre is still inside of it.
+			expect(block(/<code>/, '</code>')).toEqual([
+				'<code>',
+				'{"c1"}',
+				'{"\\n"}',
+				'{"  c2"}',
+				'</code>',
+			]);
+			// An entity is passed on as it is: a string would show the `&`.
+			expect(page).toContain('{html("&lt;b&gt; a")}');
 		});
 
 		test('writes a > of the text as an entity', () => {
