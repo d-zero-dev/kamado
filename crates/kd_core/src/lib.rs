@@ -2549,6 +2549,21 @@ mod tests {
 	}
 
 	#[test]
+	fn a_page_written_to_an_htm_path_gets_the_same_doctype_format_and_minify_as_html() {
+		let site = Site::new("htm_pipeline");
+		site.write(
+			"src/100.html",
+			&format!("---\npath: \"/legacy/page.htm\"\n---\n{DOCUMENT}"),
+		);
+		let loaded = site.config(r#", "pages": { "outputPathField": "path" }"#);
+		run_build(&loaded).unwrap();
+		assert_eq!(
+			site.read("out/legacy/page.htm"),
+			"<!DOCTYPE html>\n<html>\n\t<head>\n\t\t<title>t</title>\n\t</head>\n\t<body>\n\t\t<input disabled>\n\t\t<p>x</p>\n\t</body>\n</html>\n"
+		);
+	}
+
+	#[test]
 	fn a_page_that_starts_with_an_xml_declaration_gets_its_doctype_after_it() {
 		let site = Site::new("xml_declaration");
 		site.write(
