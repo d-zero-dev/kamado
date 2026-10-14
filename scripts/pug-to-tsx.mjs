@@ -1404,12 +1404,23 @@ function node(n, ctx, depth) {
 		}
 		case 'Text': {
 			const t = n.val;
-			if (t.trim() === '' && t.includes('\n')) return [`${pad}{' '}`];
 			if (/</.test(t)) {
 				// A line of HTML written in the template (`<meta ...>`, `<!--#include ...-->`).
 				ctx.rt.add('html');
 				return [`${pad}{html(${JSON.stringify(t)})}`];
 			}
+			// In `pre` / `textarea` the line breaks and the indentation are the text:
+			// bare JSX text would lose the white space at the edges of each line, and
+			// the `\n` nodes of a `.` block or of `|` lines would turn into a space.
+			if (ctx.pre > 0) {
+				// An entity (`&lt;`) is what Pug passed on as it was; a string would show the `&`.
+				if (/&(?:[a-zA-Z][a-zA-Z0-9]*|#\d+|#x[0-9a-fA-F]+);/.test(t)) {
+					ctx.rt.add('html');
+					return [`${pad}{html(${JSON.stringify(t)})}`];
+				}
+				return [`${pad}{${JSON.stringify(t)}}`];
+			}
+			if (t.trim() === '' && t.includes('\n')) return [`${pad}{' '}`];
 			return [`${pad}${jsxText(t)}`];
 		}
 		case 'Code': {
