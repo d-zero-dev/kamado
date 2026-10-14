@@ -4,7 +4,9 @@ import path from 'node:path';
 // The converter reads the Pug code with the acorn of the project that it converts. The
 // repository has it only through its linters (espree), so the import is not a declared one.
 
+import dz from '@d-zero/eslint-config';
 import * as acorn from 'acorn';
+import { Linter } from 'eslint';
 import { describe, expect, test } from 'vitest';
 
 import { readPropNames, render } from './generate-react-prop-names.mjs';
@@ -368,6 +370,107 @@ describe('pruneUnusedImports', () => {
 		);
 	});
 
+	test('reads an import of several lines, and drops it whole when no name is used', () => {
+		const text = [
+			'import {',
+			'\tA,',
+			'\tB,',
+			"} from './a.tsx';",
+			'import {',
+			'\tC,',
+			"} from './c.tsx';",
+			'',
+			'const x = A;',
+		].join('\n');
+		expect(pruneUnusedImports(text)).toBe(
+			["import { A } from './a.tsx';", '', 'const x = A;'].join('\n'),
+		);
+	});
+
+	test('keeps an import of several lines as it is when every name is used', () => {
+		const text = [
+			'import {',
+			'\tA,',
+			'\tB,',
+			"} from './a.tsx';",
+			'',
+			'const x = [A, B];',
+		].join('\n');
+		expect(pruneUnusedImports(text)).toBe(text);
+	});
+
+	test('reads the local name of `a as b`, and a double-quoted module path', () => {
+		const text = ['import { a as b, c as d } from "./a.tsx";', '', 'const x = b;'].join(
+			'\n',
+		);
+		expect(pruneUnusedImports(text)).toBe(
+			['import { a as b } from "./a.tsx";', '', 'const x = b;'].join('\n'),
+		);
+	});
+
+	test('counts a line of white space as a blank line, and writes it empty', () => {
+		const text = [
+			"import { html } from 'kamado/jsx';",
+			'  \t',
+			"import A from '../a.tsx';",
+			'',
+			"import B from './b.tsx';",
+			'',
+			'const x = [html, B];',
+		].join('\n');
+		expect(pruneUnusedImports(text)).toBe(
+			[
+				"import { html } from 'kamado/jsx';",
+				'',
+				"import B from './b.tsx';",
+				'',
+				'const x = [html, B];',
+			].join('\n'),
+		);
+	});
+
+	test('does not read a line of white space as the code below the imports', () => {
+		const text = ['  ', "import A from './a.tsx';", '', 'const x = A;'].join('\n');
+		expect(pruneUnusedImports(text)).toBe(
+			["import A from './a.tsx';", '', 'const x = A;'].join('\n'),
+		);
+	});
+
+	test('reads the name of an inline `type` specifier', () => {
+		const text = [
+			"import { type T, type U, A } from './t.ts';",
+			'',
+			'const x: T = A;',
+		].join('\n');
+		expect(pruneUnusedImports(text)).toBe(
+			["import { type T, A } from './t.ts';", '', 'const x: T = A;'].join('\n'),
+		);
+	});
+
+	test('keeps the line break at the end of a module that is only imports', () => {
+		expect(pruneUnusedImports("import './a.css';\n\n")).toBe("import './a.css';\n");
+		expect(pruneUnusedImports("import './a.css';")).toBe("import './a.css';");
+	});
+
+	test('leaves the imports below a comment as they are', () => {
+		const text = ['// @ts-check', "import A from './a.tsx';", '', 'const x = 1;'].join(
+			'\n',
+		);
+		expect(pruneUnusedImports(text)).toBe(text);
+	});
+
+	test('leaves a statement that it does not read, and the names that only it uses', () => {
+		const text = [
+			"import type { T } from './t.ts';",
+			"import * as ns from './ns.ts';",
+			"import D, { E } from './d.tsx';",
+			"import './side.css';",
+			'',
+			'const x = 1;',
+		].join('\n');
+		expect(pruneUnusedImports(text)).toBe(text);
+	});
+
 	test('leaves the blank lines of the code below the imports', () => {
 		const text = [
 			"import A from './a.tsx';",
@@ -388,7 +491,7 @@ describe('orderImports', () => {
 	test('puts the packages, the parents, the siblings and the index in this order, a blank line apart', () => {
 		expect(
 			orderImports(
-				['./index.tsx', './a.tsx', '../b.tsx', 'kamado/jsx', '../../c.tsx'].map((spec) =>
+				['./index.js', './a.tsx', '../b.tsx', 'kamado/jsx', '../../c.tsx'].map((spec) =>
 					entry(spec),
 				),
 			),
@@ -400,7 +503,25 @@ describe('orderImports', () => {
 			'',
 			line('./a.tsx'),
 			'',
+			line('./index.js'),
+		]);
+	});
+
+	test('takes `./index.tsx` for a sibling: only `.`, `./`, `./index` and `./index.js` are the index', () => {
+		expect(
+			orderImports(
+				['./index.js', './index.tsx', './a.tsx', './index', '.', './'].map((spec) =>
+					entry(spec),
+				),
+			),
+		).toEqual([
+			line('./a.tsx'),
 			line('./index.tsx'),
+			'',
+			line('.'),
+			line('./'),
+			line('./index'),
+			line('./index.js'),
 		]);
 	});
 
@@ -430,6 +551,107 @@ describe('orderImports', () => {
 
 	test('writes nothing for no import', () => {
 		expect(orderImports([])).toEqual([]);
+	});
+
+	test('puts the built-in modules before the packages, and the `@alias/**` and scoped paths among the packages', () => {
+		expect(
+			orderImports(
+				[
+					'./a.tsx',
+					'../b.tsx',
+					'@alias/c.tsx',
+					'@scope/pkg',
+					'kamado/jsx',
+					'fs/promises',
+					'node:path',
+				].map((spec) => entry(spec)),
+			),
+		).toEqual([
+			line('fs/promises'),
+			line('node:path'),
+			'',
+			line('@alias/c.tsx'),
+			line('@scope/pkg'),
+			line('kamado/jsx'),
+			'',
+			line('../b.tsx'),
+			'',
+			line('./a.tsx'),
+		]);
+	});
+
+	describe('against the import-x/order of @d-zero/eslint-config', () => {
+		const config = dz.configs.node.find((c) => c.rules?.['import-x/order']);
+		if (!config?.rules) throw new Error('@d-zero/eslint-config has no import-x/order');
+		const flat: Linter.Config[] = [
+			{
+				plugins: config.plugins,
+				rules: { 'import-x/order': config.rules['import-x/order'] },
+				languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+			},
+		];
+		const filename = path.join(import.meta.dirname, 'order.mjs');
+		const specs = [
+			'node:fs',
+			'fs/promises',
+			'path',
+			'kamado/jsx',
+			'@scope/pkg',
+			'@scope/pkg/sub',
+			'@alias/a.tsx',
+			'@alias/a/b.tsx',
+			'../../z.tsx',
+			'../C-Header.tsx',
+			'../a.tsx',
+			'../c-footer.tsx',
+			'../c-footer/index.tsx',
+			'../component/c-header.tsx',
+			'./C-Header.tsx',
+			'./a.tsx',
+			'./c-footer.tsx',
+			'./c-footer/index.tsx',
+			'./mixin/meta.tsx',
+			'./index.tsx',
+			'./index.js',
+			'./index',
+			'.',
+		];
+		const importOf = (spec: string, i: number) => ({
+			spec,
+			line: `import X${i} from '${spec}';`,
+		});
+		/**
+		 * A shuffle that is the same on every run.
+		 * @param seed
+		 */
+		const shuffled = (seed: number) => {
+			const out = [...specs];
+			let state = seed;
+			for (let i = out.length - 1; i > 0; i--) {
+				state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+				const j = state % (i + 1);
+				[out[i], out[j]] = [out[j], out[i]];
+			}
+			return out;
+		};
+
+		test('gives the order that the rule has nothing to fix in, whatever the order of the lines', () => {
+			const linter = new Linter({ configType: 'flat' });
+			for (let seed = 1; seed <= 40; seed++) {
+				const entries = shuffled(seed).map((spec, i) => importOf(spec, i));
+				const ordered = orderImports(entries).join('\n');
+				expect(linter.verify(ordered, flat, { filename }), `seed ${seed}`).toEqual([]);
+			}
+		});
+
+		test('is not a vacuous check: the rule reports the lines before they are ordered', () => {
+			const linter = new Linter({ configType: 'flat' });
+			const entries = shuffled(1).map((spec, i) => importOf(spec, i));
+			const messages = linter.verify(entries.map(({ line }) => line).join('\n'), flat, {
+				filename,
+			});
+			expect(messages.length).toBeGreaterThan(0);
+		});
 	});
 });
 

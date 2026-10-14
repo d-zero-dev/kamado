@@ -7,6 +7,8 @@
  * names get a type, so that the text of a string or a comment is never touched.
  */
 
+import { builtinModules } from 'node:module';
+
 /**
  * @typedef {{
  * 	parse: (input: string, options: { ecmaVersion: 'latest' }) => any;
@@ -204,11 +206,15 @@ export function blockText(nodes) {
 /**
  * The module without the imports that nothing below uses: a page imports the mixins of a
  * file that it includes, and `noUnusedLocals` refuses what it does not call. A name counts
- * as used when it appears in the code outside the import lines (see
- * {@link isIdentifierUsed}). Only the forms that the converter writes are read:
- * `import { A, B } from '...';` and `import A from '...';`. The blank lines that the dropped
- * lines leave in the block of imports (a group with nothing left) go with them, so that the
- * groups that {@link orderImports} writes stay one blank line apart.
+ * as used when it appears in the code below the imports (see {@link isIdentifierUsed}).
+ * Only the block of imports at the top is read (it ends at the first line that is neither
+ * blank nor an import statement, so a comment above the imports leaves them as they are), a
+ * statement at a time (it may take several lines), and only two forms are changed: `import { A, B as C } from '...';` and
+ * `import A from '...';`. A statement of any other form (`import type`, a namespace, a
+ * default with names, a side effect) stays as it is. The blank lines that the dropped
+ * statements leave in the block (a group with nothing left) go with them, so that the groups
+ * that {@link orderImports} writes stay one blank line apart; a line of white space counts
+ * as a blank one.
  * @param {string} text - The module
  * @returns {string}
  * @example
@@ -216,66 +222,132 @@ export function blockText(nodes) {
  * // "import { A } from './a.tsx';\nconst x = A;"
  */
 export function pruneUnusedImports(text) {
-	return tidyImportBlock(pruneImportLines(text));
-}
-
-/**
- * The import lines of the module without the names that nothing uses.
- * @param {string} text - The module
- * @returns {string}
- */
-function pruneImportLines(text) {
-	const lines = text.split('\n');
-	const code = lines.filter((line) => !line.startsWith('import ')).join('\n');
-	/** @type {string[]} */
-	const kept = [];
-	for (const line of lines) {
-		const named = /^import \{ (.+) \} from (.+);$/.exec(line);
-		if (named) {
-			const names = named[1].split(', ').filter((name) => isIdentifierUsed(code, name));
-			if (names.length > 0) {
-				kept.push(`import { ${names.join(', ')} } from ${named[2]};`);
-			}
-			continue;
-		}
-		const sole = /^import ([\w$]+) from .+;$/.exec(line);
-		if (sole) {
-			if (isIdentifierUsed(code, sole[1])) {
-				kept.push(line);
-			}
-			continue;
-		}
-		kept.push(line);
-	}
-	return kept.join('\n');
-}
-
-/**
- * The module with no blank line at its top and no two in a row among its imports: only the
- * block before the first line that is neither blank nor an import is touched.
- * @param {string} text - The module
- * @returns {string}
- */
-function tidyImportBlock(text) {
-	const lines = text.split('\n');
-	let end = lines.findIndex((line) => line !== '' && !line.startsWith('import '));
-	if (end === -1) end = lines.length;
+	const { items, rest } = splitImportBlock(text);
 	/** @type {string[]} */
 	const tidy = [];
-	for (const line of lines.slice(0, end)) {
-		if (line === '' && (tidy.length === 0 || tidy.at(-1) === '')) continue;
-		tidy.push(line);
+	for (const item of items) {
+		const kept = item === '' ? item : pruneStatement(item, rest);
+		if (kept === undefined) continue;
+		if (kept === '' && (tidy.length === 0 || tidy.at(-1) === '')) continue;
+		tidy.push(kept);
 	}
-	return [...tidy, ...lines.slice(end)].join('\n');
+	if (rest !== '') return [...tidy, rest].join('\n');
+	while (tidy.at(-1) === '') tidy.pop();
+	return tidy.length > 0 && text.endsWith('\n')
+		? `${tidy.join('\n')}\n`
+		: tidy.join('\n');
 }
 
 /**
- * The import lines in the order that `import-x/order` of `@d-zero/eslint-config` asks for:
- * the packages, then the parent directories (`../`), then the siblings (`./`), then the
- * index (`./index`), one blank line between the groups. Inside a group the module paths go
- * in the alphabetical order, compared a segment at a time, and the lines of one module keep
- * the order they came in. Only the module paths that the converter writes are told apart:
- * `kamado/jsx` stands for the packages, and the rest are relative paths.
+ * One statement that starts with `import` and ends at the quote that closes its module path.
+ * It may be several lines long; the line break after it is part of the match.
+ */
+const IMPORT_STATEMENT =
+	/^import\s[^;'"]*(?:'[^']*'|"[^"]*")[^\S\n]*(?:;[^\S\n]*)?(?:\n|$)/;
+
+/**
+ * The block of imports at the top of the module: its import statements (as they are written,
+ * without the line break at the end) and its blank lines (`''`, a line of white space
+ * included), and the code from the first line that is neither.
+ * @param {string} text - The module
+ * @returns {{ items: string[]; rest: string }}
+ */
+function splitImportBlock(text) {
+	/** @type {string[]} */
+	const items = [];
+	let rest = text;
+	while (rest !== '') {
+		const eol = rest.indexOf('\n');
+		const line = eol === -1 ? rest : rest.slice(0, eol);
+		if (line.trim() === '') {
+			items.push('');
+			rest = eol === -1 ? '' : rest.slice(eol + 1);
+			continue;
+		}
+		const statement = IMPORT_STATEMENT.exec(rest);
+		if (!statement) break;
+		items.push(statement[0].trimEnd());
+		rest = rest.slice(statement[0].length);
+	}
+	return { items, rest };
+}
+
+/**
+ * An import statement without the names that the code does not use.
+ * @param {string} statement - The import statement
+ * @param {string} code - The code below the imports
+ * @returns {string | undefined} The statement, or `undefined` when no name of it is used
+ */
+function pruneStatement(statement, code) {
+	const named = /^import\s*\{([^}]*)\}\s*from\s*('[^']*'|"[^"]*")\s*;?$/.exec(statement);
+	if (named) {
+		const specifiers = named[1]
+			.split(',')
+			.map((specifier) => specifier.trim())
+			.filter((specifier) => specifier !== '');
+		// The local name is what follows `as`, without an inline `type`. A specifier that
+		// is not a plain identifier (a string name) is kept: it is not told whether it is used.
+		const used = specifiers.filter((specifier) => {
+			const local = (specifier.split(/\s+as\s+/).at(-1) ?? specifier).replace(
+				/^type\s+/,
+				'',
+			);
+			return !/^[\w$]+$/.test(local) || isIdentifierUsed(code, local);
+		});
+		if (used.length === specifiers.length) return statement;
+		return used.length > 0
+			? `import { ${used.join(', ')} } from ${named[2]};`
+			: undefined;
+	}
+	const sole = /^import\s+([\w$]+)\s+from\s*(?:'[^']*'|"[^"]*")\s*;?$/.exec(statement);
+	if (sole) return isIdentifierUsed(code, sole[1]) ? statement : undefined;
+	return statement;
+}
+
+/**
+ * The group of a module path for `import-x/order` of `@d-zero/eslint-config`, in the order
+ * that it asks for: the built-in modules (`node:fs`, `fs/promises`), the packages
+ * (`kamado/jsx`, `@scope/pkg`), the parent directories (`../`), the siblings (`./`), and the
+ * index. The index is only the four paths that `import-x` names (`.`, `./`, `./index`,
+ * `./index.js`): `./index.tsx` is a sibling. The `@alias/**` of its `pathGroups` is not a
+ * group of its own: the rule leaves the built-in and external types out of `pathGroups`, and
+ * a path that starts with `@` is an external one, so it goes among the packages.
+ * @param {string} spec - The module path of an import
+ * @returns {0 | 1 | 2 | 3 | 4}
+ */
+function importGroupOf(spec) {
+	if (spec.startsWith('node:') || builtinModules.includes(spec)) return 0;
+	if (!spec.startsWith('.')) return 1;
+	if (['.', './', './index', './index.js'].includes(spec)) return 4;
+	return spec.startsWith('..') ? 2 : 3;
+}
+
+/**
+ * The comparison of `alphabetize` of `import-x/order` (`asc`, case sensitive): the module
+ * paths go a segment at a time, and a path that is the start of another one comes first.
+ * The rule skips the first segment when both are `.` or `..` and differ, but those are in
+ * different groups, so the paths that this compares never reach that case.
+ * @param {string} a - A module path
+ * @param {string} b - A module path
+ * @returns {number}
+ */
+function compareImportPath(a, b) {
+	const left = a.split('/');
+	const right = b.split('/');
+	for (let i = 0; i < Math.min(left.length, right.length); i++) {
+		if (left[i] !== right[i]) return left[i] < right[i] ? -1 : 1;
+	}
+	return left.length === right.length ? 0 : left.length < right.length ? -1 : 1;
+}
+
+/**
+ * The import lines in the order that `import-x/order` of `@d-zero/eslint-config` asks for
+ * (see {@link importGroupOf} for the groups), one blank line between the groups. Inside a
+ * group the module paths go in the alphabetical order of {@link compareImportPath}, and the
+ * lines of one module keep the order they came in. The groups and the comparison are written
+ * here as that rule works, and a spec lints the result with the rule itself, so that a
+ * change of the rule shows. Only the paths that a converted module can import are told
+ * apart: `import type`, `#` and `/` paths, and the `internal` type of a resolver are not.
  * @param {readonly { spec: string; line: string }[]} entries - The lines and their module paths
  * @returns {string[]} The lines, the blank ones between the groups included
  * @example
@@ -287,30 +359,12 @@ function tidyImportBlock(text) {
  * // ["import { html } from 'kamado/jsx';", '', "import Z from '../z.tsx';", '', "import A from './a.tsx';"]
  */
 export function orderImports(entries) {
-	/** @param {string} spec */
-	const groupOf = (spec) => {
-		if (!spec.startsWith('.')) return 0;
-		if (spec.startsWith('..')) return 1;
-		return /^\.\/?(?:index(?:\.\w+)?)?$/.test(spec) ? 3 : 2;
-	};
-	/**
-	 * @param {string} a @param {string} b
-	 * @param b
-	 */
-	const compareSpec = (a, b) => {
-		const left = a.split('/');
-		const right = b.split('/');
-		for (let i = 0; i < Math.min(left.length, right.length); i++) {
-			if (left[i] !== right[i]) return left[i] < right[i] ? -1 : 1;
-		}
-		return left.length - right.length;
-	};
 	/** @type {string[]} */
 	const out = [];
-	for (let group = 0; group < 4; group++) {
+	for (let group = 0; group < 5; group++) {
 		const lines = entries
-			.filter(({ spec }) => groupOf(spec) === group)
-			.toSorted((a, b) => compareSpec(a.spec, b.spec))
+			.filter(({ spec }) => importGroupOf(spec) === group)
+			.toSorted((a, b) => compareImportPath(a.spec, b.spec))
 			.map(({ line }) => line);
 		if (lines.length === 0) continue;
 		if (out.length > 0) out.push('');
