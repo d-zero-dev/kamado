@@ -361,7 +361,7 @@ yarn kamado build --incremental        # そのページだけ built
 | HTML のコメント（JSX には書けない）。`<head>` 内の並び（React 19 の持ち上げ）                                                                | §7.1 |
 | フォームの属性の並び（`action` と `method` は React が最後に出す）                                                                           | §7.1 |
 
-HTML 内の CSS の引用符（上の表）: v2 は prettier で整形してから html-minifier-terser（clean-css）で圧縮する。prettier が引用符を `'` から `"` に変える（属性内は `&quot;`）ので、`url('x')` は `url(&quot;x&quot;)` に変わり、`style="font-family:'Helvetica Neue', Arial"` は `font-family:&quot` に壊れる。v3 は Rust の圧縮器で、引用符が要らない値は外す（`url(x)`、`font-family:Helvetica Neue,Arial`、`<style>` 内は `font-family:Foo Bar`）。見た目は変わらないので、出力の比較で差が出たら、この差かを先に確かめる。
+HTML 内の CSS の引用符（上の表）: v2 は prettier で整形してから html-minifier-terser（clean-css）で圧縮する。prettier が引用符を `'` から `"` に変える（属性内は `&quot;`）ので、`url('x')` は `url(&quot;x&quot;)` に変わり、`style="font-family:'Helvetica Neue', Arial"` は `font-family:&quot` に壊れる。v3 は Rust の圧縮器で、引用符が要らない値は外す（`url(x)`、`font-family:Helvetica Neue,Arial`、`<style>` 内は `font-family:Foo Bar`）。v3 は元の CSS の意味を保つ。v2 の出力と比べて差が出たら、まずこの差かを確かめる（v2 で壊れていたものは、v3 では直る）。
 
 v1（kamado 1.x）から直接移すと、基準が v2 の出力ではないので、v2 の挙動に合わせた次の差も出ます。
 
