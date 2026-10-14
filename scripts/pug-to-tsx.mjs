@@ -504,6 +504,7 @@ function mixinParams(args) {
 				name: undefined,
 				pattern: source.slice(target.start, target.end),
 				names: patternNames(target),
+				units: patternUnits(target, source),
 			};
 		}
 		return p.type === 'AssignmentPattern'
@@ -521,6 +522,181 @@ function patternNames(pattern) {
 }
 
 /**
+ * The keyword of a declaration: `let` if the body assigns to any of the names.
+ * @param isLet
+ * @param names
+ */
+function declKind(isLet, names) {
+	return names.some((n) => isLet(n)) ? 'let' : 'const';
+}
+
+/**
+ * The pieces of an object pattern that can be declared apart: `{ a = 1, b: { c, d } }` is
+ * `a = 1`, `b: { c }` and `b: { d }`, so that the body's assignment to one name does not
+ * make `let` of the others (`prefer-const` refuses them, and `--fix` cannot split them).
+ * What cannot be cut (a level with a rest, which takes what the other properties leave; a
+ * computed key, which would run again for each piece; an array pattern; a pattern with a
+ * default) stays one piece, see {@link patternUnit}.
+ * @param pattern
+ * @param source - The code that the nodes' positions are from.
+ * @param wrap - Puts the text of a piece into the patterns around it.
+ * @returns The pieces in the order of the pattern: `build(isLet, taken)` gives the keyword,
+ * the code, and the declarations that follow it.
+ */
+function patternUnits(pattern, source, wrap = (text) => text) {
+	const rest = pattern.properties.find((p) => p.type === 'RestElement');
+	if (rest) {
+		const first = pattern.properties[0];
+		return [patternUnit(source, first.start, rest.end, wrap, (walk) => walk(pattern))];
+	}
+	return pattern.properties.flatMap((p) => {
+		if (
+			p.value.type === 'ObjectPattern' &&
+			!p.computed &&
+			p.value.properties.length > 0
+		) {
+			const key = source.slice(p.start, p.value.start);
+			return patternUnits(p.value, source, (text) => wrap(`${key}{ ${text} }`));
+		}
+		return [patternUnit(source, p.start, p.end, wrap, (walk) => walk(p))];
+	});
+}
+
+/**
+ * One piece of a pattern, and how to declare it. When the body assigns to some of its names but
+ * not to all, it is declared with `const` and those names are renamed in it (`id: _id`) and
+ * declared after it (`let id = _id;`). A default that reads a renamed name reads the new
+ * name, which is the value that the original read too: the body has not run yet.
+ * @param source
+ * @param start - Where the text of the piece starts in the source.
+ * @param end
+ * @param wrap
+ * @param visit - Calls `walk` with the node that holds the bindings.
+ */
+function patternUnit(source, start, end, wrap, visit) {
+	const bindings = [];
+	const expressions = [];
+	const walk = (node, shorthand = false) => {
+		switch (node.type) {
+			case 'Identifier': {
+				bindings.push({ name: node.name, start: node.start, end: node.end, shorthand });
+				break;
+			}
+			case 'Property': {
+				if (node.computed) expressions.push(node.key);
+				walk(node.value, node.shorthand);
+				break;
+			}
+			case 'ObjectPattern': {
+				for (const p of node.properties) walk(p);
+				break;
+			}
+			case 'ArrayPattern': {
+				for (const element of node.elements) if (element) walk(element);
+				break;
+			}
+			case 'AssignmentPattern': {
+				walk(node.left, shorthand);
+				expressions.push(node.right);
+				break;
+			}
+			case 'RestElement': {
+				walk(node.argument);
+				break;
+			}
+		}
+	};
+	visit(walk);
+	const names = bindings.map((b) => b.name);
+	return {
+		build: (isLet, taken) => {
+			const letNames = names.filter((n) => isLet(n));
+			const code = source.slice(start, end);
+			if (letNames.length === 0 || letNames.length === names.length) {
+				return { kind: declKind(isLet, names), text: wrap(code), after: [] };
+			}
+			const alias = new Map();
+			for (const name of new Set(letNames)) {
+				let to = `_${name}`;
+				while (taken.has(to)) to += '_';
+				taken.add(to);
+				alias.set(name, to);
+			}
+			const edits = [];
+			for (const b of bindings) {
+				const to = alias.get(b.name);
+				if (to)
+					edits.push({
+						start: b.start,
+						end: b.end,
+						text: b.shorthand ? `${b.name}: ${to}` : to,
+					});
+			}
+			let readsInFunction = false;
+			for (const expression of expressions) {
+				readsInFunction ||= renameReads(expression, alias, edits);
+			}
+			// A function in a default may declare the name again: leave it as it is then.
+			if (readsInFunction) return { kind: 'let', text: wrap(code), after: [] };
+			let text = code;
+			for (const e of edits.toSorted((a, b) => b.start - a.start)) {
+				text = text.slice(0, e.start - start) + e.text + text.slice(e.end - start);
+			}
+			return {
+				kind: 'const',
+				text: wrap(text),
+				after: [...alias].map(([name, to]) => `let ${name} = ${to};`),
+			};
+		},
+	};
+}
+
+/**
+ * Adds an edit for each read of a name that is renamed, in an expression.
+ * @param expression
+ * @param alias - The new name for each name.
+ * @param edits - Where the edits go.
+ * @returns Whether a function that may declare a name again was met (a block body, or a
+ * parameter of that name): this does not follow the scopes, so the caller leaves the names.
+ */
+function renameReads(expression, alias, edits) {
+	let inFunction = false;
+	const declares = (param) => bindingNames(param).some((n) => alias.has(n));
+	const visit = (node, parent, key) => {
+		if (!node || typeof node.type !== 'string') return;
+		if (/Function/.test(node.type)) {
+			// A block may declare the name again, and so may a parameter.
+			if (node.body.type === 'BlockStatement' || node.params.some((p) => declares(p))) {
+				inFunction = true;
+			}
+		}
+		if (node.type === 'Identifier') {
+			const to = alias.get(node.name);
+			const isName =
+				(parent?.type === 'Property' && key === 'key' && !parent.computed) ||
+				(parent?.type === 'MemberExpression' && key === 'property' && !parent.computed);
+			if (to && !isName) {
+				const shorthand = parent?.type === 'Property' && parent.shorthand;
+				edits.push({
+					start: node.start,
+					end: node.end,
+					text: shorthand ? `${node.name}: ${to}` : to,
+				});
+			}
+			return;
+		}
+		for (const [k, value] of Object.entries(node)) {
+			// A shorthand property is one name that the key and the value both point to.
+			if (node.type === 'Property' && node.shorthand && k === 'key') continue;
+			if (Array.isArray(value)) for (const v of value) visit(v, node, k);
+			else if (value && typeof value === 'object') visit(value, node, k);
+		}
+	};
+	visit(expression, undefined, '');
+	return inFunction;
+}
+
+/**
  * The code of one component: the function (the imports are written by the caller).
  * @param ctx
  * @param name
@@ -535,34 +711,53 @@ function componentText(ctx, name, body, exported, params) {
 	const external = needsExt.filter((n) => !PROP_NAMES.has(n) && !DATA_VARS.has(n));
 	const lines = [''];
 	// The body may assign to an argument (`- options = options || {}`): a `let` then.
-	const keyword = (names) => (names.some((n) => ctx.assigned.has(n)) ? 'let' : 'const');
+	const isLet = (name) => ctx.assigned.has(name);
+	// What a name that a piece renames must not be.
+	const taken = new Set([
+		...ctx.used,
+		...ctx.declared,
+		...needsExt,
+		...params.flatMap((p) => p.names ?? [p.name]),
+		'props',
+		'_data',
+		'_vars',
+	]);
 	// Only the names that it assigns to are `let` (`prefer-const` refuses the others in the
 	// same declaration, and `--fix` cannot split it): one declaration for each run of the
 	// same keyword, in the order of the names, as a default may read a name before it.
-	const declare = (names, source) => {
-		const runs = [];
-		for (const entry of names) {
-			const kind = keyword([entry.name]);
-			if (runs.at(-1)?.kind === kind) runs.at(-1).texts.push(entry.text);
-			else runs.push({ kind, texts: [entry.text] });
+	const declare = (entries, source) => {
+		const out = [];
+		let run;
+		for (const entry of entries) {
+			const { kind, text, after } = entry.build(isLet, taken);
+			if (run?.kind === kind && after.length === 0) run.texts.push(text);
+			else {
+				run = { kind, texts: [text] };
+				out.push(run);
+			}
+			// What follows reads the declaration above: the next piece starts a new one.
+			if (after.length > 0) {
+				out.push(...after.map((line) => ({ line })));
+				run = undefined;
+			}
 		}
-		return runs.map(
-			({ kind, texts }) => `\t${kind} { ${texts.join(', ')} } = ${source};`,
+		return out.map((o) =>
+			o.line ? `\t${o.line}` : `\t${o.kind} { ${o.texts.join(', ')} } = ${source};`,
 		);
 	};
-	const plain = params.filter((p) => !p.pattern);
+	const plainUnit = (name, text) => ({
+		build: () => ({ kind: declKind(isLet, [name]), text, after: [] }),
+	});
 	lines.push(
 		...declare(
-			plain.map((p) => ({
-				name: p.name,
-				text: p.init ? `${p.name} = ${p.init}` : p.name,
-			})),
+			params.flatMap((p) =>
+				p.pattern
+					? p.units
+					: [plainUnit(p.name, p.init ? `${p.name} = ${p.init}` : p.name)],
+			),
 			'props as any',
 		),
 	);
-	for (const p of params.filter((q) => q.pattern)) {
-		lines.push(`\t${keyword(p.names)} ${p.pattern} = props as any;`);
-	}
 	if (fromProps.length > 0)
 		lines.push(`\tconst { ${fromProps.join(', ')} } = props as any;`);
 	if (dataVars.length > 0) {
@@ -575,7 +770,7 @@ function componentText(ctx, name, body, exported, params) {
 		lines.push('\tconst _vars = { ...(props as any).meta, ...props };');
 		lines.push(
 			...declare(
-				external.map((name) => ({ name, text: name })),
+				external.map((name) => plainUnit(name, name)),
 				'_vars',
 			),
 		);

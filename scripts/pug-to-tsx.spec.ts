@@ -120,6 +120,61 @@ mixin fromPageOnly
 mixin reassignPattern({ label = "a" } = {})
 	- label = label + "b"
 	p= label
+mixin splitPattern({ label = "a", size } = {})
+	- label = label + "b"
+	p= label
+	p= size
+mixin splitNested(first, { head: { title, sub = 1 }, tail }, last = first)
+	- title = title + "!"
+	p= title
+	p= sub
+	p= tail
+	p= last
+mixin restPattern({ id, ...rest })
+	- id = id + 1
+	p= id
+	p= rest.name
+mixin restAssigned({ a, b = 1, ...others })
+	- others = { ...others, b }
+	p= a
+	p= others.name
+mixin restReader({ a, b = a, ...others })
+	- a = a + 1
+	p= b
+	p= others.name
+mixin restTaken({ id, _id, ...others })
+	- id = id + _id
+	p= id
+	p= others.name
+mixin restNested({ head: { title, sub }, ...others })
+	- title = title + "!"
+	p= title
+	p= sub
+	p= others.name
+mixin nestedDefault({ head: { title, sub } = {}, tail })
+	- title = title + "!"
+	p= title
+	p= sub
+	p= tail
+mixin shorthandDefault({ a, b = { a }, ...r })
+	- a = a + 1
+	p= b
+	p= r.name
+mixin functionDefault({ a, b = () => a, ...r })
+	- a = a + 1
+	p= b
+	p= r.name
+mixin blockDefault({ a, b = () => { const a = 1; return a }, ...r })
+	- a = a + 1
+	p= b
+	p= r.name
+mixin paramDefault({ a, b = (a = 0) => a, ...r })
+	- a = a + 1
+	p= b
+	p= r.name
+mixin computedKey({ ["x"]: { a, b } })
+	- a = a + 1
+	p= b
 mixin guard(label)
 	- if (!label) label = "x"
 	p= label
@@ -376,6 +431,58 @@ describe.skipIf(!available && !process.env.CI)(
 			// A default reads the names before it: the declarations keep the order of the arguments.
 			expect(mixins).toContain(
 				'\tlet { a } = props as any;\n\tconst { b = a, c } = props as any;\n',
+			);
+		});
+
+		test('declares with let only the names of an object pattern that the body assigns to', () => {
+			const mixins = read('__assets/_libs/mixin/r.tsx');
+			expect(mixins).toContain(
+				'\tlet { label = "a" } = props as any;\n\tconst { size } = props as any;\n',
+			);
+			// A nested pattern is cut down to the name, and the order of the arguments stays
+			// (the neighbours of the same keyword share a declaration).
+			expect(mixins).toContain(
+				'\tconst { first } = props as any;\n\tlet { head: { title } } = props as any;\n\tconst { head: { sub = 1 }, tail, last = first } = props as any;\n',
+			);
+			// A rest takes what the others leave: the pattern stays whole, and a name that
+			// needs the other keyword is renamed there and declared after it.
+			expect(mixins).toContain(
+				'\tconst { id: _id, ...rest } = props as any;\n\tlet id = _id;\n',
+			);
+			expect(mixins).toContain(
+				'\tconst { a, b = 1, ..._others } = props as any;\n\tlet others = _others;\n',
+			);
+			// A default that reads a renamed name reads the new name: the body has not run yet.
+			expect(mixins).toContain(
+				'\tconst { a: _a, b = _a, ...others } = props as any;\n\tlet a = _a;\n',
+			);
+			// The new name is not one that the pattern has already.
+			expect(mixins).toContain(
+				'\tconst { id: _id_, _id, ...others } = props as any;\n\tlet id = _id_;\n',
+			);
+			// A shorthand property in a default is renamed with its key kept.
+			expect(mixins).toContain(
+				'\tconst { a: _a, b = { a: _a }, ...r } = props as any;\n\tlet a = _a;\n',
+			);
+			expect(mixins).toContain(
+				'\tconst { a: _a, b = () => _a, ...r } = props as any;\n\tlet a = _a;\n',
+			);
+			// A function in a default may declare the name again, with a block or a parameter:
+			// nothing is renamed then.
+			expect(mixins).toContain(
+				'\tlet { a, b = () => { const a = 1; return a }, ...r } = props as any;\n',
+			);
+			expect(mixins).toContain('\tlet { a, b = (a = 0) => a, ...r } = props as any;\n');
+			// A computed key is one piece, as it would run again for each piece.
+			expect(mixins).toContain(
+				'\tconst { ["x"]: { a: _a, b } } = props as any;\n\tlet a = _a;\n',
+			);
+			// Nested, with a rest, or with a default: the same.
+			expect(mixins).toContain(
+				'\tconst { head: { title: _title, sub }, ...others } = props as any;\n\tlet title = _title;\n',
+			);
+			expect(mixins).toContain(
+				'\tconst { head: { title: _title, sub } = {} } = props as any;\n\tlet title = _title;\n\tconst { tail } = props as any;\n',
 			);
 		});
 
