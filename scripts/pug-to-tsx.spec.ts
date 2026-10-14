@@ -215,6 +215,56 @@ mixin table(rows)
 	each v, k in rows
 		p #{k}=#{v}
 `,
+	// What a `pre` calls or includes: a mixin, the block of a call, a file, a file of
+	// mixins that also writes markup, and a mixin that calls another one in its own `pre`.
+	'__assets/htdocs/pre.pug': `include /mixin/p.pug
+include /component/c-both.pug
+html
+	body
+		pre
+			+sample
+		pre
+			+wrap
+				| w1
+				|   w2
+		pre
+			include /component/c-text.pug
+		pre
+			include /component/c-both.pug
+		+sample
+		+holder
+`,
+	'__assets/_libs/layout/base.pug': `html
+	body
+		block content
+`,
+	'__assets/htdocs/pre-child.pug': `extends /layout/base.pug
+mixin local
+	| l1
+	|   l2
+block content
+	pre
+		+local
+`,
+	'__assets/_libs/mixin/p.pug': `mixin sample
+	| line1
+	|   indented
+	| line3
+mixin wrap
+	block
+mixin holder
+	pre
+		+sample
+`,
+	'__assets/_libs/component/c-text.pug': `| s1
+|   s2
+`,
+	'__assets/_libs/component/c-both.pug': `mixin tag
+	| t1
+	|   t2
+| b1
+|   b2
+`,
 	'__assets/_libs/data/frag.html': '<hr>\n',
 	'package.json': '{ "name": "fixture", "private": true }\n',
 };
@@ -386,6 +436,52 @@ describe.skipIf(!available && !process.env.CI)(
 			]);
 			// An entity is passed on as it is: a string would show the `&`.
 			expect(page).toContain('{html("&lt;b&gt; a")}');
+		});
+
+		test('keeps the line breaks of what a pre calls or includes, with a component for it', () => {
+			const page = read('__assets/htdocs/pre.tsx');
+			const mixins = read('__assets/_libs/mixin/p.tsx');
+			const lines = (s: string) => s.split('\n').map((l) => l.trim());
+			const component = (source: string, name: string) => {
+				const start = source.indexOf(`function ${name}(`);
+				return lines(source.slice(start, source.indexOf('\n}', start) + 2));
+			};
+			// A mixin called in a pre is the component that writes its text as strings, and
+			// the same call outside of one is still the plain component.
+			expect(page).toContain('<SamplePre {...props} />');
+			expect(page).toContain('<Sample {...props} />');
+			expect(component(mixins, 'SamplePre').slice(2, 9)).toEqual([
+				'<>',
+				'{"line1"}',
+				'{"\\n"}',
+				'{"  indented"}',
+				'{"\\n"}',
+				'{"line3"}',
+				'</>',
+			]);
+			expect(component(mixins, 'Sample')).toContain("{' '}");
+			// The block of a call was already inside of the pre.
+			expect(page).toContain('<WrapPre {...props}>');
+			// A mixin that calls another in its own pre.
+			expect(component(mixins, 'Holder')).toContain('<SamplePre {...props} />');
+			// An include is a component of its own file, named in the import.
+			expect(page).toContain('<CTextPre {...props} />');
+			expect(read('__assets/_libs/component/c-text.tsx')).toContain(
+				'export function CTextPre(',
+			);
+			expect(
+				component(read('__assets/_libs/component/c-text.tsx'), 'CTextPre'),
+			).toContain('{"  s2"}');
+			// A file of mixins that also writes markup: the body and the mixins.
+			expect(page).toContain('<CBothBodyPre {...props} />');
+			const both = read('__assets/_libs/component/c-both.tsx');
+			expect(component(both, 'CBothBodyPre')).toContain('{"  b2"}');
+			// A mixin that a page writes itself, in the module of the page.
+			const child = read('__assets/htdocs/pre-child.tsx');
+			expect(child).toContain('<LocalPre {...props} />');
+			expect(component(child, 'LocalPre')).toContain('{"  l2"}');
+			// What no pre calls has no component for it.
+			expect(both).not.toContain('function TagPre(');
 		});
 
 		test('writes a > of the text as an entity', () => {
@@ -660,6 +756,47 @@ describe.skipIf(!available && !process.env.CI)(
 			}
 			expect(output).toBe('');
 		}, 120_000);
+
+		test('fails the run when the component for a pre would take the name of a mixin', () => {
+			const project = path.join(root, 'pre-collision');
+			const files: Record<string, string> = {
+				'__assets/htdocs/index.pug': 'include /mixin/q.pug\n+box\n',
+				'__assets/_libs/mixin/q.pug': `mixin foo
+	| a
+mixin foo-pre
+	| b
+mixin box
+	pre
+		+foo
+`,
+				'package.json': '{}',
+			};
+			for (const [file, text] of Object.entries(files)) {
+				mkdirSync(path.dirname(path.join(project, file)), { recursive: true });
+				writeFileSync(path.join(project, file), text);
+			}
+			symlinkSync(path.join(repo, 'node_modules'), path.join(project, 'node_modules'));
+			let status = 0;
+			let stdout = '';
+			try {
+				execFileSync(
+					process.execPath,
+					[
+						path.join(repo, 'scripts', 'pug-to-tsx.mjs'),
+						project,
+						path.join(root, 'pre-collision-out'),
+					],
+					{ encoding: 'utf8', stdio: 'pipe' },
+				);
+			} catch (error) {
+				status = (error as { status: number }).status;
+				stdout = String((error as { stdout?: string }).stdout);
+			}
+			expect(status).toBe(1);
+			expect(stdout).toContain(
+				'not converted: __assets/_libs/mixin/q.pug: the mixin foo is called in a pre, and FooPre is a mixin of the file already: write it by hand',
+			);
+		}, 60_000);
 
 		test('stops with a reason on the acorn 7 that Pug pulls in', () => {
 			const project = path.join(root, 'old-acorn');

@@ -352,6 +352,34 @@ function mapExpr(expr) {
 }
 
 const converted = new Map();
+// JSX drops the line breaks and the indentation of a text, which a `pre` and a
+// `textarea` must keep. A mixin or an include called inside of one is therefore a second
+// component, named with `Pre` at the end, whose text is written as strings; the plain one
+// stays for the calls outside. Only the calls tell which are needed, so the file of each
+// is converted once more when the calls are all seen.
+// file -> the names of its mixins, and `*` for what the file writes besides them.
+const preNeeds = new Map();
+const PRE_BODY = '*';
+/**
+ * Records that something of a file is called inside of a `pre`.
+ * @param file the Pug file that defines the mixin or is included
+ * @param key the name of the mixin, or `PRE_BODY` for the markup the file writes itself
+ */
+function requestPre(file, key) {
+	const keys = preNeeds.get(file) ?? new Set();
+	keys.add(key);
+	preNeeds.set(file, keys);
+}
+/**
+ * Imports the component for a call in a `pre` from the module that writes it.
+ * @param ctx the context of the calling file
+ * @param spec the module the component is imported from
+ * @param name the name of the component (ending with `Pre`)
+ */
+function importPre(ctx, spec, name) {
+	const names = ctx.named.get(spec) ?? [];
+	if (!names.includes(name)) ctx.named.set(spec, [...names, name]);
+}
 // `--pretty`: write out the white space that Pug's `pretty` option puts into pages.
 const PRETTY = process.argv.includes('--pretty');
 const PUG_INLINE = new Set([
@@ -832,6 +860,9 @@ function convertFile(file) {
 	if (converted.has(file)) return converted.get(file);
 	const info = { mixins: [] };
 	converted.set(file, info);
+	// What a call in a `pre` has asked of this file so far: a call met while converting
+	// it asks again, and the file is converted once more (see `preNeeds`).
+	const wantsPre = new Set(preNeeds.get(file));
 	const src = readFileSync(file, 'utf8');
 	const ast = parse(lex(src, { filename: file }), { filename: file, src });
 	const rel = path.relative(path.join(srcRoot, '__assets'), file);
@@ -851,6 +882,7 @@ function convertFile(file) {
 			sameFile.set(component(def.name), {
 				name: component(def.name),
 				params: mixinParams(def.args),
+				file,
 			});
 		}
 		// What the file includes at its top level (other files of mixins) is seen by
@@ -886,25 +918,37 @@ function convertFile(file) {
 		}
 		for (const def of defs) {
 			const params = mixinParams(def.args);
-			info.mixins.push({ name: component(def.name), params });
-			const ctx = newContext(file);
-			for (const n of constants) ctx.declared.add(n);
-			for (const [k, v] of top.mixins) ctx.mixins.set(k, v);
-			for (const [k, v] of top.named) ctx.named.set(k, v);
-			for (const [k, v] of top.imports) ctx.imports.set(k, v);
-			for (const [k, v] of sameFile) ctx.mixins.set(k, v);
-			for (const p of params) {
-				if (p.pattern) for (const n of p.names) ctx.declared.add(n);
-				else ctx.declared.add(p.name);
+			info.mixins.push({ name: component(def.name), params, file });
+			// The component, and one for a call in a `pre` when there is one.
+			const variants = [[component(def.name), 0]];
+			if (wantsPre.has(component(def.name)))
+				variants.push([`${component(def.name)}Pre`, 1]);
+			if (variants.length > 1 && sameFile.has(`${component(def.name)}Pre`)) {
+				throw new Error(
+					`the mixin ${def.name} is called in a pre, and ${component(def.name)}Pre is a mixin of the file already: write it by hand`,
+				);
 			}
-			const body = block(def.block.nodes, ctx, 1);
-			contexts.push(ctx);
-			parts.push(componentText(ctx, component(def.name), body, 'export', params));
-			for (const name of constants) {
-				if (ctx.assigned.has(name)) {
-					warnings.add(
-						`${path.relative(srcRoot, file)}: the mixin ${def.name} assigns to ${name}, which the top of the file declares for all of them as a constant: write it by hand`,
-					);
+			for (const [componentName, pre] of variants) {
+				const ctx = newContext(file);
+				ctx.pre = pre;
+				for (const n of constants) ctx.declared.add(n);
+				for (const [k, v] of top.mixins) ctx.mixins.set(k, v);
+				for (const [k, v] of top.named) ctx.named.set(k, v);
+				for (const [k, v] of top.imports) ctx.imports.set(k, v);
+				for (const [k, v] of sameFile) ctx.mixins.set(k, v);
+				for (const p of params) {
+					if (p.pattern) for (const n of p.names) ctx.declared.add(n);
+					else ctx.declared.add(p.name);
+				}
+				const body = block(def.block.nodes, ctx, 1);
+				contexts.push(ctx);
+				parts.push(componentText(ctx, componentName, body, 'export', params));
+				for (const name of constants) {
+					if (ctx.assigned.has(name)) {
+						warnings.add(
+							`${path.relative(srcRoot, file)}: the mixin ${def.name} assigns to ${name}, which the top of the file declares for all of them as a constant: write it by hand`,
+						);
+					}
 				}
 			}
 		}
@@ -936,18 +980,23 @@ function convertFile(file) {
 				!(n.type === 'Code' && !n.buffer),
 		);
 		if (rest.length > 0) {
-			const ctx = newContext(file);
-			for (const [k, v] of top.mixins) ctx.mixins.set(k, v);
-			for (const [k, v] of top.named) ctx.named.set(k, v);
-			for (const [k, v] of top.imports) ctx.imports.set(k, v);
-			for (const [k, v] of sameFile) ctx.mixins.set(k, v);
-			const body = block(
-				ast.nodes.filter((n) => !(n.type === 'Mixin' && !n.call)),
-				ctx,
-				1,
-			);
-			contexts.push(ctx);
-			parts.push(componentText(ctx, `${pascal(file)}Body`, body, 'export default', []));
+			const variants = [[`${pascal(file)}Body`, 0]];
+			if (wantsPre.has(PRE_BODY)) variants.push([`${pascal(file)}BodyPre`, 1]);
+			for (const [name, pre] of variants) {
+				const ctx = newContext(file);
+				ctx.pre = pre;
+				for (const [k, v] of top.mixins) ctx.mixins.set(k, v);
+				for (const [k, v] of top.named) ctx.named.set(k, v);
+				for (const [k, v] of top.imports) ctx.imports.set(k, v);
+				for (const [k, v] of sameFile) ctx.mixins.set(k, v);
+				const body = block(
+					ast.nodes.filter((n) => !(n.type === 'Mixin' && !n.call)),
+					ctx,
+					1,
+				);
+				contexts.push(ctx);
+				parts.push(componentText(ctx, name, body, pre ? 'export' : 'export default', []));
+			}
 			info.hasBody = true;
 		}
 		text = pruneUnusedImports(
@@ -964,11 +1013,21 @@ function convertFile(file) {
 		// the order of the template: its meta says so.
 		const fragmentPage =
 			inPages(file) && !ast.nodes.some((n) => n.type === 'Tag' && n.name === 'html');
+		const contexts = [ctx];
+		const parts = [componentText(ctx, pascal(file), body, 'export default', [])];
+		// What a `pre` includes of this file is the same text, written as strings.
+		if (wantsPre.has(PRE_BODY)) {
+			const preCtx = newContext(file);
+			preCtx.pre = 1;
+			const preBody = block(ast.nodes, preCtx, 1);
+			contexts.push(preCtx);
+			parts.push(componentText(preCtx, `${pascal(file)}Pre`, preBody, 'export', []));
+		}
 		text = pruneUnusedImports(
-			importLines(ctx).join('\n') +
+			importLines(...contexts).join('\n') +
 				'\n\n' +
 				(fragmentPage ? 'export const meta = { kdStatic: true };\n\n' : '') +
-				componentText(ctx, pascal(file), body, 'export default', []) +
+				parts.join('\n\n') +
 				'\n',
 		);
 	}
@@ -986,6 +1045,7 @@ function convertFile(file) {
  */
 function convertChild(file, ast, extended) {
 	const ctx = newContext(file);
+	const wantsPre = new Set(preNeeds.get(file));
 	// Pug adds `.pug` to a path without an extension.
 	const named = path.extname(extended.file.path)
 		? extended.file.path
@@ -1009,21 +1069,37 @@ function convertChild(file, ast, extended) {
 		ctx.mixins.set(component(def.name), {
 			name: component(def.name),
 			params: mixinParams(def.args),
+			file,
 		});
 	}
 	const contexts = [ctx];
 	const parts = [];
 	for (const def of defs) {
 		const params = mixinParams(def.args);
-		const mixCtx = newContext(file);
-		mixCtx.mixins = ctx.mixins;
-		for (const p of params) {
-			if (p.pattern) for (const n of p.names) mixCtx.declared.add(n);
-			else mixCtx.declared.add(p.name);
+		// The component, and one for a call in a `pre` when there is one.
+		const variants = [[component(def.name), 0]];
+		if (wantsPre.has(component(def.name))) {
+			if (defs.some((d) => component(d.name) === `${component(def.name)}Pre`)) {
+				throw new Error(
+					`the mixin ${def.name} is called in a pre, and ${component(def.name)}Pre is a mixin of the file already: write it by hand`,
+				);
+			}
+			variants.push([`${component(def.name)}Pre`, 1]);
 		}
-		const body = block(def.block.nodes, mixCtx, 1);
-		contexts.push(mixCtx);
-		parts.push(componentText(mixCtx, component(def.name), body, '', params).trim());
+		for (const [componentName, pre] of variants) {
+			const mixCtx = newContext(file);
+			mixCtx.pre = pre;
+			mixCtx.mixins = ctx.mixins;
+			for (const p of params) {
+				if (p.pattern) for (const n of p.names) mixCtx.declared.add(n);
+				else mixCtx.declared.add(p.name);
+			}
+			const body = block(def.block.nodes, mixCtx, 1);
+			contexts.push(mixCtx);
+			// Of the two, the one that no call uses would be an unused local of the page.
+			const exported = variants.length > 1 ? 'export' : '';
+			parts.push(componentText(mixCtx, componentName, body, exported, params).trim());
+		}
 	}
 
 	const blocks = ast.nodes.filter((n) => n.type === 'NamedBlock');
@@ -1626,13 +1702,21 @@ function node(n, ctx, depth) {
 			);
 			let spec = path.relative(path.dirname(outFrom), outTo).replace(/\.pug$/, '.tsx');
 			if (!spec.startsWith('.')) spec = `./${spec}`;
-			ctx.imports.set(name, spec.replace(/\.tsx$/, '.tsx'));
+			// Inside of a `pre` the file is the component that writes its text as strings.
+			let tag = name;
+			if (ctx.pre > 0) {
+				tag = `${name}Pre`;
+				requestPre(abs, PRE_BODY);
+				importPre(ctx, spec, tag);
+			} else {
+				ctx.imports.set(name, spec.replace(/\.tsx$/, '.tsx'));
+			}
 			// Locals the included file may use travel as props.
 			const locals = [...ctx.declared].filter(
 				(d) => (!PROP_NAMES.has(d) || ctx.shadowed.has(d)) && !DATA_VARS.has(d),
 			);
 			const passed = locals.map((l) => `${l}={${l}}`).join(' ');
-			return [`${pad}<${name} {...props}${passed ? ' ' + passed : ''} />`];
+			return [`${pad}<${tag} {...props}${passed ? ' ' + passed : ''} />`];
 		}
 		case 'RawInclude': {
 			// A file that is not Pug is put in as it is. One of the data directory is
@@ -1688,11 +1772,28 @@ function node(n, ctx, depth) {
 				}
 			}
 			const passed = [...named.values(), ...spreads].join(' ');
-			const open = `${mixin.name} {...props}${passed ? ' ' + passed : ''}`;
+			// Inside of a `pre` the mixin is the component that writes its text as strings.
+			let tag = mixin.name;
+			if (ctx.pre > 0) {
+				tag = `${mixin.name}Pre`;
+				requestPre(mixin.file, mixin.name);
+				if (mixin.file !== ctx.file) {
+					// A mixin of another file reaches the context only by an include, which names
+					// the module it is imported from.
+					const spec = [...ctx.named].find(([, names]) =>
+						names.includes(mixin.name),
+					)?.[0];
+					if (spec === undefined) {
+						throw new Error(`+${n.name} in ${ctx.file} is not imported from a module`);
+					}
+					importPre(ctx, spec, tag);
+				}
+			}
+			const open = `${tag} {...props}${passed ? ' ' + passed : ''}`;
 			if (n.block && n.block.nodes.length > 0) {
 				// The block of the call is what the mixin's `block` writes.
 				const inner = children(n.block.nodes, ctx, depth + 1);
-				return [`${pad}<${open}>`, ...inner, `${pad}</${mixin.name}>`];
+				return [`${pad}<${open}>`, ...inner, `${pad}</${tag}>`];
 			}
 			return [`${pad}<${open} />`];
 		}
@@ -1740,6 +1841,26 @@ walkDir(path.join(srcRoot, '__assets'), (f) => {
 		failures.push([f, error.message.split('\n')[0]]);
 	}
 });
+// What was called inside of a `pre` is converted again with the component for it. That
+// file may call more of them, from itself or from another file: until nothing new is asked.
+const preDone = new Map();
+for (let again = true; again;) {
+	again = false;
+	for (const [file, keys] of preNeeds) {
+		if (preDone.get(file) === keys.size || !converted.has(file)) continue;
+		preDone.set(file, keys.size);
+		converted.delete(file);
+		try {
+			convertFile(file);
+		} catch (error) {
+			// What a call imports from it is not written: the run fails, whatever the file is.
+			converted.delete(file);
+			failures.push([file, error.message.split('\n')[0]]);
+			process.exitCode = 1;
+		}
+		again = true;
+	}
+}
 // The pages use `<html static>` and may use `command` / `commandfor`: the types of
 // @types/react do not know them, so they are declared next to the pages.
 const declarations = path.join(outRoot, '__assets', 'kamado-jsx.d.ts');
