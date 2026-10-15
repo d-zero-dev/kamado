@@ -690,16 +690,24 @@ fn line_breaks(text: &str, line_break: &str) -> String {
 	}
 }
 
+/// What the DOM stage hands on.
+struct DomOutput {
+	html: String,
+	/// What the code minifiers could not minify, and why.
+	minify_failures: Vec<String>,
+}
+
 impl Pipeline {
-	/// The DOM stage: parse once, includes, rules, inject, image sizes,
-	/// serialize.
+	/// The DOM stage: parse once, includes, rules, inject, image sizes, the
+	/// minifier's attributes and code, serialize.
 	fn dom_stage(
 		&self,
 		e: &Effective<'_>,
 		input: &PageInput<'_>,
 		recorder: &Recorder<'_>,
 		warnings: &mut Vec<String>,
-	) -> Result<String, String> {
+		hooks: &dyn minify::Hooks,
+	) -> Result<DomOutput, String> {
 		let mut page = Page::parse(input.source);
 		if !e.includes.is_empty() {
 			let env = includes::Env {
@@ -748,10 +756,20 @@ impl Pipeline {
 			};
 			image_sizes::apply(&mut page, &options, recorder).map_err(|ImageSizeError(m)| m)?;
 		}
-		Ok(page.serialize_with(&kd_html::serialize::Options {
-			entities: e.entities.clone(),
-			spec: *e.spec,
-		}))
+		// The minifier's part that needs no second look at the page (attributes,
+		// and the code of `<script>` and `<style>`) runs on the tree.
+		let minify_failures = match e.minify {
+			Some(options) => minify::apply_to_dom(&mut page.doc, options, hooks),
+			None => Vec::new(),
+		};
+		Ok(DomOutput {
+			html: page.serialize_with(&kd_html::serialize::Options {
+				entities: e.entities.clone(),
+				spec: *e.spec,
+				bare_booleans: e.minify.is_some_and(|m| m.collapse_boolean_attributes),
+			}),
+			minify_failures,
+		})
 	}
 
 	/// Runs every stage for one page.
@@ -790,32 +808,38 @@ impl Pipeline {
 				}
 			};
 
-		match self.dom_stage(&e, input, &recorder, &mut warnings) {
-			Ok(html) => result = html,
+		let mut minified = false;
+		let mut minify_failures = Vec::new();
+		match self.dom_stage(&e, input, &recorder, &mut warnings, hooks) {
+			Ok(out) => {
+				result = out.html;
+				minified = e.minify.is_some();
+				minify_failures = out.minify_failures;
+			}
 			Err(message) => failed("dom", message, &mut warnings)?,
 		}
 		if *e.doctype {
 			result = print::add_doctype(&result);
 		}
 		if let Some(options) = e.format {
-			match print::format(&result, options) {
+			// What the minifier made of the code of a page it ran on is written
+			// where it stands, not indented as a block of its own.
+			let mut options = *options;
+			if minified && let Some(m) = e.minify {
+				options.hug_script = m.minify_js;
+				options.hug_style = m.minify_css;
+				options.compact_tags = true;
+			}
+			match print::format(&result, &options) {
 				Ok(html) => result = html,
 				Err(error) => failed("format", error.to_string(), &mut warnings)?,
 			}
 		}
-		if let Some(options) = e.minify {
-			match minify::minify_reporting(&result, options, hooks) {
-				// A CSS or JS text the hooks could not minify is kept as it was and
-				// the rest of the page is minified: `html.onError` decides only
-				// whether that is reported, or fails the page.
-				Ok((html, hook_failures)) => {
-					result = html;
-					for failure in hook_failures {
-						failed("minify", failure, &mut warnings)?;
-					}
-				}
-				Err(error) => failed("minify", error.to_string(), &mut warnings)?,
-			}
+		// A CSS or JS text the hooks could not minify is kept as it was and the
+		// rest of the page is minified: `html.onError` decides only whether that
+		// is reported, or fails the page.
+		for failure in minify_failures {
+			failed("minify", failure, &mut warnings)?;
 		}
 		let html = line_breaks(&result, e.line_break);
 		Ok(PageOutput {

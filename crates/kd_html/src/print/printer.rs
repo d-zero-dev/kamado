@@ -20,6 +20,9 @@ pub struct Settings {
 	pub tab_width: usize,
 	pub bracket_same_line: bool,
 	pub single_attribute_per_line: bool,
+	pub hug_script: bool,
+	pub hug_style: bool,
+	pub compact_tags: bool,
 }
 
 pub struct Printer<'a> {
@@ -191,7 +194,57 @@ impl Printer<'_> {
 		if n.kind == Kind::IeConditionalComment && !n.complete {
 			return true;
 		}
-		is_pre_like(n) && n.children.iter().any(|&c| self.node(c).kind != Kind::Text)
+		(is_pre_like(n) && n.children.iter().any(|&c| self.node(c).kind != Kind::Text))
+			|| self.hugs_code(id)
+	}
+
+	/// Whether the tags of this node are written compact (see
+	/// [`super::Options::compact_tags`]). Not inside an IE conditional comment:
+	/// the minifier read that as a comment, and left what was in it as written.
+	fn compact(&self, id: NodeId) -> bool {
+		self.settings.compact_tags && !self.in_conditional_comment(id)
+	}
+
+	fn in_conditional_comment(&self, id: NodeId) -> bool {
+		let mut cursor = self.node(id).parent;
+		while let Some(p) = cursor {
+			if self.node(p).kind == Kind::IeConditionalComment {
+				return true;
+			}
+			cursor = self.node(p).parent;
+		}
+		false
+	}
+
+	/// Whether an element that closes itself is written with its slash
+	/// (`<br />`): always, but for a void element outside of svg and math when
+	/// the settings ask for tags to be compact (`<br>`).
+	fn slashed(&self, id: NodeId) -> bool {
+		let n = self.node(id);
+		n.is_self_closing && !(self.compact(id) && n.kind == Kind::Element && n.namespace.is_none())
+	}
+
+	/// A `<script>` or `<style>` whose text is written where it stands (see
+	/// [`super::Options::hug_script`]): the settings ask for it, the element
+	/// holds code the minifier takes (by its `type`) and nothing but one text.
+	fn hugs_code(&self, id: NodeId) -> bool {
+		let n = self.node(id);
+		if n.kind != Kind::Element || n.children.len() != 1 {
+			return false;
+		}
+		let type_attr = n
+			.attrs
+			.iter()
+			.find(|a| a.full_name.eq_ignore_ascii_case("type"))
+			.map(|a| a.value.as_deref().unwrap_or(""));
+		let hugs = match n.full_name().as_str() {
+			"script" => {
+				self.settings.hug_script && crate::minify::script_type_holds_code(type_attr)
+			}
+			"style" => self.settings.hug_style && crate::minify::style_type_holds_css(type_attr),
+			_ => false,
+		};
+		hugs && self.node(n.children[0]).kind == Kind::Text && !self.in_conditional_comment(id)
 	}
 
 	// ----- borrowing of tag markers -----
@@ -269,7 +322,7 @@ impl Printer<'_> {
 		match n.kind {
 			Kind::IeConditionalComment | Kind::IeConditionalEndComment => "[endif]-->".to_owned(),
 			Kind::IeConditionalStartComment => "]><!-->".to_owned(),
-			Kind::Element if n.is_self_closing => "/>".to_owned(),
+			Kind::Element if self.slashed(id) => "/>".to_owned(),
 			_ => ">".to_owned(),
 		}
 	}
@@ -424,7 +477,11 @@ impl Printer<'_> {
 	fn print_attributes(&mut self, id: NodeId) -> DocId {
 		let n = self.node(id);
 		if n.attrs.is_empty() {
-			let s = if n.is_self_closing { " " } else { "" };
+			let s = if self.slashed(id) && !self.compact(id) {
+				" "
+			} else {
+				""
+			};
 			return self.text(s);
 		}
 		let ignore = self.ignored_attributes(id);
@@ -450,12 +507,21 @@ impl Printer<'_> {
 			&& n.attrs[0].full_name == "src"
 			&& n.children.is_empty();
 		let per_line = self.settings.single_attribute_per_line && n.attrs.len() > 1;
-		let first_line = if force_not_to_break {
+		// Compact tags keep all attributes on the line of the tag, one space
+		// apart, however the formatter would have laid them out.
+		let compact = self.compact(id);
+		let first_line = if force_not_to_break || compact {
 			self.text(" ")
 		} else {
 			LINE
 		};
-		let separator = if per_line { HARDLINE } else { LINE };
+		let separator = if compact {
+			self.text(" ")
+		} else if per_line {
+			HARDLINE
+		} else {
+			LINE
+		};
 		let joined = self.docs.join(separator, &printed);
 		let joined = self.concat(joined);
 		let inner = self.concat(vec![first_line, joined]);
@@ -463,6 +529,7 @@ impl Printer<'_> {
 		let mut parts = vec![indented];
 		let n = self.node(id);
 		let is_self_closing = n.is_self_closing;
+		let slashed = self.slashed(id);
 		let first_borrows = self
 			.ast
 			.first_child(id)
@@ -470,14 +537,17 @@ impl Printer<'_> {
 		let parent_borrows = n
 			.parent
 			.is_some_and(|p| self.needs_to_borrow_last_child_closing_tag_end_marker(p));
-		if first_borrows
+		if compact {
+			// The end of the tag follows the last attribute, `/>` as well.
+			parts.push(EMPTY);
+		} else if first_borrows
 			|| (is_self_closing && parent_borrows)
 			|| force_not_to_break
 			|| self.settings.bracket_same_line
 		{
-			parts.push(self.text(if is_self_closing { " " } else { "" }));
+			parts.push(self.text(if slashed { " " } else { "" }));
 		} else {
-			parts.push(if is_self_closing { LINE } else { SOFTLINE });
+			parts.push(if slashed { LINE } else { SOFTLINE });
 		}
 		self.concat(parts)
 	}

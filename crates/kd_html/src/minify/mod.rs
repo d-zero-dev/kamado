@@ -13,10 +13,20 @@
 //!
 //! Code minification is not done here: the caller supplies a [`Hooks`] value
 //! that minifies CSS and JavaScript (the identity until the minifiers exist).
+//!
+//! The build does not run [`minify`] on a formatted page: [`apply_to_dom`] does
+//! the same to the tree (see `dom`), which saves parsing the page a second
+//! time, and gives up the quirks above. This port stays as the specification
+//! that the tree version is held to (the golden and differential tests, and
+//! the A/B line of the `stage_bench` example), and for callers that have text
+//! and no tree.
 
+mod dom;
 mod tables;
 
 use std::fmt;
+
+pub use dom::apply_to_dom;
 
 use crate::parser::is_js_space;
 
@@ -534,6 +544,54 @@ fn is_attribute_redundant(tag: &str, name: &str, value: Option<&str>, attrs: &[A
 
 fn is_boolean_attribute(name: &str, value: &str) -> bool {
 	SIMPLE_BOOLEAN.contains(&name) || (name == "draggable" && !matches!(value, "true" | "false"))
+}
+
+/// Whether `name` (lower case) is an attribute that the minifier writes bare
+/// when it has no value to speak of (`disabled`, `draggable` without a
+/// `true` / `false`).
+///
+/// # Example
+///
+/// ```
+/// use kd_html::minify::is_bare_when_empty;
+/// assert!(is_bare_when_empty("disabled"));
+/// assert!(!is_bare_when_empty("class"));
+/// ```
+#[must_use]
+pub fn is_bare_when_empty(name: &str) -> bool {
+	is_boolean_attribute(name, "")
+}
+
+/// Whether a `<script>` with this `type` (`None` when it has none) holds code
+/// that [`Hooks::js`] is given.
+///
+/// # Example
+///
+/// ```
+/// use kd_html::minify::script_type_holds_code;
+/// assert!(script_type_holds_code(None));
+/// assert!(script_type_holds_code(Some("module")));
+/// assert!(!script_type_holds_code(Some("application/ld+json")));
+/// ```
+#[must_use]
+pub fn script_type_holds_code(value: Option<&str>) -> bool {
+	value.is_none_or(is_script_type_attribute)
+}
+
+/// Whether a `<style>` with this `type` (`None` when it has none) holds CSS
+/// that [`Hooks::css`] is given.
+///
+/// # Example
+///
+/// ```
+/// use kd_html::minify::style_type_holds_css;
+/// assert!(style_type_holds_css(None));
+/// assert!(style_type_holds_css(Some("text/css")));
+/// assert!(!style_type_holds_css(Some("text/less")));
+/// ```
+#[must_use]
+pub fn style_type_holds_css(value: Option<&str>) -> bool {
+	value.is_none_or(is_style_link_type_attribute)
 }
 
 fn is_event_attribute(name: &str) -> bool {

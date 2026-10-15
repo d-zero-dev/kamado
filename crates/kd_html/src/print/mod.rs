@@ -37,6 +37,20 @@ pub struct Options {
 	pub bracket_same_line: bool,
 	pub single_attribute_per_line: bool,
 	pub whitespace_sensitivity: WhitespaceSensitivity,
+	/// Write the text of a `<script>` that holds code (by its `type`) right
+	/// after the start tag and before the end tag, with no line break or
+	/// indentation of its own, which is the form minified code takes. Without
+	/// it the text is a block of its own, indented. The same for `<style>` and
+	/// `hug_style`.
+	pub hug_script: bool,
+	pub hug_style: bool,
+	/// Write tags compactly, instead of prettier's way: the attributes of a tag
+	/// on one line, separated by one space; no line break inside a tag, which is where a tag's end `>` (or
+	/// `/>`) that prettier lets the next node borrow would have stood on a line
+	/// of its own; a void element (`<br>`, `<img src="a">`) without the ` /`
+	/// before its end, but for the elements of svg and math, which keep a
+	/// slash written `<path d="a"/>`.
+	pub compact_tags: bool,
 }
 
 impl Default for Options {
@@ -49,6 +63,9 @@ impl Default for Options {
 			bracket_same_line: false,
 			single_attribute_per_line: false,
 			whitespace_sensitivity: WhitespaceSensitivity::Css,
+			hug_script: false,
+			hug_style: false,
+			compact_tags: false,
 		}
 	}
 }
@@ -135,6 +152,9 @@ pub fn format(source: &str, options: &Options) -> Result<String, ParseError> {
 			tab_width: options.tab_width,
 			bracket_same_line: options.bracket_same_line,
 			single_attribute_per_line: options.single_attribute_per_line,
+			hug_script: options.hug_script,
+			hug_style: options.hug_style,
+			compact_tags: options.compact_tags,
 		},
 	);
 	let printed = doc::print(
@@ -143,6 +163,7 @@ pub fn format(source: &str, options: &Options) -> Result<String, ParseError> {
 		doc::PrintOptions {
 			tab_width: options.tab_width,
 			use_tabs: options.use_tabs,
+			glue_markers: options.compact_tags,
 		},
 	);
 	Ok(if bom {
@@ -278,6 +299,49 @@ mod tests {
 		assert!(error.message.contains("nested deeper than 256"));
 		let fine = format!("{}x{}", "<div>".repeat(200), "</div>".repeat(200));
 		assert!(format(&fine, &Options::default()).is_ok());
+	}
+
+	fn compact(src: &str) -> String {
+		let options = Options {
+			use_tabs: true,
+			bracket_same_line: true,
+			compact_tags: true,
+			..Options::default()
+		};
+		format(src, &options).unwrap()
+	}
+
+	#[test]
+	fn compact_tags_take_back_the_line_before_a_borrowed_end_of_a_tag() {
+		// Prettier writes `</font\n><br />` and `<a href="x"\n><img ...>`; with
+		// compact tags nothing is broken inside a tag.
+		assert_eq!(
+			compact("<div><font><b>t</b></font><br>\n<br></div>"),
+			"<div>\n\t<font><b>t</b></font><br>\n\t<br>\n</div>\n"
+		);
+		assert_eq!(
+			compact("<p>a<a href=\"x\"><img src=\"y\"></a>b</p>"),
+			"<p>\n\ta<a href=\"x\"><img src=\"y\"></a>b\n</p>\n"
+		);
+	}
+
+	#[test]
+	fn compact_tags_do_not_take_back_more_than_one_line_break() {
+		// The two `<br>`s are kept apart, a `>` that starts the second must not
+		// be mistaken for a borrowed end.
+		assert_eq!(
+			compact("<html><body><div><font><b>t</b></font><br>\n<br></div></body></html>"),
+			"<html>\n\t<body>\n\t\t<div>\n\t\t\t<font><b>t</b></font><br>\n\t\t\t<br>\n\t\t</div>\n\t</body>\n</html>\n"
+		);
+	}
+
+	#[test]
+	fn compact_tags_keep_the_attributes_on_one_line_and_the_slash_in_svg() {
+		let out = compact("<div title=\"a\nb\" class=\"c\">x</div><svg><path d=\"M0\"/><g/></svg>");
+		assert_eq!(
+			out,
+			"<div title=\"a\nb\" class=\"c\">\n\tx\n</div>\n<svg>\n\t<path d=\"M0\"/>\n\t<g/>\n</svg>\n"
+		);
 	}
 
 	#[test]

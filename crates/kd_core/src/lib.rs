@@ -1552,7 +1552,7 @@ mod tests {
 		let dir =
 			std::path::PathBuf::from(std::env::var("KD_CHAIN_DIR").expect("set KD_CHAIN_DIR"));
 		let config = kd_config::parse(
-			r#"{ "dir": { "input": "src", "output": "out" }, "html": { "onError": "error", "imageSizes": false } }"#,
+			r#"{ "dir": { "input": "src", "output": "out" }, "html": { "onError": "error", "imageSizes": false, "minify": false } }"#,
 			"/kd-chain-root",
 			None,
 		)
@@ -2151,9 +2151,10 @@ mod tests {
 			site.root
 		);
 
-		// silent: the broken script stays as the format stage left it, the rest
-		// of the page is minified.
-		let kept = "<script>\n\tvar = ;\n</script>\n<script>window.a=1;</script>\n";
+		// silent: the broken script stays as it was written, where the minifier
+		// put the others (not indented as a block of its own), the rest of the
+		// page is minified.
+		let kept = "<script>var = ;</script>\n<script>window.a=1;</script>\n";
 		let report = run("silent").unwrap();
 		assert!(report.warnings.is_empty(), "{:?}", report.warnings);
 		assert_eq!(site.read("out/index.html"), kept);
@@ -2545,6 +2546,39 @@ mod tests {
 		assert_eq!(
 			site.read("out/a.html"),
 			"<!DOCTYPE html>\n<html>\n\t<head>\n\t\t<title>t</title>\n\t</head>\n\t<body>\n\t\t<input disabled>\n\t\t<p>x</p>\n\t</body>\n</html>\n"
+		);
+	}
+
+	#[test]
+	fn the_minify_options_decide_which_attributes_are_tidied_and_how_booleans_are_written() {
+		let site = Site::new("minify_attributes");
+		site.write("src/a.html", DOCUMENT);
+		let run = |minify: &str| {
+			let loaded = site.config(&format!(r#", "html": {{ "minify": {minify} }}"#));
+			run_build(&loaded).unwrap();
+			site.read("out/a.html")
+		};
+		let body = |out: &str| {
+			out.lines()
+				.find(|l| l.contains("<input"))
+				.unwrap()
+				.trim()
+				.to_owned()
+		};
+		assert_eq!(body(&run("true")), "<input disabled>");
+		// Not collapsed: a bare boolean attribute is written in full, as the
+		// minifier did.
+		assert_eq!(
+			body(&run(r#"{ "booleanAttributes": false }"#)),
+			"<input disabled=\"disabled\">"
+		);
+		assert_eq!(
+			body(&run(r#"{ "redundantAttributes": false }"#)),
+			"<input type=\"text\" disabled>"
+		);
+		assert_eq!(
+			body(&run("false")),
+			"<input type=\"text\" disabled=\"disabled\" />"
 		);
 	}
 
