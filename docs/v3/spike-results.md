@@ -92,7 +92,26 @@ x86_64 の SHA-NI と、命令を使った実装は採用していない（`kd_h
 - **plan の read は、ubuntu で 2〜4s、手元の macOS で 12〜40s**。ホステッドの macOS も 12〜17s と遅く、macOS の `open` 自体の重さが効いている可能性がある（検査ソフトだけが原因とは言い切れない）。ubuntu では plan は支配的でない。
 - **ubuntu の cold を占めるのは、描画まで（plan を含めて 13〜23s）と書き出し（`finish: pages and assets` が 16〜30s）**。ubuntu-24.04-arm では、全体 30s のうち書き出しが 16〜17s で半分以上。cold を縮める対象は、この 2 つ（特に書き出し）から決める。
 - 2 回の cold の差は小さい（ubuntu で数 %）。ホステッドランナーでは、手元のようなぶれは出なかった。
-- ランナーのコア数と GitHub 側の変動は確認していない。各条件 1 回の計測で、ubuntu-latest と arm の差（約 1.7 倍）はコア数や CPU の違いを含む。
+- GitHub 側の変動は確認していない。各条件 1 回の計測で、ubuntu-latest と arm の差（約 1.7 倍）は CPU の違いを含む。コア数は次の節のとおり、ubuntu が 4、macOS が 3。
+
+### 書き出しの内訳（`finish: pages and assets`、10 万ページ、各 1 回）
+
+`KD_TIMING=1` の `core finish: summed over N threads: html chain …, write …` を、同じワークフローで 2026-10-15 に取った（`dev` の `cdda496`）。2 つの合算値は、プールの全スレッドが「HTML の段（`pipeline.process` と文字コードの変換）」と「`write_output`」に使った壁時計の時間の和。N はプールのスレッド数で、ランナーのコア数と同じだった。
+
+| ランナー（スレッド数） | 条件   | finish（壁時計） | html chain（合算） | write（合算） | 全体  |
+| ---------------------- | ------ | ---------------- | ------------------ | ------------- | ----- |
+| ubuntu-latest（4）     | cold 1 | 30.2s            | 106.9s             | 13.0s         | 53.2s |
+| ubuntu-latest（4）     | cold 2 | 28.5s            | 105.3s             | 7.9s          | 51.1s |
+| ubuntu-24.04-arm（4）  | cold 1 | 18.8s            | 59.1s              | 14.9s         | 34.2s |
+| ubuntu-24.04-arm（4）  | cold 2 | 17.3s            | 58.3s              | 9.8s          | 32.5s |
+| macOS-latest（3）      | cold 1 | 55.9s            | 98.6s              | 64.9s         | 97.3s |
+| macOS-latest（3）      | cold 2 | 45.7s            | 102.6s             | 30.3s         | 86.1s |
+
+- **ubuntu の書き出しは、HTML の段の CPU が支配している**。x64 は 107s ÷ 4 スレッド ≒ 27s で、finish の壁時計 28〜30s とほぼ一致する。書き込みは 1 割程度（8〜15s）。1 ページあたりの HTML の段は、x64 が約 1.05ms、arm が約 0.59ms。
+- 手元の HTML の段だけの計測（`kd_html` の `stage_bench`、M1）は format 392µs + minify 105µs ≒ 0.5ms/ページで、arm の値と整合する。
+- **macOS は書き込みが大きい**（ホステッド 30〜65s、手元 123s。手元は 8 スレッドの合算）。検査ソフトやファイルシステムの影響と見ていて、ubuntu には出ない。
+- 前の表（同じ内容の別の実行）と finish の値が少し違う（arm で 16.9s と 18.8s など）。各条件 1 回の計測で、実行ごとの差の範囲と見ている。
+- cold の目標（≤ 10s）に近づけるには、ubuntu では HTML の段（特に format）を縮めるのが本筋になる。sidecar の存在しない open を削る案は、ubuntu で plan が 2〜4s と支配的でないので、効果が小さい。
 
 ## 構造文字の走査（SIMD）
 
