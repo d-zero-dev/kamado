@@ -2,7 +2,9 @@
 //! `cargo run --release -p kd_html --example stage_bench -- <dir> [limit]`.
 //!
 //! A development aid for finding where the per-page time goes; the numbers
-//! are per page, averaged over the files read.
+//! are per page, averaged over the files read. Three lines come out: the
+//! formatting with its steps, the minifier, and the DOM stage with the
+//! encoding.
 
 use std::fs;
 use std::time::Instant;
@@ -15,6 +17,7 @@ mod alloc;
 #[global_allocator]
 static ALLOCATOR: alloc::PoolAlloc = alloc::PoolAlloc;
 
+use kd_html::encode::{self, Encoding};
 use kd_html::minify::{self, NoMinification};
 use kd_html::print;
 
@@ -47,6 +50,7 @@ fn main() {
 		.iter()
 		.filter_map(|p| fs::read_to_string(p).ok())
 		.collect();
+	assert!(!pages.is_empty(), "no .html files under {dir}");
 	let bytes: usize = pages.iter().map(String::len).sum();
 	println!("{} pages, {} bytes", pages.len(), bytes);
 
@@ -65,9 +69,11 @@ fn main() {
 		minify_css: false,
 		minify_js: false,
 	};
+	let per_page = |nanos: u128, pages: usize| nanos as f64 / 1000.0 / pages.max(1) as f64;
 
 	// `REPEAT=n` runs the formatting n times, long enough for a sampling
-	// profiler to look at it.
+	// profiler to look at it. The other measurements run once, after it, so
+	// they see the allocator warmed up the way a build does.
 	let repeat: usize = std::env::var("REPEAT")
 		.ok()
 		.and_then(|n| n.parse().ok())
@@ -80,7 +86,64 @@ fn main() {
 			formatted.push(print::format(p, &options).unwrap_or_default());
 		}
 	}
-	let format_us = t.elapsed().as_micros() as f64 / (pages.len() * repeat) as f64;
+	let format_us = per_page(t.elapsed().as_nanos(), pages.len() * repeat);
+
+	// Inside `format`: its steps timed one by one (parse into the tree,
+	// white-space preprocessing, building the printer's document, printing it,
+	// dropping what was built). They repeat what `print::format` calls, minus
+	// its byte order mark and line-end handling, so they have to follow it by
+	// hand; `steps` is the sum, to be read next to `format`.
+	let mut parts = [0u128; 5];
+	let mut timed = 0usize;
+	for p in &pages {
+		let t = Instant::now();
+		let Ok(mut tree) = print::ast::build(p) else {
+			continue;
+		};
+		timed += 1;
+		parts[0] += t.elapsed().as_nanos();
+		let t = Instant::now();
+		print::preprocess::run(&mut tree, options.whitespace_sensitivity);
+		parts[1] += t.elapsed().as_nanos();
+		let t = Instant::now();
+		let mut docs = print::doc::Docs::new();
+		let root = print::printer::print_root(
+			&tree,
+			&mut docs,
+			print::printer::Settings {
+				tab_width: options.tab_width,
+				bracket_same_line: options.bracket_same_line,
+				single_attribute_per_line: options.single_attribute_per_line,
+			},
+		);
+		parts[2] += t.elapsed().as_nanos();
+		let t = Instant::now();
+		let out = print::doc::print(
+			&mut docs,
+			root,
+			print::doc::PrintOptions {
+				print_width: options.print_width,
+				tab_width: options.tab_width,
+				use_tabs: options.use_tabs,
+			},
+		);
+		parts[3] += t.elapsed().as_nanos();
+		let t = Instant::now();
+		drop(tree);
+		drop(docs);
+		drop(std::hint::black_box(out));
+		parts[4] += t.elapsed().as_nanos();
+	}
+	let steps: u128 = parts.iter().sum();
+	println!(
+		"format {format_us:.0}µs/page = parse {:.0} + preprocess {:.0} + build doc {:.0} + print doc {:.0} + drop {:.0} (steps sum {:.0}µs, {timed} pages timed)",
+		per_page(parts[0], timed),
+		per_page(parts[1], timed),
+		per_page(parts[2], timed),
+		per_page(parts[3], timed),
+		per_page(parts[4], timed),
+		per_page(steps, timed),
+	);
 
 	let t = Instant::now();
 	let mut total = 0;
@@ -89,6 +152,30 @@ fn main() {
 			.map(|s| s.len())
 			.unwrap_or(0);
 	}
-	let minify_us = t.elapsed().as_micros() as f64 / pages.len() as f64;
-	println!("format {format_us:.0}µs/page, minify {minify_us:.0}µs/page ({total} bytes out)");
+	let minify_us = per_page(t.elapsed().as_nanos(), pages.len());
+	println!("minify {minify_us:.0}µs/page ({total} bytes out)");
+
+	// The DOM stage without includes, rules and the like: parse into the tree,
+	// serialize it and drop the tree. Then the encoding of what came out: a
+	// copy for UTF-8, a conversion for Shift_JIS (characters it lacks are
+	// reported, not failed).
+	let serialize_options = kd_html::serialize::Options::default();
+	let t = Instant::now();
+	let mut serialized = Vec::with_capacity(pages.len());
+	for p in &pages {
+		serialized.push(kd_html::page::Page::parse(p).serialize_with(&serialize_options));
+	}
+	let dom_us = per_page(t.elapsed().as_nanos(), pages.len());
+	let mut encoded = [0.0; 2];
+	for (slot, encoding) in [Encoding::Utf8, Encoding::ShiftJis].into_iter().enumerate() {
+		let t = Instant::now();
+		for s in &serialized {
+			drop(std::hint::black_box(encode::encode_reporting(s, encoding)));
+		}
+		encoded[slot] = per_page(t.elapsed().as_nanos(), pages.len());
+	}
+	println!(
+		"dom (parse + serialize + drop) {dom_us:.0}µs/page, encode utf8 {:.0}µs, shift_jis {:.0}µs",
+		encoded[0], encoded[1]
+	);
 }
