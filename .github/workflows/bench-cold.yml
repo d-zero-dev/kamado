@@ -29,7 +29,7 @@ jobs:
     timeout-minutes: 60
 
     env:
-      FIXTURE: ${{ runner.temp }}/fixtures
+      FIXTURE: /tmp/fixtures
       PAGES: ${{ inputs.pages }}
       KD_TIMING: '1'
       KAMADO_TIMING: '1'
