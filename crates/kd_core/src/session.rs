@@ -12,6 +12,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -116,6 +117,55 @@ struct Shared {
 	started_at: (i64, u32),
 	results: Mutex<Vec<Option<Outcome>>>,
 	asset_results: Mutex<Vec<Option<AssetOutcome>>>,
+	/// What the pages spent in the HTML chain and in writing, summed over the
+	/// threads; kept only when `KD_TIMING` is set.
+	page_times: PageTimes,
+}
+
+/// The wall time the pages of a build spent in the HTML chain (with the
+/// encoding) and in writing their output, in nanoseconds summed over all
+/// threads. Compared with the wall time of the phase it says where the pages
+/// wait: a thread that is not running (more threads than cores) is counted in
+/// whichever part it was in, so the split is a hint, not a CPU profile.
+struct PageTimes {
+	enabled: bool,
+	html_ns: AtomicU64,
+	write_ns: AtomicU64,
+}
+
+impl PageTimes {
+	fn new() -> PageTimes {
+		PageTimes::with_enabled(timing_enabled())
+	}
+
+	fn with_enabled(enabled: bool) -> PageTimes {
+		PageTimes {
+			enabled,
+			html_ns: AtomicU64::new(0),
+			write_ns: AtomicU64::new(0),
+		}
+	}
+
+	/// Runs `f`, adding its time to `counter` when timing is on.
+	fn time<T>(&self, counter: &AtomicU64, f: impl FnOnce() -> T) -> T {
+		if !self.enabled {
+			return f();
+		}
+		let at = Instant::now();
+		let value = f();
+		counter.fetch_add(at.elapsed().as_nanos() as u64, Ordering::Relaxed);
+		value
+	}
+
+	fn report(&self, threads: usize) {
+		if self.enabled {
+			eprintln!(
+				"  core finish: summed over {threads} threads: html chain {}ms, write {}ms",
+				self.html_ns.load(Ordering::Relaxed) / 1_000_000,
+				self.write_ns.load(Ordering::Relaxed) / 1_000_000,
+			);
+		}
+	}
 }
 
 /// A page result, its manifest entry, the warnings it raised and the
@@ -863,6 +913,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 			started_at: crate::racy_floor(started_at),
 			results: Mutex::new((0..page_count).map(|_| None).collect()),
 			asset_results: Mutex::new((0..asset_count).map(|_| None).collect()),
+			page_times: PageTimes::new(),
 		}),
 		decisions,
 		on_disk,
@@ -876,10 +927,14 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	})
 }
 
+fn timing_enabled() -> bool {
+	std::env::var_os("KD_TIMING").is_some()
+}
+
 /// Prints how long a phase took when `KD_TIMING` is set (a development aid for
 /// finding where a build spends its time), and starts the next one.
 fn lap(last: &mut Instant, what: &str) {
-	if std::env::var_os("KD_TIMING").is_some() {
+	if timing_enabled() {
 		eprintln!("  core {what}: {}ms", last.elapsed().as_millis());
 	}
 	*last = Instant::now();
@@ -1051,6 +1106,7 @@ impl Prepared {
 			}
 		});
 		lap(&mut lap_at, "finish: pages and assets");
+		shared.page_times.report(jobs.max(1));
 		drop(pool);
 		lap(&mut lap_at, "finish: pool stopped");
 		let shared = Arc::try_unwrap(shared)
@@ -1209,17 +1265,23 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 		Some(html) => html,
 		None => page.body.as_deref().unwrap_or_default(),
 	};
-	let out = shared.pipeline.process(
-		&html::PageInput {
-			source,
-			url: &page.file.url,
-			input_path: &page.file.input_path,
-			phase: kd_html::inject::Phase::Build,
-		},
-		&shared.minifiers,
-	)?;
-	let (bytes, replaced) = kd_html::encode::encode_reporting(&out.html, out.encoding);
-	let status = write_output(&page.file.output_path, &bytes, shared.skip_unchanged)?;
+	let times = &shared.page_times;
+	let (out, bytes, replaced) = times.time(&times.html_ns, || {
+		let out = shared.pipeline.process(
+			&html::PageInput {
+				source,
+				url: &page.file.url,
+				input_path: &page.file.input_path,
+				phase: kd_html::inject::Phase::Build,
+			},
+			&shared.minifiers,
+		)?;
+		let (bytes, replaced) = kd_html::encode::encode_reporting(&out.html, out.encoding);
+		Ok::<_, String>((out, bytes, replaced))
+	})?;
+	let status = times.time(&times.write_ns, || {
+		write_output(&page.file.output_path, &bytes, shared.skip_unchanged)
+	})?;
 	// The fingerprints were taken when the bytes were read, so an edit made
 	// after that is detected by the next build instead of being recorded as if
 	// the output had been built from it.
@@ -1420,6 +1482,22 @@ pub fn write_report(config: &kd_config::Config, report: &Report) -> Result<(), S
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn the_time_of_a_part_is_summed_only_when_timing_is_on() {
+		let on = PageTimes::with_enabled(true);
+		let value = on.time(&on.write_ns, || {
+			std::thread::sleep(std::time::Duration::from_millis(2));
+			7
+		});
+		assert_eq!(value, 7);
+		assert!(on.write_ns.load(Ordering::Relaxed) >= 2_000_000);
+		assert_eq!(on.html_ns.load(Ordering::Relaxed), 0);
+
+		let off = PageTimes::with_enabled(false);
+		assert_eq!(off.time(&off.write_ns, || 7), 7);
+		assert_eq!(off.write_ns.load(Ordering::Relaxed), 0);
+	}
 
 	#[test]
 	fn the_warning_names_the_page_the_other_pages_and_the_character() {
