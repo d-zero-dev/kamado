@@ -175,7 +175,7 @@ KD_JS_FUNCTION=1 node scripts/check-kd-js-jsx.mjs fuzz 3000 7   # 関数形式
 
 ## 性能の見方
 
-`KD_TIMING=1 KAMADO_TIMING=1 node packages/kamado/dist/cli.js build ...` で、段階ごとの時間（Rust 側と JS 側）が標準エラーに出る。`sample`（macOS）や `perf`（Linux）で見るときは、`strip = "symbols"` を外したビルド（`CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p kd_napi --target-dir <別の場所>`）を `KAMADO_NATIVE_ADDON` で指す。HTML 段だけの時間は `cargo run --release -p kd_html --example stage_bench -- <出力ディレクトリ>`。
+`KD_TIMING=1 KAMADO_TIMING=1 node packages/kamado/dist/cli.js build ...` で、段階ごとの時間（Rust 側と JS 側）が標準エラーに出る。`core finish: summed over N threads` の行は、書き出しの段（`finish: pages and assets`）でページが HTML の段と書き込みに使った時間を、N 本のスレッドで合算した値。壁時計の時間（スレッド数 × 段の時間）と見比べると、ページがどちらで待っているかの目安になる。スレッドがコア数より多いと、実行されていない時間もそのときいた側に数えられるので、CPU の計測ではなく目安として読む。HTML の段には文字コードの変換が含まれる。`sample`（macOS）や `perf`（Linux）で見るときは、`strip = "symbols"` を外したビルド（`CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p kd_napi --target-dir <別の場所>`）を `KAMADO_NATIVE_ADDON` で指す。HTML 段だけの時間は `cargo run --release -p kd_html --example stage_bench -- <出力ディレクトリ>`。
 
 検査ソフトのない環境で cold を測るには、GitHub Actions の `Bench cold build`（`.github/workflows/bench-cold.yml`、手動実行）を使う。ページ数を指定して fixture を生成し、cold を 2 回、`--incremental` を 2 回（2 回目が warm）ビルドして、段階別の時間をジョブのサマリーに出す。ubuntu（x64 / arm64）と macOS で走る。
 
