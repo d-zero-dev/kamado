@@ -1,0 +1,104 @@
+name: Bench cold build
+
+# Builds a generated site of `pages` pages and prints the time of each stage to the
+# job summary. Run by hand: a 100,000-page build takes minutes, so it is not a
+# check of every push. The numbers on the maintainer's macOS machine are
+# distorted by an endpoint scanner (docs/v3/spike-results.md); a hosted runner has
+# none, so this is where the cold time of the target (cold <= 10s) is read.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pages:
+        description: 'Number of pages to generate'
+        required: true
+        default: '100000'
+
+jobs:
+  bench:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - macOS-latest
+        node: [26]
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    env:
+      FIXTURE: ${{ runner.temp }}/fixtures
+      PAGES: ${{ inputs.pages }}
+      KD_TIMING: '1'
+      KAMADO_TIMING: '1'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Enable Corepack and setup Yarn v4
+        run: |
+          npm install -g corepack
+          corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup default 1.98.1
+
+      - name: Build addon
+        run: cargo build --locked --offline --release -p kd_napi
+
+      - name: Build the Node package
+        run: yarn build
+
+      - name: Generate the fixture
+        run: node benchmarks/v3/generate-jsx-fixtures.ts --pages="$PAGES" --out="$FIXTURE"
+
+      - name: Machine
+        run: |
+          {
+            echo "## $RUNNER_OS $RUNNER_ARCH ($PAGES pages)"
+            echo
+            echo '```'
+            uname -a
+            node --version
+            node -e "const os=require('node:os');console.log(os.availableParallelism()+' cores, '+Math.round(os.totalmem()/2**30)+' GiB')"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Each cold run starts from no output, no plan cache and no JSX compile cache.
+      # The first one also reads sources the OS has just been given by the
+      # generator; the second one shows how much that matters.
+      - name: Cold build 1
+        run: |
+          rm -rf "$FIXTURE/output" "$FIXTURE/.cache" "$FIXTURE/node_modules"
+          node packages/kamado/dist/cli.js build --config "$FIXTURE/kamado.config.jsonc" 2>&1 | tee cold1.log
+          { echo '### cold 1'; echo '```'; cat cold1.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cold build 2
+        run: |
+          rm -rf "$FIXTURE/output" "$FIXTURE/.cache" "$FIXTURE/node_modules"
+          node packages/kamado/dist/cli.js build --config "$FIXTURE/kamado.config.jsonc" 2>&1 | tee cold2.log
+          { echo '### cold 2'; echo '```'; cat cold2.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      # The first `--incremental` run makes the plan cache; the second one is warm.
+      - name: Incremental build (plan cache made)
+        run: |
+          node packages/kamado/dist/cli.js build --incremental --config "$FIXTURE/kamado.config.jsonc" 2>&1 | tee incremental1.log
+          { echo '### incremental, first'; echo '```'; cat incremental1.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Warm build
+        run: |
+          node packages/kamado/dist/cli.js build --incremental --config "$FIXTURE/kamado.config.jsonc" 2>&1 | tee warm.log
+          { echo '### warm'; echo '```'; cat warm.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

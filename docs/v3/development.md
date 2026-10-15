@@ -177,4 +177,6 @@ KD_JS_FUNCTION=1 node scripts/check-kd-js-jsx.mjs fuzz 3000 7   # 関数形式
 
 `KD_TIMING=1 KAMADO_TIMING=1 node packages/kamado/dist/cli.js build ...` で、段階ごとの時間（Rust 側と JS 側）が標準エラーに出る。`sample`（macOS）や `perf`（Linux）で見るときは、`strip = "symbols"` を外したビルド（`CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p kd_napi --target-dir <別の場所>`）を `KAMADO_NATIVE_ADDON` で指す。HTML 段だけの時間は `cargo run --release -p kd_html --example stage_bench -- <出力ディレクトリ>`。
 
+検査ソフトのない環境で cold を測るには、GitHub Actions の `Bench cold build`（`.github/workflows/bench-cold.yml`、手動実行）を使う。ページ数を指定して fixture を生成し、cold を 2 回、`--incremental` を 2 回（2 回目が warm）ビルドして、段階別の時間をジョブのサマリーに出す。ubuntu（x64 / arm64）と macOS で走る。
+
 ページごとの時間の大半は、`open` やファイルの作成に費やされる環境がある（開発に使っている macOS では `open` が 70〜200µs）。ファイルの数を減らすことが、CPU の最適化より効く。
