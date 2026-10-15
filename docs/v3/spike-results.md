@@ -61,6 +61,22 @@ x86_64 の SHA-NI と、命令を使った実装は採用していない（`kd_h
 - RSS は v2 の `run-bench.ts`（`v2` ブランチ）の出力にこの規模では出なかったので、v3 の比較用の RSS は `benchmarks/v3/` のハーネスで計測する。
 - 10 万ページの v2 基準値は、v2 の生成器を使えないので、v3 の fixture 生成器（`benchmarks/v3/generate-jsx-fixtures.ts`、`--target=v2`、ディレクトリを分けて生成）で作った fixture を、`benchmarks/v2-baseline/run.ts`（公開済みの v2 を固定した版で動かす）で処理する形で取る。手順は `docs/v3/development.md` の「v2 の oracle」。
 
+## v3 の 10 万ページ（`kamado build`、1 台のマシン、各条件 1〜2 回計測）
+
+環境は Apple M1（8 コア、16 GB）、macOS、コミット `cdde1be` のアドオン（`cargo build --release -p kd_napi`）。fixture は `node benchmarks/v3/generate-jsx-fixtures.ts --pages=100000`（seed 1）。段階別の時間は `KD_TIMING=1 KAMADO_TIMING=1` で取った。
+
+| 条件                                                                | plan の read | 描画まで | 全体       |
+| ------------------------------------------------------------------- | ------------ | -------- | ---------- |
+| cold 1（出力・`.cache`・JSX のコンパイルキャッシュを消した状態）    | 12.1s        | 23.3s    | **42.97s** |
+| cold 2（同上）                                                      | 29.8s        | 45.6s    | **67.74s** |
+| warm（`--incremental` の 2 回目、変更なし。100013 件すべて cached） | 0.3s         | —        | **3.38s**  |
+
+- **cold は目標（≤ 10s）を満たしていない**。2 回の計測で 43〜68s。
+- **warm は目標を満たしている**（3.38s）。
+- **cold の計測はぶれが大きく、原因は未確認**。差は主に plan の read（12s と 30s）に出ている。ファイルシステムのキャッシュの状態や、ほかのプロセスの負荷が考えられるが、切り分けていない。
+- 出力が残った状態で `--incremental` なしで再ビルドすると 75s、`--incremental` の初回（plan cache を作る）は 66s だった。どちらも出力と JSX のコンパイルキャッシュが残った状態で測っていて、cold の条件と違うので、cold の値としては使わない（遅い理由は切り分けていない）。
+- cold 1 の内訳は、plan 13.0s（read 12.1s）、ページの判定（モジュールのコンパイル）2.5s、描画 6.8s、書き出し（`finish: pages and assets`）19.4s。cold を縮める対象は、ぶれを切り分けたうえで、この内訳から決める。
+
 ## 構造文字の走査（SIMD）
 
 30 KB の HTML から `<` と `&` を探すマイクロベンチ（aarch64、`rustc -O`）:
