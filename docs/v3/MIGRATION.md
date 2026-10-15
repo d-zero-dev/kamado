@@ -296,7 +296,8 @@ kamado の前身の `@d-zero/builder`（Eleventy ベース）で作られた案�
 | `minifier: { minifyCSS: false }`（HTML Minifier の他の機能は何も有効にならない） | `html.minify: { "redundantAttributes": false, "css": false }`（空の `class=""` を残し、`style` 属性を圧縮しない）                                 |
 | `characterEntities: true`                                                        | `html.entities: "all"`                                                                                                                            |
 | builder が DOM を jsdom で書き戻す（属性の `&amp;`、`<path></path>`、`&nbsp;`）  | `html.serializer: "spec"`                                                                                                                         |
-| `autoDecode`（入力が Shift_JIS）                                                 | **未対応**（入力は UTF-8）                                                                                                                        |
+| `autoDecode`（開発サーバーが Shift_JIS の出力を UTF-8 に戻す機能）               | 不要。開発サーバーは常に UTF-8 を返す（RFC §9.5）                                                                                                 |
+| ソースが Shift_JIS の HTML・JSX・CSS（builder の `autoDecode` の対象外）         | **未対応**。`<path>: file is not valid UTF-8` で失敗する（lossy 変換はしない）。`iconv -f CP932 -t UTF-8` 等で UTF-8 にしてから移す               |
 | `ssi`（開発サーバーで `<!--#include virtual-->` を展開）                         | ビルドでは何もしない（コメントのまま残る）。展開が要るなら `html.includes` の `ssi`                                                               |
 | `banner()`                                                                       | `styles.banner` / `scripts.banner` の文字列（`{{date:YYYY-MM-DD}}` `{{year}}`）                                                                   |
 | `eleventy-pug-plugin` の `filters.cjs`（`:name` が `data/<name>.html` を返す）   | `data/<name>.html` を置く。変換スクリプトは `:name` を `html(data[name])` にする                                                                  |
