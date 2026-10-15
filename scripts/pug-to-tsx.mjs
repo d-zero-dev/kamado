@@ -1111,13 +1111,35 @@ function convertChild(file, ast, extended) {
 			);
 		}
 	}
-	for (const v of blocks.filter((n) => n.name === 'vars')) children(v.nodes, ctx, 0);
-	const given = [...ctx.declared];
-	const slots = [];
-	for (const n of blocks.filter((b) => b.name !== 'vars')) {
-		slots.push(`\t\t\t${JSON.stringify(n.name)}: (\n${block(n.nodes, ctx, 4)}\n\t\t\t)`);
+	// The page, and one for an include in a `pre` when there is one: the slots of it are
+	// the text written as strings (the layout around them stays as it is).
+	const pageVariants = [[ctx, pascal(file), 'export default']];
+	if (wantsPre.has(PRE_BODY)) {
+		if (defs.some((d) => component(d.name) === `${pascal(file)}Pre`)) {
+			throw new Error(
+				`the file is included in a pre, and ${pascal(file)}Pre is a mixin of the file already: write it by hand`,
+			);
+		}
+		const preCtx = newContext(file);
+		preCtx.pre = 1;
+		preCtx.imports.set(parentName, spec);
+		preCtx.mixins = ctx.mixins;
+		contexts.push(preCtx);
+		pageVariants.push([preCtx, `${pascal(file)}Pre`, 'export']);
 	}
-	const body = `\t\t<${parentName} {...props}${given.length > 0 ? ` {...{ ${given.join(', ')} }}` : ''} slots={{\n${slots.join(',\n')},\n\t\t}} />`;
+	const pages = pageVariants.map(([pageCtx, name, exported]) => {
+		for (const v of blocks.filter((n) => n.name === 'vars'))
+			children(v.nodes, pageCtx, 0);
+		const given = [...pageCtx.declared];
+		const slots = [];
+		for (const n of blocks.filter((b) => b.name !== 'vars')) {
+			slots.push(
+				`\t\t\t${JSON.stringify(n.name)}: (\n${block(n.nodes, pageCtx, 4)}\n\t\t\t)`,
+			);
+		}
+		const body = `\t\t<${parentName} {...props}${given.length > 0 ? ` {...{ ${given.join(', ')} }}` : ''} slots={{\n${slots.join(',\n')},\n\t\t}} />`;
+		return componentText(pageCtx, name, body, exported, []);
+	});
 	// A fragment of slots is evaluated before the layout's `<html static>` is
 	// reached, so the page says it is static itself.
 	return pruneUnusedImports(
@@ -1126,7 +1148,7 @@ function convertChild(file, ast, extended) {
 			'export const meta = { kdStatic: true };\n\n' +
 			parts.join('\n\n') +
 			(parts.length > 0 ? '\n\n' : '') +
-			componentText(ctx, pascal(file), body, 'export default', []) +
+			pages.join('\n\n') +
 			'\n',
 	);
 }

@@ -231,6 +231,8 @@ html
 			include /component/c-text.pug
 		pre
 			include /component/c-both.pug
+		pre
+			include /component/c-extends.pug
 		+sample
 		+holder
 `,
@@ -264,6 +266,15 @@ mixin holder
 	|   t2
 | b1
 |   b2
+`,
+	'__assets/_libs/component/c-extends.pug': `extends /layout/base.pug
+mixin xm
+	| m1
+	|   m2
+block content
+	| x1
+	|   x2
+	+xm
 `,
 	'__assets/_libs/data/frag.html': '<hr>\n',
 	'package.json': '{ "name": "fixture", "private": true }\n',
@@ -480,6 +491,15 @@ describe.skipIf(!available && !process.env.CI)(
 			const child = read('__assets/htdocs/pre-child.tsx');
 			expect(child).toContain('<LocalPre {...props} />');
 			expect(component(child, 'LocalPre')).toContain('{"  l2"}');
+			// A file that extends a layout: the slots of the component for a pre are strings.
+			expect(page).toContain('<CExtendsPre {...props} />');
+			const extending = read('__assets/_libs/component/c-extends.tsx');
+			expect(component(extending, 'CExtendsPre')).toContain('{"  x2"}');
+			expect(component(extending, 'CExtends')).not.toContain('{"  x2"}');
+			// A mixin of that file called in the slots of the component for a pre.
+			expect(component(extending, 'CExtendsPre')).toContain('<XmPre {...props} />');
+			expect(component(extending, 'XmPre')).toContain('{"  m2"}');
+			expect(component(extending, 'CExtends')).toContain('<Xm {...props} />');
 			// What no pre calls has no component for it.
 			expect(both).not.toContain('function TagPre(');
 		});
@@ -795,6 +815,47 @@ mixin box
 			expect(status).toBe(1);
 			expect(stdout).toContain(
 				'not converted: __assets/_libs/mixin/q.pug: the mixin foo is called in a pre, and FooPre is a mixin of the file already: write it by hand',
+			);
+		}, 60_000);
+
+		test('fails the run when the component of an extending file for a pre would take the name of a mixin', () => {
+			const project = path.join(root, 'pre-extends-collision');
+			const files: Record<string, string> = {
+				'__assets/htdocs/index.pug':
+					'html\n\tbody\n\t\tpre\n\t\t\tinclude /component/thing.pug\n',
+				'__assets/_libs/layout/base.pug': 'block content\n',
+				'__assets/_libs/component/thing.pug': `extends /layout/base.pug
+mixin thing-pre
+	| a
+block content
+	| b
+`,
+				'package.json': '{}',
+			};
+			for (const [file, text] of Object.entries(files)) {
+				mkdirSync(path.dirname(path.join(project, file)), { recursive: true });
+				writeFileSync(path.join(project, file), text);
+			}
+			symlinkSync(path.join(repo, 'node_modules'), path.join(project, 'node_modules'));
+			let status = 0;
+			let stdout = '';
+			try {
+				execFileSync(
+					process.execPath,
+					[
+						path.join(repo, 'scripts', 'pug-to-tsx.mjs'),
+						project,
+						path.join(root, 'pre-extends-collision-out'),
+					],
+					{ encoding: 'utf8', stdio: 'pipe' },
+				);
+			} catch (error) {
+				status = (error as { status: number }).status;
+				stdout = String((error as { stdout?: string }).stdout);
+			}
+			expect(status).toBe(1);
+			expect(stdout).toContain(
+				'not converted: __assets/_libs/component/thing.pug: the file is included in a pre, and ThingPre is a mixin of the file already: write it by hand',
 			);
 		}, 60_000);
 
