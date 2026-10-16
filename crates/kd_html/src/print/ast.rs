@@ -257,6 +257,10 @@ struct Builder<'a> {
 }
 
 fn lower_if_known_element(name: &str) -> String {
+	// Both outcomes are the name itself when nothing in it is upper case.
+	if !name.bytes().any(|b| b.is_ascii_uppercase()) {
+		return name.to_owned();
+	}
 	let lower = name.to_ascii_lowercase();
 	if tables::ELEMENT_NAMES.binary_search(&lower.as_str()).is_ok() {
 		lower
@@ -266,6 +270,10 @@ fn lower_if_known_element(name: &str) -> String {
 }
 
 fn lower_if_known_attribute(element: &str, name: &str) -> String {
+	// Both outcomes are the name itself when nothing in it is upper case.
+	if !name.bytes().any(|b| b.is_ascii_uppercase()) {
+		return name.to_owned();
+	}
 	let lower = name.to_ascii_lowercase();
 	let known_for = |list: &str| -> bool {
 		tables::ATTRIBUTES
@@ -306,15 +314,14 @@ impl Builder<'_> {
 		let explicit = namespace
 			.as_deref()
 			.is_some_and(|ns| written.starts_with(&format!("{ns}:")));
-		let mut name = if explicit {
+		// normalizeAttributeName: only attributes without a namespace.
+		let name = if explicit {
 			written[namespace.as_deref().map_or(0, str::len) + 1..].to_owned()
+		} else if namespace.is_none() {
+			lower_if_known_attribute(element_name, written)
 		} else {
 			written.to_owned()
 		};
-		// normalizeAttributeName: only attributes without a namespace.
-		if namespace.is_none() {
-			name = lower_if_known_attribute(element_name, &name);
-		}
 		let full_name = match &namespace {
 			Some(ns) => format!("{ns}:{name}"),
 			None => name.clone(),
@@ -612,10 +619,11 @@ pub fn build(text: &str) -> Result<Ast, ParseError> {
 fn fix_parents(ast: &mut Ast) {
 	let mut stack = vec![ast.root];
 	while let Some(id) = stack.pop() {
-		let children = ast.nodes[id].children.clone();
-		for c in children {
+		let children = std::mem::take(&mut ast.nodes[id].children);
+		for &c in &children {
 			ast.nodes[c].parent = Some(id);
 			stack.push(c);
 		}
+		ast.nodes[id].children = children;
 	}
 }
