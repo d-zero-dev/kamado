@@ -114,6 +114,18 @@ pub fn add_doctype(content: &str) -> String {
 	}
 }
 
+/// Documents per AST node that the arena is sized for. A rough guess, not derived: a page with
+/// more documents still grows the arena, a page with fewer reserves space it does not use.
+pub const DOCS_PER_NODE: usize = 24;
+
+/// The bytes reserved for the output of a page whose text is `text_len` bytes long: the text
+/// itself and the indentation that formatting adds, at most 16 MiB (a longer output grows).
+#[must_use]
+pub const fn output_capacity(text_len: usize) -> usize {
+	let wanted = text_len.saturating_add(text_len / 2);
+	if wanted < 16 << 20 { wanted } else { 16 << 20 }
+}
+
 /// Formats `source` as prettier's HTML parser and printer would.
 ///
 /// # Errors
@@ -144,7 +156,7 @@ pub fn format(source: &str, options: &Options) -> Result<String, ParseError> {
 	if tree.node(tree.root).children.is_empty() {
 		return Ok(if bom { BOM.to_string() } else { String::new() });
 	}
-	let mut docs = doc::Docs::new();
+	let mut docs = doc::Docs::with_capacity(tree.nodes.len().saturating_mul(DOCS_PER_NODE));
 	let root = printer::print_root(
 		&tree,
 		&mut docs,
@@ -164,6 +176,7 @@ pub fn format(source: &str, options: &Options) -> Result<String, ParseError> {
 			tab_width: options.tab_width,
 			use_tabs: options.use_tabs,
 			glue_markers: options.compact_tags,
+			capacity: output_capacity(text.len()),
 		},
 	);
 	Ok(if bom {
@@ -243,6 +256,50 @@ mod tests {
 				words.trim_end()
 			)
 		);
+	}
+
+	#[test]
+	fn a_page_denser_in_tags_and_deeper_in_indentation_than_the_reserved_room_is_formatted() {
+		// 3 tokens per 10 bytes, and each item on a line of its own behind two columns of
+		// indentation; then a stack of elements whose indentation is most of the output:
+		// both past what the lists and the output reserve room for.
+		let items = 3_000;
+		let src = format!("<ul>{}</ul>", "<li>x</li>".repeat(items));
+		let expected = format!("<ul>\n{}</ul>\n", "  <li>x</li>\n".repeat(items));
+		assert_eq!(fmt(&src), expected);
+
+		let nested = "<div>".repeat(40) + "x" + &"</div>".repeat(40);
+		let out = fmt(&nested);
+		assert_eq!(out.lines().count(), 77);
+		assert!(out.contains(&format!("\n{}<div><div>x</div></div>\n", " ".repeat(76))));
+		assert!(out.len() > 5 * nested.len());
+	}
+
+	#[test]
+	fn the_reserved_output_is_one_and_a_half_times_the_text_up_to_16_mib() {
+		assert_eq!(output_capacity(0), 0);
+		assert_eq!(output_capacity(1_000), 1_500);
+		assert_eq!(output_capacity(100_000_000), 16_777_216);
+		assert_eq!(output_capacity(usize::MAX), 16_777_216);
+	}
+
+	#[test]
+	fn an_arena_with_a_tiny_or_a_huge_capacity_still_builds_and_prints() {
+		for capacity in [0, 10, usize::MAX] {
+			let mut docs = doc::Docs::with_capacity(capacity);
+			let text = docs.text("a");
+			let out = doc::print(
+				&mut docs,
+				text,
+				doc::PrintOptions {
+					tab_width: 2,
+					use_tabs: false,
+					glue_markers: false,
+					capacity: 0,
+				},
+			);
+			assert_eq!(out, "a");
+		}
 	}
 
 	#[test]

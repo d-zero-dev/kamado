@@ -1282,6 +1282,16 @@ impl Builder<'_> {
 	}
 }
 
+/// Source bytes per token that the token list is sized for. A token holds its attributes, so
+/// the list is large, and growing it by doubling copies it each time (reserving up front made
+/// the parse of a page about a quarter shorter on the macOS benchmark machine; not measured on
+/// Linux). The ratio is a rough guess, not derived: a page with more tokens still grows the list.
+const TOKEN_BYTES: usize = 24;
+
+/// The most tokens reserved up front. A token is large, so a huge page must not reserve in
+/// proportion to its size; past this the list grows as usual.
+const MAX_RESERVED_TOKENS: usize = 1 << 16;
+
 /// Parses `src` (line ends already normalized to `\n`).
 ///
 /// # Errors
@@ -1292,15 +1302,15 @@ pub fn parse(src: &str) -> Result<RawTree, ParseError> {
 		src,
 		bytes: src.as_bytes(),
 		pos: 0,
-		tokens: Vec::new(),
+		tokens: Vec::with_capacity((src.len() / TOKEN_BYTES + 8).min(MAX_RESERVED_TOKENS)),
 	};
 	lexer.tokenize()?;
 	let tokens = std::mem::take(&mut lexer.tokens);
 	let mut builder = Builder {
 		src,
-		tokens,
 		index: 0,
-		nodes: Vec::new(),
+		nodes: Vec::with_capacity(tokens.len().min(MAX_RESERVED_TOKENS)),
+		tokens,
 		roots: Vec::new(),
 		stack: Vec::new(),
 	};

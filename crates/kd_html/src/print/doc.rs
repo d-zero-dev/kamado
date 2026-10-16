@@ -89,8 +89,16 @@ impl Default for Docs {
 impl Docs {
 	#[must_use]
 	pub fn new() -> Docs {
+		Self::with_capacity(256)
+	}
+
+	/// An arena with room for `capacity` documents (at least 256, and at most `1 << 20`: a huge
+	/// page must not reserve in proportion to its size), so that building a large page does not
+	/// copy the arena each time it doubles.
+	#[must_use]
+	pub fn with_capacity(capacity: usize) -> Docs {
 		let mut d = Docs {
-			nodes: Vec::with_capacity(256),
+			nodes: Vec::with_capacity(capacity.clamp(256, 1 << 20)),
 			next_group: 0,
 			_private: (),
 		};
@@ -389,6 +397,9 @@ pub struct PrintOptions {
 	/// Why a text can be taken for such an end: the serializer writes a `>` of
 	/// the text of a page as `&gt;`, so a text that starts with one is a tag's.
 	pub glue_markers: bool,
+	/// Bytes to reserve for the output, so that it is not copied each time it doubles. Only a
+	/// hint: a longer output still grows.
+	pub capacity: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -783,7 +794,7 @@ pub fn print(docs: &mut Docs, doc: DocId, options: PrintOptions) -> String {
 		docs,
 		options,
 		group_modes: Vec::new(),
-		out: String::new(),
+		out: String::with_capacity(options.capacity),
 		scratch: Vec::new(),
 		last_line: None,
 	};
@@ -800,6 +811,7 @@ mod tests {
 			tab_width: 2,
 			use_tabs: tabs,
 			glue_markers: false,
+			capacity: 0,
 		}
 	}
 
