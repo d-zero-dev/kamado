@@ -105,7 +105,8 @@ fn main() {
 		print::preprocess::run(&mut tree, options.whitespace_sensitivity);
 		parts[1] += t.elapsed().as_nanos();
 		let t = Instant::now();
-		let mut docs = print::doc::Docs::new();
+		let mut docs =
+			print::doc::Docs::with_capacity(tree.nodes.len().saturating_mul(print::DOCS_PER_NODE));
 		let root = print::printer::print_root(
 			&tree,
 			&mut docs,
@@ -127,6 +128,7 @@ fn main() {
 				tab_width: options.tab_width,
 				use_tabs: options.use_tabs,
 				glue_markers: options.compact_tags,
+				capacity: print::output_capacity(p.len()),
 			},
 		);
 		parts[3] += t.elapsed().as_nanos();

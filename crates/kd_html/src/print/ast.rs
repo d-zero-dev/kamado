@@ -589,7 +589,7 @@ pub fn build(text: &str) -> Result<Ast, ParseError> {
 	}
 	let mut b = Builder {
 		text,
-		nodes: Vec::new(),
+		nodes: Vec::with_capacity((raw.nodes.len() + 1).min(1 << 16)),
 	};
 	let root_span = Span {
 		start: 0,
