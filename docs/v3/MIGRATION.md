@@ -24,7 +24,7 @@ cp -R <output dir> /tmp/baseline-v2   # 出力ディレクトリを丸ごと保�
 ```
 
 - 確認: 出力ディレクトリのファイル数を控える。
-- v2 の prettier 設定が入力の種類で違う（`.pug` / `.tsx` は幅 90、`.html` は幅 100000 など）場合、v3 は**入力によらず 1 つの幅**です。合わせるには v3 の `html.format.printWidth` を v2 の値にします（`.pug` と `.tsx` が多数なら 90）。幅を超えない小さなページでは差が出ません。
+- v3 の整形に**幅の設定はありません**（`html.format.printWidth` は廃止。書くと設定エラー）。長い行も折り返さず、折れるのは強制改行のときだけです。v2 が幅 100000 で整形していた出力（`.html` の既定）とは、100000 桁を超える行（巨大な `data:` URI を持つ属性など）を除いて、バイトまで一致します。v2 の prettier 設定が入力の種類で違い（`.pug` / `.tsx` は幅 90、など）、幅 90 で折り返された出力は、長い行の折り返しの位置が一致しません（意味は同じ）。基準の出力で、属性が 1 行ずつに折り返されていないかを見て確かめます。
 
 ## 2. 設定ファイル（TS / JS → `kamado.config.jsonc`）
 
@@ -59,7 +59,7 @@ v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは `p
 		"alias": { "@": "./src/_libs" },
 	},
 	"data": { "dir": "src/_libs/data" },
-	"html": { "format": { "printWidth": 90 } },
+	"html": { "format": { "useTabs": false } },
 	"scripts": { "alias": { "@": "./src/js" } },
 	"styles": { "alias": { "@": "./src/css" } },
 }
@@ -75,7 +75,6 @@ v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは `p
 - **一覧にないページ**: v2 は一覧に載らないページを `nav()` と `breadcrumbs` に出さなかった。v3 は常にすべてのページを索引に入れる。ナビゲーションから隠すなら、そのページに `{ "url": "/x/", "meta": { "navHidden": true } }` を書く。ページのタイトル（`<title>` とパンくず）は v3 では自分の front matter の値になる（v2 は一覧になければサイト名）。
 - **`transformBreadcrumbItem`** はコンポーネントに書く（`link.href` を `link.meta.realHref ?? link.href` に）。**`filterNavigationNode`** は `nav()` の結果を再帰で絞るヘルパーを書く（子から先に絞り、`keep(node)` が偽なら捨てる）。
 - **`<!-- @include(...) -->` のコメントを出力する transform** は `html.includes` の `includeComment`（`root` は `/` 始まりの基準ディレクトリ）に、**BurgerEditor の `importBlock`** は `burgerEditorImport`（`root` は入力ディレクトリ）に、`data-bgi-ver` を消す正規表現は `html.rules` の `removeAttr` に、`©` などを実体参照にする transform は `html.entities` に置き換える。`manipulateDOM` が全ページから要素を消していたなら `html.rules` の `remove`。
-- **Pug のページだけ幅 90**: `.html` は prettier の設定が 100000、`.pug` は 90 だったので、Pug だったページの出力 URL を `html.overrides` に並べて `{ "format": { "printWidth": 90 } }` にする。幅の計測は、属性を圧縮した後の長さで行う（v2 は圧縮前）。
 - **別のコンパイラ設定が同じファイルを別の transform で処理していたとき**（サブサイトだけ `manipulateDOM` と include を外していた、など）は `html.overrides` の `pages` に URL の glob を書いて、`includes` / `rules` を `[]` にする。
 - **ビルド出力を `include` していた Pug**（出力の `header.html` を別の Pug が読む）は、v3 では出力の順序に依存させず、元のコンポーネントを直接呼ぶ。
 
