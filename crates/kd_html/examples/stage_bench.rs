@@ -55,7 +55,6 @@ fn main() {
 	println!("{} pages, {} bytes", pages.len(), bytes);
 
 	let options = print::Options {
-		print_width: 100_000,
 		tab_width: 2,
 		use_tabs: true,
 		bracket_same_line: true,
@@ -122,7 +121,6 @@ fn main() {
 			&mut docs,
 			root,
 			print::doc::PrintOptions {
-				print_width: options.print_width,
 				tab_width: options.tab_width,
 				use_tabs: options.use_tabs,
 			},

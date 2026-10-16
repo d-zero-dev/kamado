@@ -28,10 +28,10 @@ pub mod util;
 pub use angular::ParseError;
 pub use preprocess::WhitespaceSensitivity;
 
-/// Formatting options (prettier's, for HTML).
+/// Formatting options (prettier's, for HTML), without a print width: nothing
+/// wraps for being long (see the module `doc`).
 #[derive(Debug, Clone, Copy)]
 pub struct Options {
-	pub print_width: usize,
 	pub tab_width: usize,
 	pub use_tabs: bool,
 	pub bracket_same_line: bool,
@@ -41,10 +41,9 @@ pub struct Options {
 
 impl Default for Options {
 	/// What v2 formatted with when no prettier configuration said otherwise:
-	/// a print width so large that nothing wraps, two-space indentation.
+	/// two-space indentation. Nothing wraps, as it did not at v2's width.
 	fn default() -> Self {
 		Options {
-			print_width: 100_000,
 			tab_width: 2,
 			use_tabs: false,
 			bracket_same_line: false,
@@ -142,7 +141,6 @@ pub fn format(source: &str, options: &Options) -> Result<String, ParseError> {
 		&mut docs,
 		root,
 		doc::PrintOptions {
-			print_width: options.print_width,
 			tab_width: options.tab_width,
 			use_tabs: options.use_tabs,
 		},
@@ -207,6 +205,22 @@ mod tests {
 				"<h1 disabled src=\"x'y\"><article hidden> <ul data-x=\"a\nb\"><li><code>\n  &amp; x<img src=\"y\"> </code></li></ul>\n</article>  <link alt=\"z\"> <!-- c --> </h1>"
 			),
 			"<h1 disabled src=\"x'y\">\n  <article hidden>\n    <ul\n      data-x=\"a\nb\"\n    >\n      <li>\n        <code> &amp; x<img src=\"y\" /> </code>\n      </li>\n    </ul>\n  </article>\n  <link alt=\"z\" />\n  <!-- c -->\n</h1>\n"
+		);
+	}
+
+	#[test]
+	fn a_line_wider_than_prettiers_100000_is_not_wrapped() {
+		// Past that width prettier fills a paragraph over several lines and puts
+		// the attributes of a tag on lines of their own; here nothing wraps.
+		let words = "word ".repeat(25_000);
+		let value = "x".repeat(120_000);
+		let out = fmt(&format!("<p>{words}</p><div data-a=\"{value}\">a</div>"));
+		assert_eq!(
+			out,
+			format!(
+				"<p>{}</p>\n<div data-a=\"{value}\">a</div>\n",
+				words.trim_end()
+			)
 		);
 	}
 

@@ -43,7 +43,6 @@
 							"properties": {
 								"useTabs": { "type": "boolean" },
 								"tabWidth": { "type": "integer", "minimum": 0 },
-								"printWidth": { "type": "integer", "minimum": 0 },
 								"bracketSameLine": { "type": "boolean" }
 							}
 						}
