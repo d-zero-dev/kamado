@@ -130,8 +130,23 @@ const VOID_DEF: TagDef = TagDef {
 /// the table does not know has the default definition.
 #[must_use]
 pub fn tag_def(name: &str) -> TagDef {
-	let lower = name.to_ascii_lowercase();
-	match lower.as_str() {
+	// Short names (all of the table's today) are lowercased into a stack buffer;
+	// a longer one takes the allocating path, so the table needs no length limit.
+	let bytes = name.as_bytes();
+	let mut buf = [0u8; 16];
+	if bytes.len() <= buf.len() {
+		for (slot, b) in buf.iter_mut().zip(bytes) {
+			*slot = b.to_ascii_lowercase();
+		}
+		if let Ok(lower) = std::str::from_utf8(&buf[..bytes.len()]) {
+			return tag_def_lower(lower);
+		}
+	}
+	tag_def_lower(&name.to_ascii_lowercase())
+}
+
+fn tag_def_lower(lower: &str) -> TagDef {
+	match lower {
 		"base" | "meta" | "area" | "embed" | "link" | "img" | "input" | "param" | "hr" | "br"
 		| "source" | "track" | "wbr" | "col" => VOID_DEF,
 		"p" => TagDef {
@@ -269,7 +284,8 @@ impl TagDef {
 		self.is_void
 			|| self
 				.closed_by_children
-				.contains(&full_name.to_ascii_lowercase().as_str())
+				.iter()
+				.any(|c| c.eq_ignore_ascii_case(full_name))
 	}
 }
 
@@ -511,7 +527,19 @@ impl<'a> Lexer<'a> {
 	/// Text up to the next tag start. `{{ … }}` is skipped as a unit, so a
 	/// `&` inside it is not a character reference.
 	fn consume_text(&mut self, start: usize) -> LexResult<()> {
-		while !(self.is_tag_start() || self.peek() == 0) {
+		loop {
+			// Bytes that can neither start a tag, an interpolation nor a
+			// reference (nor end the input) are skipped without decoding; a
+			// stop byte is ASCII, so this never lands inside a character.
+			while let Some(&b) = self.bytes.get(self.pos) {
+				if matches!(b, 0 | b'<' | b'{' | b'&') {
+					break;
+				}
+				self.pos += 1;
+			}
+			if self.is_tag_start() || self.peek() == 0 {
+				break;
+			}
 			if self.src[self.pos..].starts_with("{{") {
 				self.pos += 2;
 				self.consume_interpolation(&|l: &Lexer<'_>| l.is_tag_start())?;
@@ -762,9 +790,12 @@ impl<'a> Lexer<'a> {
 			return Err(self.unexpected());
 		}
 		self.advance()?;
+		let content_type = tag_def(&name).content_type;
+		let raw_text_names = (content_type != ContentType::Parsable && !void)
+			.then(|| (prefix.clone(), name.clone()));
 		self.tokens.push(Tok::TagOpen {
-			prefix: prefix.clone(),
-			name: name.clone(),
+			prefix,
+			name,
 			attrs,
 			span: Span {
 				start,
@@ -773,15 +804,14 @@ impl<'a> Lexer<'a> {
 			name_span,
 			void,
 		});
-		if void {
-			return Ok(());
-		}
-		match tag_def(&name).content_type {
-			ContentType::Parsable => Ok(()),
-			ContentType::RawText => self.consume_raw_text_with_tag_close(&prefix, &name, false),
-			ContentType::EscapableRawText => {
+		match (content_type, raw_text_names) {
+			(ContentType::RawText, Some((prefix, name))) => {
+				self.consume_raw_text_with_tag_close(&prefix, &name, false)
+			}
+			(ContentType::EscapableRawText, Some((prefix, name))) => {
 				self.consume_raw_text_with_tag_close(&prefix, &name, true)
 			}
+			_ => Ok(()),
 		}
 	}
 
@@ -886,20 +916,37 @@ impl<'a> Lexer<'a> {
 		let q = self.peek();
 		if q == 39 || q == 34 {
 			self.advance()?;
-			self.consume_value_text(&|l: &Lexer<'_>| l.peek() == q)?;
+			self.consume_value_text(&|l: &Lexer<'_>| l.peek() == q, u8::try_from(q).ok())?;
 			if self.peek() != q {
 				return Err(self.unexpected());
 			}
 			self.advance()?;
 		} else {
-			self.consume_value_text(&|l: &Lexer<'_>| is_name_end(l.peek()))?;
+			self.consume_value_text(&|l: &Lexer<'_>| is_name_end(l.peek()), None)?;
 		}
 		Ok(())
 	}
 
-	/// Value text up to where `end` holds (not consumed).
-	fn consume_value_text(&mut self, end: &dyn Fn(&Lexer<'_>) -> bool) -> LexResult<()> {
-		while !end(self) {
+	/// Value text up to where `end` holds (not consumed). With `quote`, the
+	/// byte that ends the value, bytes that can neither end it nor start an
+	/// interpolation or a reference are skipped without decoding.
+	fn consume_value_text(
+		&mut self,
+		end: &dyn Fn(&Lexer<'_>) -> bool,
+		quote: Option<u8>,
+	) -> LexResult<()> {
+		loop {
+			if let Some(q) = quote {
+				while let Some(&b) = self.bytes.get(self.pos) {
+					if b == q || matches!(b, 0 | b'{' | b'&') {
+						break;
+					}
+					self.pos += 1;
+				}
+			}
+			if end(self) {
+				break;
+			}
 			if self.peek() == 0 {
 				return Err(self.unexpected());
 			}
@@ -975,12 +1022,25 @@ impl Builder<'_> {
 		&self.tokens[self.index.min(self.tokens.len() - 1)]
 	}
 
+	/// Takes the current token out of the list (a tag carries its attribute
+	/// list, which would be a copy otherwise); the last token, `Eof`, stays.
+	/// A consumed slot holds `Eof`, so the builder only ever looks forward.
 	fn advance(&mut self) -> Tok {
-		let t = self.peek().clone();
-		if self.index < self.tokens.len() - 1 {
+		let last = self.tokens.len() - 1;
+		if self.index < last {
+			let t = std::mem::replace(&mut self.tokens[self.index], Tok::Eof);
 			self.index += 1;
+			t
+		} else {
+			Tok::Eof
 		}
-		t
+	}
+
+	fn peek_text_span(&self) -> Option<Span> {
+		match self.peek() {
+			Tok::Text { span } => Some(*span),
+			_ => None,
+		}
 	}
 
 	fn add_to_parent(&mut self, node: usize) {
@@ -1035,7 +1095,7 @@ impl Builder<'_> {
 
 	fn build(&mut self) -> Result<(), ParseError> {
 		loop {
-			match self.peek().clone() {
+			match self.peek() {
 				Tok::Eof => return Ok(()),
 				Tok::TagOpen { .. } => {
 					let t = self.advance();
@@ -1098,7 +1158,7 @@ impl Builder<'_> {
 		{
 			only_the_ignored_lf = span.end == span.start + 1;
 		}
-		while let Tok::Text { span: next } = self.peek().clone() {
+		while let Some(next) = self.peek_text_span() {
 			if next.start != span.end {
 				break;
 			}

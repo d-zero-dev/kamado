@@ -246,6 +246,36 @@ mod tests {
 	}
 
 	#[test]
+	fn multibyte_text_and_values_around_references_and_quotes_are_kept() {
+		assert_eq!(
+			fmt(
+				"<DIV CLASS=\"日本語 &amp; é\" Data-A='\"é\"'>日本語 &amp; é &lt; x</DIV><p title=\"a{{ 'é' }}b\">é{{ x }}é</p>"
+			),
+			"<div class=\"日本語 &amp; é\" Data-A='\"é\"'>日本語 &amp; é &lt; x</div>\n<p title=\"a{{ 'é' }}b\">é{{ x }}é</p>\n"
+		);
+	}
+
+	#[test]
+	fn tag_names_are_matched_in_any_case_and_any_length() {
+		assert_eq!(
+			fmt(
+				"<DIV><BR><TEXTAREA>\n a</TEXTAREA><Optgroup></Optgroup><averyveryverylongunknowntag>x</averyveryverylongunknowntag></DIV>"
+			),
+			"<div>\n  <br /><textarea> a</textarea>\n  <optgroup></optgroup>\n  <averyveryverylongunknowntag>x</averyveryverylongunknowntag>\n</div>\n"
+		);
+	}
+
+	#[test]
+	fn a_lone_angle_bracket_in_text_is_text() {
+		assert_eq!(fmt("<p>a < b c</p>"), "<p>a < b c</p>\n");
+	}
+
+	#[test]
+	fn an_unterminated_quoted_value_is_an_error() {
+		assert!(format("<p title=\"abc", &Options::default()).is_err());
+	}
+
+	#[test]
 	fn nothing_but_white_space_prints_nothing() {
 		assert_eq!(fmt(""), "");
 		assert_eq!(fmt(" \n"), "");
