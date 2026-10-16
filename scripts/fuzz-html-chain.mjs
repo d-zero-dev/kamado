@@ -2,15 +2,22 @@
  * Differential test input for the whole HTML chain of a v3 build: random
  * broken HTML (the generator of the parser fuzzing) and what v2 makes of it
  * with its default page transforms: linkedom's serialization, `doctype`,
- * prettier, html-minifier-terser (code minifiers off, they are compared on
- * their own), `lineBreak`. v3's defaults for the formatter are tabs and
- * `bracketSameLine`, so prettier is called with those. Written as `<n>.in` /
- * `<n>.out` for the ignored test `chain_matches_v2` in `crates/kd_core`:
+ * prettier, `lineBreak`; and html-minifier-terser (code minifiers off, they
+ * are compared on their own) when the fourth argument is `on`. v3's defaults
+ * for the formatter are tabs and `bracketSameLine`, so prettier is called with
+ * those. Written as `<n>.in` / `<n>.out` for the ignored test
+ * `chain_matches_v2` in `crates/kd_core`, which runs v3 with `minify: false`:
  *
  * ```sh
  * node scripts/fuzz-html-chain.mjs /tmp/kd-chain 5000 1
  * KD_CHAIN_DIR=/tmp/kd-chain cargo test --release -p kd_core -- --ignored chain_matches_v2
  * ```
+ *
+ * With `on`, the corpus is what v2 outputs with its minifier, which v3 matches
+ * on well-formed pages but not on the broken ones that this generator makes:
+ * v3 minifies the tree, where the minifier repaired the markup (a `<colgroup>`
+ * around a bare `<col>`, unclosed elements). Use it to see how far apart the
+ * two are, not as a test that has to pass.
  *
  * Inputs for which a v2 stage throws are stored as `__ERROR__`: with
  * `html.onError: "error"` v3 must fail on them too.
@@ -23,11 +30,13 @@ import { domSerialize } from 'kamado-v2/utils/dom';
 import { createInputGenerator } from './html-fuzz.mjs';
 import { addDoctype, prettierHtml, v2Minify } from './v2-print.mjs';
 
-const [outDirArg, countArg = '1000', seedArg = '1'] = process.argv.slice(2);
+const [outDirArg, countArg = '1000', seedArg = '1', minifyArg = 'off'] =
+	process.argv.slice(2);
 if (!outDirArg) {
-	process.stderr.write('usage: fuzz-html-chain.mjs <outDir> [count] [seed]\n');
+	process.stderr.write('usage: fuzz-html-chain.mjs <outDir> [count] [seed] [off|on]\n');
 	process.exit(2);
 }
+const withMinify = minifyArg === 'on';
 const outDir = path.resolve(outDirArg);
 const nextInput = createInputGenerator(Number(seedArg));
 
@@ -54,7 +63,7 @@ for (let n = 0; n < count; n++) {
 			useTabs: true,
 			bracketSameLine: true,
 		});
-		const minified = await v2Minify(formatted);
+		const minified = withMinify ? await v2Minify(formatted) : formatted;
 		expected = minified.replaceAll(/\r?\n/g, '\n');
 	} catch {
 		expected = '__ERROR__';

@@ -137,8 +137,20 @@ fn push_escaped_text(text: &str, spec: bool, out: &mut String) {
 
 /// Prints one attribute (with a leading space), or nothing for an empty
 /// `id`, `class` or `style`.
-fn push_attribute(name: &str, value: &str, ent: &Entities, spec: bool, out: &mut String) {
+fn push_attribute(
+	name: &str,
+	value: &str,
+	ent: &Entities,
+	spec: bool,
+	bare_booleans: bool,
+	out: &mut String,
+) {
 	if value.is_empty() {
+		if bare_booleans && crate::minify::is_bare_when_empty(&name.to_ascii_lowercase()) {
+			out.push(' ');
+			out.push_str(name);
+			return;
+		}
 		// The standard writes every empty attribute as `name=""`.
 		if is_empty_attribute(name) && !spec {
 			if matches!(name, "id" | "class" | "style") {
@@ -254,7 +266,7 @@ fn push_node(doc: &Document, id: NodeId, parent_raw: bool, options: &Options, ou
 				out.push('<');
 				out.push_str(&e.name);
 				for a in &e.attrs {
-					push_attribute(&a.name, &a.value, ent, spec, out);
+					push_attribute(&a.name, &a.value, ent, spec, options.bare_booleans, out);
 				}
 				if is_raw_text_element(e) {
 					out.push('>');
@@ -311,6 +323,9 @@ pub struct Options {
 	/// U+00A0 is `&nbsp;` in text, an empty attribute is `name=""`, and an empty
 	/// SVG element is `<path></path>`, not `<path />`.
 	pub spec: bool,
+	/// Write an empty boolean attribute (`disabled`, not `disabled=""`) bare,
+	/// as the minifier does, whichever of the two forms above is written.
+	pub bare_booleans: bool,
 }
 
 /// The markup of `id` including the node itself.
@@ -565,7 +580,7 @@ mod tests {
 			ROOT,
 			&Options {
 				entities,
-				spec: false,
+				..Options::default()
 			},
 		)
 	}
@@ -577,8 +592,8 @@ mod tests {
 			"<a href=\"/x?a=1&amp;b=2\" title=\"a&nbsp;b\" class=\"\" data-x=\"\">a&nbsp;b</a><svg><path d=\"M0\"/></svg>",
 		);
 		let spec = Options {
-			entities: Entities::None,
 			spec: true,
+			..Options::default()
 		};
 		assert_eq!(
 			inner_html_with(&doc, ROOT, &spec),
@@ -592,11 +607,29 @@ mod tests {
 	}
 
 	#[test]
+	fn empty_boolean_attributes_are_bare_when_asked_in_both_forms() {
+		let doc =
+			parse("<input disabled=\"\" readonly><div compact=\"\" class=\"\" data-x=\"\">a</div>");
+		for spec in [false, true] {
+			let options = Options {
+				spec,
+				bare_booleans: true,
+				..Options::default()
+			};
+			let out = inner_html_with(&doc, ROOT, &options);
+			assert!(out.contains("<input disabled readonly>"), "{out}");
+			assert!(out.contains(" compact"), "{out}");
+			assert!(!out.contains("compact="), "{out}");
+			assert!(out.contains("data-x=\"\""), "{out}");
+		}
+	}
+
+	#[test]
 	fn the_standard_form_escapes_the_text_of_a_title() {
 		let doc = parse("<title>a &amp; b&nbsp;c</title>");
 		let spec = Options {
-			entities: Entities::None,
 			spec: true,
+			..Options::default()
 		};
 		assert_eq!(
 			inner_html_with(&doc, ROOT, &spec),
@@ -605,6 +638,7 @@ mod tests {
 		let all = Options {
 			entities: Entities::All,
 			spec: true,
+			..Options::default()
 		};
 		assert_eq!(
 			inner_html_with(&parse("<p>a\u{A0}b</p>"), ROOT, &all),

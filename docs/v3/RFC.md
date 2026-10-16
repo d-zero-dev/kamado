@@ -269,14 +269,14 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 4. `html.rules`（宣言的な DOM 操作）
 5. `html.inject`
 6. `imageSizes`
-7. 印字（`doctype`、`format`、`minify`、`entities`、`lineBreak`）。DOM を戻す書き方は `serializer`、書き出すバイト列の文字コードは `encoding`（§9.5、§9.6）。`<style>` と `style` 属性の CSS は Rust の CSS 圧縮、`<script>` は esbuild（子プロセス、内容のハッシュでキャッシュ）
+7. 印字（`doctype`、`format`、`minify`、`entities`、`lineBreak`）。`minify` のうち、属性の整理と値の整形、`<script>` / `<style>` の中身の圧縮は、整形した文字列を読み直さず、シリアライズの前の木（画像寸法のあと）の上で行う。`minify` が有効なとき、整形はタグを詰めて書く。属性は 1 行に並べ、持ち越した `>` の前では折らない。void 要素に ` /` は付けない（svg と math の要素は残す）。圧縮した `<script>` / `<style>` の中身は、字下げせずにタグの間に書く。IE の条件付きコメントの中は、この詰め方をしない。DOM を戻す書き方は `serializer`、書き出すバイト列の文字コードは `encoding`（§9.5、§9.6）。`<style>` と `style` 属性の CSS は Rust の CSS 圧縮、`<script>` は esbuild（子プロセス、内容のハッシュでキャッシュ）
 8. 書き出し
 
 `<script type="application/ld+json">`（`importmap`、`speculationrules`、`json` で終わる type も同じ）の中身は、v2 と同じく prettier の JSON 整形がそのまま出力に残る（オブジェクトは `{ "a": 1 }` の 1 行、`{` の直後で改行されていれば展開、複数のオブジェクトを持つ配列は展開、数値は `1.50` → `1.5`、文字列は二重引用符、末尾カンマなし）。コメントを含む JSON と JSON として読めない中身は整形せず、書かれたまま出す（prettier も後者はそのまま出す）。
 
 `html.overrides` は、`pages` の glob（出力 URL に対して）に一致するページに限り、`html` の任意のオプションを上書きする。上書きするのは、そのエントリが**書いたオプションだけ**で（`rules` を書けば `rules` 全体が置き換わる）、書かなかったオプションは `html` の値のまま。一致するエントリが複数あれば、書かれた順に適用する。たとえば整形と圧縮を切る、`imageSizes` を切る、といった使い方ができる。エントリの中に `overrides` は書けない。
 
-**ステージの失敗と `html.onError`**: 手順 2〜6（パース・取り込み・ルール・inject・画像）は 1 つの「DOM ステージ」で、`doctype`、`format`、`minify` はそれぞれ別のステージ。v2 の `formatOptions.parseError` と同じく、ステージが失敗したとき `silent`（既定）は何も報告せずそのステージを飛ばして直前の文字列を次のステージに渡し、`warning` は警告を出して同じく飛ばし、`error` はそのページのビルドを失敗にする。DOM ステージの失敗（たとえば取り込みの path traversal）で、ルールや inject も一緒に飛ばされるので、CI では `warning` か `error` にする。`minify` の中で CSS / JS の 1 か所が圧縮できなかったとき（esbuild が読めない JS、esbuild が起動できない・途中で落ちた、`kd_css` が諦めた CSS）は、ステージを飛ばさず、その箇所だけを元のまま残して残りを圧縮する。`html.onError` は、その報告だけを決める（`silent` は何も言わない、`warning` は箇所と理由を警告、`error` はページの失敗）。警告はそのビルドで組み立てたページ分だけ出る（差分ビルドで `cached` になったページの警告は再掲されない）。
+**ステージの失敗と `html.onError`**: 手順 2〜6（パース・取り込み・ルール・inject・画像）は 1 つの「DOM ステージ」で、`doctype`、`format`、`minify` はそれぞれ別のステージ。v2 の `formatOptions.parseError` と同じく、ステージが失敗したとき `silent`（既定）は何も報告せずそのステージを飛ばして直前の文字列を次のステージに渡し、`warning` は警告を出して同じく飛ばし、`error` はそのページのビルドを失敗にする。DOM ステージの失敗（たとえば取り込みの path traversal）で、ルールや inject も一緒に飛ばされるので、CI では `warning` か `error` にする。`minify` は木の上で行うので DOM ステージの中で動くが、失敗は `minify` として報告する。DOM ステージが失敗して飛ばされたページは、`minify` も行わない。`minify` はパースの失敗でページ全体を諦めることがない（v2 の minify は壊れたマークアップで投げ、そのページは圧縮されなかった）。`minify` の中で CSS / JS の 1 か所が圧縮できなかったとき（esbuild が読めない JS、esbuild が起動できない・途中で落ちた、`kd_css` が諦めた CSS）は、ステージを飛ばさず、その箇所だけを元のまま残して残りを圧縮する。`html.onError` は、その報告だけを決める（`silent` は何も言わない、`warning` は箇所と理由を警告、`error` はページの失敗）。警告はそのビルドで組み立てたページ分だけ出る（差分ビルドで `cached` になったページの警告は再掲されない）。
 
 ### 9.1 `html.rules`
 

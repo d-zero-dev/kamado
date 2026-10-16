@@ -113,6 +113,9 @@ fn main() {
 				tab_width: options.tab_width,
 				bracket_same_line: options.bracket_same_line,
 				single_attribute_per_line: options.single_attribute_per_line,
+				hug_script: options.hug_script,
+				hug_style: options.hug_style,
+				compact_tags: options.compact_tags,
 			},
 		);
 		parts[2] += t.elapsed().as_nanos();
@@ -123,6 +126,7 @@ fn main() {
 			print::doc::PrintOptions {
 				tab_width: options.tab_width,
 				use_tabs: options.use_tabs,
+				glue_markers: options.compact_tags,
 			},
 		);
 		parts[3] += t.elapsed().as_nanos();
@@ -175,5 +179,43 @@ fn main() {
 	println!(
 		"dom (parse + serialize + drop) {dom_us:.0}µs/page, encode utf8 {:.0}µs, shift_jis {:.0}µs",
 		encoded[0], encoded[1]
+	);
+
+	// The two ways of doing the HTML stages with the minifier on, one after the
+	// other for each page so that the load of the machine falls on both: the
+	// minifier on the formatted text (parse, serialize, format, minify), and on
+	// the tree (parse, minify the tree, serialize, format with compact tags).
+	let compact_options = print::Options {
+		hug_script: true,
+		hug_style: true,
+		compact_tags: true,
+		..options
+	};
+	let on_tree_options = kd_html::serialize::Options {
+		bare_booleans: true,
+		..kd_html::serialize::Options::default()
+	};
+	let (mut on_text, mut on_tree) = (0u128, 0u128);
+	let mut same = 0usize;
+	for p in &pages {
+		let t = Instant::now();
+		let html = kd_html::page::Page::parse(p).serialize_with(&serialize_options);
+		let formatted = print::format(&html, &options).unwrap_or_default();
+		let a = minify::minify(&formatted, &min, &NoMinification).unwrap_or_default();
+		on_text += t.elapsed().as_nanos();
+
+		let t = Instant::now();
+		let mut page = kd_html::page::Page::parse(p);
+		let _ = minify::apply_to_dom(&mut page.doc, &min, &NoMinification);
+		let html = page.serialize_with(&on_tree_options);
+		let b = print::format(&html, &compact_options).unwrap_or_default();
+		on_tree += t.elapsed().as_nanos();
+		same += usize::from(a == b);
+	}
+	println!(
+		"minifier on text {:.0}µs/page, on the tree {:.0}µs/page ({same} of {} pages give the same bytes)",
+		per_page(on_text, pages.len()),
+		per_page(on_tree, pages.len()),
+		pages.len()
 	);
 }

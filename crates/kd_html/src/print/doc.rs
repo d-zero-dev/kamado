@@ -383,6 +383,12 @@ impl Docs {
 pub struct PrintOptions {
 	pub tab_width: usize,
 	pub use_tabs: bool,
+	/// A text that starts with `>` or `/>` (the end of a tag that prettier let
+	/// the next node borrow) follows what stands before it with no line break
+	/// of its own: the line that would have been put before it is taken back.
+	/// Why a text can be taken for such an end: the serializer writes a `>` of
+	/// the text of a page as `&gt;`, so a text that starts with one is a tag's.
+	pub glue_markers: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -408,6 +414,9 @@ struct Printer<'a> {
 	out: String,
 	/// The stack of [`Printer::fits_flat`], kept to reuse its allocation.
 	scratch: Vec<Cmd>,
+	/// Where the last line break (not a literal one) began and where its
+	/// indentation ended in `out`.
+	last_line: Option<(usize, usize)>,
 }
 
 impl Printer<'_> {
@@ -555,6 +564,16 @@ impl Printer<'_> {
 			} = cmd;
 			match &self.docs.nodes[doc as usize] {
 				Node::Text(s) => {
+					if self.options.glue_markers
+						&& (s.starts_with('>') || s.starts_with("/>"))
+						&& let Some((start, end)) = self.last_line
+						&& self.out.len() == end
+					{
+						self.out.truncate(start);
+						// Used once: what is written after may bring the output
+						// back to the length of `end`.
+						self.last_line = None;
+					}
 					self.out.push_str(s);
 				}
 				Node::Concat(parts) => {
@@ -737,9 +756,11 @@ impl Printer<'_> {
 							self.out.push('\n');
 						} else {
 							self.trim_trailing_whitespace();
+							let start = self.out.len();
 							self.out.push('\n');
 							let value = self.indent_value(indent);
 							self.out.push_str(&value);
+							self.last_line = Some((start, self.out.len()));
 						}
 					}
 				},
@@ -764,6 +785,7 @@ pub fn print(docs: &mut Docs, doc: DocId, options: PrintOptions) -> String {
 		group_modes: Vec::new(),
 		out: String::new(),
 		scratch: Vec::new(),
+		last_line: None,
 	};
 	printer.run(doc);
 	printer.out
@@ -777,6 +799,7 @@ mod tests {
 		PrintOptions {
 			tab_width: 2,
 			use_tabs: tabs,
+			glue_markers: false,
 		}
 	}
 
