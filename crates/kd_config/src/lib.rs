@@ -83,7 +83,6 @@ pub struct Data {
 pub struct Format {
 	pub use_tabs: bool,
 	pub tab_width: u32,
-	pub print_width: u32,
 	pub bracket_same_line: bool,
 }
 
@@ -587,16 +586,20 @@ fn parse_html(o: &Obj<'_>) -> R<Html> {
 		None | Some(Value::Bool(true)) => Some(Format {
 			use_tabs: true,
 			tab_width: 2,
-			print_width: 100_000,
 			bracket_same_line: true,
 		}),
 		Some(Value::Object(_)) => {
 			let f = o.obj("format")?;
-			f.allow(&["useTabs", "tabWidth", "printWidth", "bracketSameLine"])?;
+			if f.get("printWidth").is_some() {
+				return Err(f.err(
+					"printWidth",
+					"removed: HTML is formatted without a print width, so lines never wrap; delete it",
+				));
+			}
+			f.allow(&["useTabs", "tabWidth", "bracketSameLine"])?;
 			Some(Format {
 				use_tabs: f.bool_or("useTabs", true)?,
 				tab_width: f.uint_or("tabWidth", 2)?,
-				print_width: f.uint_or("printWidth", 100_000)?,
 				bracket_same_line: f.bool_or("bracketSameLine", true)?,
 			})
 		}
@@ -1077,7 +1080,6 @@ mod tests {
 			Some(Format {
 				use_tabs: true,
 				tab_width: 2,
-				print_width: 100_000,
 				bracket_same_line: true
 			})
 		);
@@ -1179,6 +1181,23 @@ mod tests {
 			fail(r#"{ "html": { "format": { "width": 80 } } }"#).path,
 			"html.format.width"
 		);
+	}
+
+	#[test]
+	fn the_removed_print_width_is_an_error_that_says_so() {
+		for text in [
+			r#"{ "html": { "format": { "printWidth": 90 } } }"#,
+			r#"{ "html": { "overrides": [{ "pages": ["/a/"], "format": { "printWidth": 100000 } }] } }"#,
+		] {
+			let e = fail(text);
+			assert!(e.path.ends_with("format.printWidth"), "{}", e.path);
+			assert!(
+				e.message
+					.starts_with("removed: HTML is formatted without a print width"),
+				"{}",
+				e.message
+			);
+		}
 	}
 
 	#[test]
@@ -1284,14 +1303,13 @@ mod tests {
 		assert_eq!(c.html.image_sizes.exclude, ["/lp/**"]);
 		assert!(c.html.image_sizes.keep_authored);
 		let c = ok(
-			r#"{ "html": { "format": { "printWidth": 90, "useTabs": false }, "minify": false, "imageSizes": false, "entities": "all" } }"#,
+			r#"{ "html": { "format": { "tabWidth": 4, "useTabs": false }, "minify": false, "imageSizes": false, "entities": "all" } }"#,
 		);
 		assert_eq!(
 			c.html.format,
 			Some(Format {
 				use_tabs: false,
-				tab_width: 2,
-				print_width: 90,
+				tab_width: 4,
 				bracket_same_line: true
 			})
 		);

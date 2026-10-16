@@ -18,7 +18,7 @@ Rust のコアを持つ、オンデマンドの静的サイトジェネレータ
 	"dir": { "input": "src", "output": "htdocs" },
 	"site": { "baseURL": "https://example.com/" },
 	"pages": { "ignore": ["_libs/**"], "layouts": { "dir": "src/_libs/layouts" } },
-	"html": { "format": { "printWidth": 90 } },
+	"html": { "format": { "useTabs": false } },
 	"sitemap": { "lastmod": "mtime" },
 }
 ```

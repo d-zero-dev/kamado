@@ -1,7 +1,8 @@
 //! Differential test of the HTML printer against prettier. Ignored by
 //! default: it needs the corpus that `scripts/fuzz-html-print.mjs` writes
 //! (see that script for the commands). `options.json` in the corpus holds the
-//! prettier options (`printWidth`, `tabWidth`, `useTabs`, `bracketSameLine`).
+//! prettier options (`tabWidth`, `useTabs`, `bracketSameLine`); the print
+//! width is prettier's 100000, which the printer has no option for.
 
 use std::fs;
 use std::path::PathBuf;
@@ -13,9 +14,12 @@ fn options_from(dir: &std::path::Path) -> Options {
 	let json = fs::read_to_string(dir.join("options.json")).unwrap_or_else(|_| "{}".to_owned());
 	let value = kd_jsonc_free_parse(&json);
 	let mut options = Options::default();
-	if let Some(v) = value.get("printWidth") {
-		options.print_width = *v;
-	}
+	// The printer has no width to set: a corpus made for another one would
+	// report differences that are not bugs.
+	assert!(
+		value.get("printWidth").is_none_or(|&w| w == 100_000),
+		"the printer formats as printWidth 100000; the corpus asks for another width"
+	);
 	if let Some(v) = value.get("tabWidth") {
 		options.tab_width = *v;
 	}

@@ -438,7 +438,6 @@ fn compile_layer(html: &Html, host: &str, root_dir: &str, path: &str) -> Result<
 	Ok(Layer {
 		doctype: html.doctype,
 		format: html.format.as_ref().map(|f| print::Options {
-			print_width: f.print_width as usize,
 			tab_width: f.tab_width as usize,
 			use_tabs: f.use_tabs,
 			bracket_same_line: f.bracket_same_line,

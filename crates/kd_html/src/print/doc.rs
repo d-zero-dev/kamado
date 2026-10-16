@@ -10,6 +10,14 @@
 //!
 //! What is not here, because the HTML printer never builds it: cursor,
 //! label, line-suffix, trim, and `align` other than "back to the root".
+//!
+//! Also not here: a page width. kamado formats as if the width were
+//! unlimited (prettier's `printWidth: 100000` is what v2 used for almost every
+//! page), so nothing wraps for being long: a group is broken exactly when it
+//! holds a forced break (`propagateBreaks`), and everything else stays flat.
+//! That is what lets the printer skip `fits` for groups and the measuring of
+//! text, which was a tenth of the time of a page. A line wider than 100000
+//! columns, which prettier would have wrapped, is the one output that differs.
 
 /// An id in a [`Docs`] arena.
 pub type DocId = u32;
@@ -373,7 +381,6 @@ impl Docs {
 /// How the printer lays out.
 #[derive(Debug, Clone, Copy)]
 pub struct PrintOptions {
-	pub print_width: usize,
 	pub tab_width: usize,
 	pub use_tabs: bool,
 }
@@ -394,59 +401,21 @@ struct Cmd {
 	fill_offset: usize,
 }
 
-fn is_wide(c: char) -> bool {
-	let cp = c as u32;
-	matches!(cp,
-		0x1100..=0x115F | 0x231A..=0x231B | 0x2329..=0x232A | 0x23E9..=0x23EC | 0x23F0 | 0x23F3
-		| 0x25FD..=0x25FE | 0x2614..=0x2615 | 0x2648..=0x2653 | 0x267F | 0x2693 | 0x26A1
-		| 0x26AA..=0x26AB | 0x26BD..=0x26BE | 0x26C4..=0x26C5 | 0x26CE | 0x26D4 | 0x26EA
-		| 0x26F2..=0x26F3 | 0x26F5 | 0x26FA | 0x26FD | 0x2705 | 0x270A..=0x270B | 0x2728
-		| 0x274C | 0x274E | 0x2753..=0x2755 | 0x2757 | 0x2795..=0x2797 | 0x27B0 | 0x27BF
-		| 0x2B1B..=0x2B1C | 0x2B50 | 0x2B55 | 0x2E80..=0x303E | 0x3041..=0x33FF
-		| 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xA000..=0xA4CF | 0xA960..=0xA97F
-		| 0xAC00..=0xD7A3 | 0xF900..=0xFAFF | 0xFE10..=0xFE19 | 0xFE30..=0xFE6F
-		| 0xFF00..=0xFF60 | 0xFFE0..=0xFFE6 | 0x1F300..=0x1F64F | 0x1F900..=0x1F9FF
-		| 0x20000..=0x3FFFD
-	)
-}
-
-/// The display width of `text` in columns (CJK and emoji count as two, marks
-/// and control characters as zero). An approximation of prettier's
-/// `getStringWidth`, exact for ASCII and for the common wide ranges.
-fn string_width(text: &str) -> usize {
-	if text.is_ascii() {
-		return text.len();
-	}
-	let mut width = 0;
-	for c in text.chars() {
-		let cp = c as u32;
-		if cp <= 31 || (127..=159).contains(&cp) {
-			continue;
-		}
-		if (768..=879).contains(&cp) || (65024..=65039).contains(&cp) {
-			continue;
-		}
-		width += if is_wide(c) { 2 } else { 1 };
-	}
-	width
-}
-
 struct Printer<'a> {
 	docs: &'a Docs,
 	options: PrintOptions,
 	group_modes: Vec<Option<Mode>>,
 	out: String,
-	position: usize,
-	should_remeasure: bool,
+	/// The stack of [`Printer::fits_flat`], kept to reuse its allocation.
+	scratch: Vec<Cmd>,
 }
 
 impl Printer<'_> {
-	fn indent_value(&self, levels: usize) -> (String, usize) {
+	fn indent_value(&self, levels: usize) -> String {
 		if self.options.use_tabs {
-			("\t".repeat(levels), levels * self.options.tab_width)
+			"\t".repeat(levels)
 		} else {
-			let n = levels * self.options.tab_width;
-			(" ".repeat(n), n)
+			" ".repeat(levels * self.options.tab_width)
 		}
 	}
 
@@ -462,29 +431,25 @@ impl Printer<'_> {
 		self.group_modes[i] = Some(mode);
 	}
 
-	/// Whether `next` (and what follows it, from `rest`) fits in `remaining`
-	/// columns up to the first possible line break.
+	/// Whether the parts of a fill, `initial`, can be laid out flat: what
+	/// prettier's `fits` answers with `mustBeFlat` and an unlimited width. It
+	/// is false only when a group that holds a forced break comes before the
+	/// first line break; running into a line break first, or the end, is true.
 	///
 	/// `initial` is a stack: its last element is looked at first.
-	fn fits(
-		&self,
-		initial: &[Cmd],
-		rest: &[Cmd],
-		mut remaining: isize,
-		must_be_flat: bool,
-	) -> bool {
-		let mut rest_index = rest.len();
-		let mut has_pending_space = false;
-		let mut commands: Vec<Cmd> = initial.to_vec();
-		while remaining >= 0 {
-			let Some(cmd) = commands.pop().or_else(|| {
-				if rest_index == 0 {
-					None
-				} else {
-					rest_index -= 1;
-					Some(rest[rest_index])
-				}
-			}) else {
+	fn fits_flat(&mut self, initial: &[Cmd]) -> bool {
+		// One stack for every call: a fill asks once or twice per part.
+		let mut commands = std::mem::take(&mut self.scratch);
+		commands.clear();
+		commands.extend_from_slice(initial);
+		let flat = self.scan_flat(&mut commands);
+		self.scratch = commands;
+		flat
+	}
+
+	fn scan_flat(&self, commands: &mut Vec<Cmd>) -> bool {
+		loop {
+			let Some(cmd) = commands.pop() else {
 				return true;
 			};
 			let Cmd {
@@ -494,15 +459,7 @@ impl Printer<'_> {
 				..
 			} = cmd;
 			match &self.docs.nodes[doc as usize] {
-				Node::Text(s) => {
-					if !s.is_empty() {
-						if has_pending_space {
-							remaining -= 1;
-							has_pending_space = false;
-						}
-						remaining -= string_width(s) as isize;
-					}
-				}
+				Node::Text(_) => {}
 				Node::Concat(parts) => {
 					for &p in parts.iter().rev() {
 						commands.push(Cmd {
@@ -539,12 +496,11 @@ impl Printer<'_> {
 					});
 				}
 				Node::Group { contents, brk, .. } => {
-					if must_be_flat && *brk {
+					if *brk {
 						return false;
 					}
-					let group_mode = if *brk { Mode::Break } else { mode };
 					commands.push(Cmd {
-						mode: group_mode,
+						mode,
 						doc: *contents,
 						fill_offset: 0,
 						indent: cmd.indent,
@@ -573,22 +529,17 @@ impl Printer<'_> {
 						});
 					}
 				}
-				Node::Line { soft, hard, .. } => {
+				Node::Line { hard, .. } => {
 					if mode == Mode::Break || *hard {
 						return true;
-					}
-					if !*soft {
-						has_pending_space = true;
 					}
 				}
 				Node::BreakParent => {}
 			}
 		}
-		false
 	}
 
 	fn run(&mut self, root: DocId) {
-		let width = self.options.print_width as isize;
 		let mut commands: Vec<Cmd> = vec![Cmd {
 			indent: 0,
 			mode: Mode::Break,
@@ -604,12 +555,7 @@ impl Printer<'_> {
 			} = cmd;
 			match &self.docs.nodes[doc as usize] {
 				Node::Text(s) => {
-					if !s.is_empty() {
-						self.out.push_str(s);
-						if !commands.is_empty() {
-							self.position += string_width(s);
-						}
-					}
+					self.out.push_str(s);
 				}
 				Node::Concat(parts) => {
 					for &p in parts.iter().rev() {
@@ -638,32 +584,13 @@ impl Printer<'_> {
 					});
 				}
 				Node::Group { contents, brk, id } => {
-					let command = if mode == Mode::Flat && !self.should_remeasure {
-						Cmd {
-							indent,
-							mode: if *brk { Mode::Break } else { Mode::Flat },
-							doc: *contents,
-							fill_offset: 0,
-						}
-					} else {
-						self.should_remeasure = false;
-						let remaining = width - self.position as isize;
-						let flat = Cmd {
-							indent,
-							mode: Mode::Flat,
-							doc: *contents,
-							fill_offset: 0,
-						};
-						if !*brk && self.fits(&[flat], &commands, remaining, false) {
-							flat
-						} else {
-							Cmd {
-								indent,
-								mode: Mode::Break,
-								doc: *contents,
-								fill_offset: 0,
-							}
-						}
+					// With no width to run out of, a group is broken exactly when it
+					// holds a forced break, whatever the mode it is met in.
+					let command = Cmd {
+						indent,
+						mode: if *brk { Mode::Break } else { Mode::Flat },
+						doc: *contents,
+						fill_offset: 0,
 					};
 					if let Some(id) = id {
 						self.set_group_mode(*id, command.mode);
@@ -671,7 +598,6 @@ impl Printer<'_> {
 					commands.push(command);
 				}
 				Node::Fill(parts) => {
-					let remaining = width - self.position as isize;
 					let length = parts.len() - fill_offset;
 					if length == 0 {
 						continue;
@@ -689,7 +615,7 @@ impl Printer<'_> {
 						doc: content,
 						fill_offset: 0,
 					};
-					let content_fits = self.fits(&[content_flat], &[], remaining, true);
+					let content_fits = self.fits_flat(&[content_flat]);
 					if length == 1 {
 						commands.push(if content_fits {
 							content_flat
@@ -735,12 +661,7 @@ impl Printer<'_> {
 						fill_offset: 0,
 					};
 					// content, whitespace, second content, measured flat, in that order
-					let pair_fits = self.fits(
-						&[second_flat, whitespace_flat, content_flat],
-						&[],
-						remaining,
-						true,
-					);
+					let pair_fits = self.fits_flat(&[second_flat, whitespace_flat, content_flat]);
 					commands.push(remaining_command);
 					if pair_fits {
 						commands.push(whitespace_flat);
@@ -809,22 +730,16 @@ impl Printer<'_> {
 					Mode::Flat if !*hard => {
 						if !*soft {
 							self.out.push(' ');
-							self.position += 1;
 						}
 					}
 					_ => {
-						if mode == Mode::Flat {
-							self.should_remeasure = true;
-						}
 						if *literal {
 							self.out.push('\n');
-							self.position = 0;
 						} else {
 							self.trim_trailing_whitespace();
 							self.out.push('\n');
-							let (value, length) = self.indent_value(indent);
+							let value = self.indent_value(indent);
 							self.out.push_str(&value);
-							self.position = length;
 						}
 					}
 				},
@@ -848,8 +763,7 @@ pub fn print(docs: &mut Docs, doc: DocId, options: PrintOptions) -> String {
 		options,
 		group_modes: Vec::new(),
 		out: String::new(),
-		position: 0,
-		should_remeasure: false,
+		scratch: Vec::new(),
 	};
 	printer.run(doc);
 	printer.out
@@ -859,9 +773,8 @@ pub fn print(docs: &mut Docs, doc: DocId, options: PrintOptions) -> String {
 mod tests {
 	use super::*;
 
-	fn opts(width: usize, tabs: bool) -> PrintOptions {
+	fn opts(tabs: bool) -> PrintOptions {
 		PrintOptions {
-			print_width: width,
 			tab_width: 2,
 			use_tabs: tabs,
 		}
@@ -872,22 +785,32 @@ mod tests {
 	}
 
 	#[test]
-	fn a_group_that_fits_stays_flat_and_one_that_does_not_breaks() {
+	fn a_group_without_a_forced_break_stays_flat_however_long() {
 		let mut d = Docs::new();
 		let (a, b, c) = (t(&mut d, "a"), t(&mut d, "b"), t(&mut d, "c"));
 		let inner = d.concat(vec![LINE, b]);
 		let ind = d.indent(inner);
 		let g = d.concat(vec![a, ind, LINE, c]);
 		let g = d.group(g);
-		assert_eq!(print(&mut d, g, opts(80, false)), "a b c");
+		assert_eq!(print(&mut d, g, opts(false)), "a b c");
 
+		let long = "x".repeat(500);
 		let mut d = Docs::new();
-		let (a, b, c) = (t(&mut d, "aaaa"), t(&mut d, "bbbb"), t(&mut d, "cccc"));
+		let (a, b) = (t(&mut d, &long), t(&mut d, &long));
+		let g = d.concat(vec![a, LINE, b]);
+		let g = d.group(g);
+		assert_eq!(print(&mut d, g, opts(false)), format!("{long} {long}"));
+	}
+
+	#[test]
+	fn a_group_marked_broken_breaks_its_lines() {
+		let mut d = Docs::new();
+		let (a, b, c) = (t(&mut d, "a"), t(&mut d, "b"), t(&mut d, "c"));
 		let inner = d.concat(vec![LINE, b]);
 		let ind = d.indent(inner);
 		let g = d.concat(vec![a, ind, LINE, c]);
-		let g = d.group(g);
-		assert_eq!(print(&mut d, g, opts(8, false)), "aaaa\n  bbbb\ncccc");
+		let g = d.group_with(g, true, None);
+		assert_eq!(print(&mut d, g, opts(false)), "a\n  b\nc");
 	}
 
 	#[test]
@@ -896,7 +819,7 @@ mod tests {
 		let (a, b, c) = (t(&mut d, "a"), t(&mut d, "b"), t(&mut d, "c"));
 		let g = d.concat(vec![a, LINE, b, HARDLINE, c]);
 		let g = d.group(g);
-		assert_eq!(print(&mut d, g, opts(80, false)), "a\nb\nc");
+		assert_eq!(print(&mut d, g, opts(false)), "a\nb\nc");
 	}
 
 	#[test]
@@ -909,11 +832,11 @@ mod tests {
 		let mid = d.indent(mid);
 		let g = d.concat(vec![a, mid]);
 		let g = d.group(g);
-		assert_eq!(print(&mut d, g, opts(80, true)), "a\n\tb\n\t\tc");
+		assert_eq!(print(&mut d, g, opts(true)), "a\n\tb\n\t\tc");
 	}
 
 	#[test]
-	fn fill_packs_words_into_lines() {
+	fn fill_keeps_words_on_one_line() {
 		let mut d = Docs::new();
 		let words: Vec<DocId> = ["one", "two", "three", "four", "five", "six"]
 			.iter()
@@ -921,10 +844,18 @@ mod tests {
 			.collect();
 		let parts = d.join(LINE, &words);
 		let f = d.fill(parts);
-		assert_eq!(
-			print(&mut d, f, opts(12, false)),
-			"one two\nthree four\nfive six"
-		);
+		assert_eq!(print(&mut d, f, opts(false)), "one two three four five six");
+	}
+
+	#[test]
+	fn fill_breaks_before_a_part_that_holds_a_forced_break() {
+		let mut d = Docs::new();
+		let (a, b, c) = (t(&mut d, "a"), t(&mut d, "b"), t(&mut d, "c"));
+		let inner = d.concat(vec![b, HARDLINE, c]);
+		let broken = d.group(inner);
+		let parts = d.join(LINE, &[a, broken, a]);
+		let f = d.fill(parts);
+		assert_eq!(print(&mut d, f, opts(false)), "a\nb\nc\na");
 	}
 
 	#[test]
@@ -936,8 +867,8 @@ mod tests {
 		let inner = d.concat(vec![SOFTLINE, x, SOFTLINE]);
 		let inner = d.indent(inner);
 		let g = d.concat(vec![open, inner, close]);
-		let g = d.group(g);
-		assert_eq!(print(&mut d, g, opts(4, false)), "(\n  xxxx\n  )");
+		let g = d.group_with(g, true, None);
+		assert_eq!(print(&mut d, g, opts(false)), "(\n  xxxx\n  )");
 		let mut d = Docs::new();
 		let open = t(&mut d, "(");
 		let x = t(&mut d, "xxxx");
@@ -946,7 +877,7 @@ mod tests {
 		let inner = d.indent(inner);
 		let g = d.concat(vec![open, inner, close]);
 		let g = d.group(g);
-		assert_eq!(print(&mut d, g, opts(80, false)), "(xxxx)");
+		assert_eq!(print(&mut d, g, opts(false)), "(xxxx)");
 	}
 
 	#[test]
@@ -959,7 +890,7 @@ mod tests {
 		let (brk, flat) = (t(&mut d, "BRK"), t(&mut d, "FLT"));
 		let ib = d.if_break(brk, flat, Some(id));
 		let all = d.concat(vec![g, ib]);
-		assert_eq!(print(&mut d, all, opts(80, false)), "a\nbBRK");
+		assert_eq!(print(&mut d, all, opts(false)), "a\nbBRK");
 	}
 
 	#[test]
@@ -972,17 +903,17 @@ mod tests {
 		let body = d.concat(vec![HARDLINE, z]);
 		let iib = d.indent_if_break(body, id, false);
 		let all = d.concat(vec![g, iib]);
-		assert_eq!(print(&mut d, all, opts(3, false)), "x y\nz");
+		assert_eq!(print(&mut d, all, opts(false)), "x y\nz");
 
 		let mut d = Docs::new();
 		let id = d.new_group_id();
-		let (x, y, z) = (t(&mut d, "xxxx"), t(&mut d, "yyyy"), t(&mut d, "z"));
+		let (x, y, z) = (t(&mut d, "x"), t(&mut d, "y"), t(&mut d, "z"));
 		let inner = d.concat(vec![x, LINE, y]);
-		let g = d.group_with(inner, false, Some(id));
+		let g = d.group_with(inner, true, Some(id));
 		let body = d.concat(vec![HARDLINE, z]);
 		let iib = d.indent_if_break(body, id, false);
 		let all = d.concat(vec![g, iib]);
-		assert_eq!(print(&mut d, all, opts(5, false)), "xxxx\nyyyy\n  z");
+		assert_eq!(print(&mut d, all, opts(false)), "x\ny\n  z");
 	}
 
 	#[test]
@@ -990,7 +921,7 @@ mod tests {
 		let mut d = Docs::new();
 		let (a, sp, b) = (t(&mut d, "a"), t(&mut d, " "), t(&mut d, "b"));
 		let all = d.concat(vec![a, sp, HARDLINE, b]);
-		assert_eq!(print(&mut d, all, opts(80, false)), "a\nb");
+		assert_eq!(print(&mut d, all, opts(false)), "a\nb");
 	}
 
 	#[test]
@@ -1001,21 +932,16 @@ mod tests {
 		let inner = d.indent(inner);
 		let g = d.concat(vec![a, inner]);
 		let g = d.group(g);
-		assert_eq!(print(&mut d, g, opts(80, false)), "a\nb");
+		assert_eq!(print(&mut d, g, opts(false)), "a\nb");
 	}
 
 	#[test]
-	fn wide_characters_count_two_columns() {
+	fn wide_characters_do_not_make_a_group_break() {
 		let mut d = Docs::new();
 		let (jp, ab) = (t(&mut d, "日本語"), t(&mut d, "ab"));
 		let g = d.concat(vec![jp, LINE, ab]);
 		let g = d.group(g);
-		assert_eq!(print(&mut d, g, opts(6, false)), "日本語\nab");
-		let mut d = Docs::new();
-		let (jp, ab) = (t(&mut d, "日本語"), t(&mut d, "ab"));
-		let g = d.concat(vec![jp, LINE, ab]);
-		let g = d.group(g);
-		assert_eq!(print(&mut d, g, opts(9, false)), "日本語 ab");
+		assert_eq!(print(&mut d, g, opts(false)), "日本語 ab");
 	}
 
 	#[test]
@@ -1026,6 +952,6 @@ mod tests {
 		let ded = d.dedent_to_root(inner);
 		let ind = d.indent(ded);
 		let all = d.concat(vec![a, ind]);
-		assert_eq!(print(&mut d, all, opts(80, false)), "a\nb");
+		assert_eq!(print(&mut d, all, opts(false)), "a\nb");
 	}
 }
