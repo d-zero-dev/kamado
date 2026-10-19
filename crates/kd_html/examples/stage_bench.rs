@@ -46,10 +46,10 @@ fn main() {
 	let limit: usize = args.next().and_then(|n| n.parse().ok()).unwrap_or(2000);
 	let mut files = Vec::new();
 	collect(std::path::Path::new(&dir), &mut files, limit);
-	let pages: Vec<String> = files
+	let (names, pages): (Vec<&std::path::PathBuf>, Vec<String>) = files
 		.iter()
-		.filter_map(|p| fs::read_to_string(p).ok())
-		.collect();
+		.filter_map(|p| fs::read_to_string(p).ok().map(|s| (p, s)))
+		.unzip();
 	assert!(!pages.is_empty(), "no .html files under {dir}");
 	let bytes: usize = pages.iter().map(String::len).sum();
 	println!("{} pages, {} bytes", pages.len(), bytes);
@@ -79,13 +79,40 @@ fn main() {
 		.unwrap_or(1);
 	let t = Instant::now();
 	let mut formatted = Vec::with_capacity(pages.len());
+	let mut did_not_format = Vec::with_capacity(pages.len());
 	for _ in 0..repeat {
 		formatted.clear();
+		did_not_format.clear();
 		for p in &pages {
-			formatted.push(print::format(p, &options).unwrap_or_default());
+			let out = print::format(p, &options);
+			did_not_format.push(out.is_err());
+			formatted.push(out.unwrap_or_default());
 		}
 	}
+	let failed = did_not_format.iter().filter(|&&f| f).count();
+	if failed > 0 {
+		// Their output is an empty string below (and in the files `DUMP` writes).
+		println!("{failed} pages did not format");
+	}
 	let format_us = per_page(t.elapsed().as_nanos(), pages.len() * repeat);
+
+	// `DUMP=<dir>` keeps the output of `format` so that two builds can be compared byte for
+	// byte; `index.txt` says which page each `<n>.html` is, for when they differ.
+	if let Ok(dump) = std::env::var("DUMP") {
+		let dump = std::path::Path::new(&dump);
+		fs::create_dir_all(dump).expect("create the DUMP directory");
+		let mut index = String::new();
+		for (n, out) in formatted.iter().enumerate() {
+			fs::write(dump.join(format!("{n}.html")), out).expect("write a formatted page");
+			let mark = if did_not_format[n] {
+				"\t(did not format)"
+			} else {
+				""
+			};
+			index.push_str(&format!("{n}\t{}{mark}\n", names[n].display()));
+		}
+		fs::write(dump.join("index.txt"), index).expect("write the index");
+	}
 
 	// Inside `format`: its steps timed one by one (parse into the tree,
 	// white-space preprocessing, building the printer's document, printing it,
