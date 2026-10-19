@@ -306,10 +306,13 @@ fn merge_if_conditional_start_end_comment_into_element_opening_tag(ast: &mut Ast
 		if !has_children(ast.node(id)) {
 			return;
 		}
-		let mut i = 0;
-		while i < ast.node(id).children.len() {
-			let child = ast.node(id).children[i];
-			let prev = i.checked_sub(1).map(|j| ast.node(id).children[j]);
+		// The children that stay are moved to the front of the same list (`kept` of them), not
+		// taken out one by one with `Vec::remove`, which moves everything behind each time.
+		let mut list = std::mem::take(&mut ast.nodes[id].children);
+		let mut kept = 0usize;
+		for read in 0..list.len() {
+			let child = list[read];
+			let prev = kept.checked_sub(1).map(|j| list[j]);
 			let first = ast.node(child).children.first().copied();
 			let matches = ast.node(child).kind == Kind::Element
 				&& prev.is_some_and(|p| {
@@ -320,7 +323,8 @@ fn merge_if_conditional_start_end_comment_into_element_opening_tag(ast: &mut Ast
 					&& ast.node(f).span.start == ast.node(child).start_span.end
 			});
 			if !matches {
-				i += 1;
+				list[kept] = child;
+				kept += 1;
 				continue;
 			}
 			let (prev, first) = (prev.unwrap_or_default(), first.unwrap_or_default());
@@ -333,14 +337,17 @@ fn merge_if_conditional_start_end_comment_into_element_opening_tag(ast: &mut Ast
 				end: ast.node(child).span.end,
 			};
 			let condition = ast.node(prev).condition.clone();
-			ast.nodes[id].children.remove(i - 1);
+			// The start comment before the child goes away: the child takes its place.
+			list[kept - 1] = child;
 			let n = &mut ast.nodes[child];
 			n.condition = condition;
 			n.span = whole;
 			n.start_span = opening;
 			n.children.remove(0);
-			// the removal shifted the child to index i - 1; continue after it
+			ast.reindex_children(child);
 		}
+		list.truncate(kept);
+		ast.nodes[id].children = list;
 	});
 }
 
@@ -359,11 +366,15 @@ fn merge_text(ast: &mut Ast, matches: impl Fn(&Node) -> bool, value_of: impl Fn(
 		if !has_children(ast.node(id)) {
 			return;
 		}
-		let mut i = 0;
-		while i < ast.node(id).children.len() {
-			let child = ast.node(id).children[i];
+		// Moved to the front of the same list, as in the step above: no `Vec::remove` for each
+		// text that is merged away.
+		let mut list = std::mem::take(&mut ast.nodes[id].children);
+		let mut kept = 0;
+		for read in 0..list.len() {
+			let child = list[read];
 			if ast.node(child).kind != Kind::Text && !matches(ast.node(child)) {
-				i += 1;
+				list[kept] = child;
+				kept += 1;
 				continue;
 			}
 			if ast.node(child).kind != Kind::Text {
@@ -372,18 +383,22 @@ fn merge_text(ast: &mut Ast, matches: impl Fn(&Node) -> bool, value_of: impl Fn(
 				n.kind = Kind::Text;
 				n.value = value;
 			}
-			let prev = i.checked_sub(1).map(|j| ast.node(id).children[j]);
+			let prev = kept.checked_sub(1).map(|j| list[j]);
 			match prev {
 				Some(p) if ast.node(p).kind == Kind::Text => {
 					let (value, end) = (ast.node(child).value.clone(), ast.node(child).span.end);
 					let a = &mut ast.nodes[p];
 					a.value.push_str(&value);
 					a.span.end = end;
-					ast.nodes[id].children.remove(i);
 				}
-				_ => i += 1,
+				_ => {
+					list[kept] = child;
+					kept += 1;
+				}
 			}
 		}
+		list.truncate(kept);
+		ast.nodes[id].children = list;
 	});
 }
 
@@ -392,15 +407,17 @@ fn extract_whitespaces(ast: &mut Ast) {
 		if !has_children(ast.node(id)) {
 			return;
 		}
-		let children = ast.node(id).children.clone();
+		// Taken, not copied, to save a copy of the list for every node: every way out of here puts
+		// a list back (`set_children`, which also sets the places that the steps before this
+		// one left stale) or leaves the node with none. Until then `ast.prev` and `ast.next`
+		// cannot be asked about its children, so nothing below asks.
+		let children = std::mem::take(&mut ast.nodes[id].children);
 		if children.is_empty()
 			|| (children.len() == 1
 				&& ast.node(children[0]).kind == Kind::Text
 				&& util::trim(&ast.node(children[0]).value).is_empty())
 		{
-			let n = &mut ast.nodes[id];
-			n.has_dangling_spaces = !children.is_empty();
-			n.children = Vec::new();
+			ast.nodes[id].has_dangling_spaces = !children.is_empty();
 			return;
 		}
 		let node = ast.node(id);
@@ -410,23 +427,29 @@ fn extract_whitespaces(ast: &mut Ast) {
 		let indentation_sensitive = is_pre_like(node);
 		let mut list = children;
 		if !whitespace_sensitive {
-			let mut a = 0;
-			while a < list.len() {
+			// The children that stay are moved to the front of the same list (`kept` of them): a
+			// text of white space only is left out, which is not `list.remove` (a move of
+			// everything behind it, for each one) because a parent can have thousands of
+			// children with a line break between each two.
+			let mut kept = 0usize;
+			for a in 0..list.len() {
 				let o = list[a];
 				if ast.node(o).kind != Kind::Text {
-					a += 1;
+					list[kept] = o;
+					kept += 1;
 					continue;
 				}
-				let value = ast.node(o).value.clone();
-				let leading = util::leading_ws(&value).to_owned();
-				let rest = &value[leading.len()..];
-				let trailing = util::trailing_ws(rest).to_owned();
-				let text = rest[..rest.len() - trailing.len()].to_owned();
-				let prev = a.checked_sub(1).map(|j| list[j]);
+				// Only the lengths of the white space at both ends are kept, so that the text is
+				// cut in place and not copied into new strings.
+				let value = &ast.node(o).value;
+				let leading = util::leading_ws(value).len();
+				let rest = &value[leading..];
+				let trailing = util::trailing_ws(rest).len();
+				let text_is_empty = rest.len() == trailing;
+				let prev = kept.checked_sub(1).map(|j| list[j]);
 				let next = list.get(a + 1).copied();
-				if text.is_empty() {
-					list.remove(a);
-					if !leading.is_empty() || !trailing.is_empty() {
+				if text_is_empty {
+					if leading != 0 || trailing != 0 {
 						if let Some(p) = prev {
 							ast.nodes[p].has_trailing_spaces = true;
 						}
@@ -438,26 +461,32 @@ fn extract_whitespaces(ast: &mut Ast) {
 				}
 				{
 					let n = &mut ast.nodes[o];
-					n.value = text;
+					let end = n.value.len() - trailing;
+					n.value.truncate(end);
+					if leading != 0 {
+						n.value.drain(..leading);
+					}
 					n.span = Span {
-						start: n.span.start + leading.len(),
-						end: n.span.end - trailing.len(),
+						start: n.span.start + leading,
+						end: n.span.end - trailing,
 					};
 				}
-				if !leading.is_empty() {
+				if leading != 0 {
 					if let Some(p) = prev {
 						ast.nodes[p].has_trailing_spaces = true;
 					}
 					ast.nodes[o].has_leading_spaces = true;
 				}
-				if !trailing.is_empty() {
+				if trailing != 0 {
 					ast.nodes[o].has_trailing_spaces = true;
 					if let Some(n) = next {
 						ast.nodes[n].has_leading_spaces = true;
 					}
 				}
-				a += 1;
+				list[kept] = o;
+				kept += 1;
 			}
+			list.truncate(kept);
 		}
 		ast.set_children(id, list);
 		let n = &mut ast.nodes[id];
@@ -552,11 +581,15 @@ fn merge_simple_element_into_text(ast: &mut Ast) {
 		if !has_children(ast.node(id)) {
 			return;
 		}
-		let mut i = 0;
-		while i < ast.node(id).children.len() {
-			let child = ast.node(id).children[i];
-			let prev = i.checked_sub(1).map(|j| ast.node(id).children[j]);
-			let next = ast.node(id).children.get(i + 1).copied();
+		// The children that stay are moved to the front of the same list (`kept` of them), as in
+		// the steps above; `read` is where the next child to look at stands.
+		let mut list = std::mem::take(&mut ast.nodes[id].children);
+		let before = list.len();
+		let (mut read, mut kept) = (0usize, 0usize);
+		while read < list.len() {
+			let child = list[read];
+			let prev = kept.checked_sub(1).map(|j| list[j]);
+			let next = list.get(read + 1).copied();
 			let n = ast.node(child);
 			let simple = n.kind == Kind::Element
 				&& n.attrs.is_empty()
@@ -572,7 +605,9 @@ fn merge_simple_element_into_text(ast: &mut Ast) {
 				&& prev.is_some_and(|p| ast.node(p).kind == Kind::Text)
 				&& next.is_some_and(|x| ast.node(x).kind == Kind::Text);
 			if !simple {
-				i += 1;
+				list[kept] = child;
+				kept += 1;
+				read += 1;
 				continue;
 			}
 			let (p, x) = (prev.unwrap_or_default(), next.unwrap_or_default());
@@ -589,10 +624,17 @@ fn merge_simple_element_into_text(ast: &mut Ast) {
 			a.span.end = next_end;
 			a.is_trailing_space_sensitive = next_trailing_sensitive;
 			a.has_trailing_spaces = next_has_trailing;
-			// remove the element and the text after it
-			ast.nodes[id].children.remove(i);
-			ast.nodes[id].children.remove(i);
-			// stay at i - 1's successor: the merged text is now at i - 1
+			// leave out the element and the text after it: the merged text is the one before
+			// them, and what comes next is looked at with it as its `prev`
+			read += 2;
+		}
+		list.truncate(kept);
+		ast.nodes[id].children = list;
+		// The last step before the printer, which asks for siblings all the time. The steps
+		// before it leave stale places, which `extract_whitespaces` sets again. Only when
+		// something was merged away, to not walk every list for nothing.
+		if ast.node(id).children.len() != before {
+			ast.reindex_children(id);
 		}
 	});
 }

@@ -62,6 +62,18 @@ pub struct Attr {
 pub struct Node {
 	pub kind: Kind,
 	pub parent: Option<NodeId>,
+	/// Where this node stands in its parent's `children`: a hint that
+	/// [`Ast::prev`] and [`Ast::next`] check and fall back from, so that a step
+	/// that removes children without updating it costs time, never correctness.
+	/// Private so that it is only written here, by [`Ast::set_children`],
+	/// [`Ast::reindex_children`] and the end of [`build`] (which sets every place at once: the
+	/// places are not set while the tree is being built).
+	index_in_parent: usize,
+	/// A step that takes children out of this list leaves `index_in_parent` of the rest stale
+	/// until [`Ast::set_children`] or [`Ast::reindex_children`] runs: `extract_whitespaces`
+	/// does it for every node with children, and the last step does it for what it merged. Until
+	/// then [`Ast::prev`] and [`Ast::next`] are right but search; a step that runs after those
+	/// two and removes children calls `reindex_children` itself.
 	pub children: Vec<NodeId>,
 	pub span: Span,
 	pub start_span: Span,
@@ -97,6 +109,7 @@ impl Node {
 		Node {
 			kind,
 			parent: None,
+			index_in_parent: 0,
 			children: Vec::new(),
 			span,
 			start_span: span,
@@ -166,6 +179,10 @@ pub struct Ast {
 	pub root: NodeId,
 	pub text: String,
 	line_starts: Vec<usize>,
+	/// How many times [`Ast::place`] had to search because the hint was wrong: a test reads it
+	/// to see that no step forgot to update the places.
+	#[cfg(test)]
+	misses: std::cell::Cell<usize>,
 }
 
 impl Ast {
@@ -183,11 +200,23 @@ impl Ast {
 		&self.nodes[id]
 	}
 
+	/// The place of `id` among the `siblings`: the hint when it is right, else a search.
+	fn place(&self, id: NodeId, siblings: &[NodeId]) -> Option<usize> {
+		let hint = self.nodes[id].index_in_parent;
+		if siblings.get(hint) == Some(&id) {
+			Some(hint)
+		} else {
+			#[cfg(test)]
+			self.misses.set(self.misses.get() + 1);
+			siblings.iter().position(|&c| c == id)
+		}
+	}
+
 	#[must_use]
 	pub fn prev(&self, id: NodeId) -> Option<NodeId> {
 		let parent = self.nodes[id].parent?;
 		let siblings = &self.nodes[parent].children;
-		let i = siblings.iter().position(|&c| c == id)?;
+		let i = self.place(id, siblings)?;
 		i.checked_sub(1).map(|j| siblings[j])
 	}
 
@@ -195,8 +224,17 @@ impl Ast {
 	pub fn next(&self, id: NodeId) -> Option<NodeId> {
 		let parent = self.nodes[id].parent?;
 		let siblings = &self.nodes[parent].children;
-		let i = siblings.iter().position(|&c| c == id)?;
+		let i = self.place(id, siblings)?;
 		siblings.get(i + 1).copied()
+	}
+
+	/// Sets `index_in_parent` of every child of `parent` from its `children`. It costs one pass
+	/// over the children, so a step calls it once after it changed the list, not for each change.
+	pub fn reindex_children(&mut self, parent: NodeId) {
+		for i in 0..self.nodes[parent].children.len() {
+			let c = self.nodes[parent].children[i];
+			self.nodes[c].index_in_parent = i;
+		}
 	}
 
 	#[must_use]
@@ -217,8 +255,9 @@ impl Ast {
 
 	/// Replaces the children of `parent`, fixing the parent links.
 	pub fn set_children(&mut self, parent: NodeId, children: Vec<NodeId>) {
-		for &c in &children {
+		for (i, &c) in children.iter().enumerate() {
 			self.nodes[c].parent = Some(parent);
+			self.nodes[c].index_in_parent = i;
 		}
 		self.nodes[parent].children = children;
 	}
@@ -610,20 +649,194 @@ pub fn build(text: &str) -> Result<Ast, ParseError> {
 		root: root_id,
 		text: text.to_owned(),
 		line_starts: compute_line_starts(text),
+		#[cfg(test)]
+		misses: std::cell::Cell::new(0),
 	};
 	fix_parents(&mut ast);
 	Ok(ast)
 }
 
-/// Makes every child's `parent` agree with the `children` lists.
+/// Makes every child's `parent` and `index_in_parent` agree with the `children` lists.
 fn fix_parents(ast: &mut Ast) {
 	let mut stack = vec![ast.root];
 	while let Some(id) = stack.pop() {
 		let children = std::mem::take(&mut ast.nodes[id].children);
-		for &c in &children {
+		for (i, &c) in children.iter().enumerate() {
 			ast.nodes[c].parent = Some(id);
+			ast.nodes[c].index_in_parent = i;
 			stack.push(c);
 		}
 		ast.nodes[id].children = children;
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::super::preprocess::{self, WhitespaceSensitivity};
+	use super::*;
+
+	/// Whether every node that is still in the tree (reached through the `children` lists: a
+	/// node the preprocessing took out keeps its old place) has the place and the parent its
+	/// parent's list says.
+	fn places_agree(ast: &Ast) -> bool {
+		let mut stack = vec![ast.root];
+		while let Some(id) = stack.pop() {
+			for (i, &c) in ast.nodes[id].children.iter().enumerate() {
+				if ast.nodes[c].index_in_parent != i || ast.nodes[c].parent != Some(id) {
+					return false;
+				}
+				stack.push(c);
+			}
+		}
+		true
+	}
+
+	fn preprocessed(src: &str, sensitivity: WhitespaceSensitivity) -> Ast {
+		let mut ast = build(src).unwrap();
+		preprocess::run(&mut ast, sensitivity);
+		ast
+	}
+
+	/// The node ids in the tree, parents first.
+	fn in_tree(ast: &Ast) -> Vec<NodeId> {
+		let mut all = Vec::new();
+		let mut stack = vec![ast.root];
+		while let Some(id) = stack.pop() {
+			all.push(id);
+			stack.extend(ast.node(id).children.iter().rev().copied());
+		}
+		all
+	}
+
+	#[test]
+	fn a_node_knows_its_place_among_its_siblings() {
+		let src = format!("<ul>{}</ul>", "<li>x</li>".repeat(5000));
+		let ast = build(&src).unwrap();
+		assert!(places_agree(&ast));
+		let ul = ast.node(ast.root).children[0];
+		let items = ast.node(ul).children.clone();
+		assert_eq!(items.len(), 5000);
+		assert_eq!(ast.prev(items[0]), None);
+		assert_eq!(ast.next(items[4999]), None);
+		for w in items.windows(2) {
+			assert_eq!(ast.next(w[0]), Some(w[1]));
+			assert_eq!(ast.prev(w[1]), Some(w[0]));
+		}
+		assert_eq!(ast.misses.get(), 0);
+	}
+
+	#[test]
+	fn the_places_hold_and_are_never_searched_for_after_each_step_that_takes_children_out() {
+		// One page for each step: blank text between elements goes away, text around a simple
+		// element is merged, the line feed that starts a `pre` is dropped with its text, a
+		// conditional comment is merged into the tag it opens, a CDATA section is merged into
+		// The last page has all of them in a parent with hundreds of children.
+		let mut wide = String::from("<ul>");
+		for i in 0..300 {
+			wide.push_str(&format!(
+				"\n <li>{i}</li> <!-- c{i} -->\n <li><b>x</b>y<i>z</i>w</li><pre>\n<b>q</b></pre>"
+			));
+		}
+		wide.push_str("</ul><svg>a<![CDATA[b]]>c</svg>");
+		let pages = [
+			"<div> <p>a</p> \n <b>x</b>y<i>z</i>w<!-- c --> <span> </span>\n</div>",
+			"<pre>\n</pre><pre>\n<b>x</b></pre><textarea>\n</textarea>",
+			"<!--[if IE]><!--><html lang=\"ja\"><!--<![endif]--><body><p>a</p></body></html>",
+			"<svg>a<![CDATA[b]]>c<g></g><![CDATA[d]]></svg>",
+			wide.as_str(),
+		];
+		for sensitivity in [
+			WhitespaceSensitivity::Css,
+			WhitespaceSensitivity::Strict,
+			WhitespaceSensitivity::Ignore,
+		] {
+			for (n, src) in pages.into_iter().enumerate() {
+				let ast = preprocessed(src, sensitivity);
+				assert!(places_agree(&ast), "page {n}, {sensitivity:?}");
+				for id in in_tree(&ast) {
+					if let Some(next) = ast.next(id) {
+						assert_eq!(ast.prev(next), Some(id), "page {n}, {sensitivity:?}");
+					}
+				}
+				assert_eq!(ast.misses.get(), 0, "page {n}, {sensitivity:?}");
+			}
+		}
+	}
+
+	#[test]
+	fn what_the_steps_take_out_is_gone_from_the_lists() {
+		let ast = preprocessed(
+			"<ul> <li>a</li> \n <li>b</li> <li>c</li></ul>",
+			WhitespaceSensitivity::Css,
+		);
+		let ul = ast.node(ast.root).children[0];
+		let items = ast.node(ul).children.clone();
+		assert_eq!(items.len(), 3);
+		assert_eq!(ast.prev(items[0]), None);
+		assert_eq!(ast.next(items[0]), Some(items[1]));
+		assert_eq!(ast.prev(items[2]), Some(items[1]));
+		assert_eq!(ast.next(items[2]), None);
+
+		let ast = preprocessed("<pre>\n<b>x</b></pre>", WhitespaceSensitivity::Css);
+		let pre = ast.node(ast.root).children[0];
+		assert_eq!(ast.node(pre).children.len(), 1);
+		let b = ast.node(pre).children[0];
+		assert_eq!(ast.node(b).kind, Kind::Element);
+		assert_eq!((ast.prev(b), ast.next(b)), (None, None));
+
+		let ast = preprocessed(
+			"<svg>a<![CDATA[b]]>c<g></g></svg>",
+			WhitespaceSensitivity::Css,
+		);
+		let svg = ast.node(ast.root).children[0];
+		let kinds: Vec<Kind> = ast
+			.node(svg)
+			.children
+			.iter()
+			.map(|&c| ast.node(c).kind)
+			.collect();
+		assert_eq!(kinds, [Kind::Text, Kind::Element]);
+		let text = ast.node(svg).children[0];
+		assert_eq!(ast.node(text).value, "a<![CDATA[b]]>c");
+
+		let ast = preprocessed(
+			"<!--[if IE]><!--><html lang=\"ja\"><!--<![endif]--><body></body></html>",
+			WhitespaceSensitivity::Css,
+		);
+		let kids = &ast.node(ast.root).children;
+		assert_eq!(kids.len(), 1);
+		assert_eq!(ast.node(kids[0]).condition.as_deref(), Some("IE"));
+	}
+
+	#[test]
+	fn an_element_of_white_space_only_keeps_no_children_and_a_dangling_space() {
+		let ast = preprocessed("<span> </span><span></span>", WhitespaceSensitivity::Css);
+		let kids = ast.node(ast.root).children.clone();
+		assert_eq!(kids.len(), 2);
+		assert!(ast.node(kids[0]).children.is_empty());
+		assert!(ast.node(kids[0]).has_dangling_spaces);
+		assert!(ast.node(kids[1]).children.is_empty());
+		assert!(!ast.node(kids[1]).has_dangling_spaces);
+	}
+
+	#[test]
+	fn a_stale_place_does_not_change_the_answer() {
+		// The hint of a node that stood behind a removed one, and one past the end of a list that
+		// got shorter.
+		let mut ast = build("<p><a></a><b></b><i></i></p>").unwrap();
+		let p = ast.node(ast.root).children[0];
+		let kids = ast.node(p).children.clone();
+		ast.nodes[p].children.remove(0);
+		assert_eq!(ast.prev(kids[1]), None);
+		assert_eq!(ast.next(kids[1]), Some(kids[2]));
+		assert_eq!(ast.prev(kids[2]), Some(kids[1]));
+		ast.nodes[p].children.pop();
+		assert_eq!(ast.next(kids[1]), None);
+		assert_eq!(
+			ast.prev(kids[2]),
+			None,
+			"a node that left the list has no sibling"
+		);
+		assert!(ast.misses.get() > 0);
 	}
 }

@@ -26,14 +26,23 @@ pub struct Settings {
 }
 
 pub struct Printer<'a> {
+	/// A shared reference: the tree does not change while documents are built, so what is read
+	/// from it can stay borrowed (see [`Printer::ast`]) instead of being copied before `self`
+	/// is borrowed mutably.
 	pub ast: &'a Ast,
 	pub docs: &'a mut Docs,
 	pub settings: Settings,
 }
 
-impl Printer<'_> {
+impl<'a> Printer<'a> {
 	fn node(&self, id: NodeId) -> &Node {
 		self.ast.node(id)
+	}
+
+	/// The tree, with the lifetime of the tree and not of a borrow of `self`: what is read from
+	/// it can stay borrowed while a method that takes `&mut self` builds documents.
+	fn ast(&self) -> &'a Ast {
+		self.ast
 	}
 
 	fn text(&mut self, s: impl Into<String>) -> DocId {
@@ -487,7 +496,8 @@ impl Printer<'_> {
 		let ignore = self.ignored_attributes(id);
 		let mut printed: Vec<DocId> = Vec::with_capacity(self.node(id).attrs.len());
 		for i in 0..self.node(id).attrs.len() {
-			let attr = self.node(id).attrs[i].clone();
+			let ast = self.ast();
+			let attr = &ast.node(id).attrs[i];
 			let doc = if match &ignore {
 				Ignore::All => true,
 				Ignore::Some(names) => names.contains(&attr.raw_name),
@@ -584,13 +594,14 @@ impl Printer<'_> {
 	}
 
 	fn print_attribute(&mut self, element: NodeId, index: usize) -> DocId {
-		let attr = self.node(element).attrs[index].clone();
-		let Some(value) = attr.value.clone() else {
-			return self.text(attr.raw_name);
+		let ast = self.ast();
+		let attr = &ast.node(element).attrs[index];
+		let Some(value) = attr.value.as_deref() else {
+			return self.text(attr.raw_name.as_str());
 		};
 		if !value.is_empty()
 			&& let Some(doc) =
-				self.print_embedded_attribute(element, &attr.full_name, &attr.raw_name, &value)
+				self.print_embedded_attribute(element, &attr.full_name, &attr.raw_name, value)
 		{
 			return doc;
 		}
@@ -982,10 +993,13 @@ impl Printer<'_> {
 	}
 
 	fn print_children(&mut self, id: NodeId) -> DocId {
-		let children = self.node(id).children.clone();
+		// `self.print_child` below takes `&mut self`: the list is read from the tree, not through
+		// `self`, so that it needs no copy.
+		let ast = self.ast();
+		let children = &ast.node(id).children;
 		if self.node(id).kind == Kind::Element && self.force_break_children(id) {
 			let mut parts = vec![BREAK_PARENT];
-			for &child in &children {
+			for &child in children {
 				let prev = self.ast.prev(child);
 				let between = match prev {
 					Some(p) => self.print_between_line(p, child),
@@ -1140,7 +1154,7 @@ impl Printer<'_> {
 	}
 
 	fn print_node(&mut self, id: NodeId) -> DocId {
-		let ast: &Ast = self.ast;
+		let ast = self.ast();
 		let n = ast.node(id);
 		match n.kind {
 			Kind::Root => {
