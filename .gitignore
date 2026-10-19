@@ -18,6 +18,7 @@ benchmarks/v2-baseline/.yarn/
 
 # claude
 .claude/*.local.json
+CLAUDE.local.md
 
 # build outputs
 packages/**/dist/

@@ -3,6 +3,8 @@
 	"ignorePaths": [
 		"**/CHANGELOG.md",
 		"**/CODEOWNERS",
+		// Personal notes of the machine, not part of the repository.
+		"CLAUDE.local.md",
 		"crates/kd_html/src/entities_table.rs",
 		// Differential test data: deliberately misspelled tags and names.
 		"crates/kd_html/tests/golden/**",
