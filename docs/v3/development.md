@@ -76,21 +76,22 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 
 テーブルと golden ファイルは、v2 が使っていたライブラリ（oracle）の出力から作ってコミットしている。実行時はその依存を持たない。oracle の版を上げたら、次のスクリプトを実行して差分を確かめる（スクリプトの先頭のコメントに詳細がある）。oracle の置き場（ルートの `devDependencies`）は「v2 の oracle」を参照。
 
-| 契機                                                                                             | 実行するスクリプト                      | 書き出すもの                                                               |
-| ------------------------------------------------------------------------------------------------ | --------------------------------------- | -------------------------------------------------------------------------- |
-| `character-entities` を上げた                                                                    | `scripts/generate-entities.mjs`         | `crates/kd_html/src/entities_table.rs`                                     |
-| `prettier` を上げた                                                                              | `scripts/generate-prettier-tables.mjs`  | `crates/kd_html/src/print/tables.rs`（構造が変わると失敗する）             |
-| `html-minifier-terser` を上げた                                                                  | `scripts/generate-minifier-tables.mjs`  | `crates/kd_html/src/minify/tables.rs`                                      |
-| 同上                                                                                             | `scripts/generate-minify-golden.mjs`    | `crates/kd_html/tests/minify_golden/`                                      |
-| `cssnano` を上げた（v2 の style-compiler と同じ設定で使う）                                      | `scripts/generate-css-golden.mjs`       | `crates/kd_css/tests/golden/`                                              |
-| 同上                                                                                             | `scripts/generate-css-rule-tests.mjs`   | `crates/kd_css/tests/rules.rs`                                             |
-| 同上、または色名・プロパティ名の元データ（`mdn-data` 等）                                        | `scripts/generate-css-tables.mjs`       | `crates/kd_css/src/color_table.rs`、`property_table.rs`                    |
-| `esbuild` を上げた                                                                               | `scripts/generate-jsx-entities.mjs`     | `crates/kd_js/src/jsx_entities.rs`                                         |
-| `react` / `react-dom` を上げた                                                                   | `scripts/generate-jsx-tables.mjs`       | `packages/kamado/src/jsx/attr-table.ts`、`crates/kd_js/src/react_attrs.rs` |
-| `react-dom` を上げた（Pug から TSX への変換器が使う、小文字の属性名から React の綴りへの対応表） | `scripts/generate-react-prop-names.mjs` | `scripts/react-prop-names.mjs`（構造が変わると失敗する）                   |
-| Node を上げた（型の除去の挙動が変わりうる）                                                      | `scripts/generate-kd-js-golden.mjs`     | `crates/kd_js/tests/ts_golden/`                                            |
-| Node を上げた（Shift_JIS のデコーダ）                                                            | `scripts/gen-cp932-table.mjs`           | `crates/kd_html/src/cp932_table.rs`                                        |
-| HTML の golden のケースを足した、または `kamado-v2` を上げた（v2 の DOM の直列化が oracle）      | `scripts/generate-html-golden.mjs`      | `crates/kd_html/tests/golden/`                                             |
+| 契機                                                                                                                                                        | 実行するスクリプト                      | 書き出すもの                                                               |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------- |
+| `character-entities` を上げた                                                                                                                               | `scripts/generate-entities.mjs`         | `crates/kd_html/src/entities_table.rs`                                     |
+| `prettier` を上げた                                                                                                                                         | `scripts/generate-prettier-tables.mjs`  | `crates/kd_html/src/print/tables.rs`（構造が変わると失敗する）             |
+| `html-minifier-terser` を上げた                                                                                                                             | `scripts/generate-minifier-tables.mjs`  | `crates/kd_html/src/minify/tables.rs`                                      |
+| 同上                                                                                                                                                        | `scripts/generate-minify-golden.mjs`    | `crates/kd_html/tests/minify_golden/`                                      |
+| `cssnano` を上げた（v2 の style-compiler と同じ設定で使う）                                                                                                 | `scripts/generate-css-golden.mjs`       | `crates/kd_css/tests/golden/`                                              |
+| 同上                                                                                                                                                        | `scripts/generate-css-rule-tests.mjs`   | `crates/kd_css/tests/rules.rs`                                             |
+| 同上、または色名・プロパティ名の元データ（`mdn-data` 等）                                                                                                   | `scripts/generate-css-tables.mjs`       | `crates/kd_css/src/color_table.rs`、`property_table.rs`                    |
+| `esbuild` を上げた                                                                                                                                          | `scripts/generate-jsx-entities.mjs`     | `crates/kd_js/src/jsx_entities.rs`                                         |
+| `react` / `react-dom` を上げた                                                                                                                              | `scripts/generate-jsx-tables.mjs`       | `packages/kamado/src/jsx/attr-table.ts`、`crates/kd_js/src/react_attrs.rs` |
+| `react-dom` を上げた（Pug から TSX への変換器が使う、小文字の属性名から React の綴りへの対応表）                                                            | `scripts/generate-react-prop-names.mjs` | `scripts/react-prop-names.mjs`（構造が変わると失敗する）                   |
+| Node を上げた（型の除去の挙動が変わりうる）                                                                                                                 | `scripts/generate-kd-js-golden.mjs`     | `crates/kd_js/tests/ts_golden/`                                            |
+| Node を上げた（Shift_JIS のデコーダ）                                                                                                                       | `scripts/gen-cp932-table.mjs`           | `crates/kd_html/src/cp932_table.rs`                                        |
+| HTML の golden のケースを足した、または `kamado-v2` を上げた（v2 の DOM の直列化が oracle）                                                                 | `scripts/generate-html-golden.mjs`      | `crates/kd_html/tests/golden/`                                             |
+| 属性・クラスの golden のケースを足した、または `kamado-v2` を上げた（`html.rules` の属性・クラスの操作と `html.imageSizes` の v2 の DOM での結果が oracle） | `scripts/generate-html-attr-golden.mjs` | `crates/kd_html/tests/attr_golden/`                                        |
 
 生成したファイルをコミットする前に、`git diff` で変化が oracle の更新によるものか確かめる。生成したあとに `cargo test --locked --offline --workspace` を通す（`scripts/react-prop-names.mjs` は Rust が読まないので、`yarn test` の `scripts/pug-to-tsx-types.spec.ts` が、生成物が入れた react-dom と合っているかを確かめる）。`scripts/generate-jsx-tables.mjs` は実行時の出力（ランタイムと Rust のコンパイラ）が読む表を作り、`scripts/generate-react-prop-names.mjs` は変換器だけが読む表を作る。
 
@@ -116,6 +117,7 @@ v3 は「v2 と出力がバイト一致する」ことを目標にしている�
 **1. DOM の直列化（golden とランダム入力の差分テスト）**: ルートの `devDependencies` の `"kamado-v2": "npm:kamado@2.0.0-alpha.17"` が、v2 の `kamado` に別名を付けたもの。次のスクリプトが `import { domSerialize } from 'kamado-v2/utils/dom'` で使う。
 
 - `scripts/generate-html-golden.mjs`
+- `scripts/generate-html-attr-golden.mjs`
 - `scripts/fuzz-html-differential.mjs`
 - `scripts/fuzz-html-chain.mjs`
 - `scripts/v2-print.mjs`
@@ -139,7 +141,7 @@ v3 の出力と比べるには「比較ハーネスとベンチマーク」の `
 
 **oracle の版を動かすとき**:
 
-1. 1 は、ルートの `package.json` の `kamado-v2` の版を上げる（バージョンは固定。`^` は付けない）。`yarn install` のあと、上の 4 つのスクリプトのうち出力を書くもの（`generate-html-golden.mjs`）を実行し、`git diff` で `crates/kd_html/tests/golden/` の変化が v2 の変更によるものか確かめる。ランダム入力のスクリプトは、差が出ないことを確かめる。
+1. 1 は、ルートの `package.json` の `kamado-v2` の版を上げる（バージョンは固定。`^` は付けない）。`yarn install` のあと、上の 5 つのスクリプトのうち出力を書くもの（`generate-html-golden.mjs` と `generate-html-attr-golden.mjs`）を実行し、`git diff` で `crates/kd_html/tests/golden/` と `crates/kd_html/tests/attr_golden/` の変化が v2 の変更によるものか確かめる。ランダム入力のスクリプトは、差が出ないことを確かめる。
 2. 2 は、`benchmarks/v2-baseline/package.json` の 3 つの `@kamado-io/*`・`kamado` を**同じ版**に揃えて上げ、そのディレクトリで `yarn install` して `yarn.lock` を更新する。
 3. v2 の API が変わって import が通らなくなったら、スクリプト側を合わせる。v2 の出力が変わったなら、変わった理由が RFC §2 の意図した差に当たるか確かめ、当たらなければ v3 のほうを直す。
 4. v2 の保守が止まって oracle を更新しなくなったら、`kamado-v2` の版と `benchmarks/v2-baseline/` は固定したままでよい（golden はコミット済みで、実行時はこの依存を使わない）。

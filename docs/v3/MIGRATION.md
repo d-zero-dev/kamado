@@ -255,6 +255,8 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
 
 `html.rules` などの `pages` は**出力 URL**に対する glob です（入力パスではない）。
 
+`setAttr` / `removeAttr` / `addClass` / `removeClass` は、`manipulateDOM` で書いた `setAttribute` / `removeAttribute` / `classList` と同じ結果になります。足す属性は要素の先頭に入ります（`RFC.md` §9.1）。違うのは、属性名を大文字小文字を区別せず照合する点です（`RFC.md` §2 の #35）。`onclick` を消す `removeAttr` は `ONCLICK` と書かれた属性も消します。`<p CLASS=c>` への `addClass` は、v2 では 2 つ目の `class` を先頭に足していましたが、v3 は `CLASS` に書き足します。`{{attr:href}}` も `HREF` と書かれた属性を読みます。ただし `/regex/` の名前は、書かれた名前に対する正規表現のままです。
+
 ## 6. スタイルとスクリプト
 
 - スタイル（`styles.files`、既定 `**/*.css`）は v3 が自前で処理します（`@import` の展開、alias、圧縮、バナー、source map）。**postcss.config のプラグインは使えません**。autoprefixer などが要るなら、npm scripts で別に処理してから kamado に渡します。
