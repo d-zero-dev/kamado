@@ -153,10 +153,10 @@ pub fn format(source: &str, options: &Options) -> Result<String, ParseError> {
 	let mut tree = ast::build(&text)?;
 	preprocess::run(&mut tree, options.whitespace_sensitivity);
 	// Nothing but white space: prettier prints nothing at all.
-	if tree.node(tree.root).children.is_empty() {
+	if tree.node(tree.root).children().is_empty() {
 		return Ok(if bom { BOM.to_string() } else { String::new() });
 	}
-	let mut docs = doc::Docs::with_capacity(tree.nodes.len().saturating_mul(DOCS_PER_NODE));
+	let mut docs = doc::Docs::with_capacity(tree.node_count().saturating_mul(DOCS_PER_NODE));
 	let root = printer::print_root(
 		&tree,
 		&mut docs,

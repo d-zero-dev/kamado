@@ -58,23 +58,23 @@ pub struct Attr {
 	pub value_span: Option<Span>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Node {
 	pub kind: Kind,
-	pub parent: Option<NodeId>,
-	/// Where this node stands in its parent's `children`: a hint that
-	/// [`Ast::prev`] and [`Ast::next`] check and fall back from, so that a step
-	/// that removes children without updating it costs time, never correctness.
-	/// Private so that it is only written here, by [`Ast::set_children`],
-	/// [`Ast::reindex_children`] and the end of [`build`] (which sets every place at once: the
-	/// places are not set while the tree is being built).
+	/// The node whose `children` holds this one; `None` for the root and for a node that a step
+	/// took out of its parent's list. Written only in this module (read it with
+	/// [`Node::parent`]).
+	parent: Option<NodeId>,
+	/// Where this node stands in its parent's `children`. Every way to change a list is a method
+	/// of [`Ast`] (or [`build`], which sets every place at once at its end: the places are not
+	/// set while the tree is being built), and it sets the places of what it moved before it
+	/// returns, so [`Ast::prev`] and [`Ast::next`] read it without searching. A debug build
+	/// checks it.
 	index_in_parent: usize,
-	/// A step that takes children out of this list leaves `index_in_parent` of the rest stale
-	/// until [`Ast::set_children`] or [`Ast::reindex_children`] runs: `extract_whitespaces`
-	/// does it for every node with children, and the last step does it for what it merged. Until
-	/// then [`Ast::prev`] and [`Ast::next`] are right but search; a step that runs after those
-	/// two and removes children calls `reindex_children` itself.
-	pub children: Vec<NodeId>,
+	/// The ids of the children, in order. Read it with [`Node::children`]; it is changed only by
+	/// [`Ast::retain_children`], [`Ast::remove_first_child`] and [`Ast::clear_children`], so
+	/// that no list changes without the places of its children following.
+	children: Vec<NodeId>,
 	pub span: Span,
 	pub start_span: Span,
 	pub end_span: Option<Span>,
@@ -105,6 +105,42 @@ pub struct Node {
 }
 
 impl Node {
+	/// The children, in order.
+	///
+	/// # Example
+	///
+	/// ```
+	/// use kd_html::print::ast::build;
+	///
+	/// let ast = build("<ul><li>a</li><li>b</li></ul>").unwrap();
+	/// let ul = ast.node(ast.root).children()[0];
+	/// assert_eq!(ast.node(ul).children().len(), 2);
+	/// ```
+	#[must_use]
+	pub fn children(&self) -> &[NodeId] {
+		&self.children
+	}
+
+	/// The node this one is a child of. `None` for the root, and for a node that
+	/// [`Ast::retain_children`], [`Ast::remove_first_child`] or [`Ast::clear_children`] took out
+	/// of its parent's list: it has no siblings either. Only that node: what stands below it
+	/// stays as it was, a detached subtree whose links to each other still hold.
+	///
+	/// # Example
+	///
+	/// ```
+	/// use kd_html::print::ast::build;
+	///
+	/// let ast = build("<p>a</p>").unwrap();
+	/// let p = ast.node(ast.root).children()[0];
+	/// assert_eq!(ast.node(p).parent(), Some(ast.root));
+	/// assert_eq!(ast.node(ast.root).parent(), None);
+	/// ```
+	#[must_use]
+	pub fn parent(&self) -> Option<NodeId> {
+		self.parent
+	}
+
 	fn new(kind: Kind, span: Span) -> Node {
 		Node {
 			kind,
@@ -175,14 +211,44 @@ impl Node {
 /// The whole tree and the text it was parsed from.
 #[derive(Debug)]
 pub struct Ast {
-	pub nodes: Vec<Node>,
+	/// Every node, in the order they were made. Read with [`Ast::node`], written with
+	/// [`Ast::node_mut`] (the flags the preprocessing sets are fields of a node); the parent,
+	/// place and list of a node change only through the methods of [`Ast`]. `Node` cannot be
+	/// cloned and has no constructor outside this module, so no node can be replaced by a copy
+	/// of another, which would carry the place and the list of the other along.
+	nodes: Vec<Node>,
 	pub root: NodeId,
 	pub text: String,
 	line_starts: Vec<usize>,
-	/// How many times [`Ast::place`] had to search because the hint was wrong: a test reads it
-	/// to see that no step forgot to update the places.
-	#[cfg(test)]
-	misses: std::cell::Cell<usize>,
+}
+
+/// What [`Ast::retain_children`] does with the child it asks about.
+///
+/// # Example
+///
+/// ```
+/// use kd_html::print::ast::{build, Retain};
+///
+/// let mut ast = build("<ul><li>a</li><li>b</li><li>c</li></ul>").unwrap();
+/// let ul = ast.node(ast.root).children()[0];
+/// let items = ast.node(ul).children().to_vec();
+/// // `b` goes with the one after it.
+/// ast.retain_children(ul, |_, child, _, _| {
+///     if child == items[1] { Retain::DropWithNext } else { Retain::Keep }
+/// });
+/// assert_eq!(ast.node(ul).children(), [items[0]]);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retain {
+	/// The child stays.
+	Keep,
+	/// The child goes.
+	Drop,
+	/// The child stays, and the child kept before it goes: it takes the place of that one.
+	/// There must be a kept child before it.
+	InPlaceOfPrev,
+	/// The child goes, and so does the one after it. There must be a child after it.
+	DropWithNext,
 }
 
 impl Ast {
@@ -200,38 +266,103 @@ impl Ast {
 		&self.nodes[id]
 	}
 
-	/// The place of `id` among the `siblings`: the hint when it is right, else a search.
-	fn place(&self, id: NodeId, siblings: &[NodeId]) -> Option<usize> {
-		let hint = self.nodes[id].index_in_parent;
-		if siblings.get(hint) == Some(&id) {
-			Some(hint)
-		} else {
-			#[cfg(test)]
-			self.misses.set(self.misses.get() + 1);
-			siblings.iter().position(|&c| c == id)
-		}
+	/// The node, to write the flags the preprocessing sets, and what the steps rewrite in place
+	/// (`kind`, `value`, `span`). Its parent, place and children are private to this module, so
+	/// they cannot be written through it.
+	///
+	/// # Example
+	///
+	/// ```
+	/// use kd_html::print::ast::build;
+	///
+	/// let mut ast = build("<p>a</p>").unwrap();
+	/// let p = ast.node(ast.root).children()[0];
+	/// ast.node_mut(p).has_leading_spaces = true;
+	/// assert!(ast.node(p).has_leading_spaces);
+	/// ```
+	pub fn node_mut(&mut self, id: NodeId) -> &mut Node {
+		&mut self.nodes[id]
 	}
 
+	/// How many nodes were made, those that left the tree included.
+	///
+	/// # Example
+	///
+	/// ```
+	/// use kd_html::print::ast::build;
+	///
+	/// let ast = build("<p>a</p>").unwrap();
+	/// assert!(ast.node_count() >= 3);
+	/// ```
+	#[must_use]
+	pub fn node_count(&self) -> usize {
+		self.nodes.len()
+	}
+
+	/// The child before `id` in its parent's list. The place of `id` is read as it stands, not
+	/// searched for, because every change of a list sets the places before it returns: so
+	/// this is for a node that is in the tree, and it is not called from the `decide` of
+	/// [`Ast::retain_children`] (which has no [`Ast`]). `None` for the first child, and for a
+	/// node that has no parent.
+	///
+	/// # Example
+	///
+	/// ```
+	/// use kd_html::print::ast::build;
+	///
+	/// let ast = build("<ul><li>a</li><li>b</li></ul>").unwrap();
+	/// let ul = ast.node(ast.root).children()[0];
+	/// let items = ast.node(ul).children().to_vec();
+	/// assert_eq!(ast.prev(items[0]), None);
+	/// assert_eq!(ast.prev(items[1]), Some(items[0]));
+	/// ```
 	#[must_use]
 	pub fn prev(&self, id: NodeId) -> Option<NodeId> {
 		let parent = self.nodes[id].parent?;
 		let siblings = &self.nodes[parent].children;
-		let i = self.place(id, siblings)?;
+		let i = self.nodes[id].index_in_parent;
+		debug_assert_eq!(siblings.get(i), Some(&id), "stale place of node {id}");
 		i.checked_sub(1).map(|j| siblings[j])
 	}
 
+	/// The child after `id` in its parent's list; the counterpart of [`Ast::prev`], with the
+	/// same conditions.
+	///
+	/// # Example
+	///
+	/// ```
+	/// use kd_html::print::ast::build;
+	///
+	/// let ast = build("<ul><li>a</li><li>b</li></ul>").unwrap();
+	/// let ul = ast.node(ast.root).children()[0];
+	/// let items = ast.node(ul).children().to_vec();
+	/// assert_eq!(ast.next(items[0]), Some(items[1]));
+	/// assert_eq!(ast.next(items[1]), None);
+	/// ```
 	#[must_use]
 	pub fn next(&self, id: NodeId) -> Option<NodeId> {
 		let parent = self.nodes[id].parent?;
 		let siblings = &self.nodes[parent].children;
-		let i = self.place(id, siblings)?;
+		let i = self.nodes[id].index_in_parent;
+		debug_assert_eq!(siblings.get(i), Some(&id), "stale place of node {id}");
 		siblings.get(i + 1).copied()
 	}
 
-	/// Sets `index_in_parent` of every child of `parent` from its `children`. It costs one pass
-	/// over the children, so a step calls it once after it changed the list, not for each change.
-	pub fn reindex_children(&mut self, parent: NodeId) {
-		for i in 0..self.nodes[parent].children.len() {
+	/// Whether every child of `parent` has `parent` as its parent and the place its list says.
+	#[must_use]
+	pub(super) fn children_agree(&self, parent: NodeId) -> bool {
+		self.nodes[parent]
+			.children
+			.iter()
+			.enumerate()
+			.all(|(i, &c)| {
+				self.nodes[c].parent == Some(parent) && self.nodes[c].index_in_parent == i
+			})
+	}
+
+	/// Sets `index_in_parent` of the children of `parent` from slot `from` on.
+	fn reindex_from(&mut self, parent: NodeId, from: usize) {
+		for i in from..self.nodes[parent].children.len() {
 			let c = self.nodes[parent].children[i];
 			self.nodes[c].index_in_parent = i;
 		}
@@ -253,13 +384,148 @@ impl Ast {
 		&self.text[span.start.min(self.text.len())..span.end.min(self.text.len())]
 	}
 
-	/// Replaces the children of `parent`, fixing the parent links.
-	pub fn set_children(&mut self, parent: NodeId, children: Vec<NodeId>) {
-		for (i, &c) in children.iter().enumerate() {
-			self.nodes[c].parent = Some(parent);
-			self.nodes[c].index_in_parent = i;
+	/// Goes over the children of `parent` once, in order, and keeps or drops each as `decide`
+	/// says. `decide(nodes, child, prev, next)` gets the nodes (to read and write the child, and
+	/// `prev` and `next`), the child, the child kept last (`prev`) and the one still to be read
+	/// after it (`next`, which may itself be dropped when its turn comes). The children that
+	/// stay are moved to the front of the same list, so that a parent with thousands of children
+	/// costs one pass, not a move of everything behind each child that goes (which `Vec::remove`
+	/// is).
+	///
+	/// A child that goes has no parent and no siblings afterwards. The places are set again from
+	/// the first slot whose child changed, and not at all when nothing changed.
+	///
+	/// While `decide` runs, the list of `parent` is taken out: `nodes[parent].children()` reads
+	/// as empty (the children of the other nodes, `prev` and `next` among them, read as they
+	/// are), and `decide` is not given the [`Ast`], so it cannot ask [`Ast::prev`] or
+	/// [`Ast::next`]. A panic in `decide` leaves `parent` without its list; the tree is not used
+	/// after one.
+	///
+	/// A verdict that needs a neighbour that is not there (`InPlaceOfPrev` of the first kept
+	/// child, `DropWithNext` of the last child) is a mistake of the caller: a debug build stops
+	/// at it, and a release build takes `Keep` / `Drop` instead, which leaves the list whole
+	/// rather than indexing outside it.
+	///
+	/// # Example
+	///
+	/// ```
+	/// use kd_html::print::ast::{build, Retain};
+	///
+	/// let mut ast = build("<ul><li>a</li><li>b</li><li>c</li></ul>").unwrap();
+	/// let ul = ast.node(ast.root).children()[0];
+	/// let items = ast.node(ul).children().to_vec();
+	/// // Drop the first and the last.
+	/// ast.retain_children(ul, |_, child, _prev, _next| {
+	///     if child == items[1] { Retain::Keep } else { Retain::Drop }
+	/// });
+	/// assert_eq!(ast.node(ul).children(), [items[1]]);
+	/// assert_eq!(ast.prev(items[1]), None);
+	/// assert_eq!(ast.node(items[0]).parent(), None);
+	/// ```
+	pub fn retain_children(
+		&mut self,
+		parent: NodeId,
+		mut decide: impl FnMut(&mut [Node], NodeId, Option<NodeId>, Option<NodeId>) -> Retain,
+	) {
+		let mut list = std::mem::take(&mut self.nodes[parent].children);
+		let (mut read, mut kept) = (0usize, 0usize);
+		let mut dirty = usize::MAX;
+		while read < list.len() {
+			let child = list[read];
+			let prev = kept.checked_sub(1).map(|j| list[j]);
+			let next = list.get(read + 1).copied();
+			let verdict = match decide(&mut self.nodes, child, prev, next) {
+				Retain::InPlaceOfPrev if prev.is_none() => {
+					debug_assert!(false, "InPlaceOfPrev of the first kept child");
+					Retain::Keep
+				}
+				Retain::DropWithNext if next.is_none() => {
+					debug_assert!(false, "DropWithNext of the last child");
+					Retain::Drop
+				}
+				v => v,
+			};
+			match verdict {
+				Retain::Keep => {
+					if kept != read {
+						list[kept] = child;
+						dirty = dirty.min(kept);
+					}
+					kept += 1;
+					read += 1;
+				}
+				Retain::Drop => {
+					self.nodes[child].parent = None;
+					dirty = dirty.min(kept);
+					read += 1;
+				}
+				Retain::InPlaceOfPrev => {
+					let gone = list[kept - 1];
+					self.nodes[gone].parent = None;
+					list[kept - 1] = child;
+					dirty = dirty.min(kept - 1);
+					read += 1;
+				}
+				Retain::DropWithNext => {
+					self.nodes[child].parent = None;
+					if let Some(x) = next {
+						self.nodes[x].parent = None;
+					}
+					dirty = dirty.min(kept);
+					read += 2;
+				}
+			}
 		}
-		self.nodes[parent].children = children;
+		list.truncate(kept);
+		self.nodes[parent].children = list;
+		if dirty != usize::MAX {
+			self.reindex_from(parent, dirty);
+		}
+	}
+
+	/// Takes the first child of `parent` out of its list; it has no parent afterwards. The
+	/// places of the rest are set again, which is a pass over the list: for the one child that a
+	/// step takes out of a list (the line feed that starts a `pre`, the end comment of a merged
+	/// conditional comment), not for a loop over many (use [`Ast::retain_children`]).
+	///
+	/// # Example
+	///
+	/// ```
+	/// use kd_html::print::ast::build;
+	///
+	/// let mut ast = build("<ul><li>a</li><li>b</li></ul>").unwrap();
+	/// let ul = ast.node(ast.root).children()[0];
+	/// let items = ast.node(ul).children().to_vec();
+	/// ast.remove_first_child(ul);
+	/// assert_eq!(ast.node(ul).children(), [items[1]]);
+	/// assert_eq!(ast.prev(items[1]), None);
+	/// ```
+	pub fn remove_first_child(&mut self, parent: NodeId) {
+		if self.nodes[parent].children.is_empty() {
+			return;
+		}
+		let first = self.nodes[parent].children.remove(0);
+		self.nodes[first].parent = None;
+		self.reindex_from(parent, 0);
+	}
+
+	/// Takes every child of `parent` out of its list; they have no parent afterwards.
+	///
+	/// # Example
+	///
+	/// ```
+	/// use kd_html::print::ast::build;
+	///
+	/// let mut ast = build("<ul><li>a</li><li>b</li></ul>").unwrap();
+	/// let ul = ast.node(ast.root).children()[0];
+	/// ast.clear_children(ul);
+	/// assert!(ast.node(ul).children().is_empty());
+	/// ```
+	pub fn clear_children(&mut self, parent: NodeId) {
+		let list = std::mem::take(&mut self.nodes[parent].children);
+		for c in list {
+			self.nodes[c].parent = None;
+		}
 	}
 }
 
@@ -649,8 +915,6 @@ pub fn build(text: &str) -> Result<Ast, ParseError> {
 		root: root_id,
 		text: text.to_owned(),
 		line_starts: compute_line_starts(text),
-		#[cfg(test)]
-		misses: std::cell::Cell::new(0),
 	};
 	fix_parents(&mut ast);
 	Ok(ast)
@@ -722,11 +986,10 @@ mod tests {
 			assert_eq!(ast.next(w[0]), Some(w[1]));
 			assert_eq!(ast.prev(w[1]), Some(w[0]));
 		}
-		assert_eq!(ast.misses.get(), 0);
 	}
 
 	#[test]
-	fn the_places_hold_and_are_never_searched_for_after_each_step_that_takes_children_out() {
+	fn the_places_hold_after_each_step_that_takes_children_out() {
 		// One page for each step: blank text between elements goes away, text around a simple
 		// element is merged, the line feed that starts a `pre` is dropped with its text, a
 		// conditional comment is merged into the tag it opens, a CDATA section is merged into
@@ -758,7 +1021,6 @@ mod tests {
 						assert_eq!(ast.prev(next), Some(id), "page {n}, {sensitivity:?}");
 					}
 				}
-				assert_eq!(ast.misses.get(), 0, "page {n}, {sensitivity:?}");
 			}
 		}
 	}
@@ -820,23 +1082,299 @@ mod tests {
 	}
 
 	#[test]
-	fn a_stale_place_does_not_change_the_answer() {
-		// The hint of a node that stood behind a removed one, and one past the end of a list that
-		// got shorter.
+	#[cfg(debug_assertions)]
+	#[should_panic(expected = "stale place")]
+	fn a_stale_place_is_caught_instead_of_answered_with_another_sibling() {
+		// A list changed behind the API: the node that stood behind the removed one has the
+		// place its old neighbour had.
 		let mut ast = build("<p><a></a><b></b><i></i></p>").unwrap();
-		let p = ast.node(ast.root).children[0];
-		let kids = ast.node(p).children.clone();
+		let p = ast.node(ast.root).children()[0];
+		let kids = ast.node(p).children().to_vec();
 		ast.nodes[p].children.remove(0);
-		assert_eq!(ast.prev(kids[1]), None);
-		assert_eq!(ast.next(kids[1]), Some(kids[2]));
-		assert_eq!(ast.prev(kids[2]), Some(kids[1]));
-		ast.nodes[p].children.pop();
-		assert_eq!(ast.next(kids[1]), None);
+		let _ = ast.prev(kids[1]);
+	}
+
+	/// The `<li>`s of `<ul><li>0</li>…<li>4</li></ul>`.
+	fn five_items() -> (Ast, NodeId, Vec<NodeId>) {
+		let ast = build("<ul><li>0</li><li>1</li><li>2</li><li>3</li><li>4</li></ul>").unwrap();
+		let ul = ast.node(ast.root).children()[0];
+		let items = ast.node(ul).children().to_vec();
+		assert_eq!(items.len(), 5);
+		(ast, ul, items)
+	}
+
+	#[test]
+	fn retain_children_keeps_and_drops() {
+		let (mut ast, ul, items) = five_items();
+		ast.retain_children(ul, |_, child, _, _| {
+			if child == items[1] || child == items[3] {
+				Retain::Drop
+			} else {
+				Retain::Keep
+			}
+		});
+		assert_eq!(ast.node(ul).children(), [items[0], items[2], items[4]]);
+		assert!(places_agree(&ast));
+		assert_eq!(ast.node(items[1]).parent(), None);
+		assert_eq!(ast.node(items[3]).parent(), None);
+		assert_eq!(ast.prev(items[2]), Some(items[0]));
+		assert_eq!(ast.next(items[2]), Some(items[4]));
+		assert_eq!((ast.prev(items[1]), ast.next(items[1])), (None, None));
+	}
+
+	#[test]
+	fn retain_children_replaces_the_child_before() {
+		let (mut ast, ul, items) = five_items();
+		ast.retain_children(ul, |_, child, prev, _| {
+			if child == items[2] {
+				assert_eq!(prev, Some(items[1]));
+				Retain::InPlaceOfPrev
+			} else {
+				Retain::Keep
+			}
+		});
 		assert_eq!(
-			ast.prev(kids[2]),
-			None,
-			"a node that left the list has no sibling"
+			ast.node(ul).children(),
+			[items[0], items[2], items[3], items[4]]
 		);
-		assert!(ast.misses.get() > 0);
+		assert!(places_agree(&ast));
+		assert_eq!(ast.node(items[1]).parent(), None);
+		assert_eq!(ast.prev(items[2]), Some(items[0]));
+		assert_eq!(ast.next(items[0]), Some(items[2]));
+	}
+
+	#[test]
+	fn retain_children_drops_a_child_with_the_one_after_it() {
+		let (mut ast, ul, items) = five_items();
+		let mut seen = Vec::new();
+		ast.retain_children(ul, |_, child, prev, next| {
+			seen.push((child, prev, next));
+			if child == items[1] {
+				Retain::DropWithNext
+			} else {
+				Retain::Keep
+			}
+		});
+		assert_eq!(ast.node(ul).children(), [items[0], items[3], items[4]]);
+		assert!(places_agree(&ast));
+		assert_eq!(ast.node(items[1]).parent(), None);
+		assert_eq!(ast.node(items[2]).parent(), None);
+		// The one after a dropped pair is looked at with the last kept child as its `prev`.
+		assert_eq!(
+			seen,
+			[
+				(items[0], None, Some(items[1])),
+				(items[1], Some(items[0]), Some(items[2])),
+				(items[3], Some(items[0]), Some(items[4])),
+				(items[4], Some(items[3]), None),
+			]
+		);
+	}
+
+	#[test]
+	fn retain_children_with_nothing_to_change_changes_nothing() {
+		let (mut ast, ul, items) = five_items();
+		ast.retain_children(ul, |_, _, _, _| Retain::Keep);
+		assert_eq!(ast.node(ul).children(), items.as_slice());
+		assert!(places_agree(&ast));
+	}
+
+	#[test]
+	fn a_node_that_replaces_one_keeps_its_place_next_to_what_stands_before() {
+		// The merged `<html>` takes the slot of the start comment, behind the doctype: a place
+		// counted from where the element was read would leave it one too far.
+		let ast = preprocessed(
+			"<!DOCTYPE html><!--[if IE]><!--><html lang=\"ja\"><!--<![endif]--><body></body></html>",
+			WhitespaceSensitivity::Css,
+		);
+		let kids = ast.node(ast.root).children().to_vec();
+		assert_eq!(kids.len(), 2);
+		assert_eq!(ast.node(kids[0]).kind, Kind::DocType);
+		assert_eq!(ast.node(kids[1]).condition.as_deref(), Some("IE"));
+		assert_eq!(ast.prev(kids[1]), Some(kids[0]));
+		assert_eq!(ast.next(kids[0]), Some(kids[1]));
+		assert!(places_agree(&ast));
+	}
+
+	#[test]
+	fn retain_children_sets_the_places_from_the_first_slot_that_changed() {
+		// The first goes (every place changes), then the last (no place to set).
+		let (mut ast, ul, items) = five_items();
+		ast.retain_children(ul, |_, child, _, _| {
+			if child == items[0] || child == items[4] {
+				Retain::Drop
+			} else {
+				Retain::Keep
+			}
+		});
+		assert_eq!(ast.node(ul).children(), &items[1..4]);
+		assert!(places_agree(&ast));
+		assert!(ast.children_agree(ul));
+
+		// A drop, then a replacement: the place of the replacement is the one of what it replaces.
+		let (mut ast, ul, items) = five_items();
+		ast.retain_children(ul, |_, child, _, _| {
+			if child == items[1] {
+				Retain::Drop
+			} else if child == items[3] {
+				Retain::InPlaceOfPrev
+			} else {
+				Retain::Keep
+			}
+		});
+		assert_eq!(ast.node(ul).children(), [items[0], items[3], items[4]]);
+		assert!(places_agree(&ast));
+		assert_eq!(ast.node(items[2]).parent(), None);
+
+		// A pair at the start goes: what follows has no `prev` among the kept.
+		let (mut ast, ul, items) = five_items();
+		let mut first_prev = Some(items[0]);
+		ast.retain_children(ul, |_, child, prev, _| {
+			if child == items[0] {
+				return Retain::DropWithNext;
+			}
+			if child == items[2] {
+				first_prev = prev;
+			}
+			Retain::Keep
+		});
+		assert_eq!(first_prev, None);
+		assert_eq!(ast.node(ul).children(), &items[2..]);
+		assert!(places_agree(&ast));
+	}
+
+	#[test]
+	fn retain_children_of_a_parent_without_children_does_nothing() {
+		let mut ast = build("<p></p>").unwrap();
+		let p = ast.node(ast.root).children()[0];
+		ast.retain_children(p, |_, _, _, _| panic!("there is no child to ask about"));
+		assert!(ast.node(p).children().is_empty());
+	}
+
+	#[test]
+	fn the_list_being_looked_at_reads_as_empty_and_the_others_as_they_are() {
+		let (mut ast, ul, items) = five_items();
+		let mut seen = Vec::new();
+		ast.retain_children(ul, |nodes, child, _, _| {
+			seen.push((nodes[ul].children().len(), nodes[child].children().len()));
+			Retain::Keep
+		});
+		assert_eq!(seen, [(0, 1); 5]);
+		assert_eq!(ast.node(ul).children(), items.as_slice());
+	}
+
+	#[test]
+	#[cfg(debug_assertions)]
+	#[should_panic(expected = "InPlaceOfPrev of the first kept child")]
+	fn a_replacement_without_a_child_before_it_is_a_mistake() {
+		let (mut ast, ul, _) = five_items();
+		ast.retain_children(ul, |_, _, _, _| Retain::InPlaceOfPrev);
+	}
+
+	#[test]
+	#[cfg(debug_assertions)]
+	#[should_panic(expected = "DropWithNext of the last child")]
+	fn dropping_the_last_child_with_the_next_is_a_mistake() {
+		let (mut ast, ul, items) = five_items();
+		ast.retain_children(ul, |_, child, _, _| {
+			if child == items[4] {
+				Retain::DropWithNext
+			} else {
+				Retain::Keep
+			}
+		});
+	}
+
+	#[test]
+	#[cfg(debug_assertions)]
+	#[should_panic(expected = "stale place")]
+	fn a_stale_place_is_caught_for_the_next_sibling_too() {
+		let mut ast = build("<p><a></a><b></b><i></i></p>").unwrap();
+		let p = ast.node(ast.root).children()[0];
+		let kids = ast.node(p).children().to_vec();
+		ast.nodes[p].children.remove(0);
+		let _ = ast.next(kids[1]);
+	}
+
+	#[test]
+	fn children_agree_tells_a_list_that_was_changed_behind_the_api() {
+		let mut ast = build("<p><a></a><b></b></p>").unwrap();
+		let p = ast.node(ast.root).children()[0];
+		assert!(ast.children_agree(p));
+		ast.nodes[p].children.remove(0);
+		assert!(!ast.children_agree(p));
+	}
+
+	#[test]
+	fn a_parent_with_thousands_of_children_between_which_white_space_goes_keeps_its_places() {
+		let src = format!("<ul>{}</ul>", "\n <li>x</li> ".repeat(10_000));
+		let ast = preprocessed(&src, WhitespaceSensitivity::Css);
+		assert!(places_agree(&ast));
+		let ul = ast.node(ast.root).children()[0];
+		let items = ast.node(ul).children().to_vec();
+		assert_eq!(items.len(), 10_000);
+		assert_eq!(ast.prev(items[0]), None);
+		for w in items.windows(2) {
+			assert_eq!(ast.next(w[0]), Some(w[1]));
+		}
+	}
+
+	#[test]
+	fn the_first_child_and_all_children_can_be_taken_out() {
+		let (mut ast, ul, items) = five_items();
+		ast.remove_first_child(ul);
+		assert_eq!(ast.node(ul).children(), &items[1..]);
+		assert_eq!(ast.node(items[0]).parent(), None);
+		assert!(places_agree(&ast));
+		assert_eq!(ast.prev(items[1]), None);
+		assert_eq!(ast.next(items[1]), Some(items[2]));
+
+		ast.clear_children(ul);
+		assert!(ast.node(ul).children().is_empty());
+		for &item in &items {
+			assert_eq!(ast.node(item).parent(), None);
+		}
+		// Nothing to take out of an empty list.
+		ast.remove_first_child(ul);
+		ast.clear_children(ul);
+		assert!(places_agree(&ast));
+	}
+
+	#[test]
+	fn what_the_steps_take_out_has_no_parent() {
+		// For each page: the nodes (by their place among the children of the root's first child,
+		// or of the root) that a step takes out of a list.
+		type TakenOut = dyn Fn(&Ast) -> Vec<NodeId>;
+		let pages: [(&str, &TakenOut); 4] = [
+			("<div> <p>a</p> </div>", &|ast| {
+				let div = ast.node(ast.root).children()[0];
+				let kids = ast.node(div).children();
+				vec![kids[0], kids[2]]
+			}),
+			("<!--[if IE]><!--><html><!--<![endif]--></html>", &|ast| {
+				let kids = ast.node(ast.root).children();
+				let html = kids[1];
+				vec![kids[0], ast.node(html).children()[0]]
+			}),
+			("<svg>a<![CDATA[b]]>c</svg>", &|ast| {
+				let svg = ast.node(ast.root).children()[0];
+				ast.node(svg).children()[1..].to_vec()
+			}),
+			("<p>a<b>x</b>c</p>", &|ast| {
+				let p = ast.node(ast.root).children()[0];
+				ast.node(p).children()[1..].to_vec()
+			}),
+		];
+		for (src, taken_out) in pages {
+			let before = build(src).unwrap();
+			let ids = taken_out(&before);
+			assert!(!ids.is_empty(), "{src}");
+			let mut ast = build(src).unwrap();
+			preprocess::run(&mut ast, WhitespaceSensitivity::Css);
+			for id in ids {
+				assert_eq!(ast.node(id).parent(), None, "{src}: node {id}");
+				assert!(!in_tree(&ast).contains(&id), "{src}: node {id}");
+			}
+		}
 	}
 }

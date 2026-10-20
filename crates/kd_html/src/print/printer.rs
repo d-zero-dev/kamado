@@ -79,7 +79,7 @@ impl<'a> Printer<'a> {
 			&& match self.ast.prev(id) {
 				Some(p) => self.line_of(self.node(p).span.end) < self.line_of(n.span.start),
 				None => {
-					let parent = self.node(n.parent.unwrap_or(self.ast.root));
+					let parent = self.node(n.parent().unwrap_or(self.ast.root));
 					parent.kind == Kind::Root
 						|| self.line_of(parent.start_span.end) < self.line_of(n.span.start)
 				}
@@ -92,7 +92,7 @@ impl<'a> Printer<'a> {
 			&& match self.ast.next(id) {
 				Some(x) => self.line_of(self.node(x).span.start) > self.line_of(n.span.end),
 				None => {
-					let parent = self.node(n.parent.unwrap_or(self.ast.root));
+					let parent = self.node(n.parent().unwrap_or(self.ast.root));
 					parent.kind == Kind::Root
 						|| parent
 							.end_span
@@ -141,7 +141,7 @@ impl<'a> Printer<'a> {
 	fn force_break_children(&self, id: NodeId) -> bool {
 		let n = self.node(id);
 		n.kind == Kind::Element
-			&& !n.children.is_empty()
+			&& !n.children().is_empty()
 			&& (matches!(n.name.as_str(), "html" | "head" | "ul" | "ol" | "select")
 				|| (matches!(
 					n.css_display,
@@ -162,11 +162,11 @@ impl<'a> Printer<'a> {
 			return true;
 		}
 		if n.kind == Kind::Element
-			&& !n.children.is_empty()
+			&& !n.children().is_empty()
 			&& (matches!(n.name.as_str(), "body" | "script" | "style")
-				|| n.children.iter().any(|&c| {
+				|| n.children().iter().any(|&c| {
 					self.node(c)
-						.children
+						.children()
 						.iter()
 						.any(|&g| self.node(g).kind != Kind::Text)
 				})) {
@@ -203,7 +203,10 @@ impl<'a> Printer<'a> {
 		if n.kind == Kind::IeConditionalComment && !n.complete {
 			return true;
 		}
-		(is_pre_like(n) && n.children.iter().any(|&c| self.node(c).kind != Kind::Text))
+		(is_pre_like(n)
+			&& n.children()
+				.iter()
+				.any(|&c| self.node(c).kind != Kind::Text))
 			|| self.hugs_code(id)
 	}
 
@@ -215,12 +218,12 @@ impl<'a> Printer<'a> {
 	}
 
 	fn in_conditional_comment(&self, id: NodeId) -> bool {
-		let mut cursor = self.node(id).parent;
+		let mut cursor = self.node(id).parent();
 		while let Some(p) = cursor {
 			if self.node(p).kind == Kind::IeConditionalComment {
 				return true;
 			}
-			cursor = self.node(p).parent;
+			cursor = self.node(p).parent();
 		}
 		false
 	}
@@ -238,7 +241,7 @@ impl<'a> Printer<'a> {
 	/// holds code the minifier takes (by its `type`) and nothing but one text.
 	fn hugs_code(&self, id: NodeId) -> bool {
 		let n = self.node(id);
-		if n.kind != Kind::Element || n.children.len() != 1 {
+		if n.kind != Kind::Element || n.children().len() != 1 {
 			return false;
 		}
 		let type_attr = n
@@ -253,7 +256,7 @@ impl<'a> Printer<'a> {
 			"style" => self.settings.hug_style && crate::minify::style_type_holds_css(type_attr),
 			_ => false,
 		};
-		hugs && self.node(n.children[0]).kind == Kind::Text && !self.in_conditional_comment(id)
+		hugs && self.node(n.children()[0]).kind == Kind::Text && !self.in_conditional_comment(id)
 	}
 
 	// ----- borrowing of tag markers -----
@@ -308,7 +311,7 @@ impl<'a> Printer<'a> {
 		!n.is_self_closing
 			&& n.end_span.is_none()
 			&& (self.has_prettier_ignore(id)
-				|| n.parent.is_some_and(|p| self.should_preserve_content(p)))
+				|| n.parent().is_some_and(|p| self.should_preserve_content(p)))
 	}
 
 	fn print_closing_tag_start_marker(&self, id: NodeId) -> String {
@@ -376,7 +379,7 @@ impl<'a> Printer<'a> {
 	fn print_opening_tag_prefix(&self, id: NodeId) -> String {
 		if self.needs_to_borrow_parent_opening_tag_end_marker(id) {
 			return self
-				.print_opening_tag_end_marker(self.node(id).parent.unwrap_or(self.ast.root));
+				.print_opening_tag_end_marker(self.node(id).parent().unwrap_or(self.ast.root));
 		}
 		if self.needs_to_borrow_prev_closing_tag_end_marker(id)
 			&& let Some(p) = self.ast.prev(id)
@@ -389,7 +392,7 @@ impl<'a> Printer<'a> {
 	fn print_closing_tag_suffix(&self, id: NodeId) -> String {
 		if self.needs_to_borrow_parent_closing_tag_start_marker(id) {
 			return self
-				.print_closing_tag_start_marker(self.node(id).parent.unwrap_or(self.ast.root));
+				.print_closing_tag_start_marker(self.node(id).parent().unwrap_or(self.ast.root));
 		}
 		if self.needs_to_borrow_next_opening_tag_start_marker(id)
 			&& let Some(x) = self.ast.next(id)
@@ -457,7 +460,7 @@ impl<'a> Printer<'a> {
 		let borrowed = match self.ast.next(id) {
 			Some(x) => self.needs_to_borrow_prev_closing_tag_end_marker(x),
 			None => self.needs_to_borrow_last_child_closing_tag_end_marker(
-				n.parent.unwrap_or(self.ast.root),
+				n.parent().unwrap_or(self.ast.root),
 			),
 		};
 		if borrowed {
@@ -515,7 +518,7 @@ impl<'a> Printer<'a> {
 			&& n.full_name() == "script"
 			&& n.attrs.len() == 1
 			&& n.attrs[0].full_name == "src"
-			&& n.children.is_empty();
+			&& n.children().is_empty();
 		let per_line = self.settings.single_attribute_per_line && n.attrs.len() > 1;
 		// Compact tags keep all attributes on the line of the tag, one space
 		// apart, however the formatter would have laid them out.
@@ -545,7 +548,7 @@ impl<'a> Printer<'a> {
 			.first_child(id)
 			.is_some_and(|c| self.needs_to_borrow_parent_opening_tag_end_marker(c));
 		let parent_borrows = n
-			.parent
+			.parent()
 			.is_some_and(|p| self.needs_to_borrow_last_child_closing_tag_end_marker(p));
 		if compact {
 			// The end of the tag follows the last attribute, `/>` as well.
@@ -793,10 +796,10 @@ impl<'a> Printer<'a> {
 
 	fn depth(&self, id: NodeId) -> usize {
 		let mut count = 0;
-		let mut cursor = self.node(id).parent;
+		let mut cursor = self.node(id).parent();
 		while let Some(p) = cursor {
 			count += 1;
-			cursor = self.node(p).parent;
+			cursor = self.node(p).parent();
 		}
 		count
 	}
@@ -816,7 +819,7 @@ impl<'a> Printer<'a> {
 		}
 		let attr_group = self.docs.new_group_id();
 		let n = self.node(id);
-		let children_empty = n.children.is_empty();
+		let children_empty = n.children().is_empty();
 		let dangling = n.has_dangling_spaces && n.is_dangling_space_sensitive;
 
 		let build_tag = |this: &mut Self, body: DocId| -> DocId {
@@ -853,7 +856,7 @@ impl<'a> Printer<'a> {
 			let borrow = match self.ast.next(id) {
 				Some(x) => self.needs_to_borrow_prev_closing_tag_end_marker(x),
 				None => self.needs_to_borrow_last_child_closing_tag_end_marker(
-					n.parent.unwrap_or(self.ast.root),
+					n.parent().unwrap_or(self.ast.root),
 				),
 			};
 			let l = self.node(last);
@@ -916,7 +919,7 @@ impl<'a> Printer<'a> {
 		}
 		if (self.needs_to_borrow_next_opening_tag_start_marker(prev)
 			&& (self.has_prettier_ignore(next)
-				|| !n.children.is_empty()
+				|| !n.children().is_empty()
 				|| n.is_self_closing
 				|| (n.kind == Kind::Element && !n.attrs.is_empty())))
 			|| (p.kind == Kind::Element
@@ -952,7 +955,7 @@ impl<'a> Printer<'a> {
 		let end = n.span.end;
 		if n.kind == Kind::Element
 			&& n.end_span.is_none()
-			&& !n.children.is_empty()
+			&& !n.children().is_empty()
 			&& let Some(last) = self.ast.last_child(id)
 		{
 			return end.max(self.end_location(last));
@@ -996,7 +999,7 @@ impl<'a> Printer<'a> {
 		// `self.print_child` below takes `&mut self`: the list is read from the tree, not through
 		// `self`, so that it needs no copy.
 		let ast = self.ast();
-		let children = &ast.node(id).children;
+		let children = ast.node(id).children();
 		if self.node(id).kind == Kind::Element && self.force_break_children(id) {
 			let mut parts = vec![BREAK_PARENT];
 			for &child in children {
@@ -1106,7 +1109,7 @@ impl<'a> Printer<'a> {
 	fn text_value_parts(&mut self, id: NodeId) -> Vec<DocId> {
 		let n = self.node(id);
 		let value = n.value.clone();
-		let parent = self.node(n.parent.unwrap_or(self.ast.root));
+		let parent = self.node(n.parent().unwrap_or(self.ast.root));
 		if parent.is_whitespace_sensitive {
 			if parent.is_indentation_sensitive {
 				return self.replace_eol_parts(&value, LITERALLINE);
@@ -1125,7 +1128,7 @@ impl<'a> Printer<'a> {
 	/// other text and for JSON that is not formatted (see `json`).
 	fn embedded_json(&mut self, id: NodeId) -> Option<DocId> {
 		let n = self.node(id);
-		let parent = self.node(n.parent?);
+		let parent = self.node(n.parent()?);
 		if parent.kind != Kind::Element || parent.full_name() != "script" {
 			return None;
 		}
