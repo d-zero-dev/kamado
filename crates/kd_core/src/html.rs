@@ -767,6 +767,11 @@ impl Pipeline {
 				entities: e.entities.clone(),
 				spec: *e.spec,
 				bare_booleans: e.minify.is_some_and(|m| m.collapse_boolean_attributes),
+				// With the formatter next, the formatter leaves the minifier's
+				// closing tags out (the comment on the formatter call in `process`
+				// says why they cannot be left out here).
+				empty_like_minifier: e.minify.is_some() && e.format.is_none(),
+				for_formatter: e.format.is_some(),
 			}),
 			minify_failures,
 		})
@@ -809,10 +814,14 @@ impl Pipeline {
 			};
 
 		let mut minified = false;
+		// Whether `result` is what the serializer wrote (and not the source of a
+		// page whose DOM stage failed and was skipped).
+		let mut serialized = false;
 		let mut minify_failures = Vec::new();
 		match self.dom_stage(&e, input, &recorder, &mut warnings, hooks) {
 			Ok(out) => {
 				result = out.html;
+				serialized = true;
 				minified = e.minify.is_some();
 				minify_failures = out.minify_failures;
 			}
@@ -821,6 +830,14 @@ impl Pipeline {
 		if *e.doctype {
 			result = print::add_doctype(&result);
 		}
+		// The minifier of v2 read the text the formatter wrote and dropped the
+		// closing tag of the elements it takes for empty (`</frame>`, `</basefont>`,
+		// `</isindex>`), which linkedom's serialization has. Without the formatter
+		// the serializer leaves those tags out (`dom_stage`). With it, the
+		// formatter does (its parser does not take these elements for void, and
+		// would nest what follows if the serializer had left them out); and where
+		// it fails, v2's minifier ran on the text all the same, so the text loses
+		// them here.
 		if let Some(options) = e.format {
 			// What the minifier made of the code of a page it ran on is written
 			// where it stands, not indented as a block of its own.
@@ -829,10 +846,24 @@ impl Pipeline {
 				options.hug_script = m.minify_js;
 				options.hug_style = m.minify_css;
 				options.compact_tags = true;
+				options.empty_like_minifier = true;
 			}
+			// The same for `basefont` and `frame` with the standard's serializer
+			// (`spec`), whose void elements have no closing tag; the serializer
+			// cannot leave these out either, for the formatter's sake.
+			options.standard_void_end_tags = *e.spec;
 			match print::format(&result, &options) {
 				Ok(html) => result = html,
-				Err(error) => failed("format", error.to_string(), &mut warnings)?,
+				Err(error) => {
+					failed("format", error.to_string(), &mut warnings)?;
+					// (A source that was not serialized has no closing tag of the
+					// serializer's to leave out.)
+					if serialized && minified {
+						result = minify::strip_empty_element_end_tags(&result).into_owned();
+					} else if serialized && *e.spec {
+						result = minify::strip_standard_void_end_tags(&result).into_owned();
+					}
+				}
 			}
 		}
 		// A CSS or JS text the hooks could not minify is kept as it was and the

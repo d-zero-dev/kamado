@@ -1551,8 +1551,17 @@ mod tests {
 	fn chain_matches_v2() {
 		let dir =
 			std::path::PathBuf::from(std::env::var("KD_CHAIN_DIR").expect("set KD_CHAIN_DIR"));
+		// `KD_CHAIN_MINIFY=on` for a corpus written with `on` (the code minifiers
+		// are off in both).
+		let minify = match std::env::var("KD_CHAIN_MINIFY").as_deref() {
+			Ok("on") => r#"{ "js": false, "css": false }"#,
+			Err(_) | Ok("off") => "false",
+			Ok(other) => panic!("KD_CHAIN_MINIFY is `on` or `off`, not `{other}`"),
+		};
 		let config = kd_config::parse(
-			r#"{ "dir": { "input": "src", "output": "out" }, "html": { "onError": "error", "imageSizes": false, "minify": false } }"#,
+			&format!(
+				r#"{{ "dir": {{ "input": "src", "output": "out" }}, "html": {{ "onError": "error", "imageSizes": false, "minify": {minify} }} }}"#
+			),
 			"/kd-chain-root",
 			None,
 		)
@@ -2547,6 +2556,142 @@ mod tests {
 			site.read("out/a.html"),
 			"<!DOCTYPE html>\n<html>\n\t<head>\n\t\t<title>t</title>\n\t</head>\n\t<body>\n\t\t<input disabled>\n\t\t<p>x</p>\n\t</body>\n</html>\n"
 		);
+	}
+
+	#[test]
+	fn the_closing_tags_of_frame_basefont_and_isindex_are_dropped_with_minify_only() {
+		let site = Site::new("minify_empty_elements");
+		site.write(
+			"src/a.html",
+			"<html><head><title>t</title></head><frameset rows=\"48,*\"><frame src=\"head.html\" noresize><frame src=\"main.html\"></frameset></html>",
+		);
+		site.write(
+			"src/b.html",
+			"<html><head><title>t</title></head><body><basefont size=\"3\"><isindex prompt=\"q\"><p>x</p></body></html>",
+		);
+		let run = |html: &str, page: &str| {
+			let loaded = site.config(&format!(r#", "html": {html}"#));
+			run_build(&loaded).unwrap();
+			site.read(&format!("out/{page}.html"))
+		};
+		for config in [r#"{}"#, r#"{ "format": false }"#] {
+			let frames = run(config, "a");
+			assert!(
+				frames.contains("<frame src=\"head.html\" noresize>"),
+				"{frames}"
+			);
+			assert!(
+				frames.contains("<frame src=\"main.html\"></frameset>"),
+				"{frames}"
+			);
+			assert!(!frames.contains("</frame>"), "{frames}");
+			let others = run(config, "b");
+			assert!(others.contains("<basefont size=\"3\">"), "{others}");
+			assert!(others.contains("<isindex prompt=\"q\">"), "{others}");
+			assert!(
+				!others.contains("</basefont>") && !others.contains("</isindex>"),
+				"{others}"
+			);
+		}
+		// A page the formatter cannot read (nested too deep) is written as it
+		// was serialized; v2's minifier ran on that text all the same.
+		site.write(
+			"src/c.html",
+			&format!(
+				"{}<frame src=\"a\">",
+				"<div>".repeat(kd_html::print::ast::MAX_DEPTH + 1)
+			),
+		);
+		let deep = run("{}", "c");
+		assert!(deep.contains("<frame src=\"a\">"), "{deep}");
+		assert!(!deep.contains("</frame>"), "{deep}");
+		assert!(!deep.contains('\n'), "formatting failed on it: {deep}");
+		// With `serializer: "spec"` the standard's void elements have no closing
+		// tag, with the formatter on as well (which leaves them out itself: its
+		// parser would nest what follows a `<frame>` that was not closed).
+		let spec = |html: &str| {
+			let loaded = site.config(&format!(r#", "html": {{ "serializer": "spec", {html} }}"#));
+			run_build(&loaded).unwrap();
+			site.read("out/a.html")
+		};
+		let formatted = spec(r#""minify": false"#);
+		assert_eq!(formatted.matches("<frame ").count(), 2, "{formatted}");
+		assert!(!formatted.contains("</frame>"), "{formatted}");
+		// Siblings, not the second one inside the first.
+		assert!(
+			formatted.contains("\"><frame src=\"main.html\"></frameset>"),
+			"{formatted}"
+		);
+		// `isindex` is not void in the standard's serialization.
+		let isindex = {
+			let loaded = site.config(r#", "html": { "serializer": "spec", "minify": false }"#);
+			run_build(&loaded).unwrap();
+			site.read("out/b.html")
+		};
+		assert!(
+			isindex.contains("<isindex prompt=\"q\"></isindex>"),
+			"{isindex}"
+		);
+		assert!(!isindex.contains("</basefont>"), "{isindex}");
+		let unformatted = spec(r#""minify": false, "format": false"#);
+		assert!(!unformatted.contains("</frame>"), "{unformatted}");
+		let minified = spec(r#""minify": true"#);
+		assert!(!minified.contains("</frame>"), "{minified}");
+		// Without minify the closing tags stay, as linkedom writes them.
+		let frames = run(r#"{ "minify": false }"#, "a");
+		assert_eq!(frames.matches("</frame>").count(), 2, "{frames}");
+		let others = run(r#"{ "minify": false, "format": false }"#, "b");
+		assert!(
+			others.contains("</basefont>") && others.contains("</isindex>"),
+			"{others}"
+		);
+	}
+
+	/// What v2 (linkedom, `doctype`, prettier, html-minifier-terser) writes for
+	/// these pages, taken with `scripts/fuzz-html-chain.mjs`'s helpers.
+	#[test]
+	fn pages_with_frames_basefont_and_isindex_come_out_as_in_v2() {
+		let site = Site::new("minify_empty_elements_v2");
+		let cases = [
+			(
+				"<html><head><title>x</title></head><frameset cols=\"20%,*\">\n<frame src=\"a.html\" name=\"a\">\n<frame src=\"b.html\" name=\"b\">\n<noframes><body><p>no</p></body></noframes>\n</frameset></html>",
+				"<!DOCTYPE html>\n<html>\n\t<head>\n\t\t<title>x</title></head><frameset cols=\"20%,*\">\n\t\t<frame src=\"a.html\" name=\"a\">\n\t\t<frame src=\"b.html\" name=\"b\">\n\t\t<noframes>\n\t\t\t<body>\n\t\t\t\t<p>no</p>\n\t\t\t</body>\n\t\t</noframes>\n\t</frameset>\n</html>\n",
+			),
+			(
+				"<html><head><basefont size=\"3\"><title>x</title></head><body><basefont color=\"red\"><p>x <basefont size=\"2\"> y</p></body></html>",
+				"<!DOCTYPE html>\n<html>\n\t<head>\n\t\t<basefont size=\"3\">\n\t\t<title>x</title>\n\t</head>\n\t<body>\n\t\t<basefont color=\"red\">\n\t\t<p>x <basefont size=\"2\"> y</p>\n\t</body>\n</html>\n",
+			),
+			(
+				"<div><p>a<frame src=\"x\">b</p><span><isindex>text</span></div>",
+				"<div>\n\t<p>a<frame src=\"x\">b</p>\n\t<span><isindex>text</span>\n</div>\n",
+			),
+			(
+				"<html><body><pre><frame src=\"a\"><b>x</b></pre><p>y</p></body></html>",
+				"<!DOCTYPE html>\n<html>\n\t<head></head>\n\t<body>\n\t\t<pre><frame src=\"a\"><b>x</b></pre>\n\t\t<p>y</p>\n\t</body>\n</html>\n",
+			),
+			(
+				"<html><body><!-- prettier-ignore --><div><frame src=\"a\"></frame><br></br></div><p>y</p></body></html>",
+				"<!DOCTYPE html>\n<html>\n\t<head></head>\n\t<body>\n\t\t<!-- prettier-ignore -->\n\t\t<div><frame src=\"a\"><br><br></div>\n\t\t<p>y</p>\n\t</body>\n</html>\n",
+			),
+			(
+				"<html><body><!--[if IE]><frame src=\"a\"></frame><![endif]--><p>y</p></body></html>",
+				"<!DOCTYPE html>\n<html>\n\t<head></head>\n\t<body>\n\t\t<!--[if IE]><frame src=\"a\"></frame><![endif]-->\n\t\t<p>y</p>\n\t</body>\n</html>\n",
+			),
+			(
+				"<html><body><svg><frame></frame><frame/></svg><p>y</p></body></html>",
+				"<!DOCTYPE html>\n<html>\n\t<head></head>\n\t<body>\n\t\t<svg>\n\t\t\t<frame/>\n\t\t\t<frame/>\n\t\t</svg>\n\t\t<p>y</p>\n\t</body>\n</html>\n",
+			),
+			(
+				"<html><body><textarea><frame></frame></textarea><p><frame>t</frame></p></body></html>",
+				"<!DOCTYPE html>\n<html>\n\t<head></head>\n\t<body>\n\t\t<textarea><frame></textarea>\n\t\t<p><frame>t</p>\n\t</body>\n</html>\n",
+			),
+		];
+		let loaded = site.config(r#", "html": { "minify": { "js": false, "css": false } }"#);
+		for (n, (source, expected)) in cases.iter().enumerate() {
+			site.write(&format!("src/{n}.html"), source);
+			run_build(&loaded).unwrap();
+			assert_eq!(&site.read(&format!("out/{n}.html")), expected, "case {n}");
+		}
 	}
 
 	#[test]
