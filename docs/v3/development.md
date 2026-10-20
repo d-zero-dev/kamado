@@ -108,6 +108,8 @@ Pug から TSX への変換器（`scripts/pug-to-tsx.mjs`）は、小さな Pug 
 | CSS                   | `fuzz-css.mjs` と `generate-css-oracle.mjs`、`check-css.mjs`                             | `crates/kd_css/tests/differential.rs`         |
 | JS / TS / JSX         | `check-kd-js-js.mjs` / `check-kd-js-types.mjs` / `check-kd-js-jsx.mjs`（`jsx-fuzz.mjs`） | 各スクリプトを直接実行                        |
 
+`fuzz-html-chain.mjs` の第 4 引数に `on`（圧縮あり）を渡して作ったコーパスは、`chain_matches_v2` に `KD_CHAIN_MINIFY=on` を付けて回す（圧縮の JS / CSS は両側とも切る）。付けない（または `off`）と v3 の圧縮を切る。ほかの値はエラー。
+
 `scripts/` と `benchmarks/` は、ルートの `yarn lint:eslint` の対象外（prettier と cspell だけが見る）。
 
 ## v2 の oracle
