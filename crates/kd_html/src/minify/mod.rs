@@ -562,6 +562,149 @@ pub fn is_bare_when_empty(name: &str) -> bool {
 	is_boolean_attribute(name, "")
 }
 
+/// Whether `name` is an element that the minifier reads as empty: a closing
+/// tag written for it is dropped (`<frame src="a"></frame>` comes out as
+/// `<frame src="a">`). The list is html-minifier-terser's (`area`, `br`,
+/// `img`, `input`, … and `basefont`, `frame`, `isindex`). Of these the DOM
+/// serializer writes a closing tag only for `basefont`, `frame` and `isindex`,
+/// as linkedom does.
+///
+/// # Example
+///
+/// ```
+/// use kd_html::minify::is_empty_element;
+/// assert!(is_empty_element("FRAME"));
+/// assert!(!is_empty_element("div"));
+/// ```
+#[must_use]
+pub fn is_empty_element(name: &str) -> bool {
+	in_ci(EMPTY, name)
+}
+
+/// `text` as the minifier reads it, as far as closing tags of empty elements
+/// go (see [`is_empty_element`]): they are dropped, but for `</br>`, which
+/// the minifier turns into a `<br>` (the tree has no such tag: `br` is void,
+/// so the printer needs no rule for it). Like html-minifier-terser, it does not
+/// read comments or the code of `<script>` and `<style>`, and it does read the
+/// text of a `<textarea>` or a `<title>`.
+///
+/// It is for the text the formatter copies from the source as it stands (the
+/// content of a `<pre>` that holds elements, a node after `prettier-ignore`),
+/// which the tree rule of the printer (`drops_closing_tag`) does not reach, and
+/// for the text of a page the formatter could not read. A text that needs no
+/// change is returned as it is, without a copy.
+///
+/// # Example
+///
+/// ```
+/// use kd_html::minify::strip_empty_element_end_tags;
+/// assert_eq!(
+///     strip_empty_element_end_tags("<frame src=\"a\"></frame><b>x</b>"),
+///     "<frame src=\"a\"><b>x</b>"
+/// );
+/// assert_eq!(
+///     strip_empty_element_end_tags("<!-- </frame> --><script>a = \"</frame>\"</script>"),
+///     "<!-- </frame> --><script>a = \"</frame>\"</script>"
+/// );
+/// ```
+#[must_use]
+pub fn strip_empty_element_end_tags(text: &str) -> std::borrow::Cow<'_, str> {
+	strip_end_tags(text, is_empty_element, true)
+}
+
+/// `text` without the closing tags of `basefont` and `frame`, which the HTML
+/// standard writes no closing tag for (void elements): the same reading as
+/// [`strip_empty_element_end_tags`] (comments and the code of `<script>` and
+/// `<style>` are not read), for the other list and without the `</br>` rule.
+///
+/// # Example
+///
+/// ```
+/// use kd_html::minify::strip_standard_void_end_tags;
+/// assert_eq!(
+///     strip_standard_void_end_tags("<frame src=\"a\"></frame><isindex></isindex>"),
+///     "<frame src=\"a\"><isindex></isindex>"
+/// );
+/// ```
+#[must_use]
+pub fn strip_standard_void_end_tags(text: &str) -> std::borrow::Cow<'_, str> {
+	strip_end_tags(text, crate::serialize::is_void_unknown_to_formatter, false)
+}
+
+/// The scan behind the two functions above: drops the closing tags whose name
+/// `drops` accepts; `br_to_start_tag` turns a dropped `</br>` into `<br>`.
+fn strip_end_tags(
+	text: &str,
+	drops: fn(&str) -> bool,
+	br_to_start_tag: bool,
+) -> std::borrow::Cow<'_, str> {
+	if !text.contains("</") {
+		return std::borrow::Cow::Borrowed(text);
+	}
+	let mut out = String::new();
+	let (mut copied, mut at) = (0, 0);
+	while let Some(found) = text[at..].find('<') {
+		let start = at + found;
+		let rest = &text[start..];
+		if rest.starts_with("<!--") {
+			match rest.find("-->") {
+				Some(end) => at = start + end + 3,
+				None => break,
+			}
+		} else if let Some((len, name)) = match_end_tag(rest) {
+			if drops(name) {
+				out.push_str(&text[copied..start]);
+				if br_to_start_tag && name.eq_ignore_ascii_case("br") {
+					out.push_str("<br>");
+				}
+				copied = start + len;
+			}
+			at = start + len;
+		} else if let Some(tag) = parse_start_tag(rest, &|_| false) {
+			// A start tag is read whole, so that what an attribute value holds
+			// (`title="</frame>"`) is not taken for a tag.
+			at = start + tag.len;
+			let raw = ["script", "style"]
+				.into_iter()
+				.find(|name| tag.name.eq_ignore_ascii_case(name));
+			if let Some(name) = raw
+				&& !tag.unary_slash
+			{
+				// The code goes on to the end tag of the same name, not read in between.
+				match find_end_tag_start(&text[at..], name) {
+					Some(end) => at += end,
+					None => break,
+				}
+			}
+		} else {
+			at = start + 1;
+		}
+	}
+	if copied == 0 {
+		return std::borrow::Cow::Borrowed(text);
+	}
+	out.push_str(&text[copied..]);
+	std::borrow::Cow::Owned(out)
+}
+
+/// Where `</name` (any case) first stands in `input`, without a copy of it.
+fn find_end_tag_start(input: &str, name: &str) -> Option<usize> {
+	let bytes = input.as_bytes();
+	let mut from = 0;
+	while let Some(found) = input[from..].find("</") {
+		let at = from + found;
+		let after = at + 2;
+		if bytes
+			.get(after..after + name.len())
+			.is_some_and(|n| n.eq_ignore_ascii_case(name.as_bytes()))
+		{
+			return Some(at);
+		}
+		from = after;
+	}
+	None
+}
+
 /// Whether a `<script>` with this `type` (`None` when it has none) holds code
 /// that [`Hooks::js`] is given.
 ///
@@ -1482,6 +1625,98 @@ mod tests {
 
 	fn run(html: &str) -> String {
 		minify(html, &Options::default(), &Marking).unwrap()
+	}
+
+	#[test]
+	fn the_closing_tags_of_empty_elements_are_stripped_outside_comments_and_code() {
+		let strip = |s: &str| strip_empty_element_end_tags(s).into_owned();
+		assert_eq!(
+			strip("<frame src=\"a\"></FRAME ><basefont></basefont><isindex></isindex><b>x</b>"),
+			"<frame src=\"a\"><basefont><isindex><b>x</b>"
+		);
+		assert_eq!(strip("<img></img></p>"), "<img></p>");
+		assert_eq!(strip("<br></br>"), "<br><br>");
+		let kept = "<!-- </frame> --><script>a = '</frame>'</script><style>b{}</style>";
+		assert_eq!(strip(kept), kept);
+		assert_eq!(strip("<script>x</script></frame>"), "<script>x</script>");
+		// The end tag of the code is found whatever its case, and the code is
+		// not read up to there.
+		assert_eq!(
+			strip("<SCRIPT>a</frame></SCRIPT></frame><p>y</p>"),
+			"<SCRIPT>a</frame></SCRIPT><p>y</p>"
+		);
+		assert_eq!(
+			strip("<STYLE>a</isindex></style></isindex>"),
+			"<STYLE>a</isindex></style>"
+		);
+		// As the minifier reads `</script[^>]*>`, `</script-end>` ends the code too.
+		assert_eq!(
+			strip("<script>a = '</script-end>'</frame></script>"),
+			"<script>a = '</script-end>'</script>"
+		);
+		// A start tag is read whole: what an attribute value holds is not a tag; and
+		// a `<script/>` that closes itself has no code.
+		assert_eq!(
+			strip("<a title=\"</frame>\">x</a></frame>"),
+			"<a title=\"</frame>\">x</a>"
+		);
+		assert_eq!(
+			strip("<script src=\"a.js\"/></frame><p>y</p>"),
+			"<script src=\"a.js\"/><p>y</p>"
+		);
+	}
+
+	#[test]
+	fn the_minifier_reads_the_same_closing_tags_as_the_strip_does() {
+		let options = Options {
+			minify_css: false,
+			minify_js: false,
+			..Options::default()
+		};
+		for html in [
+			"<p><frame src=\"a\"></frame><b>x</b></p>",
+			"<p><basefont size=\"3\"></basefont><isindex prompt=\"q\"></isindex>y</p>",
+			"<p><img src=\"a\"></img><br></br><input></input>z</p>",
+			"<textarea>a </frame> b</textarea><title></basefont></title>",
+			"<![if IE]><frame src=\"a\"></frame><![endif]><p>x</p>",
+			"<script>a = '</frame>'</script><p><frame></frame></p>",
+			"<!-- x --></frame><p>y</p>",
+			"<script>a</frame></script></frame><p>y</p>",
+			"<a title=\"</frame>\" data-x=\"</basefont>\">x</a></frame><p>y</p>",
+		] {
+			let minified = minify(html, &options, &NoMinification).unwrap();
+			assert_eq!(strip_empty_element_end_tags(html), minified, "{html}");
+		}
+	}
+
+	#[test]
+	fn only_the_closing_tags_of_the_standards_void_elements_are_stripped_on_request() {
+		assert_eq!(
+			strip_standard_void_end_tags(
+				"<frame></FRAME><basefont></basefont><isindex></isindex><br></br>"
+			),
+			"<frame><basefont><isindex></isindex><br></br>"
+		);
+		let kept = "<!-- </frame> --><script>'</frame>'</script>";
+		assert_eq!(strip_standard_void_end_tags(kept), kept);
+	}
+
+	#[test]
+	fn a_text_without_a_closing_tag_to_strip_is_borrowed() {
+		// (An unclosed comment or `<script>` is left alone; the minifier does not
+		// minify such a page at all, so there is nothing to match.)
+		for text in [
+			"<frame src=\"a\">",
+			"<b>x</b>",
+			"a < b",
+			"<!-- </frame>",
+			"<script>a</frame>",
+		] {
+			assert!(matches!(
+				strip_empty_element_end_tags(text),
+				std::borrow::Cow::Borrowed(_)
+			));
+		}
 	}
 
 	#[test]
