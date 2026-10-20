@@ -177,6 +177,11 @@ KD_JS_FUNCTION=1 node scripts/check-kd-js-jsx.mjs fuzz 3000 7   # 関数形式
 
 `KD_TIMING=1 KAMADO_TIMING=1 node packages/kamado/dist/cli.js build ...` で、段階ごとの時間（Rust 側と JS 側）が標準エラーに出る。`core finish: summed over N threads` の行は、書き出しの段（`finish: pages and assets`）でページが HTML の段と書き込みに使った時間を、N 本のスレッドで合算した値。壁時計の時間（スレッド数 × 段の時間）と見比べると、ページがどちらで待っているかの目安になる。スレッドがコア数より多いと、実行されていない時間もそのときいた側に数えられるので、CPU の計測ではなく目安として読む。HTML の段には文字コードの変換が含まれる。`sample`（macOS）や `perf`（Linux）で見るときは、`strip = "symbols"` を外したビルド（`CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p kd_napi --target-dir <別の場所>`）を `KAMADO_NATIVE_ADDON` で指す。HTML 段だけの時間は `cargo run --release -p kd_html --example stage_bench -- <出力ディレクトリ> [件数]`（1 スレッド、1 ページあたりの平均）。件数のあとに 3 行出る: `format` とその内訳（パース・空白の前処理・doc の構築・doc の出力・解放。`steps sum` が `format` と近ければ内訳は合っている）、`minify`、DOM の段（パース・シリアライズ・木の解放。includes などの規則は含まない）と encode（UTF-8 と Shift_JIS）。内訳は `print::format` の中身を写したもので、`format` を変えたら追従させる。`REPEAT=n` は `format` だけを n 回回す（サンプリングプロファイラ用）。
 
+`stage_bench` で変更の前後を比べるには、出力と時間を別々に見る。
+
+- **出力**: `DUMP=<dir>` は、`REPEAT` の最後の回の `format` の出力を、読んだ順に `<dir>/<n>.html` として書き出し、`<dir>/index.txt` に番号と元のパスを書く。変更前後のバイナリで書き出して `diff -r -x index.txt` すれば、出力が変わっていないことをバイト単位で確かめられる。整形に失敗したページは空のファイルになり、失敗した件数が出力に出て、`index.txt` のそのページの行に `(did not format)` が付く（両方の版で同じページが失敗していれば、その分は空同士の一致）
+- **時間**: マシンの負荷が高いと時間（µs）がぶれる。`/usr/bin/time -l env REPEAT=n <stage_bench> ...` が出す `instructions retired`（macOS）は負荷に左右されないので、変更の前後はそれで比べる
+
 検査ソフトのない環境で cold を測るには、GitHub Actions の `Bench cold build`（`.github/workflows/bench-cold.yml`、手動実行）を使う。ページ数を指定して fixture を生成し、cold を 2 回、`--incremental` を 2 回（2 回目が warm）ビルドして、段階別の時間をジョブのサマリーに出す。ubuntu（x64 / arm64）と macOS で走る。
 
 ページごとの時間の大半は、`open` やファイルの作成に費やされる環境がある（開発に使っている macOS では `open` が 70〜200µs）。ファイルの数を減らすことが、CPU の最適化より効く。

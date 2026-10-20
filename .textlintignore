@@ -3,3 +3,4 @@ CHANGELOG.md
 .cursor/**/*
 .claude/**/*
 .agent/**/*
+CLAUDE.local.md
