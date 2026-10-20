@@ -1,0 +1,2 @@
+setAttr	[class~=b]	m	1
+setAttr	[rel~=nofollow]	n	1

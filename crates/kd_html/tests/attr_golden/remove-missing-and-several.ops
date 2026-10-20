@@ -1,0 +1,3 @@
+removeAttr	p	style
+removeAttr	p	id
+removeAttr	p	nope

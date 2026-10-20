@@ -116,7 +116,10 @@ fn is_remote_or_inline(src: &str) -> bool {
 		|| src.starts_with("//")
 }
 
-/// Sets `width` and `height` on the images of `page`.
+/// Sets `width` and `height` on the images of `page`, `width` first and each
+/// as `setAttribute` does (an existing one, of any case, keeps its place; a
+/// new one goes first). An image without either therefore comes out as
+/// `height` `width` `src`, which is the order v2 wrote.
 ///
 /// # Errors
 ///
@@ -137,7 +140,7 @@ fn is_remote_or_inline(src: &str) -> bool {
 /// let mut page = Page::parse("<img src=\"/a.svg\">");
 /// let options = Options { root_dir: "/out", keep_authored: false, extensions: &DEFAULT_EXTENSIONS };
 /// apply(&mut page, &options, &One).unwrap();
-/// assert_eq!(page.serialize(), "<img src=\"/a.svg\" width=\"4\" height=\"3\">");
+/// assert_eq!(page.serialize(), "<img height=\"3\" width=\"4\" src=\"/a.svg\">");
 /// ```
 pub fn apply(
 	page: &mut Page,
@@ -150,11 +153,12 @@ pub fn apply(
 			continue;
 		};
 		if options.keep_authored
-			&& (element.attr("width").is_some() || element.attr("height").is_some())
+			&& (element.attr_ignore_case("width").is_some()
+				|| element.attr_ignore_case("height").is_some())
 		{
 			continue;
 		}
-		let Some(src) = element.attr("src").map(str::trim) else {
+		let Some(src) = element.attr_ignore_case("src").map(str::trim) else {
 			continue;
 		};
 		let src_path = src.split(['?', '#']).next().unwrap_or("");
@@ -182,8 +186,10 @@ pub fn apply(
 			continue;
 		};
 		if let Some(element) = page.doc.element_mut(node) {
-			element.set_attr("width", &size.width.to_string());
-			element.set_attr("height", &size.height.to_string());
+			// `width` first: a new attribute goes first, so an image without
+			// either comes out as `height` `width`, which is v2's order.
+			element.set_attribute("width", &size.width.to_string());
+			element.set_attribute("height", &size.height.to_string());
 		}
 	}
 	Ok(())
@@ -247,7 +253,8 @@ mod tests {
 				false
 			)
 			.unwrap(),
-			"<img src=\"/a.svg\" width=\"20\" height=\"10\"><picture><source src=\"/dir/b.svg\" width=\"20\" height=\"10\"><img src=\"dir/b.svg\" width=\"20\" height=\"10\"></picture>"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<img height=\"10\" width=\"20\" src=\"/a.svg\"><picture><source height=\"10\" width=\"20\" src=\"/dir/b.svg\"><img height=\"10\" width=\"20\" src=\"dir/b.svg\"></picture>" // "<img src=\"/a.svg\" width=\"20\" height=\"10\"><picture><source src=\"/dir/b.svg\" width=\"20\" height=\"10\"><img src=\"dir/b.svg\" width=\"20\" height=\"10\"></picture>" // previous
 		);
 	}
 
@@ -257,9 +264,34 @@ mod tests {
 		let html = "<img src=\"/a.svg\" width=\"1\" height=\"2\"><img src=\"/a.svg\" height=\"2\">";
 		assert_eq!(
 			run(html, &files, false).unwrap(),
-			"<img src=\"/a.svg\" width=\"20\" height=\"10\"><img src=\"/a.svg\" height=\"10\" width=\"20\">"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<img src=\"/a.svg\" width=\"20\" height=\"10\"><img width=\"20\" src=\"/a.svg\" height=\"10\">" // "<img src=\"/a.svg\" width=\"20\" height=\"10\"><img src=\"/a.svg\" height=\"10\" width=\"20\">" // previous
 		);
 		assert_eq!(run(html, &files, true).unwrap(), html);
+	}
+
+	#[test]
+	fn keeping_authored_sizes_applies_to_either_attribute_alone() {
+		let files = Files::new(&[("/out/a.svg", SVG_A)]);
+		for html in [
+			"<img src=\"/a.svg\" width=\"1\">",
+			"<img src=\"/a.svg\" height=\"2\">",
+		] {
+			assert_eq!(run(html, &files, true).unwrap(), html);
+		}
+	}
+
+	#[test]
+	fn attribute_names_are_found_without_case() {
+		let files = Files::new(&[("/out/a.svg", SVG_A)]);
+		assert_eq!(
+			run("<img SRC=\"/a.svg\" WIDTH=\"1\">", &files, false).unwrap(),
+			"<img height=\"10\" SRC=\"/a.svg\" WIDTH=\"20\">"
+		);
+		assert_eq!(
+			run("<img SRC=\"/a.svg\" WIDTH=\"1\">", &files, true).unwrap(),
+			"<img SRC=\"/a.svg\" WIDTH=\"1\">"
+		);
 	}
 
 	#[test]
@@ -278,7 +310,8 @@ mod tests {
 		let files = Files::new(&[("/out/a.svg", SVG_A)]);
 		assert_eq!(
 			run("<img src=\" /a.svg?v=2#x \">", &files, false).unwrap(),
-			"<img src=\" /a.svg?v=2#x \" width=\"20\" height=\"10\">"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<img height=\"10\" width=\"20\" src=\" /a.svg?v=2#x \">" // "<img src=\" /a.svg?v=2#x \" width=\"20\" height=\"10\">" // previous
 		);
 	}
 
@@ -299,7 +332,8 @@ mod tests {
 		let files = Files::new(&[("/out/b.svg", SVG_A)]);
 		assert_eq!(
 			run("<img src=\"/a/../b.svg\">", &files, false).unwrap(),
-			"<img src=\"/a/../b.svg\" width=\"20\" height=\"10\">"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<img height=\"10\" width=\"20\" src=\"/a/../b.svg\">" // "<img src=\"/a/../b.svg\" width=\"20\" height=\"10\">" // previous
 		);
 	}
 

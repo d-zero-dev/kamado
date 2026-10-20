@@ -10,11 +10,23 @@
 //! nothing is worse than a build that stops.
 //!
 //! Names (tags, attribute names) compare ASCII-case-insensitively as in an
-//! HTML document; attribute values compare exactly unless the `i` flag is
-//! given. Matching walks right to left from the candidate, so a compound
-//! selector is tested without materializing intermediate sets.
+//! HTML document.
+//!
+//! Attribute values compare exactly unless the `i` flag is given, except for
+//! the attributes whose values the HTML standard makes case-insensitive in an
+//! HTML document (`type`, `rel`, `lang`, `dir`, `target`, `method`, and the
+//! rest of the list in `is_case_insensitive_value`): `[type=text]` sees
+//! `type=TEXT`, as in a browser and in v2's selector engine.
+//!
+//! `.class` and `[a~=v]` split a value on JavaScript white space (as v2's
+//! selector engine does, and as `classList` does), not only on ASCII white
+//! space, so a non-breaking space separates two classes.
+//!
+//! Matching walks right to left from the candidate, so a compound selector is
+//! tested without materializing intermediate sets.
 
 use crate::dom::{Document, NodeId, NodeKind, ROOT};
+use crate::parser::is_js_space;
 
 /// A selector that failed to parse.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -323,6 +335,7 @@ impl<'a> Reader<'a> {
 			return self.err("a `]` is missing");
 		}
 		self.pos += 1;
+		let insensitive = insensitive || is_case_insensitive_value(&name);
 		Ok(Simple::Attr {
 			name,
 			op,
@@ -719,11 +732,50 @@ fn matches_compound(doc: &Document, node: NodeId, compound: &[Simple]) -> bool {
 }
 
 fn attribute_value<'a>(doc: &'a Document, node: NodeId, name: &str) -> Option<&'a str> {
-	doc.element(node)?
-		.attrs
-		.iter()
-		.find(|a| a.name.eq_ignore_ascii_case(name))
-		.map(|a| a.value.as_str())
+	doc.element(node)?.attr_ignore_case(name)
+}
+
+/// The attributes whose values an attribute selector compares without case in
+/// an HTML document (HTML Standard, "Case-sensitivity of selectors"). `name`
+/// is lowercase.
+fn is_case_insensitive_value(name: &str) -> bool {
+	matches!(
+		name,
+		"accept"
+			| "accept-charset"
+			| "align" | "alink"
+			| "axis" | "bgcolor"
+			| "charset"
+			| "checked"
+			| "clear" | "codetype"
+			| "color" | "compact"
+			| "declare"
+			| "defer" | "dir"
+			| "direction"
+			| "disabled"
+			| "enctype"
+			| "face" | "frame"
+			| "hreflang"
+			| "http-equiv"
+			| "lang" | "language"
+			| "link" | "media"
+			| "method"
+			| "multiple"
+			| "nohref"
+			| "noresize"
+			| "noshade"
+			| "nowrap"
+			| "readonly"
+			| "rel" | "rev"
+			| "rules" | "scope"
+			| "scrolling"
+			| "selected"
+			| "shape" | "target"
+			| "text" | "type"
+			| "valign"
+			| "valuetype"
+			| "vlink"
+	)
 }
 
 fn matches_simple(doc: &Document, node: NodeId, simple: &Simple) -> bool {
@@ -735,7 +787,7 @@ fn matches_simple(doc: &Document, node: NodeId, simple: &Simple) -> bool {
 		Simple::Type(name) => element.name.eq_ignore_ascii_case(name),
 		Simple::Id(id) => attribute_value(doc, node, "id") == Some(id.as_str()),
 		Simple::Class(class) => attribute_value(doc, node, "class")
-			.is_some_and(|v| v.split_ascii_whitespace().any(|c| c == class)),
+			.is_some_and(|v| v.split(is_js_space).any(|c| c == class)),
 		Simple::Attr {
 			name,
 			op,
@@ -817,9 +869,7 @@ fn attribute_matches(actual: &str, op: Op, expected: &str, insensitive: bool) ->
 	match op {
 		Op::Exists => true,
 		Op::Equals => actual == expected,
-		Op::Includes => {
-			!expected.is_empty() && actual.split_ascii_whitespace().any(|w| w == expected)
-		}
+		Op::Includes => !expected.is_empty() && actual.split(is_js_space).any(|w| w == expected),
 		Op::Dash => {
 			actual == expected
 				|| actual
@@ -845,6 +895,106 @@ mod tests {
 			.into_iter()
 			.map(|n| doc.text_content(n))
 			.collect()
+	}
+
+	#[test]
+	fn a_class_list_is_split_on_javascript_white_space() {
+		let mut doc = parse("<p>x</p>");
+		let p = doc.first_element_child(ROOT).unwrap();
+		doc.element_mut(p)
+			.unwrap()
+			.set_attribute("class", "a\u{a0}b\u{3000}c");
+		for selector in [".a", ".b", ".c", "[class~=b]"] {
+			assert_eq!(
+				Selector::parse(selector).unwrap().select_all(&doc),
+				[p],
+				"{selector}"
+			);
+		}
+		assert!(Selector::parse(".ab").unwrap().select_all(&doc).is_empty());
+	}
+
+	#[test]
+	fn every_attribute_html_lists_compares_its_value_without_case() {
+		for name in [
+			"accept",
+			"accept-charset",
+			"align",
+			"alink",
+			"axis",
+			"bgcolor",
+			"charset",
+			"checked",
+			"clear",
+			"codetype",
+			"color",
+			"compact",
+			"declare",
+			"defer",
+			"dir",
+			"direction",
+			"disabled",
+			"enctype",
+			"face",
+			"frame",
+			"hreflang",
+			"http-equiv",
+			"lang",
+			"language",
+			"link",
+			"media",
+			"method",
+			"multiple",
+			"nohref",
+			"noresize",
+			"noshade",
+			"nowrap",
+			"readonly",
+			"rel",
+			"rev",
+			"rules",
+			"scope",
+			"scrolling",
+			"selected",
+			"shape",
+			"target",
+			"text",
+			"type",
+			"valign",
+			"valuetype",
+			"vlink",
+		] {
+			let html = format!("<p {name}=VALUE>x</p>");
+			// The name in the selector may be written in capitals too.
+			for selector in [
+				format!("[{name}=value]"),
+				format!("[{}=value]", name.to_uppercase()),
+			] {
+				assert_eq!(texts(&html, &selector), ["x"], "{selector}");
+			}
+		}
+		assert!(texts("<p title=VALUE>x</p>", "[title=value]").is_empty());
+	}
+
+	#[test]
+	fn attribute_names_match_without_case() {
+		let html = "<p CLASS=c DATA-X=1 ID=i>1</p>";
+		for selector in ["p.c", "[data-x]", "[DATA-X]", "#i", "[id]"] {
+			assert_eq!(texts(html, selector), ["1"], "{selector}");
+		}
+	}
+
+	#[test]
+	fn the_values_html_makes_case_insensitive_match_without_case() {
+		let html = "<input type=TEXT>a<p lang=Ja>b</p><a rel=NoFollow>c</a><p title=Hi>d</p>";
+		assert_eq!(texts(html, "[type=text]"), [""]);
+		assert_eq!(texts(html, "[lang|=ja]"), ["b"]);
+		assert_eq!(texts(html, "[rel^=no]"), ["c"]);
+		assert_eq!(texts(html, "[rel~=nofollow]"), ["c"]);
+		// Any other attribute compares exactly unless the `i` flag is given.
+		assert!(texts(html, "[title=hi]").is_empty());
+		assert!(texts(html, "[title^=h]").is_empty());
+		assert_eq!(texts(html, "[title=hi i]"), ["d"]);
 	}
 
 	#[test]
