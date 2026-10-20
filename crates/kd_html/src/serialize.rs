@@ -67,6 +67,50 @@ fn is_serializer_void(name: &str) -> bool {
 	)
 }
 
+/// Whether the element of this name is written without a closing tag when it
+/// is empty (and, for what [`Options::empty_like_minifier`] names, whatever it
+/// holds).
+fn writes_no_closing_tag(name: &str, options: &Options) -> bool {
+	if options.empty_like_minifier && crate::minify::is_empty_element(name) {
+		return true;
+	}
+	if options.spec {
+		// The formatter's parser does not take `basefont` and `frame` for void:
+		// without their closing tag it would nest what follows.
+		is_spec_void(name) && !(options.for_formatter && is_void_unknown_to_formatter(name))
+	} else {
+		is_serializer_void(name)
+	}
+}
+
+/// `basefont` and `frame`: void in the HTML standard (so `spec` writes no
+/// closing tag for them), but not for the formatter's parser, which would nest
+/// what follows one that is not closed. The one list of them, for the
+/// serializer, the printer and the text scan alike.
+pub(crate) fn is_void_unknown_to_formatter(name: &str) -> bool {
+	name.eq_ignore_ascii_case("basefont") || name.eq_ignore_ascii_case("frame")
+}
+
+/// Void elements for the serializer of the HTML standard (`spec`), which
+/// writes no closing tag for them: the standard's list, but for `bgsound`,
+/// which the parser here reads as linkedom does, as an element that takes the
+/// nodes that follow as its children (not void). It differs from linkedom's
+/// list above: `basefont` and `frame` are in it, `menuitem` is not.
+fn is_spec_void(name: &str) -> bool {
+	matches!(
+		name,
+		"area"
+			| "base" | "basefont"
+			| "br" | "col"
+			| "embed" | "frame"
+			| "hr" | "img"
+			| "input" | "keygen"
+			| "link" | "meta"
+			| "param" | "source"
+			| "track" | "wbr"
+	)
+}
+
 /// Elements whose content is written as raw text: `script`, `style`,
 /// `textarea` and `title`, unless they were created inside an `<svg>` (there
 /// they are ordinary elements and their text is escaped, as in linkedom, which
@@ -290,7 +334,7 @@ fn push_node(doc: &Document, id: NodeId, parent_raw: bool, options: &Options, ou
 				} else if doc.first_child(node).is_none() {
 					if e.svg && !spec {
 						out.push_str(" />");
-					} else if is_serializer_void(&e.name) {
+					} else if writes_no_closing_tag(&e.name, options) {
 						out.push('>');
 					} else {
 						out.push_str("></");
@@ -299,7 +343,11 @@ fn push_node(doc: &Document, id: NodeId, parent_raw: bool, options: &Options, ou
 					}
 				} else {
 					out.push('>');
-					stack.push(Work::Close(&e.name));
+					// An element of the minifier's list that a rule gave children
+					// has no closing tag either: the minifier read it as empty.
+					if !(options.empty_like_minifier && crate::minify::is_empty_element(&e.name)) {
+						stack.push(Work::Close(&e.name));
+					}
 					push_children_reversed(doc, node, &mut stack);
 				}
 			}
@@ -328,6 +376,21 @@ pub struct Options {
 	/// Write an empty boolean attribute (`disabled`, not `disabled=""`) bare,
 	/// as the minifier does, whichever of the two forms above is written.
 	pub bare_booleans: bool,
+	/// Write no closing tag for the elements the minifier reads as empty
+	/// (`<frame src="a">`, not `<frame src="a"></frame>`), as v2's output has it
+	/// after the minifier ran on the serialized text; also for one that holds
+	/// nodes, and also with `spec` (where `isindex` is not void). Not for the
+	/// markup the formatter reads next: its parser does not take `basefont`,
+	/// `frame` and `isindex` for void, so it would nest what follows (the
+	/// formatter leaves the tags out on its own, see
+	/// `print::Options::empty_like_minifier`).
+	pub empty_like_minifier: bool,
+	/// The formatter reads the markup next. With `spec`, `basefont` and `frame`
+	/// then keep their closing tag, which the standard would not write: the
+	/// formatter's parser does not take them for void and would nest what
+	/// follows (the formatter leaves the tags out on its own, see
+	/// `print::Options::standard_void_end_tags`).
+	pub for_formatter: bool,
 }
 
 /// The markup of `id` including the node itself.
@@ -450,6 +513,74 @@ mod tests {
 		assert_eq!(
 			rt("<basefont><frame><command><isindex><keygen><menuitem>x</menuitem><wbr><embed>"),
 			"<basefont></basefont><frame></frame><command></command><isindex></isindex><keygen><menuitem>x</menuitem><wbr><embed>"
+		);
+	}
+
+	#[test]
+	fn the_elements_the_minifier_reads_as_empty_have_no_closing_tag_when_asked() {
+		let doc =
+			parse("<frameset><frame src=\"a\"><basefont size=\"3\"><isindex></frameset><p></p>");
+		assert_eq!(
+			inner_html_with(&doc, ROOT, &Options::default()),
+			"<frameset><frame src=\"a\"></frame><basefont size=\"3\"></basefont><isindex></isindex></frameset><p></p>"
+		);
+		for spec in [false, true] {
+			let options = Options {
+				spec,
+				empty_like_minifier: true,
+				..Options::default()
+			};
+			assert_eq!(
+				inner_html_with(&doc, ROOT, &options),
+				"<frameset><frame src=\"a\"><basefont size=\"3\"><isindex></frameset><p></p>"
+			);
+		}
+	}
+
+	#[test]
+	fn an_element_of_the_minifiers_list_that_holds_nodes_has_no_closing_tag_either() {
+		let mut doc = parse("<p><frame src=\"a\"></p>");
+		let p = doc.first_child(ROOT).unwrap();
+		let frame = doc.first_child(p).unwrap();
+		doc.append_text(frame, "x");
+		let options = Options {
+			empty_like_minifier: true,
+			..Options::default()
+		};
+		assert_eq!(
+			inner_html_with(&doc, ROOT, &options),
+			"<p><frame src=\"a\">x</p>"
+		);
+		assert_eq!(
+			inner_html_with(&doc, ROOT, &Options::default()),
+			"<p><frame src=\"a\">x</frame></p>"
+		);
+	}
+
+	#[test]
+	fn the_standard_form_keeps_the_closing_tag_of_frame_and_basefont_for_the_formatter() {
+		let doc = parse("<frameset><frame src=\"a\"><frame src=\"b\"></frameset><basefont>");
+		let options = Options {
+			spec: true,
+			for_formatter: true,
+			..Options::default()
+		};
+		assert_eq!(
+			inner_html_with(&doc, ROOT, &options),
+			"<frameset><frame src=\"a\"></frame><frame src=\"b\"></frame></frameset><basefont></basefont>"
+		);
+	}
+
+	#[test]
+	fn the_standard_form_writes_the_void_elements_of_the_standard() {
+		let doc = parse("<basefont><frame><isindex><menuitem></menuitem><br><img>");
+		let options = Options {
+			spec: true,
+			..Options::default()
+		};
+		assert_eq!(
+			inner_html_with(&doc, ROOT, &options),
+			"<basefont><frame><isindex></isindex><menuitem></menuitem><br><img>"
 		);
 	}
 

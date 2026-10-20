@@ -101,6 +101,9 @@ export function createInputGenerator(seed) {
 		'template',
 		'details',
 		'summary',
+		'frame',
+		'basefont',
+		'isindex',
 	];
 	const attrNames = [
 		'class',

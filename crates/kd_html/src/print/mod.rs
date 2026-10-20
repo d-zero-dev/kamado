@@ -51,6 +51,25 @@ pub struct Options {
 	/// before its end, but for the elements of svg and math, which keep a
 	/// slash written `<path d="a"/>`.
 	pub compact_tags: bool,
+	/// Leave out the closing tag of the elements the minifier reads as empty
+	/// (`basefont`, `frame`, `isindex`: `<frame src="a">`), as the minifier did
+	/// with what prettier had printed. They are laid out as elements with a
+	/// closing tag, as prettier does (it does not take them for void), and only
+	/// the tag is not written; also not in the text copied from the source
+	/// as it stands. Not inside an IE conditional comment.
+	///
+	/// Meant for markup the serializer wrote, where these elements are always
+	/// closed. Given a `<frame>` without its closing tag, the printer's parser
+	/// would nest what follows it, and the nested nodes would then be written
+	/// as if they were its siblings.
+	pub empty_like_minifier: bool,
+	/// Leave out the closing tag of `basefont` and `frame`, which the HTML
+	/// standard's serialization writes none for (void elements), by the same
+	/// means and with the same limits as [`Options::empty_like_minifier`]
+	/// (which covers these two and more; with both set, that one decides).
+	/// Text copied from the source loses these tags too, but the content of a
+	/// `<textarea>` or `<title>` is text there and is not read.
+	pub standard_void_end_tags: bool,
 }
 
 impl Default for Options {
@@ -66,6 +85,8 @@ impl Default for Options {
 			hug_script: false,
 			hug_style: false,
 			compact_tags: false,
+			empty_like_minifier: false,
+			standard_void_end_tags: false,
 		}
 	}
 }
@@ -156,6 +177,10 @@ pub fn format(source: &str, options: &Options) -> Result<String, ParseError> {
 	if tree.node(tree.root).children().is_empty() {
 		return Ok(if bom { BOM.to_string() } else { String::new() });
 	}
+	// A source that holds the sign of the glue keeps its closing tags, rather than
+	// have one of its texts taken for the sign (see `doc::GLUE`).
+	let leave_out = (options.empty_like_minifier || options.standard_void_end_tags)
+		&& !text.contains(doc::GLUE);
 	let mut docs = doc::Docs::with_capacity(tree.node_count().saturating_mul(DOCS_PER_NODE));
 	let root = printer::print_root(
 		&tree,
@@ -167,6 +192,8 @@ pub fn format(source: &str, options: &Options) -> Result<String, ParseError> {
 			hug_script: options.hug_script,
 			hug_style: options.hug_style,
 			compact_tags: options.compact_tags,
+			empty_like_minifier: options.empty_like_minifier && leave_out,
+			standard_void_end_tags: options.standard_void_end_tags && leave_out,
 		},
 	);
 	let printed = doc::print(
@@ -176,6 +203,7 @@ pub fn format(source: &str, options: &Options) -> Result<String, ParseError> {
 			tab_width: options.tab_width,
 			use_tabs: options.use_tabs,
 			glue_markers: options.compact_tags,
+			glue_sign: leave_out,
 			capacity: output_capacity(text.len()),
 		},
 	);
@@ -295,6 +323,7 @@ mod tests {
 					tab_width: 2,
 					use_tabs: false,
 					glue_markers: false,
+					glue_sign: false,
 					capacity: 0,
 				},
 			);
@@ -396,6 +425,113 @@ mod tests {
 			..Options::default()
 		};
 		format(src, &options).unwrap()
+	}
+
+	fn without_empty_end_tags(src: &str) -> String {
+		let options = Options {
+			compact_tags: true,
+			empty_like_minifier: true,
+			..Options::default()
+		};
+		format(src, &options).unwrap()
+	}
+
+	#[test]
+	fn the_closing_tags_of_empty_elements_are_left_out_and_the_layout_is_kept() {
+		let src = "<html><head></head><frameset rows=\"48,*\"><frame src=\"a\" noresize></frame><frame src=\"b\"></frame></frameset></html>";
+		let with = format(
+			src,
+			&Options {
+				compact_tags: true,
+				..Options::default()
+			},
+		)
+		.unwrap();
+		let without = without_empty_end_tags(src);
+		assert!(with.contains("</frame>"), "{with}");
+		assert_eq!(without, with.replace("</frame>", ""));
+		assert!(!without.contains("</frame>"), "{without}");
+		assert!(without.contains("</frameset>"), "{without}");
+		for name in ["basefont", "isindex"] {
+			let src = format!("<p><{name}></{name}>x</p>");
+			let out = without_empty_end_tags(&src);
+			assert!(!out.contains(&format!("</{name}>")), "{out}");
+		}
+	}
+
+	#[test]
+	fn the_sign_of_a_left_out_closing_tag_is_not_confused_with_text_of_the_page() {
+		// Private-use characters (icon fonts) start texts of real pages.
+		let icons = without_empty_end_tags("<p><i>\u{E000}</i> <i>\u{E001}</i></p><frame></frame>");
+		assert!(icons.contains("<i>\u{E000}</i>"), "{icons}");
+		assert!(icons.contains("<i>\u{E001}</i>"), "{icons}");
+		assert!(!icons.contains("</frame>"), "{icons}");
+		// A source that holds the sign itself keeps its closing tags.
+		let src = format!("<div><frame></frame>{}x</div>", crate::print::doc::GLUE);
+		let out = without_empty_end_tags(&src);
+		assert!(out.contains("</frame>"), "{out}");
+		assert!(out.contains(crate::print::doc::GLUE), "{out}");
+	}
+
+	#[test]
+	fn the_text_of_a_textarea_is_markup_to_the_minifier_but_not_to_the_standard() {
+		let src = "<textarea><frame></frame></textarea>";
+		assert_eq!(
+			without_empty_end_tags(src),
+			"<textarea><frame></textarea>\n"
+		);
+		let standard = Options {
+			compact_tags: true,
+			standard_void_end_tags: true,
+			..Options::default()
+		};
+		assert_eq!(
+			format(src, &standard).unwrap(),
+			"<textarea><frame></frame></textarea>\n"
+		);
+	}
+
+	#[test]
+	fn the_standards_void_end_tags_are_left_out_for_basefont_and_frame_only() {
+		let options = Options {
+			compact_tags: true,
+			standard_void_end_tags: true,
+			..Options::default()
+		};
+		let out = format(
+			"<frameset><frame src=\"a\"></frame><frame src=\"b\"></frame></frameset><basefont></basefont><isindex></isindex><pre><frame></frame><b>x</b></pre><textarea><frame></frame></textarea>",
+			&options,
+		)
+		.unwrap();
+		assert!(
+			out.contains("<frame src=\"a\"><frame src=\"b\"></frameset>"),
+			"{out}"
+		);
+		assert!(out.contains("<basefont>"), "{out}");
+		assert!(!out.contains("</basefont>"), "{out}");
+		assert!(out.contains("<isindex></isindex>"), "{out}");
+		assert!(out.contains("<pre><frame><b>x</b></pre>"), "{out}");
+		// The text of a `<textarea>` is not markup.
+		assert!(
+			out.contains("<textarea><frame></frame></textarea>"),
+			"{out}"
+		);
+	}
+
+	#[test]
+	fn the_closing_tags_in_copied_text_are_left_out_but_not_in_a_conditional_comment() {
+		let pre = without_empty_end_tags("<pre><frame src=\"a\"></frame><b>x</b></pre>");
+		assert!(!pre.contains("</frame>"), "{pre}");
+		let ignored =
+			without_empty_end_tags("<div><!-- prettier-ignore --><frame src=\"a\"></frame></div>");
+		assert!(!ignored.contains("</frame>"), "{ignored}");
+		let comment =
+			without_empty_end_tags("<!--[if IE]><frame src=\"a\"></frame><![endif]--><p>x</p>");
+		assert!(comment.contains("</frame>"), "{comment}");
+		let nested = without_empty_end_tags(
+			"<!--[if IE]><div><frame src=\"a\"></frame></div><![endif]--><p>x</p>",
+		);
+		assert!(nested.contains("</frame>"), "{nested}");
 	}
 
 	#[test]

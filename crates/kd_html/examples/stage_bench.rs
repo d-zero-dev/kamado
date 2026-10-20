@@ -144,6 +144,8 @@ fn main() {
 				hug_script: options.hug_script,
 				hug_style: options.hug_style,
 				compact_tags: options.compact_tags,
+				empty_like_minifier: options.empty_like_minifier,
+				standard_void_end_tags: options.standard_void_end_tags,
 			},
 		);
 		parts[2] += t.elapsed().as_nanos();
@@ -155,6 +157,7 @@ fn main() {
 				tab_width: options.tab_width,
 				use_tabs: options.use_tabs,
 				glue_markers: options.compact_tags,
+				glue_sign: false,
 				capacity: print::output_capacity(p.len()),
 			},
 		);
@@ -218,6 +221,8 @@ fn main() {
 		hug_script: true,
 		hug_style: true,
 		compact_tags: true,
+		// (The formatter leaves the closing tags out; the serializer below keeps them.)
+		empty_like_minifier: true,
 		..options
 	};
 	let on_tree_options = kd_html::serialize::Options {
@@ -246,5 +251,35 @@ fn main() {
 		per_page(on_text, pages.len()),
 		per_page(on_tree, pages.len()),
 		pages.len()
+	);
+
+	// What leaving out the closing tags of the empty elements costs the formatter:
+	// the same compact formatting with and without it, one after the other for
+	// each page.
+	let plain_compact = print::Options {
+		empty_like_minifier: false,
+		..compact_options
+	};
+	let trees: Vec<String> = pages
+		.iter()
+		.map(|p| {
+			let mut page = kd_html::page::Page::parse(p);
+			let _ = minify::apply_to_dom(&mut page.doc, &min, &NoMinification);
+			page.serialize_with(&on_tree_options)
+		})
+		.collect();
+	let (mut left_out, mut kept) = (0u128, 0u128);
+	for html in &trees {
+		let t = Instant::now();
+		drop(std::hint::black_box(print::format(html, &compact_options)));
+		left_out += t.elapsed().as_nanos();
+		let t = Instant::now();
+		drop(std::hint::black_box(print::format(html, &plain_compact)));
+		kept += t.elapsed().as_nanos();
+	}
+	println!(
+		"format, compact: closing tags of empty elements left out {:.0}µs/page, kept {:.0}µs/page",
+		per_page(left_out, trees.len()),
+		per_page(kept, trees.len())
 	);
 }

@@ -13,6 +13,9 @@
  * KD_CHAIN_DIR=/tmp/kd-chain cargo test --release -p kd_core -- --ignored chain_matches_v2
  * ```
  *
+ * For a corpus written with `on`, set `KD_CHAIN_MINIFY=on` as well: the test then
+ * runs v3 with the minifier (code minifiers off).
+ *
  * With `on`, the corpus is what v2 outputs with its minifier, which v3 matches
  * on well-formed pages but not on the broken ones that this generator makes:
  * v3 minifies the tree, where the minifier repaired the markup (a `<colgroup>`

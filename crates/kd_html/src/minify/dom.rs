@@ -14,6 +14,11 @@
 //! - the minifier parser's repairs of broken markup (a `<colgroup>` around a
 //!   bare `<col>`, `<br />` losing its slash, unclosed elements closed): the
 //!   tree is already well formed, and the printer writes void elements;
+//! - the closing tag of an element the minifier reads as empty (`</frame>`,
+//!   `</basefont>`, `</isindex>`; [`super::is_empty_element`]): the serializer
+//!   writes it, as linkedom does, and the formatter
+//!   (`print::Options::empty_like_minifier`) or, without it,
+//!   [`super::strip_empty_element_end_tags`] leaves it out;
 //! - an empty boolean attribute written bare: the serializer does that
 //!   (`Options::bare_booleans`).
 //!

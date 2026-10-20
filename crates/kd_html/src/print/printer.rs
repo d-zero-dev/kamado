@@ -23,6 +23,8 @@ pub struct Settings {
 	pub hug_script: bool,
 	pub hug_style: bool,
 	pub compact_tags: bool,
+	pub empty_like_minifier: bool,
+	pub standard_void_end_tags: bool,
 }
 
 pub struct Printer<'a> {
@@ -308,10 +310,66 @@ impl<'a> Printer<'a> {
 
 	fn should_not_print_closing_tag(&self, id: NodeId) -> bool {
 		let n = self.node(id);
-		!n.is_self_closing
-			&& n.end_span.is_none()
-			&& (self.has_prettier_ignore(id)
-				|| n.parent().is_some_and(|p| self.should_preserve_content(p)))
+		self.drops_closing_tag(id)
+			|| (!n.is_self_closing
+				&& n.end_span.is_none()
+				&& (self.has_prettier_ignore(id)
+					|| n.parent().is_some_and(|p| self.should_preserve_content(p))))
+	}
+
+	/// Whether the closing tag of this element is left out, as the minifier
+	/// left out the one that prettier had printed (see
+	/// [`super::Options::empty_like_minifier`]). The parser here does not take
+	/// these elements for void, so the tree has them with a closing tag and
+	/// the printer lays them out like any element: leaving the tag out of the
+	/// output, and not out of the tree, is what keeps the line breaks where v2's
+	/// prettier put them. Not inside an IE conditional comment, which the
+	/// minifier read as a comment.
+	///
+	/// The same for `basefont` and `frame` when the standard's serialization is
+	/// asked for ([`super::Options::standard_void_end_tags`]).
+	fn drops_closing_tag(&self, id: NodeId) -> bool {
+		let n = self.node(id);
+		if !(self.settings.empty_like_minifier || self.settings.standard_void_end_tags)
+			|| n.kind != Kind::Element
+			|| n.is_self_closing
+		{
+			return false;
+		}
+		let name = n.raw_name();
+		let named = (self.settings.empty_like_minifier && crate::minify::is_empty_element(&name))
+			|| (self.settings.standard_void_end_tags
+				&& crate::serialize::is_void_unknown_to_formatter(&name));
+		named && !self.in_conditional_comment(id)
+	}
+
+	/// `text`, which is copied from the source for the node `id` as it stands,
+	/// without the closing tags that are left out: the rule of
+	/// `drops_closing_tag`, which works on the tree and on the closing-tag
+	/// markers written from it, does not reach text copied from the source.
+	/// `markup` is false for the text of a text node (the content of a
+	/// `<textarea>` or `<title>`): the minifier read that as markup, the
+	/// standard's serialization has no markup in it.
+	fn copied_text<'t>(
+		&self,
+		id: NodeId,
+		text: &'t str,
+		markup: bool,
+	) -> std::borrow::Cow<'t, str> {
+		// (The text has nothing to strip in nearly every case; that is asked first,
+		// as this runs for every text node of a page.)
+		if !(self.settings.empty_like_minifier || (markup && self.settings.standard_void_end_tags))
+			|| !text.contains("</")
+			|| self.node(id).kind == Kind::IeConditionalComment
+			|| self.in_conditional_comment(id)
+		{
+			return std::borrow::Cow::Borrowed(text);
+		}
+		if self.settings.empty_like_minifier {
+			crate::minify::strip_empty_element_end_tags(text)
+		} else {
+			crate::minify::strip_standard_void_end_tags(text)
+		}
 	}
 
 	fn print_closing_tag_start_marker(&self, id: NodeId) -> String {
@@ -384,9 +442,21 @@ impl<'a> Printer<'a> {
 		if self.needs_to_borrow_prev_closing_tag_end_marker(id)
 			&& let Some(p) = self.ast.prev(id)
 		{
-			return self.print_closing_tag_end_marker(p);
+			return self.borrowed_closing_tag_end_marker(p);
 		}
 		String::new()
+	}
+
+	/// The end marker of the closing tag of `id` as the next node, or the parent,
+	/// writes it where it borrowed it. A closing tag that is left out (see
+	/// `drops_closing_tag`) had its line break inside the tag (`</frame` break
+	/// `>`), so that nothing breaks in its place: what is written is the sign
+	/// [`super::doc::GLUE`] that takes the line back.
+	fn borrowed_closing_tag_end_marker(&self, id: NodeId) -> String {
+		if self.drops_closing_tag(id) {
+			return super::doc::GLUE.to_string();
+		}
+		self.print_closing_tag_end_marker(id)
 	}
 
 	fn print_closing_tag_suffix(&self, id: NodeId) -> String {
@@ -406,7 +476,7 @@ impl<'a> Printer<'a> {
 		if self.needs_to_borrow_last_child_closing_tag_end_marker(id)
 			&& let Some(last) = self.ast.last_child(id)
 		{
-			return self.print_closing_tag_end_marker(last);
+			return self.borrowed_closing_tag_end_marker(last);
 		}
 		String::new()
 	}
@@ -811,6 +881,7 @@ impl<'a> Printer<'a> {
 			let opening = self.print_opening_tag(id);
 			let opening = self.docs.group(opening);
 			let content = self.node_content(id);
+			let content = self.copied_text(id, &content, true);
 			let content = self.docs.replace_end_of_line(&content, LITERALLINE);
 			let closing = self.print_closing_tag(id);
 			let suffix = self.print_closing_tag_suffix(id);
@@ -985,6 +1056,7 @@ impl<'a> Printer<'a> {
 				end: to.max(from),
 			}))
 			.to_owned();
+			let raw = self.copied_text(id, &raw, true);
 			let prefix = self.print_opening_tag_prefix(id);
 			let prefix = self.text(prefix);
 			let body = self.docs.replace_end_of_line(&raw, LITERALLINE);
@@ -1108,8 +1180,20 @@ impl<'a> Printer<'a> {
 
 	fn text_value_parts(&mut self, id: NodeId) -> Vec<DocId> {
 		let n = self.node(id);
-		let value = n.value.clone();
 		let parent = self.node(n.parent().unwrap_or(self.ast.root));
+		// What this parser reads as text (the content of a `<textarea>` or a
+		// `<title>`) is markup to the minifier, which dropped the closing tags of
+		// empty elements there; the code of `<script>` and `<style>` it did not read.
+		// (The flags and the text are asked before the name of the parent, which
+		// allocates: this runs for every text node of every page.)
+		let value = if (self.settings.empty_like_minifier || self.settings.standard_void_end_tags)
+			&& n.value.contains("</")
+			&& !matches!(parent.full_name().as_str(), "script" | "style")
+		{
+			self.copied_text(id, &n.value, false).into_owned()
+		} else {
+			n.value.clone()
+		};
 		if parent.is_whitespace_sensitive {
 			if parent.is_indentation_sensitive {
 				return self.replace_eol_parts(&value, LITERALLINE);

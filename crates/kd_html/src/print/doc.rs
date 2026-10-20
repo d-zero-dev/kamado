@@ -386,6 +386,14 @@ impl Docs {
 // ---------------------------------------------------------------------------
 // printing
 
+/// Starts a text that stands for the end of a closing tag left out: the line
+/// break that was inside that tag goes with it (the printer takes the line
+/// back, as for the `>` that ends a tag), and the sign itself is not written.
+/// A noncharacter (Unicode keeps these for internal use, so a page has no use
+/// for one): `print::format` does not leave closing tags out of a source that
+/// holds it, so that a text of the page is never taken for the sign.
+pub const GLUE: char = '\u{FDD0}';
+
 /// How the printer lays out.
 #[derive(Debug, Clone, Copy)]
 pub struct PrintOptions {
@@ -397,6 +405,10 @@ pub struct PrintOptions {
 	/// Why a text can be taken for such an end: the serializer writes a `>` of
 	/// the text of a page as `&gt;`, so a text that starts with one is a tag's.
 	pub glue_markers: bool,
+	/// A text that starts with [`GLUE`] is the sign of a closing tag that is left
+	/// out: it takes the line back like the end of a tag, and is not written.
+	/// Off, the character is a character like any other.
+	pub glue_sign: bool,
 	/// Bytes to reserve for the output, so that it is not copied each time it doubles. Only a
 	/// hint: a longer output still grows.
 	pub capacity: usize,
@@ -575,8 +587,17 @@ impl Printer<'_> {
 			} = cmd;
 			match &self.docs.nodes[doc as usize] {
 				Node::Text(s) => {
-					if self.options.glue_markers
-						&& (s.starts_with('>') || s.starts_with("/>"))
+					// The sign of a closing tag that is left out takes the line
+					// back like the end of a tag does, and is not written.
+					let (glue, s) = match s.strip_prefix(GLUE).filter(|_| self.options.glue_sign) {
+						Some(rest) => (true, rest),
+						None => (
+							self.options.glue_markers
+								&& (s.starts_with('>') || s.starts_with("/>")),
+							s.as_str(),
+						),
+					};
+					if glue
 						&& let Some((start, end)) = self.last_line
 						&& self.out.len() == end
 					{
@@ -811,6 +832,7 @@ mod tests {
 			tab_width: 2,
 			use_tabs: tabs,
 			glue_markers: false,
+			glue_sign: false,
 			capacity: 0,
 		}
 	}
