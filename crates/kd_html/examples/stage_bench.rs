@@ -133,7 +133,7 @@ fn main() {
 		parts[1] += t.elapsed().as_nanos();
 		let t = Instant::now();
 		let mut docs =
-			print::doc::Docs::with_capacity(tree.nodes.len().saturating_mul(print::DOCS_PER_NODE));
+			print::doc::Docs::with_capacity(tree.node_count().saturating_mul(print::DOCS_PER_NODE));
 		let root = print::printer::print_root(
 			&tree,
 			&mut docs,
