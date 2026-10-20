@@ -173,13 +173,19 @@ pub(crate) fn is_js_space(c: char) -> bool {
 /// ```
 #[must_use]
 pub fn normalize_class(value: &str) -> String {
+	class_tokens(value).join(" ")
+}
+
+/// The tokens of a `class` value as `classList` reads them: split on
+/// JavaScript white space, empty ones and repeats dropped (first one wins).
+pub(crate) fn class_tokens(value: &str) -> Vec<&str> {
 	let mut seen: Vec<&str> = Vec::new();
 	for token in value.split(is_js_space) {
 		if !token.is_empty() && !seen.contains(&token) {
 			seen.push(token);
 		}
 	}
-	seen.join(" ")
+	seen
 }
 
 /// JavaScript object key order: canonical array indices ascending first, then

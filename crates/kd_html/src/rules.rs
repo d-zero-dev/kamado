@@ -10,6 +10,19 @@
 //! them, so an action's own changes do not influence which elements the rule
 //! visits. Rules see the result of the rules before them.
 //!
+//! Attributes behave as the DOM API `manipulateDOM` hooks used in v2
+//! (`setAttribute`, `removeAttribute`, `classList`): a new attribute goes
+//! first while an existing one keeps its place, and `class` is read and
+//! written as a token list (white space as in JavaScript, no empty or
+//! repeated tokens). Names are matched ASCII-case-insensitively, as in an
+//! HTML document and as the selectors do, so `data-x` finds `DATA-X`.
+//!
+//! Why not match names exactly, as v2's DOM (linkedom) does: it keeps the
+//! case an author wrote, so on `<p CLASS=c>` its selectors and `getAttribute`
+//! do not see `CLASS`, and `classList.add` writes a second, lowercase `class`
+//! in front. A browser then uses only the first one and the author's class is
+//! gone. Here the rule and its selector see the same attribute and extend it.
+//!
 //! Text templates (`setAttr` values, `insert` and `wrap` markup) may use
 //! `{{attr:NAME}}` (the element's own attribute, empty when missing),
 //! `{{url}}` (the page's output URL), `{{baseURL}}` and `{{host}}`. `wrap`
@@ -18,7 +31,7 @@
 
 use crate::dom::{Document, NodeId, NodeKind, ROOT};
 use crate::page::Page;
-use crate::parser::parse;
+use crate::parser::{class_tokens, parse};
 use crate::pattern::Pattern;
 use crate::selector::Selector;
 
@@ -138,7 +151,7 @@ impl Template {
 			match part {
 				Part::Text(t) => out.push_str(t),
 				Part::Attr(name) => {
-					if let Some(v) = attr_ignore_case(doc, node, name) {
+					if let Some(v) = doc.element(node).and_then(|e| e.attr_ignore_case(name)) {
 						push_value(&mut out, v);
 					}
 				}
@@ -150,14 +163,6 @@ impl Template {
 		}
 		out
 	}
-}
-
-fn attr_ignore_case<'a>(doc: &'a Document, node: NodeId, name: &str) -> Option<&'a str> {
-	doc.element(node)?
-		.attrs
-		.iter()
-		.find(|a| a.name.eq_ignore_ascii_case(name))
-		.map(|a| a.value.as_str())
 }
 
 /// Where `insert` puts its markup relative to the element.
@@ -219,7 +224,7 @@ pub enum Action {
 /// let mut page = Page::parse("<a href=\"https://x.test/\">x</a>");
 /// let ctx = Context { url: "/", base_url: "https://example.com/", host: "example.com" };
 /// apply(&mut page, &rules, &ctx).unwrap();
-/// assert_eq!(page.serialize(), "<a href=\"https://x.test/\" rel=\"noopener\">x</a>");
+/// assert_eq!(page.serialize(), "<a rel=\"noopener\" href=\"https://x.test/\">x</a>");
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule {
@@ -272,6 +277,9 @@ impl Rule {
 		})
 	}
 
+	/// Sets attribute `name` as `setAttribute` does: an existing attribute (of
+	/// any case) keeps its place, and a new one goes first.
+	///
 	/// # Errors
 	///
 	/// A [`RuleError`] for an invalid selector, name or template.
@@ -306,6 +314,9 @@ impl Rule {
 		})
 	}
 
+	/// Adds `class` as `classList.add` does: `class` is rewritten as a list of
+	/// distinct tokens, and an element without one gets it first.
+	///
 	/// # Errors
 	///
 	/// A [`RuleError`] for an invalid selector or an empty class.
@@ -590,22 +601,17 @@ pub(crate) fn fragment(doc: &mut Document, html: &str) -> Vec<NodeId> {
 	children
 }
 
-fn class_tokens(doc: &Document, node: NodeId) -> Vec<String> {
-	attr_ignore_case(doc, node, "class")
-		.map(|v| v.split_ascii_whitespace().map(str::to_owned).collect())
+fn element_class_tokens(doc: &Document, node: NodeId) -> Vec<String> {
+	doc.element(node)
+		.and_then(|e| e.attr_ignore_case("class"))
+		.map(|v| class_tokens(v).into_iter().map(str::to_owned).collect())
 		.unwrap_or_default()
 }
 
+/// `Element::set_attribute` on `node`, which may be a text or comment node.
 fn set_attribute(doc: &mut Document, node: NodeId, name: &str, value: &str) {
 	if let Some(element) = doc.element_mut(node) {
-		match element
-			.attrs
-			.iter_mut()
-			.find(|a| a.name.eq_ignore_ascii_case(name))
-		{
-			Some(existing) => existing.value = value.to_owned(),
-			None => element.set_attr(name, value),
-		}
+		element.set_attribute(name, value);
 	}
 }
 
@@ -683,19 +689,35 @@ fn apply_to(
 			}
 		}
 		Action::AddClass(class) => {
-			let mut tokens = class_tokens(&page.doc, node);
+			let mut tokens = element_class_tokens(&page.doc, node);
 			if !tokens.contains(class) {
 				tokens.push(class.clone());
 			}
 			set_attribute(&mut page.doc, node, "class", &tokens.join(" "));
 		}
 		Action::RemoveClass(class) => {
-			let tokens: Vec<String> = class_tokens(&page.doc, node)
+			let tokens: Vec<String> = element_class_tokens(&page.doc, node)
 				.into_iter()
 				.filter(|t| t != class)
 				.collect();
-			if attr_ignore_case(&page.doc, node, "class").is_some() {
-				set_attribute(&mut page.doc, node, "class", &tokens.join(" "));
+			// Why not create an empty `class` when there is none: the serializer
+			// drops an empty `class`, so the output is the same.
+			let written = page.doc.element(node).and_then(|e| {
+				e.attrs
+					.iter()
+					.find(|a| a.name.eq_ignore_ascii_case("class"))
+					.map(|a| a.name.clone())
+			});
+			if let Some(written) = written {
+				if tokens.is_empty() && written != "class" {
+					// The serializer drops an empty `class` written in lower case
+					// only (as v2's does), so one written `CLASS` is removed here.
+					if let Some(e) = page.doc.element_mut(node) {
+						e.remove_attr(&written);
+					}
+				} else {
+					set_attribute(&mut page.doc, node, "class", &tokens.join(" "));
+				}
 			}
 		}
 		Action::Insert { position, html } => {
@@ -729,7 +751,12 @@ fn apply_to(
 		}
 		Action::RewriteUrl { to, origin, attrs } => {
 			for attr in attrs {
-				let Some(value) = attr_ignore_case(&page.doc, node, attr).map(str::to_owned) else {
+				let Some(value) = page
+					.doc
+					.element(node)
+					.and_then(|e| e.attr_ignore_case(attr))
+					.map(str::to_owned)
+				else {
 					continue;
 				};
 				if let Some(new) = rewrite_attribute(attr, &value, *to, origin, ctx.url) {
@@ -843,11 +870,12 @@ mod tests {
 	}
 
 	#[test]
-	fn set_attr_replaces_in_place_or_appends_and_expands_templates() {
+	fn set_attr_replaces_in_place_or_puts_first_and_expands_templates() {
 		let r = [Rule::set_attr("a", HOST, "rel", "noopener").unwrap()];
 		assert_eq!(
 			run("<a href=x rel=old>t</a><a href=y>u</a>", &r),
-			"<a href=\"x\" rel=\"noopener\">t</a><a href=\"y\" rel=\"noopener\">u</a>"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<a href=\"x\" rel=\"noopener\">t</a><a rel=\"noopener\" href=\"y\">u</a>" // "<a href=\"x\" rel=\"noopener\">t</a><a href=\"y\" rel=\"noopener\">u</a>" // previous
 		);
 		let r = [Rule::set_attr(
 			"a",
@@ -858,11 +886,79 @@ mod tests {
 		.unwrap()];
 		assert_eq!(
 			run("<a href=x>t</a>", &r),
-			"<a href=\"x\" data-p=\"/a/b/|https://example.com/|example.com|x|\">t</a>"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<a data-p=\"/a/b/|https://example.com/|example.com|x|\" href=\"x\">t</a>" // "<a href=\"x\" data-p=\"/a/b/|https://example.com/|example.com|x|\">t</a>" // previous
 		);
 		assert!(Rule::set_attr("a", HOST, "rel", "{{nope}}").is_err());
 		assert!(Rule::set_attr("a", HOST, "rel", "{{content}}").is_err());
 		assert!(Rule::set_attr("a", HOST, "bad name", "x").is_err());
+	}
+
+	#[test]
+	fn attribute_names_are_matched_without_case_as_in_an_html_document() {
+		let r = [Rule::set_attr("p", HOST, "data-x", "2").unwrap()];
+		assert_eq!(run("<p DATA-X=1>x</p>", &r), "<p DATA-X=\"2\">x</p>");
+		let r = [Rule::remove_attr("p", HOST, "data-x").unwrap()];
+		assert_eq!(run("<p DATA-X=1 data-x=2>x</p>", &r), "<p>x</p>");
+		// A pattern is a regular expression over the names as written.
+		let r = [Rule::remove_attr("p", HOST, "/^data-/").unwrap()];
+		assert_eq!(
+			run("<p DATA-X=1 data-x=2>x</p>", &r),
+			"<p DATA-X=\"1\">x</p>"
+		);
+		let r = [Rule::rewrite_url(
+			"a",
+			HOST,
+			UrlTarget::Absolute,
+			"https://example.com",
+			&["href"],
+		)
+		.unwrap()];
+		assert_eq!(
+			run("<a HREF=\"/x\">t</a>", &r),
+			"<a HREF=\"https://example.com/x\">t</a>"
+		);
+		let r = [Rule::set_attr("a", HOST, "data-h", "{{attr:href}}").unwrap()];
+		assert_eq!(
+			run("<a HREF=x>t</a>", &r),
+			"<a data-h=\"x\" HREF=\"x\">t</a>"
+		);
+	}
+
+	#[test]
+	fn a_selector_and_an_action_see_the_same_attribute() {
+		let r = [Rule::add_class("p.c", HOST, "k").unwrap()];
+		assert_eq!(run("<p CLASS=c>x</p>", &r), "<p CLASS=\"c k\">x</p>");
+		let r = [Rule::remove_class("p.c", HOST, "c").unwrap()];
+		assert_eq!(run("<p CLASS=\"c d\">x</p>", &r), "<p CLASS=\"d\">x</p>");
+		assert_eq!(run("<p CLASS=c>x</p>", &r), "<p>x</p>");
+		let r = [Rule::add_class("p", HOST, "k").unwrap()];
+		assert_eq!(run("<p CLASS=\"\">x</p>", &r), "<p CLASS=\"k\">x</p>");
+		let r = [Rule::add_class("p.b", HOST, "k").unwrap()];
+		let mut page = Page::parse("<p>x</p>");
+		let first = [Rule::set_attr("p", HOST, "class", "a\u{a0}b").unwrap()];
+		apply(&mut page, &first, &ctx()).unwrap();
+		apply(&mut page, &r, &ctx()).unwrap();
+		assert_eq!(page.serialize(), "<p class=\"a b k\">x</p>");
+	}
+
+	#[test]
+	fn classes_are_read_and_written_like_a_class_list() {
+		let r = [Rule::add_class("p", HOST, "c").unwrap()];
+		let mut page = Page::parse("<p>x</p>");
+		let first = [Rule::set_attr("p", HOST, "class", "a\u{a0}b\ta a").unwrap()];
+		apply(&mut page, &first, &ctx()).unwrap();
+		apply(&mut page, &r, &ctx()).unwrap();
+		assert_eq!(page.serialize(), "<p class=\"a b c\">x</p>");
+		let r = [Rule::remove_class("p", HOST, "c").unwrap()];
+		apply(&mut page, &r, &ctx()).unwrap();
+		assert_eq!(page.serialize(), "<p class=\"a b\">x</p>");
+		let r = [
+			Rule::remove_class("p", HOST, "a").unwrap(),
+			Rule::remove_class("p", HOST, "b").unwrap(),
+		];
+		apply(&mut page, &r, &ctx()).unwrap();
+		assert_eq!(page.serialize(), "<p>x</p>");
 	}
 
 	#[test]
@@ -879,7 +975,8 @@ mod tests {
 				"<a href=\"https://example.com/x\">in</a><a href=\"https://other.test/\">out</a>",
 				&r
 			),
-			"<a href=\"https://example.com/x\">in</a><a href=\"https://other.test/\" target=\"_blank\">out</a>"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<a href=\"https://example.com/x\">in</a><a target=\"_blank\" href=\"https://other.test/\">out</a>" // "<a href=\"https://example.com/x\">in</a><a href=\"https://other.test/\" target=\"_blank\">out</a>" // previous
 		);
 	}
 
@@ -1010,7 +1107,9 @@ mod tests {
 			Rule::add_class("p", HOST, "x").unwrap(),
 			Rule::set_attr("p.x", HOST, "data-seen", "1").unwrap(),
 		];
-		assert_eq!(run("<p>a</p>", &r), "<p class=\"x\" data-seen=\"1\">a</p>");
+		// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+		assert_eq!(run("<p>a</p>", &r), "<p data-seen=\"1\" class=\"x\">a</p>");
+		// assert_eq!(run("<p>a</p>", &r), "<p class=\"x\" data-seen=\"1\">a</p>"); // previous
 	}
 
 	#[test]
@@ -1029,7 +1128,8 @@ mod tests {
 		let r = [Rule::set_attr("p", HOST, "data-x", "1").unwrap()];
 		assert_eq!(
 			run("<p class=\"<?php echo $c; ?>\"><?php echo $t; ?></p>", &r),
-			"<p class=\"<?php echo $c; ?>\" data-x=\"1\"><?php echo $t; ?></p>"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<p data-x=\"1\" class=\"<?php echo $c; ?>\"><?php echo $t; ?></p>" // "<p class=\"<?php echo $c; ?>\" data-x=\"1\"><?php echo $t; ?></p>" // previous
 		);
 	}
 
@@ -1126,7 +1226,8 @@ mod tests {
 		let r = [Rule::set_attr("p", HOST, "data-t", "{{attr:title}}").unwrap()];
 		assert_eq!(
 			run("<p title='a&amp;b'>t</p>", &r),
-			"<p title=\"a&b\" data-t=\"a&b\">t</p>"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<p data-t=\"a&b\" title=\"a&b\">t</p>" // "<p title=\"a&b\" data-t=\"a&b\">t</p>" // previous
 		);
 	}
 

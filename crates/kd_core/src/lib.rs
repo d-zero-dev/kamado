@@ -2780,7 +2780,8 @@ mod tests {
 		run_build(&loaded).unwrap();
 		assert_eq!(
 			site.read("out/a.html"),
-			"<!DOCTYPE html>\n<html>\n\t<head>\n\t\t<meta name=\"robots\" content=\"noindex\">\n\t</head>\n\t<body>\n\t\t<a href=\"https://other.test/\" rel=\"noopener\">x</a>\n\t\t<p class=\"old\">&copy;</p>\n\t</body>\n</html>\n"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<!DOCTYPE html>\n<html>\n\t<head>\n\t\t<meta name=\"robots\" content=\"noindex\">\n\t</head>\n\t<body>\n\t\t<a rel=\"noopener\" href=\"https://other.test/\">x</a>\n\t\t<p class=\"old\">&copy;</p>\n\t</body>\n</html>\n" // "<!DOCTYPE html>\n<html>\n\t<head>\n\t\t<meta name=\"robots\" content=\"noindex\">\n\t</head>\n\t<body>\n\t\t<a href=\"https://other.test/\" rel=\"noopener\">x</a>\n\t\t<p class=\"old\">&copy;</p>\n\t</body>\n</html>\n" // previous
 		);
 	}
 
@@ -2804,7 +2805,8 @@ mod tests {
 		run_build(&loaded).unwrap();
 		assert_eq!(
 			site.read("out/a.html"),
-			"<header>h</header>\n<img src=\"/p.png\" width=\"3\" height=\"2\"><img src=\"/missing.png\">\n"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<header>h</header>\n<img height=\"2\" width=\"3\" src=\"/p.png\"><img src=\"/missing.png\">\n" // "<header>h</header>\n<img src=\"/p.png\" width=\"3\" height=\"2\"><img src=\"/missing.png\">\n" // previous
 		);
 		let cache = kd_build::cache_dir(&loaded.config.root_dir, Some(".cache"));
 		let manifest =
@@ -2851,7 +2853,8 @@ mod tests {
 		run_build(&loaded).unwrap();
 		assert_eq!(
 			site.read("out/a.html"),
-			"<a href=\"https://example.com/x\">in</a><a href=\"https://other.test/\" rel=\"noopener\">out</a>\n"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<a href=\"https://example.com/x\">in</a><a rel=\"noopener\" href=\"https://other.test/\">out</a>\n" // "<a href=\"https://example.com/x\">in</a><a href=\"https://other.test/\" rel=\"noopener\">out</a>\n" // previous
 		);
 	}
 
@@ -2868,9 +2871,27 @@ mod tests {
 		assert_eq!(site.read("out/index.html"), "<p data-all=\"1\">top</p>\n");
 		assert_eq!(
 			site.read("out/a/index.html"),
-			"<p class=\"hit\" data-all=\"1\">a</p>\n"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<p data-all=\"1\" class=\"hit\">a</p>\n" // "<p class=\"hit\" data-all=\"1\">a</p>\n" // previous
 		);
 		assert_eq!(site.read("out/b.html"), "<p>b</p>\n");
+	}
+
+	#[test]
+	fn removing_the_last_class_leaves_no_class_attribute_through_format_and_minify() {
+		let site = Site::new("last-class");
+		site.write(
+			"src/a.html",
+			"<p id=\"i\" class=\"x\">a</p><p class=\"x y\">b</p>",
+		);
+		let loaded = site.config(
+			r#", "html": { "rules": [ { "selector": "p", "action": "removeClass", "value": "x" } ] }"#,
+		);
+		run_build(&loaded).unwrap();
+		assert_eq!(
+			site.read("out/a.html"),
+			"<p id=\"i\">a</p>\n<p class=\"y\">b</p>\n"
+		);
 	}
 
 	#[test]
@@ -2925,7 +2946,8 @@ mod tests {
 		assert_eq!(statuses(&incremental()), [("/a.html", "built")]);
 		assert_eq!(
 			site.read("out/a.html"),
-			"<b>part</b><img src=\"/p.svg\" width=\"4\" height=\"3\">\n"
+			// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+			"<b>part</b><img height=\"3\" width=\"4\" src=\"/p.svg\">\n" // "<b>part</b><img src=\"/p.svg\" width=\"4\" height=\"3\">\n" // previous
 		);
 	}
 
@@ -2994,7 +3016,8 @@ mod tests {
 		for i in 0..24 {
 			assert_eq!(
 				site.read(&format!("out/p{i}.html")),
-				"<header>h</header>\n<img src=\"/s.svg\" width=\"8\" height=\"6\">\n"
+				// Behavior change: a new attribute is put first, as linkedom's setAttribute does
+				"<header>h</header>\n<img height=\"6\" width=\"8\" src=\"/s.svg\">\n" // "<header>h</header>\n<img src=\"/s.svg\" width=\"8\" height=\"6\">\n" // previous
 			);
 		}
 	}

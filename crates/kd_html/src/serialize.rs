@@ -153,6 +153,8 @@ fn push_attribute(
 		}
 		// The standard writes every empty attribute as `name=""`.
 		if is_empty_attribute(name) && !spec {
+			// Why `class` too: `removeClass` leaves an emptied `class` on the tree
+			// and relies on this to keep it out of the output.
 			if matches!(name, "id" | "class" | "style") {
 				return;
 			}

@@ -364,31 +364,56 @@ impl Document {
 }
 
 impl Element {
-	/// Sets attribute `name` (exact match), keeping its position when it
-	/// exists and appending it otherwise.
-	pub fn set_attr(&mut self, name: &str, value: &str) {
-		match self.attrs.iter_mut().find(|a| a.name == name) {
+	/// Sets attribute `name` (ASCII-case-insensitively, as an HTML document
+	/// does), keeping its position and its written name when it exists and
+	/// putting it first otherwise: what linkedom's `setAttribute` does, so what
+	/// is added later comes earlier. This is what the `setAttr` rule and
+	/// `imageSizes` call.
+	pub fn set_attribute(&mut self, name: &str, value: &str) {
+		match self
+			.attrs
+			.iter_mut()
+			.find(|a| a.name.eq_ignore_ascii_case(name))
+		{
 			Some(existing) => existing.value = value.to_owned(),
-			None => self.attrs.push(Attr {
-				name: name.to_owned(),
-				value: value.to_owned(),
-			}),
+			None => self.attrs.insert(
+				0,
+				Attr {
+					name: name.to_owned(),
+					value: value.to_owned(),
+				},
+			),
 		}
 	}
 
-	/// Removes attribute `name` (exact match); whether it was there.
+	/// Removes attribute `name` (exact match, a name as written); whether it
+	/// was there. An HTML document would match without case: take the name
+	/// from the element.
 	pub fn remove_attr(&mut self, name: &str) -> bool {
 		let before = self.attrs.len();
 		self.attrs.retain(|a| a.name != name);
 		self.attrs.len() != before
 	}
 
-	/// The value of attribute `name` (exact, case-sensitive match).
+	/// The value of attribute `name` (exact, case-sensitive match). To look an
+	/// attribute up as an HTML document does, use `attr_ignore_case`.
 	#[must_use]
 	pub fn attr(&self, name: &str) -> Option<&str> {
 		self.attrs
 			.iter()
 			.find(|a| a.name == name)
+			.map(|a| a.value.as_str())
+	}
+
+	/// The value of attribute `name`, ASCII-case-insensitively: the way an
+	/// HTML document looks an attribute up (`getAttribute` there lowercases
+	/// the name). The parser keeps the case an author wrote, so `DATA-X` is
+	/// found by `data-x`.
+	#[must_use]
+	pub fn attr_ignore_case(&self, name: &str) -> Option<&str> {
+		self.attrs
+			.iter()
+			.find(|a| a.name.eq_ignore_ascii_case(name))
 			.map(|a| a.value.as_str())
 	}
 }
@@ -483,6 +508,34 @@ mod tests {
 		doc.append_text(p, "y");
 		assert_eq!(names(&doc, p), ["#a&b", "em", "#y"]);
 		assert_eq!(doc.text_content(p), "a&bxy");
+	}
+
+	#[test]
+	fn set_attribute_puts_a_new_attribute_first_and_keeps_an_existing_one_in_place() {
+		let mut element = Element {
+			name: "img".into(),
+			attrs: vec![
+				Attr {
+					name: "src".into(),
+					value: "/a.svg".into(),
+				},
+				Attr {
+					name: "height".into(),
+					value: "1".into(),
+				},
+			],
+			svg: false,
+		};
+		element.set_attribute("width", "22");
+		element.set_attribute("height", "22");
+		element.set_attribute("alt", "x");
+		let names: Vec<&str> = element.attrs.iter().map(|a| a.name.as_str()).collect();
+		assert_eq!(names, ["alt", "width", "src", "height"]);
+		assert_eq!(element.attr("height"), Some("22"));
+		element.set_attribute("WIDTH", "1");
+		assert_eq!(element.attrs[1].name, "width");
+		assert_eq!(element.attr("width"), Some("1"));
+		assert_eq!(element.attrs.len(), 4);
 	}
 
 	#[test]
