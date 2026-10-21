@@ -100,6 +100,11 @@
 			"enabled": false
 		},
 		{
+			"description": "postcss-custom-media is the version v2's @d-zero/postcss-config pins, the oracle of scripts/check-css-custom-media.mjs; it does not move on its own (docs/v3/development.md)",
+			"matchDepNames": ["postcss-custom-media"],
+			"enabled": false
+		},
+		{
 			"description": "benchmarks/v2-baseline pins the published v2 and what it needs; it is not kept up to date",
 			"matchFileNames": ["benchmarks/v2-baseline/package.json"],
 			"enabled": false
