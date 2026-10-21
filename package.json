@@ -61,7 +61,7 @@
 		"kamado-v2": "npm:kamado@2.0.0-alpha.17",
 		"lerna": "10.0.1",
 		"npm-run-all2": "9.0.3",
-		"postcss": "8.5.29",
+		"postcss": "8.5.30",
 		"postcss-custom-media": "12.0.1",
 		"postcss-import": "17.0.0",
 		"prettier": "3.9.10",
