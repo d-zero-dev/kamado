@@ -61,6 +61,9 @@ pub struct Built {
 	/// Fingerprints of every file that was read (and of the candidates that
 	/// were probed and missing).
 	pub deps: BTreeMap<String, Dep>,
+	/// A message for each statement of the sources that was left out (see
+	/// [`crate::style_import::Bundle::warnings`]), for the build report.
+	pub warnings: Vec<String>,
 }
 
 /// Builds the stylesheet `input`, which is written to `output` (that is where
@@ -117,6 +120,7 @@ pub fn build(input: &str, output: &str, settings: &StyleSettings) -> Result<Buil
 	Ok(Built {
 		css,
 		deps: bundle.deps,
+		warnings: bundle.warnings,
 	})
 }
 
@@ -218,6 +222,59 @@ mod tests {
 		assert!(built.deps.contains_key(&main));
 	}
 
+	fn minified(dir: &Dir, main: &str) -> Built {
+		let settings = StyleSettings {
+			alias: Vec::new(),
+			banner: None,
+			minify: true,
+			sourcemap: false,
+		};
+		build(
+			&format!("{}/{main}", dir.0),
+			&format!("{}/out/{main}", dir.0),
+			&settings,
+		)
+		.unwrap()
+	}
+
+	#[test]
+	fn a_remote_import_of_an_imported_file_keeps_the_layer_of_its_import() {
+		let dir = Dir::new("remote-layer");
+		dir.write(
+			"_b.css",
+			"@import url('https://example.com/f.css');\n.b { color: blue; }\n",
+		);
+		dir.write(
+			"main.css",
+			"@layer x, y;\n@import './_b.css' layer(y);\n.a { color: red; }\n",
+		);
+
+		let built = minified(&dir, "main.css");
+
+		assert_eq!(
+			built.css,
+			"@layer x, y;@import url(\"https://example.com/f.css\") layer(y);@layer y{.b{color:blue}}.a{color:red}"
+		);
+		assert!(built.warnings.is_empty());
+	}
+
+	#[test]
+	fn an_import_that_cannot_stand_where_it_is_is_left_out_and_reported() {
+		let dir = Dir::new("import-reported");
+		dir.write("_b.css", ".b { color: blue; }\n");
+		dir.write("_c.css", ".c { color: green; }\n");
+		dir.write(
+			"main.css",
+			"@import './_b.css';\n@layer x;\n@import './_c.css';\n.a { color: red; }\n",
+		);
+
+		let built = minified(&dir, "main.css");
+
+		assert_eq!(built.css, "@layer x;.b{color:blue}.a{color:red}");
+		assert_eq!(built.warnings.len(), 1);
+		assert!(built.warnings[0].contains("must precede all other statements"));
+	}
+
 	#[test]
 	fn the_charset_and_the_layer_order_hoisted_to_the_top_stay_in_front_of_the_banner() {
 		let dir = Dir::new("hoisted");
@@ -235,10 +292,15 @@ mod tests {
 
 		let built = build(&main, &format!("{}/out/main.css", dir.0), &settings).unwrap();
 
+		// Behavior change: `one` is declared before `two`, as the import does, so `@layer one;` is written in front of the order that names `two` first
 		assert_eq!(
 			built.css,
-			"@layer two, one;/*! v */@layer one{a{color:#fff}}b{margin:0}"
+			"@layer one;@layer two, one;/*! v */@layer one{a{color:#fff}}b{margin:0}"
 		);
+		// assert_eq!( // previous
+		// 	built.css, // previous
+		// 	"@layer two, one;/*! v */@layer one{a{color:#fff}}b{margin:0}" // previous
+		// ); // previous
 	}
 
 	#[test]

@@ -173,8 +173,8 @@ impl PageTimes {
 /// them, by [`replaced_warnings`]).
 type Outcome = Result<(PageResult, Option<kd_build::Entry>, Vec<String>, Vec<char>), String>;
 
-/// An asset result and its manifest entry.
-type AssetOutcome = Result<(AssetResult, Option<kd_build::Entry>), String>;
+/// An asset result, its manifest entry and the warnings it raised.
+type AssetOutcome = Result<(AssetResult, Option<kd_build::Entry>, Vec<String>), String>;
 
 /// The compiled layout (its module) and the fingerprints of its import closure.
 pub(crate) type LayoutModule = (String, BTreeMap<String, kd_build::Dep>);
@@ -1136,7 +1136,7 @@ impl Prepared {
 						stale.entries.remove(&result.output_path);
 					}
 				}
-				for (result, _) in asset_results.iter().flatten().flatten() {
+				for (result, _, _) in asset_results.iter().flatten().flatten() {
 					if matches!(result.status, Status::Built | Status::Unchanged) {
 						stale.entries.remove(&result.output_path);
 					}
@@ -1205,7 +1205,8 @@ impl Prepared {
 		);
 		report.warnings.extend(replaced_warnings);
 		for outcome in asset_results.into_iter().flatten() {
-			let (result, entry) = outcome?;
+			let (result, entry, warnings) = outcome?;
+			report.warnings.extend(warnings);
 			match entry {
 				Some(entry) => {
 					dirty = true;
@@ -1354,6 +1355,7 @@ struct AssetBuild {
 	text: String,
 	deps: BTreeMap<String, kd_build::Dep>,
 	settled: bool,
+	warnings: Vec<String>,
 }
 
 /// The bundle esbuild made for a script. esbuild reads its inputs on its own,
@@ -1377,6 +1379,7 @@ fn script_build(shared: &Shared, asset: &Asset, output: &ScriptOutput) -> AssetB
 		text: output.code.clone(),
 		deps,
 		settled,
+		warnings: Vec::new(),
 	}
 }
 
@@ -1390,8 +1393,12 @@ fn finish_asset(shared: &Shared, i: usize, script: Option<&ScriptOutput>) -> Ass
 		status,
 	};
 	match &shared.asset_decisions[i] {
-		Decision::Virtual | Decision::Skipped => return Ok((result(Status::Skipped), None)),
-		Decision::Cached(entry) => return Ok((result(Status::Cached), entry.clone())),
+		Decision::Virtual | Decision::Skipped => {
+			return Ok((result(Status::Skipped), None, Vec::new()));
+		}
+		Decision::Cached(entry) => {
+			return Ok((result(Status::Cached), entry.clone(), Vec::new()));
+		}
 		Decision::Build { .. } => {}
 	}
 	let (built, env) = match asset.kind {
@@ -1412,6 +1419,7 @@ fn finish_asset(shared: &Shared, i: usize, script: Option<&ScriptOutput>) -> Ass
 					text: style.css,
 					deps: style.deps,
 					settled: true,
+					warnings: style.warnings,
 				},
 				&shared.env_styles,
 			)
@@ -1425,7 +1433,7 @@ fn finish_asset(shared: &Shared, i: usize, script: Option<&ScriptOutput>) -> Ass
 		output_size: bytes.len() as u64,
 		deps: built.deps,
 	});
-	Ok((result(status), entry))
+	Ok((result(status), entry, built.warnings))
 }
 
 /// Runs a build that needs no JavaScript and returns the report. A site with

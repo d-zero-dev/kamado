@@ -2208,6 +2208,30 @@ mod tests {
 	}
 
 	#[test]
+	fn an_import_that_is_left_out_of_a_stylesheet_is_in_the_report_of_the_build() {
+		let (site, _) = style_site("styles-warning");
+		site.write(
+			"src/css/late.css",
+			"a { color : white }\n@import 'base.css';\nb { margin : 0 }\n",
+		);
+		let loaded = site.config(r#", "styles": { "banner": "" }"#);
+
+		let report = build(&loaded, &BuildOptions::default()).unwrap();
+
+		let left_out: Vec<&String> = report
+			.warnings
+			.iter()
+			.filter(|w| w.contains("late.css"))
+			.collect();
+		assert_eq!(left_out.len(), 1, "{:?}", report.warnings);
+		assert!(
+			left_out[0].contains("late.css: @import statements must precede all other statements"),
+			"{left_out:?}"
+		);
+		assert!(!site.read("out/css/late.css").contains("@import"));
+	}
+
+	#[test]
 	fn a_stylesheet_is_rebuilt_when_an_import_or_the_config_changes() {
 		let (site, loaded) = style_site("styles-incremental");
 		let run = |loaded: &Loaded| {
