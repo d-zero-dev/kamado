@@ -9,7 +9,10 @@
 //! - [`selector`], [`params`], [`values`] and the modules under them: the
 //!   rewrite rules, ported from cssnano's plugins,
 //! - [`minify`](fn@minify), [`minify_declarations`] and
-//!   [`minify_media_query`]: what the HTML minifier and the style compiler call.
+//!   [`minify_media_query`]: what the HTML minifier and the style compiler call,
+//! - [`resolve_custom_media`] and [`resolve_custom_media_with_marks`]: the
+//!   `@custom-media` of a style sheet resolved without minifying it, for the
+//!   style compiler when minification is off.
 //!
 //! The contract is "equal to a browser": the output means what the input
 //! meant, and where cssnano does something that could change what a browser
@@ -71,6 +74,45 @@ pub fn minify_with_marks(source: &str) -> Result<(String, Vec<print::Mark>), Err
 	let mut marks = Vec::new();
 	let css = minify::minify_stylesheet_marked(source, Some(&mut marks))?;
 	Ok((css, marks))
+}
+
+/// Resolves the `@custom-media` of a style sheet as [`minify`] does, without
+/// minifying it: the definitions go, the prelude of every `@media` that uses
+/// one is written anew (white space and comments in it included), and a rule
+/// written more than once is copied inside its wrapping `@media` rules.
+/// Everything else (white space, comments, the spelling of values) stays as
+/// written. A style sheet that defines nothing comes back as it is.
+///
+/// # Example
+///
+/// ```
+/// let css = "@custom-media --narrow (width < 100px);\n@media (--narrow) {\n  a { top : 0 }\n}\n";
+/// assert_eq!(kd_css::resolve_custom_media(css), "@media (width < 100px) {\n  a { top : 0 }\n}\n");
+/// ```
+#[must_use]
+pub fn resolve_custom_media(source: &str) -> String {
+	custom_media::resolve_text(source, None)
+}
+
+/// Like [`resolve_custom_media`], and also tells where every line of the
+/// output and every part it rewrote came from in `source` (byte offsets, in
+/// output order): the raw material of a source map.
+///
+/// # Example
+///
+/// ```
+/// let css = "@custom-media --n (width < 1px);\n@media (--n) {}\n";
+/// let (out, marks) = kd_css::resolve_custom_media_with_marks(css);
+/// assert_eq!(out, "@media (width < 1px) {}\n");
+/// // `@media ` came from the second line, the query from the reference.
+/// assert_eq!((marks[0].out, marks[0].src), (0, 33));
+/// assert_eq!((marks[1].out, marks[1].src), (7, 40));
+/// ```
+#[must_use]
+pub fn resolve_custom_media_with_marks(source: &str) -> (String, Vec<print::Mark>) {
+	let mut marks = Vec::new();
+	let css = custom_media::resolve_text(source, Some(&mut marks));
+	(css, marks)
 }
 
 /// Minifies the declarations of a `style` attribute (`color: red;  margin :

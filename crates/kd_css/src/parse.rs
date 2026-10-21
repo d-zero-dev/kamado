@@ -74,6 +74,11 @@ pub struct AtRule {
 	pub body: Body,
 	/// Byte offset of the rule in the source.
 	pub offset: usize,
+	/// Byte offset in the source where the prelude ends: the `{`, the `;`, the
+	/// `}` that closes the enclosing block, or the end of the source.
+	pub block: usize,
+	/// Byte offset in the source just past the rule.
+	pub end: usize,
 }
 
 /// A declaration: `property: value !important`.
@@ -182,6 +187,93 @@ fn ends_with_unescaped(s: &[u8], close: u8, min_len: usize) -> bool {
 		.take_while(|&&c| c == b'\\')
 		.count();
 	slashes % 2 == 0
+}
+
+/// What closes the strings, URLs and blocks left open by `toks` (tokens of
+/// `src`) when the input ends inside them.
+///
+/// A backslash at the end (CSS Syntax 3 §4.3.7) would escape what is written
+/// after it, so it is completed first with what it meant at the end: U+FFFD
+/// (`\fffd`, which needs no space after it: what follows is a closer or white
+/// space, never a hex digit) outside a string, nothing (a line continuation)
+/// inside one.
+fn closers_of(src: &str, toks: &[Token]) -> String {
+	let mut stack: Vec<Kind> = Vec::new();
+	let mut tail = String::new();
+	if let Some(last) = toks.last()
+		&& last.kind != Kind::Comment
+		&& src.as_bytes()[..last.end]
+			.iter()
+			.rev()
+			.take_while(|&&b| b == b'\\')
+			.count() % 2
+			== 1
+	{
+		tail.push_str(if last.kind == Kind::String {
+			"\n"
+		} else {
+			"fffd"
+		});
+	}
+	for t in toks {
+		match t.kind {
+			Kind::LParen | Kind::Function => stack.push(Kind::RParen),
+			Kind::LBracket => stack.push(Kind::RBracket),
+			Kind::LBrace => stack.push(Kind::RBrace),
+			Kind::RParen | Kind::RBracket | Kind::RBrace => {
+				if stack.last() == Some(&t.kind) {
+					stack.pop();
+				}
+			}
+			Kind::String => {
+				let s = &src.as_bytes()[t.start..t.end];
+				if !ends_with_unescaped(s, s[0], 2) {
+					tail.push(s[0] as char);
+				}
+			}
+			Kind::Url => {
+				let s = &src.as_bytes()[t.start..t.end];
+				if !ends_with_unescaped(s, b')', 5) {
+					tail.push(')');
+				}
+			}
+			// A malformed `url(` runs to its `)` or to the end, braces and all.
+			Kind::BadUrl => {
+				let s = &src.as_bytes()[t.start..t.end];
+				if !ends_with_unescaped(s, b')', 1) {
+					tail.push(')');
+				}
+			}
+			_ => {}
+		}
+	}
+	while let Some(k) = stack.pop() {
+		tail.push(match k {
+			Kind::RParen => ')',
+			Kind::RBracket => ']',
+			_ => '}',
+		});
+	}
+	tail
+}
+
+/// What closes `text` when it is cut short, so that what is written after it
+/// stands outside it: a comment left open, then what [`closers_of`] closes.
+/// Empty for text that closes all it opens. (The parser needs no comment
+/// closed: the text it keeps has its comments taken out.)
+pub(crate) fn closers_of_text(text: &str) -> String {
+	let toks = tokenize(text);
+	let mut tail = String::new();
+	if let Some(last) = toks.last()
+		&& last.kind == Kind::Comment
+	{
+		let s = &text.as_bytes()[last.start..last.end];
+		if !(s.len() >= 4 && s.ends_with(b"*/")) {
+			tail.push_str("*/");
+		}
+	}
+	tail.push_str(&closers_of(text, &toks));
+	tail
 }
 
 /// Which grammar the block of an at-rule has.
@@ -422,41 +514,7 @@ impl Parser<'_> {
 	/// What closes the strings, URLs and blocks left open by the tokens
 	/// `from..to` when the input ends inside them.
 	fn closers(&self, from: usize, to: usize) -> String {
-		let mut stack: Vec<Kind> = Vec::new();
-		let mut tail = String::new();
-		for t in &self.toks[from..to] {
-			match t.kind {
-				Kind::LParen | Kind::Function => stack.push(Kind::RParen),
-				Kind::LBracket => stack.push(Kind::RBracket),
-				Kind::LBrace => stack.push(Kind::RBrace),
-				Kind::RParen | Kind::RBracket | Kind::RBrace => {
-					if stack.last() == Some(&t.kind) {
-						stack.pop();
-					}
-				}
-				Kind::String => {
-					let s = self.text_of(*t).as_bytes();
-					if !ends_with_unescaped(s, s[0], 2) {
-						tail.push(s[0] as char);
-					}
-				}
-				Kind::Url => {
-					let s = self.text_of(*t).as_bytes();
-					if !ends_with_unescaped(s, b')', 5) {
-						tail.push(')');
-					}
-				}
-				_ => {}
-			}
-		}
-		while let Some(k) = stack.pop() {
-			tail.push(match k {
-				Kind::RParen => ')',
-				Kind::RBracket => ']',
-				_ => '}',
-			});
-		}
-		tail
+		closers_of(self.src, &self.toks[from..to])
 	}
 
 	fn declaration(&self, start: usize, end: usize, eof: bool) -> Option<Declaration> {
@@ -547,6 +605,10 @@ impl Parser<'_> {
 			.get(self.pos)
 			.is_some_and(|t| matches!(t.kind, Kind::Whitespace | Kind::Comment));
 		let (end, term) = self.scan(self.pos, true, nested, false);
+		let block = match term {
+			Some(_) => self.toks[end].start,
+			None => self.src.len(),
+		};
 		let mut prelude = self.text(self.pos, end, Text::Plain);
 		if term.is_none() {
 			prelude.push_str(&self.closers(self.pos, end));
@@ -601,6 +663,9 @@ impl Parser<'_> {
 			space,
 			body,
 			offset: t.start,
+			block,
+			// The at-keyword at least was read.
+			end: self.toks[self.pos - 1].end,
 		}))
 	}
 }

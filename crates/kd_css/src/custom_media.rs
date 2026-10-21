@@ -41,11 +41,16 @@
 //! last one; and it removes a `@layer` block left empty by the removal of its
 //! definitions, which can move the layer in the layer order.
 //!
+//! A style sheet that is not minified is resolved in its text
+//! ([`resolve_text`]) to the same rules: the tree of the parser does not keep
+//! the white space and the comments it is written with.
+//!
 //! [Media Queries 5 §10]: https://drafts.csswg.org/mediaqueries-5/#custom-mq
 
 use std::collections::{HashMap, HashSet};
 
-use crate::parse::{AtRule, Body, Node};
+use crate::parse::{AtRule, Body, Comment, Node, parse_stylesheet};
+use crate::print::Mark;
 
 /// A query that always matches (`true` in a definition): no device has that
 /// many colors per component. postcss-custom-media writes the same one.
@@ -55,10 +60,25 @@ const NEVER: &str = "(color:2147477350)";
 
 /// Resolves the custom media queries of a style sheet.
 pub(crate) fn resolve(nodes: &mut Vec<Node>) {
-	let mut defined: HashMap<String, Vec<String>> = HashMap::new();
-	collect(nodes, &mut defined);
-	if defined.is_empty() {
+	let Some(defined) = definitions(nodes, &mut Vec::new(), false) else {
 		return;
+	};
+	*nodes = expand(std::mem::take(nodes), &defined, 0);
+}
+
+/// Finds the definitions of `nodes` and returns the names that resolve,
+/// without the ones of a loop; `None` when nothing is defined. `removed`
+/// receives the offset of every definition, which is removed from `nodes`
+/// unless `keep`.
+fn definitions(
+	nodes: &mut Vec<Node>,
+	removed: &mut Vec<usize>,
+	keep: bool,
+) -> Option<HashMap<String, Vec<String>>> {
+	let mut defined: HashMap<String, Vec<String>> = HashMap::new();
+	collect(nodes, &mut defined, removed, keep);
+	if defined.is_empty() {
+		return None;
 	}
 	let looped: Vec<String> = defined
 		.keys()
@@ -68,7 +88,7 @@ pub(crate) fn resolve(nodes: &mut Vec<Node>) {
 	for name in &looped {
 		defined.remove(name);
 	}
-	*nodes = expand(std::mem::take(nodes), &defined, 0);
+	Some(defined)
 }
 
 /// Whether the definition of `name` refers back to `name`, directly or
@@ -130,8 +150,9 @@ fn is_name(text: &str) -> bool {
 	text.starts_with("--") && !text.contains(|c: char| c.is_whitespace() || c == '(')
 }
 
-/// Removes the definitions and records them; the last definition of a name
-/// in the style sheet wins (Media Queries 5, whatever cascade layer it is in).
+/// Removes the definitions (unless `keep`) and records them; the last
+/// definition of a name in the style sheet wins (Media Queries 5, whatever
+/// cascade layer it is in).
 ///
 /// A definition counts at the top level and inside `@layer`, `@scope`,
 /// `@container` and style rules, and is left as it is (not defined) inside
@@ -140,26 +161,32 @@ fn is_name(text: &str) -> bool {
 /// its condition does, so the line is drawn where postcss-custom-media draws
 /// it. An `@layer` block left empty stays, here and in the later steps of the
 /// minifier: it still places the layer in the layer order.
-fn collect(nodes: &mut Vec<Node>, defined: &mut HashMap<String, Vec<String>>) {
+fn collect(
+	nodes: &mut Vec<Node>,
+	defined: &mut HashMap<String, Vec<String>>,
+	removed: &mut Vec<usize>,
+	keep: bool,
+) {
 	nodes.retain_mut(|n| match n {
 		Node::AtRule(a) if a.name.eq_ignore_ascii_case("custom-media") => {
 			let Some((name, queries)) = definition(&a.prelude) else {
 				return true;
 			};
 			defined.insert(name, queries);
-			false
+			removed.push(a.offset);
+			keep
 		}
 		Node::AtRule(a) => {
 			let counted = ["layer", "scope", "container"]
 				.iter()
 				.any(|name| a.name.eq_ignore_ascii_case(name));
 			if counted && let Body::Nodes(inner) = &mut a.body {
-				collect(inner, defined);
+				collect(inner, defined, removed, keep);
 			}
 			true
 		}
 		Node::Rule(r) => {
-			collect(&mut r.nodes, defined);
+			collect(&mut r.nodes, defined, removed, keep);
 			true
 		}
 		_ => true,
@@ -279,7 +306,7 @@ fn expand_node(
 				while let Some(pieces) = resolve_list(&a.prelude, defined) {
 					if pieces.iter().all(|p| p.wrappers.is_empty()) {
 						let list: Vec<&str> = pieces.iter().map(|p| p.prelude.as_str()).collect();
-						a.prelude = list.join(",");
+						a.prelude = list.join(", ");
 						continue;
 					}
 					// A rule nested deeper than the parser takes would overflow
@@ -357,7 +384,7 @@ fn resolve_list(prelude: &str, defined: &HashMap<String, Vec<String>>) -> Option
 			}
 		}
 	}
-	changed.then(|| vec![Piece::plain(done.join(","))])
+	changed.then(|| vec![Piece::plain(done.join(", "))])
 }
 
 /// Resolves the first defined reference of one query. A query that is not
@@ -372,7 +399,7 @@ fn resolve_query(query: &str, defined: &HashMap<String, Vec<String>>) -> Option<
 		.filter(|feature| is_name(feature))
 		.and_then(|name| defined.get(name))
 	{
-		return Some(vec![Piece::plain(queries.join(","))]);
+		return Some(vec![Piece::plain(queries.join(", "))]);
 	}
 	let (start, end, queries) = first_reference(query, defined)?;
 	let (before, after) = (&query[..start], &query[end..]);
@@ -385,11 +412,11 @@ fn resolve_query(query: &str, defined: &HashMap<String, Vec<String>>) -> Option<
 	Some(vec![
 		Piece {
 			prelude: format!("{before}{ALWAYS}{after}"),
-			wrappers: vec![queries.join(",")],
+			wrappers: vec![queries.join(", ")],
 		},
 		Piece {
 			prelude: format!("{before}{NEVER}{after}"),
-			wrappers: queries.iter().map(|q| negate(q).join(",")).collect(),
+			wrappers: queries.iter().map(|q| negate(q).join(", ")).collect(),
 		},
 	])
 }
@@ -661,11 +688,13 @@ fn build(pieces: Vec<Piece>, rule: &AtRule) -> Vec<Node> {
 			space: rule.space,
 			body,
 			offset: rule.offset,
+			block: rule.block,
+			end: rule.end,
 		})
 	};
 	if pieces.iter().all(|p| p.wrappers.is_empty()) {
 		let list: Vec<String> = pieces.into_iter().map(|p| p.prelude).collect();
-		return vec![with(list.join(","), rule.body.clone())];
+		return vec![with(list.join(", "), rule.body.clone())];
 	}
 	pieces
 		.into_iter()
@@ -679,9 +708,373 @@ fn build(pieces: Vec<Piece>, rule: &AtRule) -> Vec<Node> {
 		.collect()
 }
 
+// ---------------------------------------------------------------------------
+// Resolving without reprinting
+
+/// Resolves the custom media queries of a style sheet in its text: what the
+/// tree of the parser drops (white space, comments) stays as written. A
+/// definition goes (with its line, when only definitions are on it), a
+/// reference written in place replaces the prelude of its `@media`, and an
+/// `@media` whose rule is written more than once becomes its copies, each
+/// opening its wrapping `@media` rules where the rule began and closing them
+/// where it ended: one per line when the rule begins its line, side by side
+/// when it is in the middle of one. `marks`, when given, receives where every line
+/// that is copied and every part that is written came from.
+pub(crate) fn resolve_text(source: &str, marks: Option<&mut Vec<Mark>>) -> String {
+	let mut text = Text {
+		source,
+		defined: HashMap::new(),
+		removed: HashSet::new(),
+		out: String::with_capacity(source.len()),
+		marks,
+		cursor: 0,
+		line_cut: None,
+	};
+	// A style sheet that defines nothing is copied without building its tree:
+	// a build that does not minify should not pay for parsing it.
+	let needle = b"@custom-media";
+	let bytes = source.as_bytes();
+	let mut nodes = if source.match_indices('@').any(|(i, _)| {
+		bytes
+			.get(i..i + needle.len())
+			.is_some_and(|w| w.eq_ignore_ascii_case(needle))
+	}) {
+		// A block nested too deep is not in the tree: its text is copied.
+		parse_stylesheet(source).nodes
+	} else {
+		Vec::new()
+	};
+	let mut removed = Vec::new();
+	if let Some(defined) = definitions(&mut nodes, &mut removed, true) {
+		text.defined = defined;
+		text.removed = removed.into_iter().collect();
+		text.walk(&nodes, 0);
+	}
+	text.copy(source.len());
+	text.out
+}
+
+struct Text<'s, 'm> {
+	source: &'s str,
+	defined: HashMap<String, Vec<String>>,
+	/// The offsets of the definitions that go.
+	removed: HashSet<usize>,
+	out: String,
+	marks: Option<&'m mut Vec<Mark>>,
+	/// How far the source has been written.
+	cursor: usize,
+	/// While the definitions removed last are all that has been on their
+	/// line: where the line starts in the source, and the lengths of `out`
+	/// and of the marks at that point.
+	line_cut: Option<(usize, usize, usize)>,
+}
+
+impl Text<'_, '_> {
+	/// Copies the source from the cursor to `to`.
+	fn copy(&mut self, to: usize) {
+		let from = self.cursor;
+		if from >= to {
+			return;
+		}
+		if let Some(marks) = self.marks.as_deref_mut() {
+			let base = self.out.len();
+			marks.push(Mark {
+				out: base,
+				src: from,
+			});
+			// Every line starts with a mark, whatever its line break (`\r\n`
+			// is one, as it is to [`line_start`]).
+			let bytes = &self.source.as_bytes()[from..to];
+			for (i, &b) in bytes.iter().enumerate() {
+				let ends_line = match b {
+					b'\n' | b'\x0c' => true,
+					b'\r' => bytes.get(i + 1) != Some(&b'\n'),
+					_ => false,
+				};
+				if ends_line && from + i + 1 < to {
+					marks.push(Mark {
+						out: base + i + 1,
+						src: from + i + 1,
+					});
+				}
+			}
+		}
+		self.out.push_str(&self.source[from..to]);
+		self.cursor = to;
+	}
+
+	/// Writes `text`, which stands for the source at `src`.
+	fn write(&mut self, text: &str, src: usize) {
+		if text.is_empty() {
+			return;
+		}
+		if let Some(marks) = self.marks.as_deref_mut() {
+			marks.push(Mark {
+				out: self.out.len(),
+				src,
+			});
+		}
+		self.out.push_str(text);
+	}
+
+	fn walk(&mut self, nodes: &[Node], depth: usize) {
+		for node in nodes {
+			match node {
+				Node::AtRule(a) if self.removed.contains(&a.offset) => self.remove(a),
+				Node::AtRule(a) => {
+					self.line_cut = None;
+					if a.name.eq_ignore_ascii_case("media") && a.prelude.contains("--") {
+						let nodes = resolved(a, &self.defined, depth);
+						match nodes.as_slice() {
+							[Node::AtRule(r)] if wraps_the_block(r) => {
+								if r.prelude != a.prelude {
+									let (from, to) = prelude_span(self.source, a);
+									self.copy(from);
+									self.write(&r.prelude, from);
+									self.cursor = to;
+								}
+							}
+							_ => {
+								self.copies(a, &nodes, depth);
+								continue;
+							}
+						}
+					}
+					if let Body::Nodes(inner) = &a.body {
+						self.walk(inner, depth + 1);
+					}
+				}
+				Node::Rule(r) => {
+					self.line_cut = None;
+					self.walk(&r.nodes, depth + 1);
+				}
+				_ => self.line_cut = None,
+			}
+		}
+	}
+
+	/// Removes the definition `a`: with its line when nothing but white space
+	/// and other definitions is on it, otherwise with the white space after it
+	/// (and before it, when it ends its line).
+	fn remove(&mut self, a: &AtRule) {
+		let bytes = self.source.as_bytes();
+		let line = line_start(self.source, a.offset);
+		let after = bytes[a.end..]
+			.iter()
+			.position(|&b| !is_blank(b))
+			.map_or(bytes.len(), |i| a.end + i);
+		let newline = match &bytes[after..] {
+			[b'\r', b'\n', ..] => Some(2),
+			[b'\n' | b'\r' | b'\x0c', ..] => Some(1),
+			[] => Some(0),
+			_ => None,
+		};
+		let continued = self
+			.line_cut
+			.filter(|&(at, ..)| at == line && self.cursor == a.offset);
+		let first = bytes[line..a.offset].iter().all(|&b| is_blank(b));
+		if !first && continued.is_none() {
+			let from = match newline {
+				Some(_) => {
+					a.offset
+						- bytes[..a.offset]
+							.iter()
+							.rev()
+							.take_while(|&&b| is_blank(b))
+							.count()
+				}
+				None => a.offset,
+			};
+			self.copy(from.max(self.cursor));
+			self.cursor = after;
+			self.line_cut = None;
+			return;
+		}
+		let cut = continued.unwrap_or_else(|| {
+			self.copy(line);
+			let marks = self.marks.as_deref().map_or(0, Vec::len);
+			(line, self.out.len(), marks)
+		});
+		match newline {
+			Some(n) => {
+				self.out.truncate(cut.1);
+				if let Some(marks) = self.marks.as_deref_mut() {
+					marks.truncate(cut.2);
+				}
+				self.cursor = after + n;
+				self.line_cut = None;
+			}
+			None => {
+				self.copy(a.offset);
+				self.cursor = after;
+				self.line_cut = Some(cut);
+			}
+		}
+	}
+
+	/// Writes `a` as the `@media` rules [`resolved`] made of it, its block
+	/// copied (with what is in it resolved) wherever they hold it.
+	fn copies(&mut self, a: &AtRule, nodes: &[Node], depth: usize) {
+		self.copy(a.offset);
+		// A rule that begins its line has its copies on lines of their own,
+		// indented as it is; one in the middle of a line, on the same line.
+		let line = line_start(self.source, a.offset);
+		let before = &self.source[line..a.offset];
+		let between = if before.bytes().all(is_blank) {
+			format!("{}{before}", line_break(self.source, line))
+		} else {
+			" ".to_owned()
+		};
+		let closers = crate::parse::closers_of_text(&self.source[a.block..a.end]);
+		let mut pending = Pending::default();
+		for (i, node) in nodes.iter().enumerate() {
+			if i > 0 {
+				self.put(&mut pending, &between, a.offset);
+			}
+			self.copy_in(a, node, depth, &closers, &mut pending);
+		}
+		self.flush(&mut pending);
+		self.cursor = a.end;
+	}
+
+	/// Writes `node`, an `@media` that [`resolved`] made of `a` (at `depth`),
+	/// with the block of `a` where the stand-in for it is.
+	fn copy_in(
+		&mut self,
+		a: &AtRule,
+		node: &Node,
+		depth: usize,
+		closers: &str,
+		pending: &mut Pending,
+	) {
+		let Node::AtRule(r) = node else {
+			return;
+		};
+		let Body::Nodes(inner) = &r.body else {
+			return;
+		};
+		self.put(pending, &format!("@{} {}", a.name, r.prelude), a.offset);
+		if wraps_the_block(r) {
+			if self.source[a.block..a.end].starts_with('{') {
+				self.put(pending, " ", a.offset);
+			}
+			self.flush(pending);
+			self.cursor = a.block;
+			if let Body::Nodes(block) = &a.body {
+				self.walk(block, depth + 1);
+			}
+			self.copy(a.end);
+			self.put(pending, closers, a.end);
+			return;
+		}
+		self.put(pending, " { ", a.offset);
+		for (i, child) in inner.iter().enumerate() {
+			if i > 0 {
+				self.put(pending, " ", a.offset);
+			}
+			self.copy_in(a, child, depth + 1, closers, pending);
+		}
+		self.put(pending, " }", a.end);
+	}
+
+	/// Adds `text`, which stands for the source at `src`, to what is written
+	/// next: runs that stand for the same place are one mark.
+	fn put(&mut self, pending: &mut Pending, text: &str, src: usize) {
+		if !pending.text.is_empty() && pending.src != src {
+			self.flush(pending);
+		}
+		if pending.text.is_empty() {
+			pending.src = src;
+		}
+		pending.text.push_str(text);
+	}
+
+	fn flush(&mut self, pending: &mut Pending) {
+		self.write(&pending.text, pending.src);
+		pending.text.clear();
+	}
+}
+
+/// Text to write and the place in the source it stands for.
+#[derive(Default)]
+struct Pending {
+	text: String,
+	src: usize,
+}
+
+/// The line break the source uses: the one that ends the line before
+/// `line`, or the first one, or `\n` when it has none.
+fn line_break(source: &str, line: usize) -> &str {
+	let bytes = source.as_bytes();
+	let at = if line > 0 {
+		line - 1
+	} else {
+		match bytes
+			.iter()
+			.position(|&b| matches!(b, b'\n' | b'\r' | b'\x0c'))
+		{
+			Some(i) => i,
+			None => return "\n",
+		}
+	};
+	match (bytes[at], bytes.get(at + 1)) {
+		(b'\r', Some(b'\n')) => &source[at..at + 2],
+		(b'\n', _) if at > 0 && bytes[at - 1] == b'\r' => &source[at - 1..at + 1],
+		_ => &source[at..at + 1],
+	}
+}
+
+/// Where the line of `offset` begins: past the last newline (CSS Syntax 3
+/// §3.3 reads `\r`, `\r\n` and `\x0c` as one too) before it.
+fn line_start(source: &str, offset: usize) -> usize {
+	source.as_bytes()[..offset]
+		.iter()
+		.rposition(|&b| matches!(b, b'\n' | b'\r' | b'\x0c'))
+		.map_or(0, |i| i + 1)
+}
+
+fn is_blank(b: u8) -> bool {
+	b == b' ' || b == b'\t'
+}
+
+/// The span of the prelude of `a` in the source, without the white space
+/// around it.
+fn prelude_span(source: &str, a: &AtRule) -> (usize, usize) {
+	let from = a.offset + 1 + a.name.len();
+	let text = &source[from..a.block];
+	let start = from + (text.len() - text.trim_start().len());
+	(start, from + text.trim_end().len())
+}
+
+/// The `@media` rules `a` becomes once it is resolved, with an empty comment
+/// standing in for its block: what [`expand_node`] makes of it, so that the
+/// copies nest as the minifier nests them.
+fn resolved(a: &AtRule, defined: &HashMap<String, Vec<String>>, depth: usize) -> Vec<Node> {
+	let probe = AtRule {
+		name: a.name.clone(),
+		prelude: a.prelude.clone(),
+		space: a.space,
+		body: Body::Nodes(vec![Node::Comment(Comment {
+			text: String::new(),
+			offset: a.offset,
+		})]),
+		offset: a.offset,
+		block: a.block,
+		end: a.end,
+	};
+	let mut nodes = Vec::new();
+	expand_node(Node::AtRule(probe), defined, depth, &mut nodes);
+	nodes
+}
+
+/// Whether `r`, one of the rules [`resolved`] makes, holds the block itself.
+fn wraps_the_block(r: &AtRule) -> bool {
+	matches!(&r.body, Body::Nodes(inner) if matches!(inner.as_slice(), [Node::Comment(_)]))
+}
+
 #[cfg(test)]
 mod tests {
-	use crate::minify;
+	use crate::{minify, resolve_custom_media, resolve_custom_media_with_marks};
 
 	#[test]
 	fn a_name_is_replaced_by_its_query_and_the_definition_goes() {
@@ -1030,5 +1423,357 @@ mod tests {
 			minify(css).unwrap(),
 			"@media (max-color:2147477350){a{top:0}}@media (color:2147477350) and (hover){b{top:0}}"
 		);
+	}
+
+	#[test]
+	fn without_minifying_a_reference_is_replaced_and_the_definition_goes() {
+		let css = "@custom-media --narrow (width < 100px);\n@media (--narrow) { a { top: 0 } }";
+		assert_eq!(
+			resolve_custom_media(css),
+			"@media (width < 100px) { a { top: 0 } }"
+		);
+	}
+
+	#[test]
+	fn without_minifying_everything_else_stays_as_written() {
+		let css = "/* note */\n@custom-media --narrow (width < 100px);\n\n@media  (--narrow)  {\n  a  { top : 0 } /* x */\n}\n";
+		assert_eq!(
+			resolve_custom_media(css),
+			"/* note */\n\n@media  (width < 100px)  {\n  a  { top : 0 } /* x */\n}\n"
+		);
+	}
+
+	#[test]
+	fn without_minifying_a_definition_that_shares_its_line_goes_with_the_space_after_it() {
+		let css = "@layer x { @custom-media --a (x:1); }\na { @custom-media --b (y:1);  top: 0 }\n@media (--a) and (--b) { b { top: 0 } }";
+		assert_eq!(
+			resolve_custom_media(css),
+			"@layer x { }\na { top: 0 }\n@media (x:1) and (y:1) { b { top: 0 } }"
+		);
+	}
+
+	#[test]
+	fn without_minifying_the_wrapping_media_rules_open_on_the_first_line_and_close_on_the_last() {
+		let css = "@custom-media --l (width < 1px), print;\n  @media not (--l) {\n    b { top: 0 }\n  }\n";
+		assert_eq!(
+			resolve_custom_media(css),
+			"  @media (width < 1px), print { @media not (max-color:2147477350) {\n    b { top: 0 }\n  } }\n  @media not print { @media not all and (width < 1px) { @media not (color:2147477350) {\n    b { top: 0 }\n  } } }\n"
+		);
+	}
+
+	#[test]
+	fn without_minifying_a_reference_in_a_copied_block_is_resolved_in_every_copy() {
+		let css = "@custom-media --l (width < 1px), print;\n@custom-media --a (hover);\n@media not (--l) {\n  @media (--a) { b { top: 0 } }\n}";
+		assert_eq!(
+			resolve_custom_media(css),
+			"@media (width < 1px), print { @media not (max-color:2147477350) {\n  @media (hover) { b { top: 0 } }\n} }\n@media not print { @media not all and (width < 1px) { @media not (color:2147477350) {\n  @media (hover) { b { top: 0 } }\n} } }"
+		);
+	}
+
+	#[test]
+	fn without_minifying_a_block_left_open_at_the_end_is_closed_before_its_wrappers() {
+		let css = "@custom-media --l (width < 1px), print;\n@media not (--l) { b { content: \"x";
+		assert_eq!(
+			resolve_custom_media(css),
+			"@media (width < 1px), print { @media not (max-color:2147477350) { b { content: \"x\"}} }\n@media not print { @media not all and (width < 1px) { @media not (color:2147477350) { b { content: \"x\"}} } }"
+		);
+	}
+
+	#[test]
+	fn without_minifying_a_url_or_a_backslash_left_open_at_the_end_does_not_take_in_the_wrappers() {
+		// The block as written, and what closes it.
+		for (block, closers) in [
+			("{ a { b: url(x }", ")}}"),
+			("{ a { b: url(x\\", "fffd)}}"),
+			("{ a { top: 0 } \\", "fffd}"),
+			("{ a { b: \"x\\", "\n\"}}"),
+			("{ a { top: 0 } /* x", "*/}"),
+		] {
+			let css = format!("@custom-media --l (width < 1px), print;\n@media not (--l) {block}");
+			let out = resolve_custom_media(&css);
+			assert_eq!(
+				out,
+				format!(
+					"@media (width < 1px), print {{ @media not (max-color:2147477350) {block}{closers} }}\n@media not print {{ @media not all and (width < 1px) {{ @media not (color:2147477350) {block}{closers} }} }}"
+				)
+			);
+			let nodes = crate::parse::parse_stylesheet(&out).nodes;
+			let preludes: Vec<&str> = nodes
+				.iter()
+				.filter_map(|n| match n {
+					crate::parse::Node::AtRule(a) => Some(a.prelude.as_str()),
+					_ => None,
+				})
+				.collect();
+			assert_eq!(preludes, ["(width < 1px), print", "not print"], "{out}");
+		}
+	}
+
+	#[test]
+	fn without_minifying_a_line_of_definitions_goes_and_a_definition_at_the_end_of_a_line_takes_the_space_before_it()
+	 {
+		for (css, out) in [
+			// Two definitions are all the line holds.
+			(
+				"@custom-media --n (x:1);@custom-media --m (y:1);\n@media (--n) and (--m) {}",
+				"@media (x:1) and (y:1) {}",
+			),
+			(
+				"  @custom-media --n (x:1); @custom-media --m (y:1);\t\n@media (--n) and (--m) {}",
+				"@media (x:1) and (y:1) {}",
+			),
+			// The last line, without a line break.
+			(
+				"@media (--a) {}\n  @custom-media --a (x:1);",
+				"@media (x:1) {}\n",
+			),
+			// Something before it on the line, nothing after it.
+			(
+				"/* x */ @custom-media --n (x:1);\n@media (--n) {}",
+				"/* x */\n@media (x:1) {}",
+			),
+			// Something after it on the line: the indentation stays.
+			(
+				"  @custom-media --n (x:1); a { top: 0 }\n@media (--n) {}",
+				"  a { top: 0 }\n@media (x:1) {}",
+			),
+			// A rule between two definitions keeps the line.
+			(
+				"@custom-media --l (width < 1px), print;\n@custom-media --a (x:1); @media not (--l) {} @custom-media --b (y:1);\n",
+				"@media (width < 1px), print { @media not (max-color:2147477350) {} } @media not print { @media not all and (width < 1px) { @media not (color:2147477350) {} } }\n",
+			),
+		] {
+			assert_eq!(resolve_custom_media(css), out, "{css}");
+		}
+	}
+
+	#[test]
+	fn without_minifying_the_copies_are_separated_by_the_line_break_of_the_source() {
+		let css = "@custom-media --l (width < 1px), print;\r\n@media not (--l) {\r\n  a { top: 0 }\r\n}\r\n";
+		assert_eq!(
+			resolve_custom_media(css),
+			"@media (width < 1px), print { @media not (max-color:2147477350) {\r\n  a { top: 0 }\r\n} }\r\n@media not print { @media not all and (width < 1px) { @media not (color:2147477350) {\r\n  a { top: 0 }\r\n} } }\r\n"
+		);
+	}
+
+	#[test]
+	fn without_minifying_the_copies_of_two_references_nest_as_the_minifier_nests_them() {
+		let css = "@custom-media --a screen;\n@custom-media --b print;\n@media (--a) and (--b) { a { top: 0 } }\n";
+		let out = resolve_custom_media(css);
+		assert_eq!(
+			out,
+			"@media screen { @media print { @media (max-color:2147477350) and (max-color:2147477350) { a { top: 0 } } } @media not print { @media (max-color:2147477350) and (color:2147477350) { a { top: 0 } } } }\n@media not screen { @media print { @media (color:2147477350) and (max-color:2147477350) { a { top: 0 } } } @media not print { @media (color:2147477350) and (color:2147477350) { a { top: 0 } } } }\n"
+		);
+		assert_eq!(minify(&out).unwrap(), minify(css).unwrap());
+	}
+
+	#[test]
+	fn without_minifying_a_line_after_a_carriage_return_or_a_form_feed_is_marked() {
+		let css = "@custom-media --n (x:1);\ra {}\x0cb {}\r\nc {}";
+		let (out, marks) = resolve_custom_media_with_marks(css);
+		assert_eq!(out, "a {}\x0cb {}\r\nc {}");
+		let pairs: Vec<(usize, usize)> = marks.iter().map(|m| (m.out, m.src)).collect();
+		assert_eq!(pairs, [(0, 25), (5, 30), (11, 36)]);
+	}
+
+	#[test]
+	fn without_minifying_an_at_media_without_a_block_is_copied_with_its_semicolon() {
+		let css = "@custom-media --l (width < 1px), print;\n@media not (--l);\n";
+		assert_eq!(
+			resolve_custom_media(css),
+			"@media (width < 1px), print { @media not (max-color:2147477350); }\n@media not print { @media not all and (width < 1px) { @media not (color:2147477350); } }\n"
+		);
+	}
+
+	#[test]
+	fn without_minifying_the_copies_are_marked_where_the_rule_and_its_block_came_from() {
+		let css =
+			"@custom-media --l (width < 1px), print;\n@media not (--l) {\n  a { top: 0 }\n}\n";
+		let (_, marks) = resolve_custom_media_with_marks(css);
+		let pairs: Vec<(usize, usize)> = marks.iter().map(|m| (m.out, m.src)).collect();
+		// Each copy: its wrapping `@media` rules at `@media` (40), its block
+		// at `{` (57) and the two lines after it, its closing braces at the
+		// end of the rule (75). The line break before the second copy stands
+		// for `@media` too, with its wrapping rules.
+		assert_eq!(
+			pairs,
+			[
+				(0, 40),
+				(64, 57),
+				(66, 59),
+				(81, 74),
+				(82, 75),
+				(84, 40),
+				(169, 57),
+				(171, 59),
+				(186, 74),
+				(187, 75),
+				(191, 75)
+			]
+		);
+	}
+
+	/// What each way of writing a reference becomes, as written.
+	#[test]
+	fn without_minifying_each_kind_of_reference_is_written_out() {
+		for (css, out) in [
+			(
+				"@custom-media --c (width >= 1px) and (hover);\n@media ( --c ) { b { top: 0 } }",
+				"@media (width >= 1px) and (hover) { b { top: 0 } }",
+			),
+			(
+				"@custom-media --a (width < 1px);\n@media NOT (--a) { a { top: 0 } }",
+				"@media NOT (width < 1px) { a { top: 0 } }",
+			),
+			(
+				"@custom-media --l (width < 1px), print;\n@supports (display: grid) { @media not (--l) { a { top: 0 } } }",
+				"@supports (display: grid) { @media (width < 1px), print { @media not (max-color:2147477350) { a { top: 0 } } } @media not print { @media not all and (width < 1px) { @media not (color:2147477350) { a { top: 0 } } } } }",
+			),
+			(
+				"@custom-media --a (--b);\n@custom-media --b (--a);\n@media (--a) { a { top: 0 } }",
+				"@media (--a) { a { top: 0 } }",
+			),
+			(
+				"@custom-media --t true;\n@custom-media --f false;\n@media (--t) { a { top: 0 } }\n@media (--f) and (hover) { b { top: 0 } }",
+				"@media (max-color:2147477350) { a { top: 0 } }\n@media (color:2147477350) and (hover) { b { top: 0 } }",
+			),
+			(
+				"@custom-media --sm (576px <= width);\na { @media screen and (--sm) and (hover) { top: 0 } }",
+				"a { @media screen and (576px <= width) and (hover) { top: 0 } }",
+			),
+			(
+				"@layer x, y;\n@layer y { @custom-media --a (width < 1px); }\n@layer x { @custom-media --a (width > 2px); }\n@media (--a) { a { top: 0 } }",
+				"@layer x, y;\n@layer y { }\n@layer x { }\n@media (width > 2px) { a { top: 0 } }",
+			),
+			(
+				"@custom-media --x (--y) and (hover);\n@custom-media --y screen;\n@media (--x) { a { top: 0 } }",
+				"@media screen { @media (max-color:2147477350) and (hover) { a { top: 0 } } }\n@media not screen { @media (color:2147477350) and (hover) { a { top: 0 } } }",
+			),
+		] {
+			assert_eq!(resolve_custom_media(css), out, "{css}");
+		}
+	}
+
+	#[test]
+	fn without_minifying_a_definition_goes_with_its_line_whatever_ends_the_line() {
+		let css = "@custom-media --a (x:1);\r\n@custom-media --b (y:1);\r@custom-media --c (z:1);\x0c@media (--a) and (--b) and (--c) {}\r\n";
+		assert_eq!(
+			resolve_custom_media(css),
+			"@media (x:1) and (y:1) and (z:1) {}\r\n"
+		);
+	}
+
+	#[test]
+	fn without_minifying_the_copies_of_a_rule_in_the_middle_of_a_line_stay_on_it() {
+		let css = "@custom-media --l (width < 1px), print;\na { @media not (--l) { top: 0 } }\n";
+		assert_eq!(
+			resolve_custom_media(css),
+			"a { @media (width < 1px), print { @media not (max-color:2147477350) { top: 0 } } @media not print { @media not all and (width < 1px) { @media not (color:2147477350) { top: 0 } } } }\n"
+		);
+	}
+
+	/// Around the limit of nesting, the copies of a block resolve what is in
+	/// them the way the minifier does.
+	#[test]
+	fn without_minifying_a_reference_near_the_limit_of_nesting_is_resolved_as_the_minifier_does() {
+		// The parser takes the outer blocks, two `@media` and `a`.
+		for outer in 240..=crate::parse::MAX_NESTING - 3 {
+			let css = format!(
+				"@custom-media --l (width < 1px), print;\n{}@media not (--l) {{ @media not (--l) {{ a {{ top: 0 }} }} }}{}",
+				"@supports (x) {".repeat(outer),
+				"}".repeat(outer)
+			);
+			// What the minifier writes may nest deeper than the parser reads, so
+			// the `@media` rules are compared, not the minified texts.
+			let media = |css: &str| -> Vec<String> {
+				css.split("@media")
+					.skip(1)
+					.map(|rest| {
+						rest[..rest.find('{').unwrap()]
+							.chars()
+							.filter(|c| !c.is_whitespace())
+							.collect()
+					})
+					.collect()
+			};
+			let out = resolve_custom_media(&css);
+			assert_eq!(media(&out), media(&minify(&css).unwrap()), "{outer}");
+			// Up to 250 blocks every reference is resolved; past that, the
+			// inner one of the copy wrapped three deep would nest past the limit
+			// and stays as written.
+			assert_eq!(out.contains("(--l)"), outer > 250, "{outer}");
+		}
+	}
+
+	#[test]
+	fn without_minifying_a_style_sheet_without_definitions_is_returned_as_it_is() {
+		let deep = format!("{}a{{top:0}}{}", "@media x{".repeat(300), "}".repeat(300));
+		for css in [
+			"@media (--a) { a { top : 0 } } /* c */",
+			"@custom-media foo (x:1);\n@media (--foo) { a { top: 0 } }",
+			deep.as_str(),
+		] {
+			assert_eq!(resolve_custom_media(css), css);
+		}
+	}
+
+	#[test]
+	fn without_minifying_every_line_and_every_rewritten_part_is_marked_where_it_came_from() {
+		let css =
+			"@custom-media --n (width < 1px);\na {\n  b: c\n}\n@media (--n) {\n  d { e: f }\n}\n";
+		let (out, marks) = resolve_custom_media_with_marks(css);
+		assert_eq!(
+			out,
+			"a {\n  b: c\n}\n@media (width < 1px) {\n  d { e: f }\n}\n"
+		);
+		let pairs: Vec<(usize, usize)> = marks.iter().map(|m| (m.out, m.src)).collect();
+		// The four lines after the definition, the new query, the rest of the
+		// line of `@media` and the two lines after it.
+		assert_eq!(
+			pairs,
+			[
+				(0, 33),
+				(4, 37),
+				(11, 44),
+				(13, 46),
+				(20, 53),
+				(33, 58),
+				(36, 61),
+				(49, 74)
+			]
+		);
+	}
+
+	/// Resolving without minifying, then minifying, gives what minifying gives.
+	#[test]
+	fn without_minifying_the_resolution_is_the_one_of_the_minifier() {
+		let cases = [
+			"@custom-media --md-lte (width < 992px);\n@media (--md-lte) { a { top: 0 } }",
+			"@custom-media --sm (576px <= width);\na { @media screen and (--sm) and (hover) { top: 0 } }",
+			"@custom-media --l (width < 1px), print;\n@custom-media --c (width >= 1px) and (hover);\n@media (--l) { a { top: 0 } }\n@media ( --c ) { b { top: 0 } }",
+			"@custom-media --narrow (width < 100px);\n@custom-media --wide (not (--narrow));\n@media (--wide) { a { top: 0 } }\n@media (not (--narrow)) { b { left: 0 } }",
+			"@custom-media --wide (width >= 1px), print;\n@media (--wide) and (hover) { a { top: 0 } b { left: 0 } }",
+			"@custom-media --l (width < 1px), print;\n@media (not (--l)) { a { top: 0 } }\n@media (--l) or (color) { b { left: 0 } }",
+			"@custom-media --a (width >= 1px) and (hover);\n@media NOT (--a) { a { top: 0 } }",
+			"@custom-media --s screen;\n@custom-media --o only screen and (hover);\n@custom-media --n not screen and (hover);\n@media not (--s) { a { top: 0 } }\n@media (--o) and (color) { b { top: 0 } }\n@media (--n) and (color) { c { top: 0 } }",
+			"@custom-media --l (width < 1px), print;\n@custom-media --a (hover);\n@media (--l), (--a) and (--l) { a { top: 0 } }",
+			"@custom-media --l (width < 1px), print;\n@supports (display: grid) { @media not (--l) { a { top: 0 } } }",
+			"@custom-media --x (--y) and (hover);\n@custom-media --y screen;\n@media (--x) { a { top: 0 } }",
+			"@media screen { @custom-media --a (width < 1px); }\n@supports (display: grid) { @custom-media --b (hover); }\n@media (--a) and (--b) { a { top: 0 } }",
+			"@layer x, y;\n@layer y { @custom-media --a (width < 1px); }\n@layer x { @custom-media --a (width > 2px); }\na { @custom-media --b (hover); }\n@media (--a) and (--b) { a { top: 0 } }",
+			"@custom-media --a foo(x);\n@custom-media --b not(hover);\n@media not (--a) { a { top: 0 } }\n@media not (--b) { b { top: 0 } }",
+			"@custom-media --a (not (--a));\n@custom-media --b (--c) and (hover);\n@custom-media --c (not (--b));\n@custom-media --d (--a);\n@media (--a) { a { top: 0 } }\n@media (--b) { b { top: 0 } }\n@media (--d) { c { top: 0 } }",
+			"@custom-media --t true;\n@custom-media --f false;\n@media (--t) { a { top: 0 } }\n@media (--f) and (hover) { b { top: 0 } }",
+			"@custom-media --l (width < 1px), print;\n@media not (--l) {\n  @media not (--l) { b { top: 0 } }\n}",
+			"@custom-media --a screen;\n@custom-media --b print;\n@media (--a) and (--b) { a { top: 0 } }",
+			"@custom-media --l (width < 1px), print;\n@media not (--l) { a { b: c\\",
+		];
+		for css in cases {
+			assert_eq!(
+				minify(&resolve_custom_media(css)).unwrap(),
+				minify(css).unwrap(),
+				"{css}"
+			);
+		}
 	}
 }

@@ -5,10 +5,15 @@
 //! The banner is an important comment (`/*! ... */`) so that minification
 //! keeps it.
 //!
+//! Without minification the bundle is written as it is, except that the
+//! `@custom-media` are resolved all the same: v2 ran postcss-custom-media on
+//! every build, and no browser knows the at-rule yet.
+//!
 //! A source map, when asked for, is appended as an inline comment. It maps
 //! every rule and declaration of the output to its place in the file it was
 //! written in, through the bundler's record of where each run of the bundle
-//! came from. Granularity is the rule and the declaration, not the token.
+//! came from. Granularity is the rule and the declaration, not the token;
+//! without minification, the line and each part the `@custom-media` rewrote.
 
 use std::collections::BTreeMap;
 
@@ -103,14 +108,12 @@ pub fn build(input: &str, output: &str, settings: &StyleSettings) -> Result<Buil
 				Vec::new(),
 			)
 		}
+	} else if settings.sourcemap {
+		// Not minified: the source as written, with the custom media resolved
+		// (no browser knows `@custom-media` yet).
+		kd_css::resolve_custom_media_with_marks(&source)
 	} else {
-		// Not minified: the output is the source, so every line maps to itself.
-		let marks = std::iter::once(0)
-			.chain(source.match_indices('\n').map(|(i, _)| i + 1))
-			.filter(|&o| o < source.len())
-			.map(|o| kd_css::print::Mark { out: o, src: o })
-			.collect();
-		(source.clone(), marks)
+		(kd_css::resolve_custom_media(&source), Vec::new())
 	};
 	if settings.sourcemap {
 		let map = map_of(&css, output, &bundle, prefix.len(), &marks);
@@ -428,6 +431,68 @@ mod tests {
 			.collect();
 		// Generated line 0 is the banner; lines 1-3 are the three source lines.
 		assert_eq!(points, [(1, 0, 0, 0), (2, 0, 1, 0), (3, 0, 2, 0)]);
+	}
+
+	#[test]
+	fn without_minify_or_a_source_map_a_custom_media_of_an_imported_file_is_resolved() {
+		let dir = Dir::new("custom_media_no_map");
+		dir.write("media.css", "@custom-media --l (width < 1px), print;\n");
+		let main = dir.write(
+			"main.css",
+			"@import 'media.css';\n/* keep */\n@media not (--l) {\n  a { top : 0 }\n}\n",
+		);
+		let settings = StyleSettings {
+			alias: Vec::new(),
+			banner: Some("/*! v */".to_owned()),
+			minify: false,
+			sourcemap: false,
+		};
+
+		let built = build(&main, &format!("{}/out/main.css", dir.0), &settings).unwrap();
+
+		assert_eq!(
+			built.css,
+			"/*! v */\n\n/* keep */\n@media (width < 1px), print { @media not (max-color:2147477350) {\n  a { top : 0 }\n} }\n@media not print { @media not all and (width < 1px) { @media not (color:2147477350) {\n  a { top : 0 }\n} } }\n"
+		);
+	}
+
+	#[test]
+	fn without_minify_a_custom_media_is_resolved_and_each_line_maps_to_where_it_was_written() {
+		let dir = Dir::new("custom_media_plain");
+		dir.write("media.css", "@custom-media --narrow (width < 100px);\n");
+		let main = dir.write(
+			"main.css",
+			"@import 'media.css';\n@media (--narrow) {\n  a { top: 0 }\n}\n",
+		);
+		let settings = StyleSettings {
+			alias: Vec::new(),
+			banner: None,
+			minify: false,
+			sourcemap: true,
+		};
+
+		let built = build(&main, &format!("{}/main.out.css", dir.0), &settings).unwrap();
+
+		let marker = "\n/*# sourceMappingURL=";
+		assert_eq!(
+			&built.css[..built.css.find(marker).unwrap()],
+			"\n@media (width < 100px) {\n  a { top: 0 }\n}\n"
+		);
+		let points = crate::sourcemap::decode(&inline_map(&built.css));
+		// (generated line, column, source, line, column); source 0 is
+		// main.css. The blank first line is the end of the line of `@import`,
+		// whose definition went; the query is where the reference was.
+		assert_eq!(
+			points,
+			[
+				(0, 0, 0, 0, 20),
+				(1, 0, 0, 1, 0),
+				(1, 7, 0, 1, 7),
+				(1, 22, 0, 1, 17),
+				(2, 0, 0, 2, 0),
+				(3, 0, 0, 3, 0)
+			]
+		);
 	}
 
 	#[test]
