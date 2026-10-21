@@ -222,6 +222,26 @@ mod tests {
 		assert!(built.deps.contains_key(&main));
 	}
 
+	#[test]
+	fn a_custom_media_defined_in_an_imported_file_is_resolved_in_the_importing_one() {
+		let dir = Dir::new("custom_media");
+		dir.write(
+			"media.css",
+			"@custom-media --narrow (width < 100px);\n@custom-media --l (width < 1px), print;\n",
+		);
+		dir.write(
+			"main.css",
+			"@import 'media.css';\n@media (not (--narrow)) { a { top: 0 } }\n@media not (--l) { b { top: 0 } }\n",
+		);
+
+		let built = minified(&dir, "main.css");
+
+		assert_eq!(
+			built.css,
+			"@media (not (width < 100px)){a{top:0}}@media (width < 1px),print{@media not (max-color:2147477350){b{top:0}}}@media not print{@media not all and (width < 1px){@media not (color:2147477350){b{top:0}}}}"
+		);
+	}
+
 	fn minified(dir: &Dir, main: &str) -> Built {
 		let settings = StyleSettings {
 			alias: Vec::new(),
