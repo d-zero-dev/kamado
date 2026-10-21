@@ -29,7 +29,7 @@ node scripts/check-rust-no-external-crates.mjs
 | `kd_yaml`   | YAML のサブセットと front matter の分割                                                          | `kd_jsonc`                     |
 | `kd_pool`   | スレッドプール                                                                                   | なし                           |
 | `kd_image`  | 画像（png / jpeg / webp / avif / svg）の寸法の読み取り                                           | なし                           |
-| `kd_css`    | CSS のトークナイザ・パーサ・圧縮（cssnano 相当）                                                 | なし                           |
+| `kd_css`    | CSS のトークナイザ・パーサ・圧縮（cssnano 相当）・`@custom-media` の解決（圧縮しないときも）     | なし                           |
 | `kd_js`     | TS / TSX / JSX のパーサ、型の除去、JSX → 文字列連結へのコンパイル、静的な meta の抽出            | なし                           |
 | `kd_html`   | HTML のパーサ、DOM、セレクタ、宣言的ルール、取り込み、画像寸法の付与、整形と圧縮（融合した印字） | `kd_image`                     |
 | `kd_site`   | 出力パス・URL の写像、`outputPathField`、衝突、探索、メタデータのマージ、overrides               | `kd_glob` `kd_jsonc`           |
