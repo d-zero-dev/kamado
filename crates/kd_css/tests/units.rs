@@ -109,6 +109,26 @@ fn an_unterminated_string_comment_or_block_is_closed_at_the_end() {
 }
 
 #[test]
+fn a_malformed_url_left_open_at_the_end_is_closed_before_the_blocks() {
+	assert_eq!(kd_css::minify("a{b:url(x }").unwrap(), "a{b:url(x })}");
+	assert_eq!(
+		kd_css::minify("@media screen{a{b:url(x y").unwrap(),
+		"@media screen{a{b:url(x y)}}"
+	);
+}
+
+#[test]
+fn a_backslash_left_at_the_end_keeps_its_meaning_and_does_not_escape_the_closers() {
+	// Outside a string it is U+FFFD, inside one it is nothing.
+	assert_eq!(kd_css::minify("a{b:c\\").unwrap(), "a{b:c\\fffd}");
+	assert_eq!(kd_css::minify("a{b:\"c\\").unwrap(), "a{b:\"c\\\n\"}");
+	assert_eq!(
+		kd_css::minify("@media screen{a{b:url(x\\").unwrap(),
+		"@media screen{a{b:url(x\\fffd)}}"
+	);
+}
+
+#[test]
 fn a_qualified_rule_cut_short_is_dropped_and_an_at_rule_is_kept() {
 	assert_eq!(kd_css::minify("a{b:c}d").unwrap(), "a{b:c}");
 	assert_eq!(
