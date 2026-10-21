@@ -234,6 +234,13 @@ pub const DECISIONS: &[Decision] = &[
 		"a{b:c} ;b{c:d}",
 		"a stray `;` before a rule stays part of its selector",
 	),
+	// each anonymous layer is a layer of its own
+	d(
+		"@layer{.a{x:1}}@layer{.b{y:2}}",
+		"@layer{.a{x:1}}@layer{.b{y:2}}",
+		"@layer{.a{x:1}.b{y:2}}",
+		"two adjacent anonymous layers are two layers, and are not joined",
+	),
 ];
 
 /// Checks one case; the error says what is wrong. On success, the indexes of
