@@ -99,15 +99,16 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 
 Pug から TSX への変換器（`scripts/pug-to-tsx.mjs`）は、小さな Pug のプロジェクトを変換して、出力を確かめ、`@d-zero/tsconfig`（strictest）の型検査に通す回帰テスト（`scripts/pug-to-tsx.spec.ts`）を持つ。変換器は、変換するプロジェクトの `pug-lexer` / `pug-parser` / `acorn` を読む。テストのために、このリポジトリはそれらを devDependencies に持つ（変換器そのものは、パッケージに入らない。`docs/v3/MIGRATION.md` §3.4）。テストは `yarn build` が済んでいるときに動く。済んでいなければ、手元ではスキップし、CI では失敗する。この依存を足す前の `node_modules` のままだと失敗するので、`yarn install` を済ませる。テストが使うのは、このリポジトリが固定した版（`acorn` 8 など）で、利用者のプロジェクトの版ではない。変換器は `acorn` 7（Pug が引く版）なら、理由を出して止まる。
 
-| 分野                  | スクリプト                                                                               | 対応する検証                                  |
-| --------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------- |
-| HTML のパース・直列化 | `fuzz-html-differential.mjs`（`html-fuzz.mjs` が生成器）                                 | `crates/kd_html/tests/differential.rs`        |
-| prettier の印字       | `fuzz-html-print.mjs` / `fuzz-html-json.mjs` / `fuzz-html-pipeline.mjs`                  | `crates/kd_html/tests/print_differential.rs`  |
-| 圧縮                  | `fuzz-html-minify.mjs` / `fuzz-html-minify-attrs.mjs`                                    | `crates/kd_html/tests/minify_differential.rs` |
-| HTML の連鎖全体       | `fuzz-html-chain.mjs`                                                                    | `crates/kd_core` の `chain_matches_v2`        |
-| CSS                   | `fuzz-css.mjs` と `generate-css-oracle.mjs`、`check-css.mjs`                             | `crates/kd_css/tests/differential.rs`         |
-| CSS の `@import`      | `check-css-import.mjs`（要 `cargo build -p kd_napi` と `yarn build`）                    | `crates/kd_core/src/style_import.rs` のテスト |
-| JS / TS / JSX         | `check-kd-js-js.mjs` / `check-kd-js-types.mjs` / `check-kd-js-jsx.mjs`（`jsx-fuzz.mjs`） | 各スクリプトを直接実行                        |
+| 分野                   | スクリプト                                                                                                                                                                                                           | 対応する検証                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| HTML のパース・直列化  | `fuzz-html-differential.mjs`（`html-fuzz.mjs` が生成器）                                                                                                                                                             | `crates/kd_html/tests/differential.rs`        |
+| prettier の印字        | `fuzz-html-print.mjs` / `fuzz-html-json.mjs` / `fuzz-html-pipeline.mjs`                                                                                                                                              | `crates/kd_html/tests/print_differential.rs`  |
+| 圧縮                   | `fuzz-html-minify.mjs` / `fuzz-html-minify-attrs.mjs`                                                                                                                                                                | `crates/kd_html/tests/minify_differential.rs` |
+| HTML の連鎖全体        | `fuzz-html-chain.mjs`                                                                                                                                                                                                | `crates/kd_core` の `chain_matches_v2`        |
+| CSS                    | `fuzz-css.mjs` と `generate-css-oracle.mjs`、`check-css.mjs`                                                                                                                                                         | `crates/kd_css/tests/differential.rs`         |
+| CSS の `@import`       | `check-css-import.mjs`（要 `cargo build -p kd_napi` と `yarn build`）                                                                                                                                                | `crates/kd_core/src/style_import.rs` のテスト |
+| CSS の `@custom-media` | `check-css-custom-media.mjs`（要 `cargo build --release --offline -p kd_css --example minify`。oracle は v2 の `@d-zero/postcss-config` が固定する `postcss-custom-media` で、devDependencies の版をそれに合わせる） | `crates/kd_css/src/custom_media.rs` のテスト  |
+| JS / TS / JSX          | `check-kd-js-js.mjs` / `check-kd-js-types.mjs` / `check-kd-js-jsx.mjs`（`jsx-fuzz.mjs`）                                                                                                                             | 各スクリプトを直接実行                        |
 
 `fuzz-html-chain.mjs` の第 4 引数に `on`（圧縮あり）を渡して作ったコーパスは、`chain_matches_v2` に `KD_CHAIN_MINIFY=on` を付けて回す（圧縮の JS / CSS は両側とも切る）。付けない（または `off`）と v3 の圧縮を切る。ほかの値はエラー。
 
