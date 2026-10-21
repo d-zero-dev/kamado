@@ -262,7 +262,15 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
 - スタイル（`styles.files`、既定 `**/*.css`）は v3 が自前で処理します（`@import` の展開、alias、圧縮、バナー、source map）。**postcss.config のプラグインは使えません**。autoprefixer などが要るなら、npm scripts で別に処理してから kamado に渡します。
 - `@import` の解決: alias（`@/x.css`）、importing ファイルからの相対パス、`node_modules`（パッケージの `style` → `.css` の `main` → `index.css`）の順。
 - **PostCSS のプラグインのうち、`@custom-media` は組み込み**です（D-ZERO の `@d-zero/postcss-config` の `postcss-custom-media`）。定義はどのファイルにあっても使え、定義は出力から消え、`@media (--name)` が定義の条件に置き換わります（`and` で並べた条件、リストの定義、ネストした `@media` も）。定義が別の定義を使っていても、`true` / `false` の定義も使えます。未定義の名前と、リストの定義への `not (--x)` は置き換えません。定義が media type で始まるもの（`screen and (...)`）は、他の条件と並べると不正なクエリになりえます。**ほかのプラグイン**（autoprefixer、`postcss-extend-rule`、`postcss-base64`、`postcss-math` / `postcss-calc`、`postcss-color-mod-function`、`postcss-clip-path-polyfill`）は使えません。案件の CSS がそれらを使っているかは、`@extend`、`base64(`、`color-mod(`、`math(` を検索して確かめます。autoprefixer だけは、最新ブラウザ向けの browserslist なら足すプレフィックスが数個（`-webkit-box-decoration-break` など）なので、書いておけば済みます。
-- postcss-import と同じ扱い: `@import` のあとに書いた `@layer a, b;`（順序の宣言）は、取り込んだ内容より前、バナーより前に移る。取り込んだファイルの `@charset` は先頭に 1 つだけ残り、値が違えばエラーになる。
+- postcss-import と同じ扱い:
+  - `@import` のあとに書いた `@layer a, b;`（順序の宣言）は、取り込んだ内容より前、バナーより前に移る。取り込んだファイルの中の外部 URL の `@import` と `@layer` の文も同じく先頭に移る。
+  - 取り込んだファイルの `@charset` は先頭に 1 つだけ残り、値が違えばエラーになる。
+  - 外部 URL の `@import` は、取り込みの条件（`layer()`、`supports()`、メディア条件）を引き継いで書く（`@import url("f.css") layer(y)`）。同じ外部 URL の `@import` は 1 つにまとまる。
+  - `@layer` の文を挟んで続いていない `@import`、規則のあとの `@import`、読み込むファイルを名指さない `@import`、先頭にない `@charset` は、v2 と同じく出力に入れません。v3 は `kamado build` の要約に警告を出します（v2 は何も表示しませんでした）。
+- **v2 と違う点（レイヤー）**:
+  - `layer()` が 2 段以上ある取り込みの中の外部 URL の `@import` は、外側の条件を外側に書きます（`layer(a)` の中の `layer(b)` は `a.b`）。v2 の postcss-import は逆に書いて `b.a` になり、レイヤーの並びも変わります。
+  - `layer()` 付きの取り込みの後ろに `@layer` の文があり、先頭に移すとレイヤーの宣言の順が変わるときは、取り込みの位置に `@layer one;` を書き足します（`@import "a.css" layer(one); @import "b.css" layer(two); @layer two, one;` は `one`、`two` の順。v2 は `two`、`one`）。
+  - 隣り合う無名の `@layer` ブロックは、v2 の cssnano は 1 つにまとめますが、別のレイヤーなのでまとめません。無名の `layer` で取り込んだファイルの `@layer` の文は、v2 と違い、先頭に移さずそのファイルのブロックの中に残します。
 - スクリプト（`scripts.files`、既定 `**/*.{js,ts,jsx,tsx,mjs,cjs}`）は esbuild（`bundle: true`）です。`alias` / `define` / `target`（既定 `es2022`）/ `minify` / `sourcemap` / `banner` が使えます。**`pages.files` に一致するファイルはスクリプトとして扱いません**（`.tsx` はページ）。
 - **v2 と出力を揃えたいとき**: v2 は esbuild に `target` を渡さない（esnext）。構文が `es2022` で変わるコードでは `"scripts": { "target": "esnext" }` にする。
 - `<script>` の中身とイベントハンドラは esbuild で圧縮されます。v2（terser）とバイトは違いますが意味は同じです。

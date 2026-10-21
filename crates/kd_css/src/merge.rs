@@ -11,6 +11,16 @@
 //!   `::part()`. cssnano decides that from the browsers it is configured for;
 //!   here the list of what is always safe is short and fixed.
 //!
+//! - Two adjacent blocks of `@media`, `@supports`, `@container` or a named
+//!   `@layer` with the same prelude exchange rules the way cssnano does: the
+//!   rules of the second block (up to the first nested at-rule that holds a
+//!   rule) go to the end of the first, and what is not a rule (`@font-face`,
+//!   `@layer p, q;`, comments) stays in the second block. Nothing moves when
+//!   the last rule of the first block or the first rule of the second is inside
+//!   a nested at-rule: cssnano moves a rule only next to a rule that stands in
+//!   an equal block. An anonymous `@layer` is never joined: each of them is a
+//!   layer of its own, and joining two changes the cascade (cssnano does it).
+//!
 //! Not done: merging only some declarations (`a{x:1;y:2} b{x:1;z:3}`), and
 //! merging rules that are not neighbours.
 
@@ -200,34 +210,111 @@ fn same_block(a: &Rule, b: &Rule) -> bool {
 		})
 }
 
-/// Whether an at-rule is a conditional group rule whose blocks can be joined
-/// when two of them with the same prelude are neighbours.
+/// Whether an at-rule is a block whose rules can be moved into a neighbour with
+/// the same prelude: a conditional group rule, or a named `@layer` block.
+/// cssnano joins anonymous `@layer` blocks too, which is wrong: each of them
+/// is a layer of its own, and joining two changes the cascade.
 fn is_joinable(a: &AtRule) -> bool {
-	matches!(
-		a.name.to_ascii_lowercase().as_str(),
-		"media" | "supports" | "container"
-	) && matches!(a.body, Body::Nodes(_))
+	if !matches!(a.body, Body::Nodes(_)) {
+		return false;
+	}
+	match a.name.to_ascii_lowercase().as_str() {
+		"media" | "supports" | "container" => true,
+		"layer" => !a.prelude.trim().is_empty(),
+		_ => false,
+	}
 }
 
-/// Merges the neighbouring rules of every list in the tree.
+/// Whether a block holds a style rule at any depth.
+fn holds_rule(nodes: &[Node]) -> bool {
+	nodes.iter().any(|n| match n {
+		Node::Rule(_) => true,
+		Node::AtRule(a) => matches!(&a.body, Body::Nodes(inner) if holds_rule(inner)),
+		_ => false,
+	})
+}
+
+/// Whether the style rule that comes last in a block is a child of the block
+/// and not of a nested at-rule. cssnano moves the rules of a block into an
+/// earlier block with the same prelude one by one, a rule next to the rule
+/// before it, and only when both stand in equal blocks: with a rule of a
+/// nested `@media` in between, nothing moves.
+fn ends_with_own_rule(children: &[Node]) -> bool {
+	for n in children.iter().rev() {
+		match n {
+			Node::Rule(_) => return true,
+			Node::AtRule(a) if matches!(&a.body, Body::Nodes(inner) if holds_rule(inner)) => {
+				return false;
+			}
+			_ => {}
+		}
+	}
+	false
+}
+
+/// The same for the rule that comes first.
+fn starts_with_own_rule(children: &[Node]) -> bool {
+	for n in children {
+		match n {
+			Node::Rule(_) => return true,
+			Node::AtRule(a) if matches!(&a.body, Body::Nodes(inner) if holds_rule(inner)) => {
+				return false;
+			}
+			_ => {}
+		}
+	}
+	false
+}
+
+/// The children of the second of two blocks that go into the first, and those
+/// that stay: the rules, up to the first nested at-rule that holds a rule of
+/// its own (from there on, a rule is not next to a rule of the first block).
+/// Whatever is not a rule (nested layers and statements, `@font-face`,
+/// comments) stays where it is.
+fn split_movable(children: Vec<Node>) -> (Vec<Node>, Vec<Node>) {
+	let mut moved = Vec::new();
+	let mut stays = Vec::new();
+	let mut stopped = false;
+	for n in children {
+		match &n {
+			Node::Rule(_) if !stopped => moved.push(n),
+			Node::AtRule(a) if matches!(&a.body, Body::Nodes(inner) if holds_rule(inner)) => {
+				stopped = true;
+				stays.push(n);
+			}
+			_ => stays.push(n),
+		}
+	}
+	(moved, stays)
+}
+
+/// Merges the neighbouring rules and the neighbouring blocks of every list in
+/// the tree (see the documentation of the module for what is merged and what
+/// is not).
 pub fn merge_rules(nodes: &mut Vec<Node>) {
 	// `@media x{a} @media x{b}` is `@media x{a b}`.
 	let mut joined: Vec<Node> = Vec::with_capacity(nodes.len());
-	for n in nodes.drain(..) {
-		if let Node::AtRule(a) = &n
+	for mut n in nodes.drain(..) {
+		if let Node::AtRule(a) = &mut n
 			&& is_joinable(a)
 			&& let Some(Node::AtRule(prev)) = joined.last_mut()
 			&& is_joinable(prev)
 			&& prev.name.eq_ignore_ascii_case(&a.name)
 			&& prev.prelude == a.prelude
-			&& let Body::Nodes(more) = &a.body
+			&& let Body::Nodes(more) = &mut a.body
 			&& let Body::Nodes(into) = &mut prev.body
+			&& ends_with_own_rule(into)
+			&& starts_with_own_rule(more)
 			// No declaration after a nested rule (see below).
 			&& !(into.iter().any(|n| matches!(n, Node::Rule(_) | Node::AtRule(_)))
 				&& more.iter().any(|n| matches!(n, Node::Declaration(_))))
 		{
-			into.extend(more.iter().cloned());
-			continue;
+			let (moved, stays) = split_movable(std::mem::take(more));
+			into.extend(moved);
+			if stays.is_empty() {
+				continue;
+			}
+			*more = stays;
 		}
 		joined.push(n);
 	}

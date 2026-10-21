@@ -1,0 +1,1 @@
+@container (min-width:1px){.a{x:1}}@container (min-width:1px){.b{y:2}}

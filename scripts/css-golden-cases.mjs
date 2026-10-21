@@ -314,6 +314,28 @@ const sheetGroups = {
 		'.\u3042{b:c}',
 		'a{b:c}\u0000d{e:f}',
 	],
+	'adjacent blocks': [
+		'@layer y{.a{x:1}}@layer y{.b{y:2}}',
+		'@layer y.p{.a{x:1}}@layer y.p{.b{y:2}}',
+		'@layer y{.a{x:1}}@layer z{.b{y:2}}',
+		'@layer Y{.a{x:1}}@layer y{.b{y:2}}',
+		'@layer y{.a{x:1}}@layer y{.b{y:2}@layer p, q}',
+		'@layer y{.a{x:1}}@layer y{@font-face{font-family:a}.b{y:2}}',
+		'@layer y{@layer p, q}@layer y{.c{x:1}}@layer y{.b{y:2}}',
+		'@layer y{.a{x:1}@layer p{.z{x:1}}}@layer y{.b{y:2}}',
+		'@media screen{@media print{.c{x:1}}}@media screen{.b{y:2}}',
+		'@media a{.a{x:1}}@media a{@media b{.b{y:2}}}',
+		'@media screen{@layer a{@media print{@layer b{.c{x:1}}}}}@media screen{@layer a{.b{y:2}}}',
+		'@layer{.a{x:1}}@layer{.b{y:2}}',
+		'@supports (display:grid){.a{x:1}}@supports (display:grid){.b{y:2}}',
+		'@container (min-width:1px){.a{x:1}}@container (min-width:1px){.b{y:2}}',
+		'@media a{.a{x:1}}@media a{.b{y:2}@media b{.c{z:3}}.d{w:4}}',
+		'@media a{.a{x:1}}@media a{@keyframes k{from{x:1}}.b{y:2}}',
+		'.a{@media x{color:red}@media x{margin:0}}',
+		'@media a{@font-face{font-family:a}}@media a{@font-face{font-family:b}}',
+		'@media a{@font-face{font-family:a}}@media a{.b{y:2}}',
+		'@media a{.a{x:1}}@media a{@font-face{font-family:b}}',
+	],
 };
 
 /**
