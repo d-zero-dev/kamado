@@ -100,6 +100,11 @@
 			"enabled": false
 		},
 		{
+			"description": "cssnano, postcss and postcss-import are the versions the published v2 style compiler pins, the oracles of kd_css and of scripts/check-css-import.mjs; they do not move on their own (docs/v3/development.md)",
+			"matchDepNames": ["cssnano", "postcss", "postcss-import"],
+			"enabled": false
+		},
+		{
 			"description": "postcss-custom-media is the version v2's @d-zero/postcss-config pins, the oracle of scripts/check-css-custom-media.mjs; it does not move on its own (docs/v3/development.md)",
 			"matchDepNames": ["postcss-custom-media"],
 			"enabled": false
