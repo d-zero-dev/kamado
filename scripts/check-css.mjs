@@ -4,8 +4,13 @@
  *
  * 1. the Rust output must parse with postcss,
  * 2. it must mean what the input meant: `cssnano(mine) === cssnano(original)`,
- *    compared as strings,
- * 3. it must not be larger than cssnano's output by more than 3 %,
+ *    compared as strings (the declarations of a rule with nested rules, and of
+ *    a block inside a rule, are first brought to one form by cssnano; where that
+ *    fails their values are not compared, see `css-oracle.mjs`),
+ * 3. it must not be larger than cssnano's output by more than 3 %, unless the
+ *    difference is made of the decisions listed in
+ *    `crates/kd_css/tests/common/mod.rs` only (reported, as in
+ *    `crates/kd_css/tests/differential.rs`),
  * 4. minifying it again must change nothing.
  *
  * ```sh
@@ -24,7 +29,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 
-import { cssnanoMinify, postcssError } from './css-oracle.mjs';
+import { dropRepeatedAtRules, joinAdjacentAtRules } from './css-compare.mjs';
+import {
+	cssnanoMinify,
+	minifyNestedDeclarations,
+	postcssError,
+	withoutNestedDeclarations,
+} from './css-oracle.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const binary = path.join(root, 'target', 'release', 'examples', 'minify');
@@ -35,6 +46,14 @@ if (!dir) {
 const show = Number(process.env.KD_CSS_SHOW ?? 8);
 const mode = process.env.KD_CSS_MODE ?? '';
 const limit = 1.03;
+/**
+ * The decisions of `crates/kd_css/tests/common/mod.rs` that explain a file's
+ * difference from cssnano, by path (the example reports them, for the corpus
+ * files only: the files of the second run, with the output of the first, have no
+ * `<n>.out` next to them).
+ * @type {Map<string, string[]>}
+ */
+const decisionsByPath = new Map();
 
 const names = readdirSync(dir)
 	.filter((n) => n.endsWith('.in'))
@@ -60,6 +79,9 @@ function runRust(files) {
 	for (const line of run.stdout.split('\n').filter(Boolean)) {
 		const r = JSON.parse(line);
 		out.set(r.path, r.error === undefined ? r.css : `__ERROR__ ${r.error}`);
+		if (r.decisions?.length > 0) {
+			decisionsByPath.set(r.path, r.decisions);
+		}
 	}
 	return out;
 }
@@ -78,38 +100,6 @@ function diffOf(theirs, mine) {
 	const window = (/** @type {string} */ text) =>
 		JSON.stringify(text.slice(Math.max(0, p - 40), p + 50)).slice(1, -1);
 	return `at ${p}: …${window(theirs)}…\n      vs …${window(mine)}…`;
-}
-
-/**
- * Joins neighbouring `@media` / `@supports` / `@container` blocks that have the
- * same query, so that two spellings of the same style sheet compare equal.
- * @param {string} css - A minified style sheet
- * @returns {string} The style sheet with the blocks joined
- */
-function joinAdjacentAtRules(css) {
-	let out = css;
-	const start = /@(?:media|supports|container)[^{};]*\{/gu;
-	let match = start.exec(out);
-	while (match) {
-		const header = match[0];
-		let depth = 1;
-		let i = match.index + header.length;
-		while (i < out.length && depth > 0) {
-			if (out[i] === '{') {
-				depth++;
-			} else if (out[i] === '}') {
-				depth--;
-			}
-			i++;
-		}
-		// `i` is just after the closing brace of the block.
-		if (depth === 0 && out.startsWith(header, i)) {
-			out = out.slice(0, i - 1) + out.slice(i + header.length);
-			start.lastIndex = match.index;
-		}
-		match = start.exec(out);
-	}
-	return out;
 }
 
 /**
@@ -136,9 +126,9 @@ const benign = {
 	'line breaks in selectors': (css) => css.replaceAll(/\s*[\n\t]\s*/gu, ' '),
 	// cssnano keeps the space after the colon in a container query.
 	'container query spacing': (css) =>
-		css
-			.replaceAll(/(@container[^{]*?)\(([\w-]+):\s*/gu, '$1($2:')
-			.replaceAll(/\s{2,}/gu, ' '),
+		css.replaceAll(/@container[^{]*/gu, (prelude) =>
+			prelude.replaceAll(/\(([\w-]+):\s*/gu, '($1:').replaceAll(/\s{2,}/gu, ' '),
+		),
 	// cssnano keeps the space after a comma inside calc().
 	'comma in calc': (css) => css.replaceAll(/(calc\([^)]*?),\s+/gu, '$1,'),
 	// cssnano keeps the space before a `/` once a function has been seen
@@ -210,6 +200,12 @@ const benign = {
 	// kd_css joins `@media x{a}@media x{b}` into `@media x{ab}`; cssnano
 	// does that only for some of them.
 	'adjacent at-rules with the same query': joinAdjacentAtRules,
+	// cssnano joins two equal neighbouring blocks and drops the repeat, unless
+	// a selector it does not know to be safe (`:is()`) is inside
+	// (`@layer b{a:is(.x){y:1}}@layer b{a:is(.x){y:1}}` stays as it is), or an
+	// empty rule between them is still there when it looks (it removes empty
+	// rules last); kd_css has removed the empty rule and joined the blocks.
+	'repeated equal at-rules': dropRepeatedAtRules,
 	// kd_css writes `border: none` as `border: 0` and `background: none` as
 	// `background: 0 0` (what clean-css does); cssnano keeps the keywords.
 	'nothing written shorter': (css) =>
@@ -270,6 +266,8 @@ for (const n of names) {
 const second = runRust(again);
 
 const failures = { rust: [], parse: [], equivalence: [], size: [], idempotence: [] };
+/** @type {string[]} */
+const deliberate = [];
 /** @type {Map<string, number>} */
 const categories = new Map();
 let strictEqual = 0;
@@ -312,11 +310,51 @@ for (const n of names) {
 			if (mineMin === theirs) {
 				strictEqual++;
 			} else {
-				const category = categoryOf(theirs, mineMin);
+				let category = categoryOf(theirs, mineMin);
 				if (category === null) {
-					// Show what is left once the known leftovers are undone.
+					// cssnano does not join two neighbouring blocks that hold rules
+					// with nested rules (or a selector like `:is()`), and so does not
+					// see what is then the same rule twice. Join them and let it
+					// minify once more.
+					const joined = await cssnanoMinify(joinAdjacentAtRules(theirs));
+					if (
+						joined !== theirs &&
+						(joined === mineMin || categoryOf(joined, mineMin) !== null)
+					) {
+						category = 'neighbouring blocks that cssnano does not join';
+					}
+				}
+				if (category === null) {
+					// cssnano minifies the declarations of a rule with nested rules,
+					// and of a block inside a rule, less than the others: bring both
+					// sides to the form it gives them at the top level and compare
+					// again, values included.
+					const [a, b] = await Promise.all([
+						minifyNestedDeclarations(theirs),
+						minifyNestedDeclarations(mineMin),
+					]);
+					if ((a !== theirs || b !== mineMin) && (a === b || categoryOf(a, b) !== null)) {
+						category = 'nested declarations compared after cssnano minified them alike';
+					}
+				}
+				if (category === null) {
+					// What that cannot bring to one form (a shorthand cssnano expanded
+					// into longhands it does not merge, an invalid value it leaves
+					// alone) is compared as a marker where the declarations are. That
+					// is a hole in this check: a wrong value there is not seen by it.
+					// kd_css minifies those declarations with the code it uses for
+					// every other declaration, which the rest of the corpus checks.
+					const a = withoutNestedDeclarations(theirs);
+					const b = withoutNestedDeclarations(mineMin);
+					if ((a !== theirs || b !== mineMin) && (a === b || categoryOf(a, b) !== null)) {
+						category = 'values of nested declarations not compared';
+					}
+				}
+				if (category === null) {
+					// Show what is left once the known leftovers are undone (and the
+					// declarations that are not compared are gone).
 					const left = (/** @type {string} */ css) => {
-						let acc = css;
+						let acc = withoutNestedDeclarations(css);
 						for (const fix of Object.values(benign)) {
 							acc = fix(acc);
 						}
@@ -341,11 +379,26 @@ for (const n of names) {
 		const ratio = theirBytes === 0 ? 1 : bytes / theirBytes;
 		ratios.push({ n, ratio, bytes, theirBytes, original: Buffer.byteLength(input) });
 		if (bytes > theirBytes * limit + 8) {
-			failures.size.push(`${n}: ${bytes} vs cssnano ${theirBytes} (${ratio.toFixed(3)})`);
+			const decisions = decisionsByPath.get(path.join(dir, `${n}.in`));
+			if (decisions) {
+				// Larger on purpose, and only by the listed decisions.
+				deliberate.push(`${n}: ${[...new Set(decisions)].join('; ')}`);
+			} else {
+				failures.size.push(
+					`${n}: ${bytes} vs cssnano ${theirBytes} (${ratio.toFixed(3)})`,
+				);
+			}
 		}
 	}
 }
 rmSync(tmp, { recursive: true, force: true });
+// As in `crates/kd_css/tests/differential.rs`: the files that are held to the
+// bound one by one are not the only measure, the total is one too.
+if (totalTheirs > 0 && totalMine > totalTheirs * limit) {
+	failures.size.push(
+		`total: ${totalMine} bytes vs cssnano ${totalTheirs} (${(totalMine / totalTheirs).toFixed(3)})`,
+	);
+}
 
 if (ratios.length > 0) {
 	const sorted = ratios.toSorted((a, b) => a.ratio - b.ratio);
@@ -368,6 +421,14 @@ if (ratios.length > 0) {
 		process.stdout.write(
 			`  large case ${r.n}: ${r.bytes} vs cssnano ${r.theirBytes} (${r.ratio.toFixed(4)})\n`,
 		);
+	}
+}
+if (deliberate.length > 0) {
+	process.stdout.write(
+		`larger than the bound by listed decisions only: ${deliberate.length}\n`,
+	);
+	for (const d of deliberate.slice(0, show)) {
+		process.stdout.write(`  ${d}\n`);
 	}
 }
 if (mode === '') {
