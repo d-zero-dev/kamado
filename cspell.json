@@ -109,6 +109,8 @@
 		"Segoe",
 		"Hiragino",
 		"Kaku",
-		"iefix"
+		"iefix",
+		// postcss's name for the type of an at-rule node.
+		"atrule"
 	]
 }
