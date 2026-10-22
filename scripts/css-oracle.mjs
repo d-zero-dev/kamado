@@ -124,17 +124,27 @@ export async function minifyNestedDeclarations(css) {
 export function withoutNestedDeclarations(css) {
 	const root = postcss.parse(css);
 	for (const container of nestedContainers(root)) {
-		let marked = false;
+		// Collect the runs first and change the nodes after: replacing and
+		// removing while walking the children skips the ones after.
+		/** @type {{ first: import('postcss').ChildNode, rest: import('postcss').ChildNode[] }[]} */
+		const runs = [];
+		let run;
 		for (const child of container.nodes) {
-			if (child.type !== 'decl') {
-				marked = marked && child.type === 'comment';
-				continue;
+			if (child.type === 'decl') {
+				if (run) {
+					run.rest.push(child);
+				} else {
+					run = { first: child, rest: [] };
+					runs.push(run);
+				}
+			} else if (child.type !== 'comment') {
+				run = undefined;
 			}
-			if (marked) {
-				child.remove();
-			} else {
-				child.replaceWith(postcss.comment({ text: 'd', raws: { left: '', right: '' } }));
-				marked = true;
+		}
+		for (const { first, rest } of runs) {
+			first.replaceWith(postcss.comment({ text: 'd', raws: { left: '', right: '' } }));
+			for (const d of rest) {
+				d.remove();
 			}
 		}
 	}

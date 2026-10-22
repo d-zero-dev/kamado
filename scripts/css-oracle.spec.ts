@@ -35,6 +35,12 @@ describe('withoutNestedDeclarations', () => {
 		);
 	});
 
+	test('marks a run of more than two declarations once', () => {
+		expect(withoutNestedDeclarations('a{b:c;d:e;f:g;h:i;&:hover{j:k}}')).toBe(
+			'a{/*d*/&:hover{/*d*/}}',
+		);
+	});
+
 	test('marks the declarations after a nested at-rule as a run of their own', () => {
 		expect(withoutNestedDeclarations('a{@media x{b:c}d:e}')).toBe(
 			'a{@media x{/*d*/}/*d*/}',
