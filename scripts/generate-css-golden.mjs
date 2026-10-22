@@ -2,14 +2,15 @@
  * Writes the golden cases of `kd_css`: the hand-written style sheets of
  * `css-golden-cases.mjs` and what cssnano (kamado v2's options) makes of
  * them, as `crates/kd_css/tests/golden/<n>.in` / `.out` (`__ERROR__` for an
- * input cssnano rejects). Run it when cssnano is upgraded:
+ * input cssnano rejects). Run it when the version of cssnano is moved
+ * (`docs/v3/development.md`, "v2 の oracle"):
  * `node scripts/generate-css-golden.mjs`.
  */
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { cssnanoMinify } from './css-oracle.mjs';
 import { cssCases } from './css-golden-cases.mjs';
+import { cssnanoMinify } from './css-oracle.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const outDir = path.join(root, 'crates', 'kd_css', 'tests', 'golden');

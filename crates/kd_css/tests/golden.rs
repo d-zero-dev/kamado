@@ -1,7 +1,7 @@
 //! The golden cases: every hand-written style sheet of
 //! `scripts/css-golden-cases.mjs` in `tests/golden/<n>.in`, with what cssnano
 //! makes of it in `<n>.out` (`scripts/generate-css-golden.mjs`). `kd_css` must
-//! give the same, unless the case is listed in `common::DELIBERATE`, where
+//! give the same, unless the case is listed in `common::DECISIONS`, where
 //! both answers are asserted.
 
 mod common;

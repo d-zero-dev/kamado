@@ -74,7 +74,7 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 
 ## 何を更新したら、何を作り直すか
 
-テーブルと golden ファイルは、v2 が使っていたライブラリ（oracle）の出力から作ってコミットしている。実行時はその依存を持たない。oracle の版を上げたら、次のスクリプトを実行して差分を確かめる（スクリプトの先頭のコメントに詳細がある）。oracle の置き場（ルートの `devDependencies`）は「v2 の oracle」を参照。
+テーブルと golden ファイルは、v2 が使っていたライブラリ（oracle）の出力から作ってコミットしている。実行時はその依存を持たない。oracle の版は v2 に合わせて固定するのが方針で（「v2 の oracle」）、動かしたときは、次のスクリプトを実行して差分を確かめる（スクリプトの先頭のコメントに詳細がある）。oracle の置き場（ルートの `devDependencies`）は「v2 の oracle」を参照。
 
 | 契機                                                                                                                                                        | 実行するスクリプト                      | 書き出すもの                                                               |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------- |
@@ -82,7 +82,7 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 | `prettier` を上げた                                                                                                                                         | `scripts/generate-prettier-tables.mjs`  | `crates/kd_html/src/print/tables.rs`（構造が変わると失敗する）             |
 | `html-minifier-terser` を上げた                                                                                                                             | `scripts/generate-minifier-tables.mjs`  | `crates/kd_html/src/minify/tables.rs`                                      |
 | 同上                                                                                                                                                        | `scripts/generate-minify-golden.mjs`    | `crates/kd_html/tests/minify_golden/`                                      |
-| `cssnano` を上げた（v2 の style-compiler と同じ設定で使う）                                                                                                 | `scripts/generate-css-golden.mjs`       | `crates/kd_css/tests/golden/`                                              |
+| `cssnano` を動かした（「v2 の oracle」の 3。設定は v2 の style-compiler と同じ）                                                                            | `scripts/generate-css-golden.mjs`       | `crates/kd_css/tests/golden/`                                              |
 | 同上                                                                                                                                                        | `scripts/generate-css-rule-tests.mjs`   | `crates/kd_css/tests/rules.rs`                                             |
 | 同上、または色名・プロパティ名の元データ（`mdn-data` 等）                                                                                                   | `scripts/generate-css-tables.mjs`       | `crates/kd_css/src/color_table.rs`、`property_table.rs`                    |
 | `esbuild` を上げた                                                                                                                                          | `scripts/generate-jsx-entities.mjs`     | `crates/kd_js/src/jsx_entities.rs`                                         |
@@ -116,7 +116,7 @@ Pug から TSX への変換器（`scripts/pug-to-tsx.mjs`）は、小さな Pug 
 
 ## v2 の oracle
 
-v3 は「v2 と出力がバイト一致する」ことを目標にしているので、v2 の実物と比べる場所が 2 つある。どちらも、公開済みの v2 のパッケージ（`2.0.0-alpha.17`）を npm から取り、このリポジトリに v2 のソースは置かない。
+v3 は「v2 と出力がバイト一致する」ことを目標にしているので、v2 の実物と比べる場所が 3 つある。どれも、公開済みの v2 のパッケージ（`2.0.0-alpha.17`）を npm から取り、このリポジトリに v2 のソースは置かない。
 
 **1. DOM の直列化（golden とランダム入力の差分テスト）**: ルートの `devDependencies` の `"kamado-v2": "npm:kamado@2.0.0-alpha.17"` が、v2 の `kamado` に別名を付けたもの。次のスクリプトが `import { domSerialize } from 'kamado-v2/utils/dom'` で使う。
 
@@ -143,12 +143,22 @@ node benchmarks/v2-baseline/run.ts /tmp/fixtures-v2 --out=/tmp/out-v2
 
 v3 の出力と比べるには「比較ハーネスとベンチマーク」の `compare-outputs.ts` を使う。
 
+**3. CSS の処理（`kd_css` と `@import` の展開）**: v2 の `@kamado-io/style-compiler` が使う `cssnano`・`postcss`・`postcss-import` を、同じ版でルートの `devDependencies` に固定する（`2.0.0-alpha.17` が固定している版は `npm view @kamado-io/style-compiler@2.0.0-alpha.17 dependencies` で読める）。`cssnano` が引く `cssnano-preset-default` などは、固定せずに範囲の解決に任せる。これは `2.0.0-alpha.17` を今インストールした利用者が受け取る解決と同じで、v2 の開発時の `yarn.lock` とは版が違うことがある。`@custom-media` の oracle である `postcss-custom-media` も、v2 の `@d-zero/postcss-config` が固定する版のまま。これらは Renovate の対象から外してある（`.github/renovate.json`）。使うスクリプトは次のとおり。
+
+- `scripts/css-oracle.mjs`（`cssnano` を v2 の style-compiler と同じ設定で動かす。次のスクリプトが使う）
+- `scripts/generate-css-golden.mjs`、`scripts/generate-css-rule-tests.mjs`
+- `scripts/fuzz-css.mjs`（コーパスを作る）、`scripts/generate-css-oracle.mjs`、`scripts/check-css.mjs`
+- `scripts/check-css-import.mjs`（`postcss-import` を直接読む）、`scripts/check-css-custom-media.mjs`
+
+`crates/kd_css/tests/rules.rs` は `generate-css-rule-tests.mjs` が書くので、手では編集しない。手で書くテストは `crates/kd_css/tests/rules_hand.rs` に置く。
+
 **oracle の版を動かすとき**:
 
 1. 1 は、ルートの `package.json` の `kamado-v2` の版を上げる（バージョンは固定。`^` は付けない）。`yarn install` のあと、上の 5 つのスクリプトのうち出力を書くもの（`generate-html-golden.mjs` と `generate-html-attr-golden.mjs`）を実行し、`git diff` で `crates/kd_html/tests/golden/` と `crates/kd_html/tests/attr_golden/` の変化が v2 の変更によるものか確かめる。ランダム入力のスクリプトは、差が出ないことを確かめる。
 2. 2 は、`benchmarks/v2-baseline/package.json` の 3 つの `@kamado-io/*`・`kamado` を**同じ版**に揃えて上げ、そのディレクトリで `yarn install` して `yarn.lock` を更新する。
-3. v2 の API が変わって import が通らなくなったら、スクリプト側を合わせる。v2 の出力が変わったなら、変わった理由が RFC §2 の意図した差に当たるか確かめ、当たらなければ v3 のほうを直す。
-4. v2 の保守が止まって oracle を更新しなくなったら、`kamado-v2` の版と `benchmarks/v2-baseline/` は固定したままでよい（golden はコミット済みで、実行時はこの依存を使わない）。
+3. 3 は、v2 の `@kamado-io/style-compiler` が固定する版が変わったときだけ、ルートの `cssnano`・`postcss`・`postcss-import` をそれに合わせる。`postcss-custom-media` は、v2 の `@d-zero/postcss-config` が固定する版が変わったときに、同じ要領で合わせる。`yarn install` のあと、`generate-css-golden.mjs` と `generate-css-rule-tests.mjs` を実行して `git diff` を確かめ、`cargo test --locked --offline -p kd_css` を通す。ランダム入力（`fuzz-css.mjs` → `generate-css-oracle.mjs` → `check-css.mjs`）と、`check-css-import.mjs`・`check-css-custom-media.mjs` も実行する。`check-css-import.mjs` の `INTENDED` と `check-css-custom-media.mjs` の `INTENDED` は、oracle が書く文字列を含むので、版を動かすと書式の差で落ちることがある。落ちた文字列が書式だけの差か、意味の差かを見分けてから直す。
+4. v2 の API が変わって import が通らなくなったら、スクリプト側を合わせる。v2 の出力が変わったなら、変わった理由が RFC §2 の意図した差に当たるか確かめ、当たらなければ v3 のほうを直す。
+5. v2 の保守が止まって oracle を更新しなくなったら、`kamado-v2` の版、`benchmarks/v2-baseline/`、CSS の `cssnano`・`postcss`・`postcss-import`・`postcss-custom-media` の版は固定したままでよい（golden はコミット済みで、実行時はこの依存を使わない）。
 
 `benchmarks/v2-baseline/.yarn/` は `.gitignore` の対象。
 
