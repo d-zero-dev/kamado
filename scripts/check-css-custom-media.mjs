@@ -77,47 +77,49 @@ const CASES = [
  * The cases whose outputs differ from v2 on purpose, where Media Queries 5
  * and postcss-custom-media disagree: the input, what v3 writes (after
  * cssnano) and why. A v3 output that is not the one listed fails the check.
+ * The strings carry the formatting of the cssnano that is pinned (`(--a )`),
+ * so a move of its version can fail them on format alone.
  * @type {{ css: string; v3: string; why: string }[]}
  */
 const INTENDED = [
 	{
 		css: '@custom-media --a (--b);\n@custom-media --b (--a);\n@media (--a) { a { top: 0 } }',
-		v3: '@media(--a){a{top:0}}',
+		v3: '@media (--a ){a{top:0}}',
 		why: 'every definition of a loop is undefined (Media Queries 5 §10); postcss-custom-media drops one name of the loop and resolves the other',
 	},
 	{
 		css: '@custom-media --a (not (--a));\n@custom-media --b (--c) and (hover);\n@custom-media --c (not (--b));\n@custom-media --d (--a);\n@media (--a) { a { top: 0 } }\n@media (--b) { b { top: 0 } }\n@media (--d) { c { top: 0 } }',
-		v3: '@media(--a){a{top:0}}@media(--b){b{top:0}}@media(--a){c{top:0}}',
+		v3: '@media (--a ){a{top:0}}@media (--b ){b{top:0}}@media (--a ){c{top:0}}',
 		why: 'every definition of a loop is undefined; postcss-custom-media resolves `--b` one step to `(--c) and (hover)`',
 	},
 	{
 		css: '@custom-media --x (min-width: var(--x));\n@media (--x) { a { top: 0 } }',
-		v3: '@media(min-width:var(--x)){a{top:0}}',
+		v3: '@media (min-width:var(--x )){a{top:0}}',
 		why: 'the argument of `var()` is no reference; postcss-custom-media counts it and takes `--x` for a loop',
 	},
 	{
 		css: '@custom-media --q not screen and (hover);\n@media (--q) and (color) { a { top: 0 } }',
-		v3: '@media not screen and (hover){@media(max-color:2147477350) and (color){a{top:0}}}@media screen and (hover){@media(color:2147477350) and (color){a{top:0}}}',
+		v3: '@media not screen and (hover){@media (max-color:2147477350) and (color){a{top:0}}}@media screen and (hover){@media (color:2147477350) and (color){a{top:0}}}',
 		why: 'the negation of `not screen and (hover)` is `screen and (hover)`; postcss-custom-media writes `(hover),screen`, which matches more',
 	},
 	{
 		css: '@custom-media --a foo(x);\n@custom-media --b not(hover);\n@custom-media --x (ab) not;\n@media not (--a) { a { top: 0 } }\n@media not (--b) { b { top: 0 } }\n@media not (--x) { c { top: 0 } }',
-		v3: '@media foo(x){@media not (max-color:2147477350){a{top:0}}}@media{@media not (color:2147477350){a{top:0}}}@media not(hover){@media not (max-color:2147477350){b{top:0}}}@media{@media not (color:2147477350){b{top:0}}}@media(ab) not{@media not (max-color:2147477350){c{top:0}}}@media{@media not (color:2147477350){c{top:0}}}',
+		v3: '@media foo(x){@media not (max-color:2147477350){a{top:0}}}@media{@media not (color:2147477350){a{top:0}}}@media not(hover){@media not (max-color:2147477350){b{top:0}}}@media{@media not (color:2147477350){b{top:0}}}@media (ab) not{@media not (max-color:2147477350){c{top:0}}}@media{@media not (color:2147477350){c{top:0}}}',
 		why: 'a definition that never matches makes `(--a)` false, so `not (--a)` always applies (the negation is `all`); postcss-custom-media writes the definition again as its negation, so the rule never applies',
 	},
 	{
 		css: '@layer x, y;\n@layer y { @custom-media --a (width < 1px); }\n@layer x { @custom-media --a (width > 2px); }\n@media (--a) { a { top: 0 } }',
-		v3: '@layer x, y;@media(width>2px){a{top:0}}',
+		v3: '@layer x, y;@layer y{}@layer x{}@media (width > 2px){a{top:0}}',
 		why: 'the last definition of a name is the one (Media Queries 5 §10); postcss-custom-media takes the one in the layer of the highest priority',
 	},
 	{
 		css: '@layer x { @custom-media --a (width < 1px); }\n@media (--a) { a { top: 0 } }',
-		v3: '@layer x{}@media(width<1px){a{top:0}}',
+		v3: '@layer x{}@media (width < 1px){a{top:0}}',
 		why: 'the emptied `@layer x {}` stays, as it places the layer; postcss-custom-media removes it',
 	},
 	{
 		css: '@custom-media -- (x:1);\n@media (--) { a { top: 0 } }',
-		v3: '@custom-media -- (x:1);@media(--){a{top:0}}',
+		v3: '@custom-media -- (x:1);@media (-- ){a{top:0}}',
 		why: '`--` alone is reserved (CSS Values 4); postcss-custom-media defines it',
 	},
 ];

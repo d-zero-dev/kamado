@@ -127,6 +127,10 @@ const INTENDED = {
 		v3: '@import "data:text/css;base64,QGltcG9ydCAnaHR0cHM6Ly9leGFtcGxlLmNvbS9mb250LmNzcycgbGF5ZXIoYikgcHJpbnQ=" layer(a) screen;@media screen{@layer a{@media print{@layer b{.remote{color:blue}}}}}@media screen{@layer a{.mid{color:blue}}}.m10{color:red}',
 		why: 'the remote import is in the layer `a.b` (the import of `layer(a)` loads the sheet that imports it with `layer(b)`); postcss-import nests them the other way round, which is `b.a`',
 	},
+	'main11.css': {
+		v3: '@layer{.theme{background:red;color:rgba(0,0,0,.5)}}@layer{.print{display:none}}.m11{color:red}',
+		why: 'each anonymous layer is a layer of its own, so two of them side by side stay apart; cssnano joins adjacent `@layer` blocks, which puts the rules of one in the layer of the other',
+	},
 	'main9.css': {
 		v3: '@layer base;@layer y{@layer p, q}@layer base{.theme{background:red;color:rgba(0,0,0,.5)}.print{display:none}}@layer y{.layers{color:blue}}.m9{color:red}',
 		why: 'the layers are declared in the order of the imports (`base`, then `y`); postcss-import moves the `@layer` statement of an imported file in front, which declares `y` first',
