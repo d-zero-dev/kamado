@@ -213,6 +213,11 @@ pub struct Scripts {
 pub struct DevServer {
 	pub port: u16,
 	pub host: String,
+	/// Host names served besides `localhost`, IP literals and `host`;
+	/// `.example.test` matches `example.test` and every subdomain of it. An IP
+	/// address here admits the pages on that address as origins. Checked by
+	/// the server.
+	pub allowed_hosts: Vec<String>,
 	pub open: bool,
 	pub start_path: String,
 	/// Prefix → rule object, validated for shape, interpreted by the server.
@@ -468,7 +473,7 @@ pub fn parse(config_text: &str, root_dir: &str, package_json: Option<&str>) -> R
 
 	let dev_server = {
 		let o = root.obj("devServer")?;
-		o.allow(&["port", "host", "open", "startPath", "proxy"])?;
+		o.allow(&["port", "host", "allowedHosts", "open", "startPath", "proxy"])?;
 		let port = o.number_or("port", 3000.0)?;
 		if port.fract() != 0.0 || !(1.0..=65535.0).contains(&port) {
 			return Err(o.err("port", "expected an integer between 1 and 65535"));
@@ -502,9 +507,57 @@ pub fn parse(config_text: &str, root_dir: &str, package_json: Option<&str>) -> R
 			}
 			Some(_) => return Err(o.err("proxy", "expected an object keyed by path prefix")),
 		};
+		let allowed_hosts = match o.get("allowedHosts") {
+			None => vec![],
+			Some(Value::Array(items)) => {
+				let mut hosts = Vec::new();
+				for item in items {
+					let Some(host) = item.as_str() else {
+						return Err(o.err("allowedHosts", "expected an array of host names"));
+					};
+					// What would never match the host name of a request (a
+					// scheme, a port, a path, a `*`, a character outside a host
+					// name, a name that is not ASCII: the browser sends punycode)
+					// is an error, so that the entry does not silently allow
+					// nothing. A bracketed entry must be an IPv6 address.
+					// The server drops the trailing dot of a fully qualified name.
+					let name = host.strip_prefix('.').unwrap_or(host);
+					let name = name.strip_suffix('.').unwrap_or(name);
+					let valid = if let Some(v6) = host.strip_prefix('[') {
+						v6.strip_suffix(']')
+							.is_some_and(|v6| v6.parse::<std::net::Ipv6Addr>().is_ok())
+					} else {
+						!name.is_empty()
+							&& name.split('.').all(|label| {
+								!label.is_empty()
+									&& label.bytes().all(|b| {
+										b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
+									})
+							})
+					};
+					if !valid {
+						let hint = if host.starts_with('*') {
+							" (write \".example.test\" to match a domain and its subdomains)"
+						} else {
+							" (ASCII letters, digits, \".\", \"-\" and \"_\"; punycode for an internationalized name; an IPv6 address in brackets)"
+						};
+						return Err(o.err(
+							"allowedHosts",
+							format!(
+								"expected a host name without a scheme, a port or a path{hint}, got {host:?}"
+							),
+						));
+					}
+					hosts.push(host.to_string());
+				}
+				hosts
+			}
+			Some(_) => return Err(o.err("allowedHosts", "expected an array of host names")),
+		};
 		DevServer {
 			port: port as u16,
 			host: o.str_or("host", "localhost")?,
+			allowed_hosts,
 			open: o.bool_or("open", false)?,
 			start_path: o.str_or("startPath", "/")?,
 			proxy,
@@ -1370,6 +1423,64 @@ mod tests {
 			fail(r#"{ "devServer": { "proxy": { "/api": 1 } } }"#).path,
 			"devServer.proxy./api"
 		);
+	}
+
+	#[test]
+	fn allowed_hosts_are_host_names() {
+		let c = ok("{}");
+		assert!(c.dev_server.allowed_hosts.is_empty());
+		let c = ok(
+			r#"{ "devServer": { "allowedHosts": ["laptop.local", ".example.test", "[::1]", "dev_box.local", "laptop.local."] } }"#,
+		);
+		assert_eq!(
+			c.dev_server.allowed_hosts,
+			[
+				"laptop.local",
+				".example.test",
+				"[::1]",
+				"dev_box.local",
+				"laptop.local."
+			]
+		);
+		assert_eq!(
+			fail(r#"{ "devServer": { "allowedHosts": "laptop.local" } }"#).to_string(),
+			"devServer.allowedHosts: expected an array of host names"
+		);
+		assert_eq!(
+			fail(r#"{ "devServer": { "allowedHosts": [1] } }"#).to_string(),
+			"devServer.allowedHosts: expected an array of host names"
+		);
+		assert!(
+			fail(r#"{ "devServer": { "allowedHosts": ["*.example.test"] } }"#)
+				.message
+				.contains("write \".example.test\""),
+		);
+		for bad in [
+			"",
+			".",
+			"..",
+			"*.example.test",
+			"http://laptop.local",
+			"laptop.local:3000",
+			"laptop.local/",
+			"a#b",
+			"a?b",
+			"user@host",
+			"[::1]:3000",
+			"[not-an-ip]",
+			" laptop.local",
+			"ラップトップ.local",
+		] {
+			let e = fail(&format!(
+				r#"{{ "devServer": {{ "allowedHosts": [{bad:?}] }} }}"#
+			));
+			assert_eq!(e.path, "devServer.allowedHosts", "{bad:?}");
+			assert!(
+				e.message.starts_with("expected a host name without"),
+				"{bad:?}: {}",
+				e.message
+			);
+		}
 	}
 
 	#[test]

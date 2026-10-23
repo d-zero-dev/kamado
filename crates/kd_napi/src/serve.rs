@@ -86,8 +86,8 @@ fn opt(s: &Option<String>) -> Value {
 }
 
 /// Opens the dev server of a project. The answer describes what the HTTP side
-/// needs: `{ handle, devServer: { port, host, open, startPath, proxy },
-/// inputDir, outputDir }`.
+/// needs: `{ handle, devServer: { port, host, allowedHosts, open, startPath,
+/// proxy }, inputDir, outputDir }`.
 pub(crate) fn open(config_path: &str, options_json: &str, runtime: &str) -> Result<String, String> {
 	let options = crate::build_options_from_json(options_json)?;
 	let loaded = kd_core::load(config_path)?;
@@ -97,6 +97,15 @@ pub(crate) fn open(config_path: &str, options_json: &str, runtime: &str) -> Resu
 	let description = Value::Object(vec![
 		("port".to_owned(), Value::Number(f64::from(dev.port))),
 		("host".to_owned(), Value::String(dev.host.clone())),
+		(
+			"allowedHosts".to_owned(),
+			Value::Array(
+				dev.allowed_hosts
+					.iter()
+					.map(|h| Value::String(h.clone()))
+					.collect(),
+			),
+		),
 		("open".to_owned(), Value::Bool(dev.open)),
 		(
 			"startPath".to_owned(),
@@ -262,6 +271,47 @@ mod tests {
 		)
 		.unwrap();
 		root
+	}
+
+	#[test]
+	fn the_description_carries_the_allowed_hosts() {
+		let root = site("hosts");
+		// Without the option the array is there, empty: the Node side relies on it.
+		let opened = open(
+			&format!("{root}/kamado.config.jsonc"),
+			"{}",
+			"file:///rt.js",
+		)
+		.unwrap();
+		let value = kd_jsonc::parse(&opened).unwrap();
+		assert_eq!(
+			value.get("devServer").and_then(|d| d.get("allowedHosts")),
+			Some(&Value::Array(vec![]))
+		);
+		close(value.get("handle").and_then(|h| h.as_str()).unwrap());
+		fs::write(
+			format!("{root}/kamado.config.jsonc"),
+			r#"{ "dir": { "input": "src", "output": "out" }, "build": { "cacheDir": ".cache" }, "devServer": { "port": 4000, "allowedHosts": ["laptop.local", ".example.test"] } }"#,
+		)
+		.unwrap();
+		let opened = open(
+			&format!("{root}/kamado.config.jsonc"),
+			"{}",
+			"file:///rt.js",
+		)
+		.unwrap();
+		let value = kd_jsonc::parse(&opened).unwrap();
+		let dev = value.get("devServer").unwrap();
+		assert_eq!(
+			dev.get("allowedHosts"),
+			Some(&Value::Array(vec![
+				Value::String("laptop.local".to_owned()),
+				Value::String(".example.test".to_owned()),
+			]))
+		);
+		let handle = value.get("handle").and_then(|h| h.as_str()).unwrap();
+		close(handle);
+		let _ = fs::remove_dir_all(&root);
 	}
 
 	#[test]
