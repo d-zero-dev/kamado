@@ -42,7 +42,7 @@ v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは `p
 | `createScriptCompiler` の `alias` / `minifier`                | `scripts.alias` / `scripts.minify`                                                                        |
 | `createStyleCompiler` の `alias`                              | `styles.alias`                                                                                            |
 | `banner`（文字列または関数）                                  | `styles.banner` / `scripts.banner`（文字列。`{{date:YYYY-MM-DD}}` `{{year}}` `{{version}}`。`""` で無効） |
-| `devServer: { port, host, open, startPath }`                  | 同じ名前                                                                                                  |
+| `devServer: { port, host, open, startPath }`                  | 同じ名前。`allowedHosts` が加わる（§8）                                                                   |
 | `devServer.proxy[prefix].pathRewrite: (p) => ...`             | `rewrite: { from: "^/api", to: "" }`（`from` は正規表現）                                                 |
 | `onBeforeBuild` / `onAfterBuild`                              | §7                                                                                                        |
 | `pageList(fn)`（スプレッドシート由来など）                    | `pages.overrides`（prebuild が JSON に書く。§2.1）                                                        |
@@ -292,6 +292,7 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
 - ページファイルの**追加と削除**、設定ファイル・`pages.overrides` の変更は、**再起動**すると反映されます。
 - コンポーネントを直すと、次のリクエストで描画用のワーカーが作り直されます（初回は少し遅い）。
 - ブラウザのライブリロードはありません。
+- `localhost`（とそのサブドメイン）、IP アドレス、`devServer.host` 以外のホスト名で開くと `403` になります。`laptop.local` やトンネルのドメインで開くなら、`devServer.allowedHosts` に足してください（`".example.test"` のように先頭が `.` の値はサブドメインにも一致します）。`devServer.host` は待ち受けるアドレスで、`0.0.0.0` にしても名前で開けるようにはなりません。別のサイトからの要求（`<script src>`、フォームの送信、`iframe` への埋め込み）も `403` です。外部のリンクからタブで開くのは通りますが、`devServer.proxy` の接頭辞の下へのリンクは通りません（アドレスバーから開けば通ります）。同じマシンの別のツール（`http://127.0.0.1:5173` など）からの要求は通ります。別のマシンのツールからの要求を通すには、そのホスト名か IP アドレスを `allowedHosts` に足してください。DNS リバインディングと、別サイトからソースや `proxy` の先の API を読まれることへの対策です。ブラウザは判定に使う `Sec-Fetch-*` ヘッダーを `https:` と `localhost` 宛てにしか送らないので、`localhost` 以外のホスト（LAN の IP アドレスや `laptop.local`）で平文のまま開いているときは、フォームの送信と fetch だけが検査され、`<script src>` や `iframe` は通ります。
 
 ## 9. d-zero/builder（11ty）からの移行
 

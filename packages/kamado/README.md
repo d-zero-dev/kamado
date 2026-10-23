@@ -35,7 +35,7 @@ Rust のコアを持つ、オンデマンドの静的サイトジェネレータ
 | `sitemap`   | `sitemap.xml`（`false` で無効）                                                                |
 | `styles`    | `@import` の展開、alias、banner、sourcemap、圧縮                                               |
 | `scripts`   | esbuild でのバンドル（alias / define / target / banner / sourcemap / 圧縮）                    |
-| `devServer` | `port` / `host` / `open` / `startPath` / `proxy`                                               |
+| `devServer` | `port` / `host` / `allowedHosts` / `open` / `startPath` / `proxy`                              |
 | `build`     | `jobs` / `incremental` / `cacheDir` / `skipUnchanged` / `report`                               |
 
 ## コマンド
@@ -49,7 +49,7 @@ kamado --help           (-h)
 
 - `--config` / `-c` を省略すると、カレントディレクトリの `kamado.config.jsonc` を使う。`--cache-dir` は差分ビルドの manifest などの置き場を変える（`build` と `server` の両方）。
 - `build` は設定の対象を全部出力する。`globs` を渡すとその入力だけ。`--incremental` は前回から変わっていないものを飛ばす（`--force` で無視）。`--jobs` は並列度（JSX の描画のワーカーと Rust のスレッドの数）で、`auto`（既定）は使える CPU の数から決める。
-- `server` はリクエストごとに依存ファイルを stat し、変わっていなければ前回の結果を返す。ファイルは書き出さない。ライブリロードはない。変更したコンポーネントはワーカーを作り直して反映する。
+- `server` はリクエストごとに依存ファイルを stat し、変わっていなければ前回の結果を返す。ファイルは書き出さない。ライブリロードはない。変更したコンポーネントはワーカーを作り直して反映する。応えるのは `localhost`・IP アドレス・`devServer.host`・`devServer.allowedHosts` 宛ての要求だけで、別のサイトからの要求は `403`（`docs/v3/RFC.md` §12）。
 
 ## プログラムから
 

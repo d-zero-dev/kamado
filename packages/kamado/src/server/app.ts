@@ -19,6 +19,7 @@ import { Hono } from 'hono';
 import { native } from '../native.js';
 import { buildScripts } from '../scripts.js';
 
+import { setGuard } from './guard.js';
 import { contentTypeOf } from './mime.js';
 import { setProxyRoutes } from './proxy.js';
 import { byteRange } from './range.js';
@@ -46,6 +47,7 @@ export interface ServeDescription {
 	readonly devServer: {
 		readonly port: number;
 		readonly host: string;
+		readonly allowedHosts: readonly string[];
 		readonly open: boolean;
 		readonly startPath: string;
 		readonly proxy: Readonly<Record<string, string | ProxyRule>>;
@@ -59,7 +61,10 @@ export interface RequestLog {
 	readonly pathname: string;
 	readonly status: number;
 	readonly ms: number;
-	/** `page`, `style`, `script` or `file`. */
+	/**
+	 * `page`, `style`, `script` or `file`; `blocked` for a request the guard
+	 * refused, `error` for a 500.
+	 */
 	readonly kind: string;
 	readonly error?: string;
 }
@@ -133,6 +138,7 @@ export function createApp(
 	let server = description.handle;
 	const renderer: Renderer = options.renderer ?? new ServeRenderer(runtimeUrl);
 	const app = new Hono();
+	setGuard(app, description.devServer, options.onRequest);
 	setProxyRoutes(app, description.devServer.proxy, options.fetch);
 
 	// The last failure to open the server again, so that the requests of one

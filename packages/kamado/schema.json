@@ -224,7 +224,15 @@
 			"additionalProperties": false,
 			"properties": {
 				"port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-				"host": { "type": "string" },
+				"host": {
+					"description": "The address the server listens on (\"0.0.0.0\" for every interface). Requests may name it too; other names that reach the machine go in allowedHosts.",
+					"type": "string"
+				},
+				"allowedHosts": {
+					"description": "Host names the dev server answers besides localhost, IP literals and host (ASCII; an internationalized name in punycode). \".example.test\" matches example.test and every subdomain of it. An IP address here admits the pages on that address (a tool on another machine) as origins of cross-site requests.",
+					"type": "array",
+					"items": { "type": "string" }
+				},
 				"open": { "type": "boolean" },
 				"startPath": { "type": "string" },
 				"proxy": {
