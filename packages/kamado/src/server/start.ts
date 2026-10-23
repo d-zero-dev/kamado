@@ -102,7 +102,8 @@ export async function start(
 	const { host, port, startPath, proxy } = description.devServer;
 
 	const { app, close } = createApp(description, RUNTIME_URL, {
-		// The port, the host and the proxy stay those of the first opening.
+		// The port, the host, the allowed hosts, the proxy and the start path
+		// stay those of the first opening.
 		reopen: () => open().handle,
 		onRequest: (log) => {
 			if (options.verbose === true || log.kind !== 'file' || log.status >= 400) {

@@ -42,7 +42,14 @@ const { createApp } = await import('./app.js');
 
 const DESCRIPTION = {
 	handle: 'h1',
-	devServer: { port: 3000, host: 'localhost', open: false, startPath: '/', proxy: {} },
+	devServer: {
+		port: 3000,
+		host: 'localhost',
+		allowedHosts: [],
+		open: false,
+		startPath: '/',
+		proxy: {},
+	},
 	inputDir: '/s',
 	outputDir: '/o',
 };
@@ -605,6 +612,85 @@ describe('createApp', () => {
 
 			expect(await response.text()).toBe('failed (KAMADO_SERVE_POISONED)');
 			expect(serveClose).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('the guard', () => {
+		test('a request for another host is a 403 before the core is asked', async () => {
+			const renderer = fakeRenderer();
+			const logs: unknown[] = [];
+			const { app } = createApp(DESCRIPTION, 'file:///rt.js', {
+				renderer,
+				onRequest: (log) => logs.push(log),
+			});
+
+			const response = await app.request('http://evil.example:3000/index.html');
+
+			expect(response.status).toBe(403);
+			expect(serveRequest).not.toHaveBeenCalled();
+			expect(renderer.render).not.toHaveBeenCalled();
+			expect(logs).toEqual([
+				{
+					pathname: '/index.html',
+					status: 403,
+					kind: 'blocked',
+					ms: expect.any(Number),
+					error: expect.stringContaining('devServer.allowedHosts'),
+				},
+			]);
+		});
+
+		test('a host in allowedHosts is served', async () => {
+			serveRequest.mockReturnValue(
+				JSON.stringify({ kind: 'text', contentType: 'text/html', body: '<p>x</p>' }),
+			);
+			const { app } = createApp(
+				{
+					...DESCRIPTION,
+					devServer: { ...DESCRIPTION.devServer, allowedHosts: ['laptop.local'] },
+				},
+				'file:///rt.js',
+				{ renderer: fakeRenderer() },
+			);
+
+			const response = await app.request('http://laptop.local:3000/');
+
+			expect(response.status).toBe(200);
+			expect(serveRequest).toHaveBeenCalledExactlyOnceWith('h1', '/', '0');
+		});
+
+		test('a cross-site form post never reaches the proxied server', async () => {
+			const fakeFetch = vi.fn();
+			const { app } = createApp(
+				{
+					...DESCRIPTION,
+					devServer: {
+						...DESCRIPTION.devServer,
+						proxy: { '/api': 'http://backend.test' },
+					},
+				},
+				'file:///rt.js',
+				{ renderer: fakeRenderer(), fetch: fakeFetch as unknown as typeof fetch },
+			);
+
+			const headers = {
+				'Sec-Fetch-Site': 'cross-site',
+				'Sec-Fetch-Mode': 'navigate',
+				'Sec-Fetch-Dest': 'document',
+			};
+
+			const response = await app.request('/api/x', {
+				method: 'POST',
+				body: 'x',
+				headers,
+			});
+			// A link to the proxied path, percent-encoded so that only the
+			// router's decoded path matches the prefix.
+			const encoded = await app.request('/%61pi/x', { headers });
+
+			expect(response.status).toBe(403);
+			expect(encoded.status).toBe(403);
+			expect(fakeFetch).not.toHaveBeenCalled();
 		});
 	});
 });
