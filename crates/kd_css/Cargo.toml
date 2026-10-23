@@ -10,3 +10,9 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+
+# The example holds tests of its own (`decisions_of`); `cargo test` skips the
+# tests of examples unless they say they have them.
+[[example]]
+name = "minify"
+test = true

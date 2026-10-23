@@ -110,6 +110,22 @@ Pug から TSX への変換器（`scripts/pug-to-tsx.mjs`）は、小さな Pug 
 | CSS の `@custom-media` | `check-css-custom-media.mjs`（要 `cargo build --release --offline -p kd_css --example minify`。oracle は v2 の `@d-zero/postcss-config` が固定する `postcss-custom-media` で、devDependencies の版をそれに合わせる） | `crates/kd_css/src/custom_media.rs` のテスト  |
 | JS / TS / JSX          | `check-kd-js-js.mjs` / `check-kd-js-types.mjs` / `check-kd-js-jsx.mjs`（`jsx-fuzz.mjs`）                                                                                                                             | 各スクリプトを直接実行                        |
 
+`check-css.mjs` は、次の 5 つの失敗がすべて 0 件のとき通る。
+
+- `rust`: kd_css がエラーを返す
+- `parse`: 出力を postcss が読めない
+- `equivalence`（レポートでは `unexplained`）: kd_css の出力を cssnano に通した文字列が、元の入力を通した文字列と合わない
+- `size`: ファイルが cssnano の出力の +3% と 8 バイトを超える。全ファイルの合計が +3% を超えるときも
+- `idempotence`: 2 回圧縮すると変わる
+
+`equivalence` か `size` が出たら、次の 3 つのどれかに分ける。
+
+1. kd_css が意味を変えている: `crates/kd_css/src/` を直す。
+2. kd_css が意図して cssnano と違う出力をする: `crates/kd_css/tests/common/mod.rs` の `DECISIONS` に両側の出力つきで記録する。`size` は、違いがこの記録だけでできているファイルを外す（`differential.rs` と同じ。`examples/minify.rs` が `DECISIONS` を読んで理由を返す。cssnano の出力 `<n>.out` が `<n>.in` の隣にあるファイルだけが対象で、`generate-css-oracle.mjs` が書く）。外したファイルは `larger than the bound by listed decisions only` として報告する。
+3. cssnano が縮めきれていない書式だけの差で、意味は同じ: `check-css.mjs` の `benign` に名前をつけて足す。`benign` は `equivalence` だけが使い、`size` は使わない。
+
+入れ子の規則を持つ規則の宣言と、規則の中のブロックの宣言は、cssnano が途中までしか縮めない（値の変換だけで、結合しない。展開した長手を戻さない）ので、そのままでは比べられない。`check-css.mjs` は、`benign` で説明できない差のときだけ、次の順に比べ直す（`scripts/css-oracle.mjs`）。(a) 両側の宣言を、cssnano がトップレベルで縮める形にそろえて比べる（値まで見る）。(b) それでも合わないものは、宣言の 1 まとまりを目印 1 つに置き換えて比べる。構造（セレクタ、at-rule、入れ子）と、入れ子の規則に対する宣言の位置は比べるが、値は比べない。(b) は検査の穴で、そこの宣言の値の誤りは見えない。kd_css はその宣言を、ほかの宣言と同じ処理で縮める。cssnano が隣り合う同名のブロックを結合しないために、同じ規則が 2 つ残る差は、結合したものを cssnano にもう一度通して比べる。
+
 `fuzz-html-chain.mjs` の第 4 引数に `on`（圧縮あり）を渡して作ったコーパスは、`chain_matches_v2` に `KD_CHAIN_MINIFY=on` を付けて回す（圧縮の JS / CSS は両側とも切る）。付けない（または `off`）と v3 の圧縮を切る。ほかの値はエラー。
 
 `scripts/` と `benchmarks/` は、ルートの `yarn lint:eslint` の対象外（prettier と cspell だけが見る）。
