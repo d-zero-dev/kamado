@@ -31,7 +31,7 @@ File: `package.json`
 + "@kamado-io/pug-compiler": "^2.0.0",
 ```
 
-Run the project's install command (`yarn install` / `npm install` / `pnpm install`).
+Run the project's install command (`yarn install`/`npm install`/`pnpm install`).
 
 ---
 
@@ -56,14 +56,14 @@ Every compiler that was a bare callable in v1 is now a factory returning a calla
 
 ### 2b. Call sites (see also section 3 for the surrounding `compilers:` shape)
 
-Find: `pageCompiler(` / `styleCompiler(` / `scriptCompiler(` not preceded by `create`.
-Replace each with `createPageCompiler()(` / `createStyleCompiler()(` / `createScriptCompiler()(`.
+Find: `pageCompiler(`/`styleCompiler(`/`scriptCompiler(` not preceded by `create`.
+Replace each with `createPageCompiler()(`/`createStyleCompiler()(`/`createScriptCompiler()(`.
 
 ---
 
 ## 3. `Config.compilers` array → callback `(def) => [...]`
 
-File: `kamado.config.ts` (or wherever `Config` / `UserConfig` is declared)
+File: `kamado.config.ts` (or wherever `Config`/`UserConfig` is declared)
 
 ```diff
 - import type { UserConfig } from 'kamado/config';
@@ -169,7 +169,7 @@ Notes:
 
 v2 parses HTML through linkedom, not jsdom. The hook signature uses linkedom-derived types re-exported from `kamado/utils/dom`.
 
-**Why**: linkedom benchmarks roughly 3.9× faster build / 47% lower RSS than jsdom on this project's workload and drops 38+ transitive dependencies. The trade-off is that linkedom is **intentionally not 100% spec-compliant** — see ARCHITECTURE.md "DOM Library (linkedom)" for the compatibility table. The kamado-side compensation (auto `<head>`, null `documentElement` fallback, `--!>` normalization, `ctx.getHref`) is in `packages/kamado/src/utils/dom.ts`.
+**Why**: linkedom benchmarks roughly 3.9× faster build/47% lower RSS than jsdom on this project's workload and drops 38+ transitive dependencies. The trade-off is that linkedom is **intentionally not 100% spec-compliant** — see ARCHITECTURE.md "DOM Library (linkedom)" for the compatibility table. The kamado-side compensation (auto `<head>`, null `documentElement` fallback, `--!>` normalization, `ctx.getHref`) is in `packages/kamado/src/utils/dom.ts`.
 
 ```diff
 - import type { Element } from 'lib.dom';   // implicit globals
@@ -199,7 +199,7 @@ Hook code that relied on jsdom-only behavior must be rewritten:
 
 Both `host` (on `manipulateDOM`) and `url` (on `domSerialize`) were deleted. Replacement is automatic via `ctx.baseURL`.
 
-**Why**: linkedom does not populate `window.location` / `Document.baseURI`, so the v1 trick of "tell jsdom which URL we're at, then read `<a>.href`" no longer works. Two options closed: either reimplement URL reflection in user code (verbose, easy to get wrong, leaks credentials in `https://user:pass@…` bases), or surface a first-class helper. v2 chose the helper. As a side effect of moving URL resolution into kamado's helper, dangerous schemes (`javascript:`/`data:`/etc.) and basic-auth credentials are stripped centrally instead of being every hook author's responsibility.
+**Why**: linkedom does not populate `window.location`/`Document.baseURI`, so the v1 trick of "tell jsdom which URL we're at, then read `<a>.href`" no longer works. Two options closed: either reimplement URL reflection in user code (verbose, easy to get wrong, leaks credentials in `https://user:pass@…` bases), or surface a first-class helper. v2 chose the helper. As a side effect of moving URL resolution into kamado's helper, dangerous schemes (`javascript:`/`data:`/etc.) and basic-auth credentials are stripped centrally instead of being every hook author's responsibility.
 
 ```diff
   manipulateDOM({
@@ -217,7 +217,7 @@ Both `host` (on `manipulateDOM`) and `url` (on `domSerialize`) were deleted. Rep
 - build mode → `pkg.production.baseURL`, falling back to `https://${pkg.production.host}`
 - `undefined` if neither is configured
 
-`ctx.getHref(el)` returns `null` for dangerous schemes (`javascript:` / `data:` / `vbscript:` / `file:`) and strips basic-auth credentials. Safe to interpolate into rendered HTML.
+`ctx.getHref(el)` returns `null` for dangerous schemes (`javascript:`/`data:`/`vbscript:`/`file:`) and strips basic-auth credentials. Safe to interpolate into rendered HTML.
 
 For non-`href` URL attributes (e.g. `<img src>`), call directly:
 
@@ -259,7 +259,7 @@ defineConfig<MyMeta>({/* ... */});
 
 The `kamado/features` deep import is gone. Use the page-compiler exports.
 
-**Why**: navigation / breadcrumb / title-list helpers live conceptually inside page compilation, not the kamado core. v1 already marked the module `@deprecated` in `1.x` and pointed users at `@kamado-io/page-compiler`; v2 finishes the move.
+**Why**: navigation/breadcrumb/title-list helpers live conceptually inside page compilation, not the kamado core. v1 already marked the module `@deprecated` in `1.x` and pointed users at `@kamado-io/page-compiler`; v2 finishes the move.
 
 ```diff
 - import { getBreadcrumbs, getNavTree, titleList, getTitle } from 'kamado/features';
@@ -277,7 +277,7 @@ Behavior changes:
 
 ## 10. Renames
 
-**Why**: `filter` was ambiguous (every option called `filter` could mean "filter the file list" or "filter nodes in the nav tree"). The new names spell out the target. `transformNode` returning `NavNode` invited mutation; switching to `boolean` separates "decide to keep" from "decide to rewrite" (rewrites go through `transformBreadcrumbItem` / a custom `Transform`).
+**Why**: `filter` was ambiguous (every option called `filter` could mean "filter the file list" or "filter nodes in the nav tree"). The new names spell out the target. `transformNode` returning `NavNode` invited mutation; switching to `boolean` separates "decide to keep" from "decide to rewrite" (rewrites go through `transformBreadcrumbItem`/a custom `Transform`).
 
 Apply these one-for-one. Search regex shown.
 
@@ -301,7 +301,7 @@ Apply these one-for-one. Search regex shown.
 
 ## 11. Prettier error policy moved to pipeline-level
 
-**Why**: a per-transform `parseError` option meant configuring "what happens when prettier throws" separately from "what happens when minifier / a custom transform throws". The pipeline-level `formatOptions.parseError` applies the same policy to every transform uniformly, and the new error message format (`Transform '<name>' failed on <source>: <original>`) carries the failing transform's name so a single policy can still tell errors apart.
+**Why**: a per-transform `parseError` option meant configuring "what happens when prettier throws" separately from "what happens when minifier/a custom transform throws". The pipeline-level `formatOptions.parseError` applies the same policy to every transform uniformly, and the new error message format (`Transform '<name>' failed on <source>: <original>`) carries the failing transform's name so a single policy can still tell errors apart.
 
 ```diff
   prettier({
@@ -336,7 +336,7 @@ Error-message format also changed to `Transform '<name>' failed on <source>: <or
 | `trackDependency`                                        | unchanged                                                      |
 | `collectDependencies`                                    | unchanged                                                      |
 
-Most user configs do not touch these — skip unless you have custom transforms / hooks that read raw files.
+Most user configs do not touch these — skip unless you have custom transforms/hooks that read raw files.
 
 ---
 
@@ -350,7 +350,7 @@ These exist in v2 but do not force changes to v1 code paths.
 - `devServer.proxy` — proxy routes through the dev server.
 - `kamado build --incremental` + `--cache-dir` + `--force` — verifying-trace incremental builds (~40× on no-change rebuilds).
 - `kamado build --skip-unchanged` — skip writes when bytes are identical.
-- `manipulateDOM` hook's `ctx.getHref(el)` / `ctx.baseURL` — URL resolution helpers.
+- `manipulateDOM` hook's `ctx.getHref(el)`/`ctx.baseURL` — URL resolution helpers.
 
 ---
 
@@ -366,9 +366,9 @@ yarn test       # if the project has its own tests; for a kamado-consumer projec
 
 Type-checking failures are the primary signal that a v1 pattern was missed. The most common holdouts are:
 
-- bare `pageCompiler(` / `styleCompiler(` / `scriptCompiler(` calls (section 2)
+- bare `pageCompiler(`/`styleCompiler(`/`scriptCompiler(` calls (section 2)
 - `compilers: [ ... ]` literal array (section 3)
-- `afterSerialize` / `beforeSerialize` on pageCompiler options (section 5)
+- `afterSerialize`/`beforeSerialize` on pageCompiler options (section 5)
 - jsdom-only DOM APIs in hooks (section 6)
 - `host:` on `manipulateDOM` options (section 7)
 
@@ -403,9 +403,9 @@ The published v1.3.0 tags are immutable; rollback by version pin alone is safe.
 2. [ ] Replace bare compiler constants with curried factories (section 2)
 3. [ ] Convert `compilers:` array to callback (section 3)
 4. [ ] Curry `createCompileHooks` (section 4)
-5. [ ] Move `afterSerialize` / `beforeSerialize` into `manipulateDOM` transform (section 5)
-6. [ ] Replace lib.dom hook types with `DomElement` / `DomWindow` (section 6)
-7. [ ] Remove `manipulateDOM({ host })` / `domSerialize({ url })`; switch URL resolution to `ctx.getHref` / `ctx.baseURL` (section 7)
+5. [ ] Move `afterSerialize`/`beforeSerialize` into `manipulateDOM` transform (section 5)
+6. [ ] Replace lib.dom hook types with `DomElement`/`DomWindow` (section 6)
+7. [ ] Remove `manipulateDOM({ host })`/`domSerialize({ url })`; switch URL resolution to `ctx.getHref`/`ctx.baseURL` (section 7)
 8. [ ] Add generic `<M>` parameters if frontmatter is customized (section 8)
 9. [ ] Migrate `kamado/features` imports to page-compiler exports (section 9)
 10. [ ] Apply renames (section 10)
