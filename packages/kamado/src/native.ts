@@ -123,7 +123,7 @@ export function native(): Native {
 		);
 	}
 	const mod: { exports: Partial<Native> } = { exports: {} };
-	process.dlopen(mod as NodeJS.Module, file);
+	process.dlopen(mod, file);
 	loaded = mod.exports as Native;
 	return loaded;
 }

@@ -64,7 +64,7 @@ function setup(
 		return Promise.resolve(respond());
 	});
 	const app = new Hono();
-	setProxyRoutes(app, proxy, fakeFetch as unknown as typeof fetch);
+	setProxyRoutes(app, proxy, fakeFetch);
 	return { app, calls };
 }
 
