@@ -1,24 +1,24 @@
 # Milestone: v2.0.0
 
-> **この文書は v2 の記録です。** v2 のコードは `v2` ブランチで保守していて、このブランチ（v3）には `kamado/features`、`@kamado-io/*` などの v2 のパッケージはありません。v3 の仕様は `docs/v3/RFC.md`、v2 からの移行手順は `docs/v3/MIGRATION.md` を参照してください。
+> **この文書は v2 の記録です。** v2 のコードは`v2`ブランチで保守していて、このブランチ（v3）には`kamado/features`、`@kamado-io/*`などの v2 のパッケージはありません。v3 の仕様は`docs/v3/RFC.md`、v2 からの移行手順は`docs/v3/MIGRATION.md`を参照してください。
 
 ## Breaking Changes TODO
 
-- [x] `kamado/features` エクスポートを削除
-  - [x] `getBreadcrumbs` を `@kamado-io/page-compiler` 内部に移動
-  - [x] `getNavTree` を `@kamado-io/page-compiler` 内部に移動
-  - [x] `getTitleList` を `@kamado-io/page-compiler` 内部に移動
-  - [x] `getTitle` を削除（`getTitleFromHtmlString` を `@kamado-io/page-compiler/title` で公開）
-  - [x] `getTitleFromStaticFile` を削除
-  - [x] `kamado/features` に deprecation 警告を追加（v2.0.0 で削除予定）
-  - [x] `PageData` 型を追加（`metaData.title` でタイトル管理）
-- [x] `compileHooks` / `transforms` の関数形式の解決タイミングを「ファイルごと」から「build/serve コンテキストごとに1回」に変更（ビルド高速化）
+- [x] `kamado/features`エクスポートを削除
+  - [x] `getBreadcrumbs`を`@kamado-io/page-compiler`内部に移動
+  - [x] `getNavTree`を`@kamado-io/page-compiler`内部に移動
+  - [x] `getTitleList`を`@kamado-io/page-compiler`内部に移動
+  - [x] `getTitle`を削除（`getTitleFromHtmlString`を`@kamado-io/page-compiler/title`で公開）
+  - [x] `getTitleFromStaticFile`を削除
+  - [x] `kamado/features`に deprecation 警告を追加（v2.0.0 で削除予定）
+  - [x] `PageData`型を追加（`metaData.title`でタイトル管理）
+- [x] `compileHooks`/`transforms`の関数形式の解決タイミングを「ファイルごと」から「build/serve コンテキストごとに1回」に変更（ビルド高速化）
 
 ## Migration Guide
 
-### `compileHooks` / `transforms` の解決タイミング変更 (v2.0.0)
+### `compileHooks` / `transforms`の解決タイミング変更 (v2.0.0)
 
-ビルド高速化のため、`PageCompilerOptions` の `compileHooks` と `transforms` を関数として指定した場合の解決タイミングが変更されました。
+ビルド高速化のため、`PageCompilerOptions`の`compileHooks`と`transforms`を関数として指定した場合の解決タイミングが変更されました。
 
 #### 変更内容
 
@@ -57,13 +57,13 @@ def(createPageCompiler(), {
 });
 ```
 
-`compileHooks` も同様に、ページごとの動的な値はファクトリ内ではなく `before` / `compiler` / `after` フックの実行時（`content` と `data` を受け取る側）で評価してください。transform / フックのインスタンスにページごとの可変状態（カウンタ・蓄積バッファ等）を持たせることはできません。
+`compileHooks`も同様に、ページごとの動的な値はファクトリ内ではなく`before`/`compiler`/`after`フックの実行時（`content`と`data`を受け取る側）で評価してください。transform/フックのインスタンスにページごとの可変状態（カウンタ・蓄積バッファ等）を持たせることはできません。
 
-ファクトリがページに依存しない初期化のみを行っている場合（`@kamado-io/pug-compiler` の `createCompileHooks` を含む）、対応は不要です。
+ファクトリがページに依存しない初期化のみを行っている場合（`@kamado-io/pug-compiler`の`createCompileHooks`を含む）、対応は不要です。
 
-### `kamado/features` の削除 (v2.0.0)
+### `kamado/features`の削除 (v2.0.0)
 
-`kamado/features` エクスポートは v2.0.0 で削除されました。
+`kamado/features`エクスポートは v2.0.0 で削除されました。
 
 #### v1.x での使用方法
 
@@ -77,7 +77,7 @@ const nav = getNavTree(file, pageList, options);
 
 #### v2.0.0 での対応方法
 
-これらの機能は `@kamado-io/page-compiler` 内部で自動的に使用されるため、**直接インポートする必要はありません**。テンプレート内で `breadcrumbs` と `nav()` 関数が自動的に利用可能です。
+これらの機能は`@kamado-io/page-compiler`内部で自動的に使用されるため、**直接インポートする必要はありません**。テンプレート内で`breadcrumbs`と`nav()`関数が自動的に利用可能です。
 
 ```pug
 // Pug テンプレート例
@@ -92,7 +92,7 @@ nav
 
 #### カスタマイズが必要な場合
 
-`PageCompilerOptions` の `transformBreadcrumbItem` および `filterNavigationNode` オプションを使用してください。
+`PageCompilerOptions`の`transformBreadcrumbItem`および`filterNavigationNode`オプションを使用してください。
 
 ```ts
 import { createPageCompiler } from '@kamado-io/page-compiler';
@@ -110,4 +110,4 @@ export const config = {
 };
 ```
 
-詳細は `v2` ブランチの `packages/@kamado-io/page-compiler/README.md` を参照してください。
+詳細は`v2`ブランチの`packages/@kamado-io/page-compiler/README.md`を参照してください。

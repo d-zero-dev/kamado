@@ -1,8 +1,8 @@
 # kamado v2 → v3 移行手順
 
-この文書は **AI が上から順に実行できる手順書**です。各ステップに「やること」「確認すること」を書いてあります。仕様の根拠は `docs/v3/RFC.md`（破壊的変更の一覧は §2）。
+この文書は **AI が上から順に実行できる手順書**です。各ステップに「やること」「確認すること」を書いてあります。仕様の根拠は`docs/v3/RFC.md`（破壊的変更の一覧は §2）。
 
-v3 はこのリポジトリの `packages/kamado`（npm 名 `kamado`、bin は `kamado`、JSX のランタイムは `kamado/jsx`）です。alpha の開発中で、dist-tag `alpha` で公開します（`docs/v3/RFC.md` §18）。v2 は `v2` ブランチで保守しています。公開済みの v2（`kamado@2.0.0-alpha.17` など）は npm に残っています。`@kamado-io/*` の 5 つのパッケージ（page / script / style / pug / jsx のコンパイラ）は v3 にはなく、機能は `kamado` に組み込まれています（RFC §2 の #3、#22）。
+v3 はこのリポジトリの`packages/kamado`（npm 名`kamado`、bin は`kamado`、JSX のランタイムは`kamado/jsx`）です。alpha の開発中で、dist-tag `alpha`で公開します（`docs/v3/RFC.md` §18）。v2 は`v2`ブランチで保守しています。公開済みの v2（`kamado@2.0.0-alpha.17`など）は npm に残っています。`@kamado-io/*`の 5 つのパッケージ（page/script/style/pug/jsx のコンパイラ）は v3 にはなく、機能は`kamado`に組み込まれています（RFC §2 の #3、#22）。
 
 v3 は v2 と**出力（HTML）がバイト一致**することを目標にしています。移行の合格条件は「同じ入力から、v2 と v3 の出力ディレクトリを比べて差がない（差があるなら §11 の意図した差だけ）」ことです。
 
@@ -24,28 +24,28 @@ cp -R <output dir> /tmp/baseline-v2   # 出力ディレクトリを丸ごと保�
 ```
 
 - 確認: 出力ディレクトリのファイル数を控える。
-- v3 の整形に**幅の設定はありません**（`html.format.printWidth` は廃止。書くと設定エラー）。長い行も折り返さず、折れるのは強制改行のときだけです。v2 が幅 100000 で整形していた出力（`.html` の既定）とは、100000 桁を超える行（巨大な `data:` URI を持つ属性など）を除いて、バイトまで一致します。v2 の prettier 設定が入力の種類で違い（`.pug` / `.tsx` は幅 90、など）、幅 90 で折り返された出力は、長い行の折り返しの位置が一致しません（意味は同じ）。基準の出力で、属性が 1 行ずつに折り返されていないかを見て確かめます。
+- v3 の整形に**幅の設定はありません**（`html.format.printWidth`は廃止。書くと設定エラー）。長い行も折り返さず、折れるのは強制改行のときだけです。v2 が幅 100000 で整形していた出力（`.html`の既定）とは、100000 桁を超える行（巨大な`data:` URI を持つ属性など）を除いて、バイトまで一致します。v2 の prettier 設定が入力の種類で違い（`.pug`/`.tsx`は幅 90、など）、幅 90 で折り返された出力は、長い行の折り返しの位置が一致しません（意味は同じ）。基準の出力で、属性が 1 行ずつに折り返されていないかを見て確かめます。
 
 ## 2. 設定ファイル（TS / JS → `kamado.config.jsonc`）
 
-v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは `package.json` と同じディレクトリに置く。相対パスは設定ファイルのディレクトリ基準です。
+v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは`package.json`と同じディレクトリに置く。相対パスは設定ファイルのディレクトリ基準です。
 
-| v2                                                            | v3                                                                                                        |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `dir: { root, input, output }`                                | `dir: { input, output }`（root は設定ファイルの場所）。**`input` と `output` は異なる**                   |
-| `pkg.production.{host,baseURL,siteName,siteNameEn}`           | `site.{host,baseURL,siteName,siteNameEn}`（未指定なら `package.json` の `production` から読む）           |
-| `compilers: (def) => [def(createPageCompiler(), {...}), ...]` | `pages` / `styles` / `scripts` の 3 セクション                                                            |
-| `createPageCompiler` の `files` / `ignore`                    | `pages.files` / `pages.ignore`（既定 `**/*.{html,tsx}`）                                                  |
-| `layouts: { dir }`                                            | `pages.layouts.dir`                                                                                       |
-| `globalData: { dir, data }`                                   | `data: { dir, values }`                                                                                   |
-| `outputPathField` / `outputPathConflict`                      | `pages.outputPathField` / `pages.outputPathConflict`                                                      |
-| `createScriptCompiler` の `alias` / `minifier`                | `scripts.alias` / `scripts.minify`                                                                        |
-| `createStyleCompiler` の `alias`                              | `styles.alias`                                                                                            |
-| `banner`（文字列または関数）                                  | `styles.banner` / `scripts.banner`（文字列。`{{date:YYYY-MM-DD}}` `{{year}}` `{{version}}`。`""` で無効） |
-| `devServer: { port, host, open, startPath }`                  | 同じ名前。`allowedHosts` が加わる（§8）                                                                   |
-| `devServer.proxy[prefix].pathRewrite: (p) => ...`             | `rewrite: { from: "^/api", to: "" }`（`from` は正規表現）                                                 |
-| `onBeforeBuild` / `onAfterBuild`                              | §7                                                                                                        |
-| `pageList(fn)`（スプレッドシート由来など）                    | `pages.overrides`（prebuild が JSON に書く。§2.1）                                                        |
+| v2                                                            | v3                                                                                                       |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `dir: { root, input, output }`                                | `dir: { input, output }`（root は設定ファイルの場所）。**`input`と`output`は異なる**                     |
+| `pkg.production.{host,baseURL,siteName,siteNameEn}`           | `site.{host,baseURL,siteName,siteNameEn}`（未指定なら`package.json`の`production`から読む）              |
+| `compilers: (def) => [def(createPageCompiler(), {...}), ...]` | `pages` / `styles` / `scripts`の 3 セクション                                                            |
+| `createPageCompiler`の`files` / `ignore`                      | `pages.files` / `pages.ignore`（既定`**/*.{html,tsx}`）                                                  |
+| `layouts: { dir }`                                            | `pages.layouts.dir`                                                                                      |
+| `globalData: { dir, data }`                                   | `data: { dir, values }`                                                                                  |
+| `outputPathField` / `outputPathConflict`                      | `pages.outputPathField` / `pages.outputPathConflict`                                                     |
+| `createScriptCompiler`の`alias` / `minifier`                  | `scripts.alias` / `scripts.minify`                                                                       |
+| `createStyleCompiler`の`alias`                                | `styles.alias`                                                                                           |
+| `banner`（文字列または関数）                                  | `styles.banner` / `scripts.banner`（文字列。`{{date:YYYY-MM-DD}}` `{{year}}` `{{version}}`。`""`で無効） |
+| `devServer: { port, host, open, startPath }`                  | 同じ名前。`allowedHosts`が加わる（§8）                                                                   |
+| `devServer.proxy[prefix].pathRewrite: (p) => ...`             | `rewrite: { from: "^/api", to: "" }`（`from`は正規表現）                                                 |
+| `onBeforeBuild` / `onAfterBuild`                              | §7                                                                                                       |
+| `pageList(fn)`（スプレッドシート由来など）                    | `pages.overrides`（prebuild が JSON に書く。§2.1）                                                       |
 
 例:
 
@@ -65,29 +65,29 @@ v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは `p
 }
 ```
 
-**未知のキーはエラー**です。エラーメッセージのパス（`pages.files` など）を見て直します。
+**未知のキーはエラー**です。エラーメッセージのパス（`pages.files`など）を見て直します。
 
-### 2.1 `pageList` と、それにぶら下がる設定
+### 2.1 `pageList`と、それにぶら下がる設定
 
-`pageList()` でページ一覧を返し、`transformBreadcrumbItem` / `filterNavigationNode` で整える構成は、次のように置き換える。
+`pageList()`でページ一覧を返し、`transformBreadcrumbItem`/`filterNavigationNode`で整える構成は、次のように置き換える。
 
-- **一覧は prebuild で JSON にする**（`pages.overrides`、RFC §6）。`url` はページの URL と同じ書き方（`/a/index.html` ではなく `/a/`、ファイルは `/a.html`）で、違う書き方は設定エラーになる。`meta` には**一覧に値があるキーだけ**を書く。`null` を書くと、ページ自身の front matter の同じキーを隠す（v2 は一覧のメタをナビゲーション用にだけ使い、ページ自身の変数は front matter から取った）。ファイルに書いたページが、書いた順で `pages` の先頭に並び、`nav()` の表示順になる。
-- **一覧にないページ**: v2 は一覧に載らないページを `nav()` と `breadcrumbs` に出さなかった。v3 は常にすべてのページを索引に入れる。ナビゲーションから隠すなら、そのページに `{ "url": "/x/", "meta": { "navHidden": true } }` を書く。ページのタイトル（`<title>` とパンくず）は v3 では自分の front matter の値になる（v2 は一覧になければサイト名）。
-- **`transformBreadcrumbItem`** はコンポーネントに書く（`link.href` を `link.meta.realHref ?? link.href` に）。**`filterNavigationNode`** は `nav()` の結果を再帰で絞るヘルパーを書く（子から先に絞り、`keep(node)` が偽なら捨てる）。
-- **`<!-- @include(...) -->` のコメントを出力する transform** は `html.includes` の `includeComment`（`root` は `/` 始まりの基準ディレクトリ）に、**BurgerEditor の `importBlock`** は `burgerEditorImport`（`root` は入力ディレクトリ）に、`data-bgi-ver` を消す正規表現は `html.rules` の `removeAttr` に、`©` などを実体参照にする transform は `html.entities` に置き換える。`manipulateDOM` が全ページから要素を消していたなら `html.rules` の `remove`。
-- **別のコンパイラ設定が同じファイルを別の transform で処理していたとき**（サブサイトだけ `manipulateDOM` と include を外していた、など）は `html.overrides` の `pages` に URL の glob を書いて、`includes` / `rules` を `[]` にする。
-- **ビルド出力を `include` していた Pug**（出力の `header.html` を別の Pug が読む）は、v3 では出力の順序に依存させず、元のコンポーネントを直接呼ぶ。
+- **一覧は prebuild で JSON にする**（`pages.overrides`、RFC §6）。`url`はページの URL と同じ書き方（`/a/index.html`ではなく`/a/`、ファイルは`/a.html`）で、違う書き方は設定エラーになる。`meta`には**一覧に値があるキーだけ**を書く。`null`を書くと、ページ自身の front matter の同じキーを隠す（v2 は一覧のメタをナビゲーション用にだけ使い、ページ自身の変数は front matter から取った）。ファイルに書いたページが、書いた順で`pages`の先頭に並び、`nav()`の表示順になる。
+- **一覧にないページ**: v2 は一覧に載らないページを`nav()`と`breadcrumbs`に出さなかった。v3 は常にすべてのページを索引に入れる。ナビゲーションから隠すなら、そのページに`{ "url": "/x/", "meta": { "navHidden": true } }`を書く。ページのタイトル（`<title>`とパンくず）は v3 では自分の front matter の値になる（v2 は一覧になければサイト名）。
+- **`transformBreadcrumbItem`** はコンポーネントに書く（`link.href`を`link.meta.realHref ?? link.href`に）。**`filterNavigationNode`** は`nav()`の結果を再帰で絞るヘルパーを書く（子から先に絞り、`keep(node)`が偽なら捨てる）。
+- **`<!-- @include(...) -->`のコメントを出力する transform** は`html.includes`の`includeComment`（`root`は`/`始まりの基準ディレクトリ）に、**BurgerEditor の`importBlock`** は`burgerEditorImport`（`root`は入力ディレクトリ）に、`data-bgi-ver`を消す正規表現は`html.rules`の`removeAttr`に、`©`などを実体参照にする transform は`html.entities`に置き換える。`manipulateDOM`が全ページから要素を消していたなら`html.rules`の`remove`。
+- **別のコンパイラ設定が同じファイルを別の transform で処理していたとき**（サブサイトだけ`manipulateDOM`と include を外していた、など）は`html.overrides`の`pages`に URL の glob を書いて、`includes`/`rules`を`[]`にする。
+- **ビルド出力を`include`していた Pug**（出力の`header.html`を別の Pug が読む）は、v3 では出力の順序に依存させず、元のコンポーネントを直接呼ぶ。
 
 ## 3. ページ: Pug → JSX
 
-v3 のページは **`.html`（front matter 付き）と `.tsx` の 2 種類**です。Pug は廃止しました。
+v3 のページは **`.html`（front matter 付き）と`.tsx`の 2 種類**です。Pug は廃止しました。
 
 ### 3.1 ファイルの置き換え
 
-- `foo.pug` → `foo.tsx`。同じ場所に置く。出力パスは変わりません（拡張子だけ `.html` になる）。
-- `foo.pug` のメタ（Pug 内の変数や front matter）→ `export const meta = { ... }`（**リテラルのみ**。式や変数は書けない）。
-- 同名の `foo.json`（sidecar）はそのまま使える。優先順位は高い順に、`pages.overrides`、sidecar `.json`、ファイル内の `meta`。
-- ページは `export default` でコンポーネントを書く。props の型は同梱しない（必要なら使う側で宣言する）。
+- `foo.pug` → `foo.tsx`。同じ場所に置く。出力パスは変わりません（拡張子だけ`.html`になる）。
+- `foo.pug`のメタ（Pug 内の変数や front matter）→ `export const meta = { ... }`（**リテラルのみ**。式や変数は書けない）。
+- 同名の`foo.json`（sidecar）はそのまま使える。優先順位は高い順に、`pages.overrides`、sidecar `.json`、ファイル内の`meta`。
+- ページは`export default`でコンポーネントを書く。props の型は同梱しない（必要なら使う側で宣言する）。
 
 ```tsx
 export const meta = { title: 'About', layout: 'default' };
@@ -101,44 +101,44 @@ export default ({ meta }: { meta: { title: string } }) => (
 
 ### 3.2 Pug の構文 → JSX
 
-| Pug                                 | JSX                                                                                                                                 |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `div.card(data-x='1')`              | `<div className="card" data-x="1">`                                                                                                 |
-| `#id` / `.a.b`                      | `id="..."` / `className="a b"`                                                                                                      |
-| `p= text`（エスケープあり）         | `<p>{text}</p>`                                                                                                                     |
-| `p!= html`（エスケープなし）        | `<p dangerouslySetInnerHTML={{ __html: html }} />`                                                                                  |
-| `if cond` / `else`                  | `{cond ? <A /> : <B />}`、または `{cond && <A />}`                                                                                  |
-| `each item in items`                | `{items.map((item) => <li>{item}</li>)}`（`key` は不要）                                                                            |
-| `mixin card(title)` と `+card('x')` | コンポーネント `const Card = ({ title }) => ...` と `<Card title="x" />`                                                            |
-| `include ./header`                  | `import { Header } from './_libs/Header'` と `<Header />`                                                                           |
-| `extends layout` と `block content` | レイアウトのコンポーネント。`meta.layout` に `layouts.dir` のファイル名（拡張子なし）を書く。レイアウトは `content` prop を受け取る |
-| `:markdown` などのフィルター        | 事前に HTML にして `.html` / データにする、または JS で変換して `dangerouslySetInnerHTML`                                           |
-| `- const x = ...`（コード）         | コンポーネントの本文の JS                                                                                                           |
-| コメント `//` / `//-`               | `{/* ... */}`                                                                                                                       |
-| `doctype html`                      | 書かない（`html.doctype` が出力する）                                                                                               |
-| `pretty` オプション                 | 書かない（整形は `html.format`）                                                                                                    |
-| `script.` / `style.` のブロック     | `<script dangerouslySetInnerHTML={{ __html: code }} />`                                                                             |
+| Pug                               | JSX                                                                                                                             |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `div.card(data-x='1')`            | `<div className="card" data-x="1">`                                                                                             |
+| `#id` / `.a.b`                    | `id="..."` / `className="a b"`                                                                                                  |
+| `p= text`（エスケープあり）       | `<p>{text}</p>`                                                                                                                 |
+| `p!= html`（エスケープなし）      | `<p dangerouslySetInnerHTML={{ __html: html }} />`                                                                              |
+| `if cond` / `else`                | `{cond ? <A /> : <B />}`、または`{cond && <A />}`                                                                               |
+| `each item in items`              | `{items.map((item) => <li>{item}</li>)}`（`key`は不要）                                                                         |
+| `mixin card(title)`と`+card('x')` | コンポーネント`const Card = ({ title }) => ...`と`<Card title="x" />`                                                           |
+| `include ./header`                | `import { Header } from './_libs/Header'`と`<Header />`                                                                         |
+| `extends layout`と`block content` | レイアウトのコンポーネント。`meta.layout`に`layouts.dir`のファイル名（拡張子なし）を書く。レイアウトは`content` prop を受け取る |
+| `:markdown`などのフィルター       | 事前に HTML にして`.html` / データにする、または JS で変換して`dangerouslySetInnerHTML`                                         |
+| `- const x = ...`（コード）       | コンポーネントの本文の JS                                                                                                       |
+| コメント`//` / `//-`              | `{/* ... */}`                                                                                                                   |
+| `doctype html`                    | 書かない（`html.doctype`が出力する）                                                                                            |
+| `pretty`オプション                | 書かない（整形は`html.format`）                                                                                                 |
+| `script.` / `style.`のブロック    | `<script dangerouslySetInnerHTML={{ __html: code }} />`                                                                         |
 
 注意:
 
-- JSX の空白は React と同じ規則（行頭行末の空白と改行は消える。意図した空白は `{' '}`）。Pug の空白との差は、出力の比較で見つかります。
-- `<br>` などの空要素は `<br />` と書く。
-- 関数の props（`onClick` など）は無視されます（警告）。
-- hooks（`useState` など）と Context は使えません。コンポーネントは**純粋関数**（同じ props から同じ出力。モジュールの変数を書き換えない）。ワーカーが並列に描画するので、破ると結果が不定になります。
-- `import` できるもの: 相対パスと `pages.alias` の別名の TS / TSX / JSON、npm パッケージ（ESM）。CSS の import はできません。
-- TS は **erasable な構文だけ**（`enum` / `namespace` / パラメータプロパティは不可。`const` オブジェクトで置き換える）。
+- JSX の空白は React と同じ規則（行頭行末の空白と改行は消える。意図した空白は`{' '}`）。Pug の空白との差は、出力の比較で見つかります。
+- `<br>`などの空要素は`<br />`と書く。
+- 関数の props（`onClick`など）は無視されます（警告）。
+- hooks（`useState`など）と Context は使えません。コンポーネントは**純粋関数**（同じ props から同じ出力。モジュールの変数を書き換えない）。ワーカーが並列に描画するので、破ると結果が不定になります。
+- `import`できるもの: 相対パスと`pages.alias`の別名の TS/TSX/JSON、npm パッケージ（ESM）。CSS の import はできません。
+- TS は **erasable な構文だけ**（`enum`/`namespace`/パラメータプロパティは不可。`const`オブジェクトで置き換える）。
 
 ### 3.3 ページに渡されるもの
 
-`page`、`meta`、`site`、`data`、`pages`、`nav(options)`、`breadcrumbs`、`titleList(options)`、`formatDate(value, format)`。レイアウトは加えて `content`。v2 の `pageList` は `pages`、`filters.date` は `formatDate`、`pkg` は `site` です（`pkg.production.*` の値は `site.*`）。`titleList` は v2 と同じで、トップページを titles から除き、`fallback`（既定は siteName）に `suffix`（既定は siteName）を区切りなしで続けるので、トップページは既定で `siteName` が 2 回並びます（`SITESITE`）。v2 のサイトでこれを避けていたなら、v3 でも同じ引数を渡せば同じ `<title>` になります（1 回にするなら `suffix: ''`）。
+`page`、`meta`、`site`、`data`、`pages`、`nav(options)`、`breadcrumbs`、`titleList(options)`、`formatDate(value, format)`。レイアウトは加えて`content`。v2 の`pageList`は`pages`、`filters.date`は`formatDate`、`pkg`は`site`です（`pkg.production.*`の値は`site.*`）。`titleList`は v2 と同じで、トップページを titles から除き、`fallback`（既定は siteName）に`suffix`（既定は siteName）を区切りなしで続けるので、トップページは既定で`siteName`が 2 回並びます（`SITESITE`）。v2 のサイトでこれを避けていたなら、v3 でも同じ引数を渡せば同じ`<title>`になります（1 回にするなら`suffix: ''`）。
 
-- `nav` の `filter` / `comparator`、`breadcrumbs` の変換（`transformBreadcrumbItem`）は廃止。返ってきた配列を JSX 側で加工する。
-- `breadcrumbs` の起点は `site.baseURL` の**パス部分**（`https://example.com/sub/` なら `/sub/`）。v2 は値をそのまま数えたので、フル URL を書くと上位 2 階層が欠けていた（出力が変わる）。
-- YAML の日付（`date: 2026-01-02`）は**文字列のまま**渡る（v2 は front matter だけ `Date`）。`formatDate()` に渡せば同じ表示になる。
+- `nav`の`filter`/`comparator`、`breadcrumbs`の変換（`transformBreadcrumbItem`）は廃止。返ってきた配列を JSX 側で加工する。
+- `breadcrumbs`の起点は`site.baseURL`の**パス部分**（`https://example.com/sub/`なら`/sub/`）。v2 は値をそのまま数えたので、フル URL を書くと上位 2 階層が欠けていた（出力が変わる）。
+- YAML の日付（`date: 2026-01-02`）は**文字列のまま**渡る（v2 は front matter だけ`Date`）。`formatDate()`に渡せば同じ表示になる。
 
 ### 3.4 変換スクリプトと、変換で見つかった注意点
 
-変換スクリプト（`scripts/pug-to-tsx.mjs`）と改行を消すツール（`scripts/prune-jsx-newlines.mjs`）は、npm パッケージ `kamado` に入っていない。案件ごとに読んで直しながら使う道具なので、このリポジトリを clone して使う。clone には Node 26 と Yarn 4（Volta か corepack）が要る。
+変換スクリプト（`scripts/pug-to-tsx.mjs`）と改行を消すツール（`scripts/prune-jsx-newlines.mjs`）は、npm パッケージ`kamado`に入っていない。案件ごとに読んで直しながら使う道具なので、このリポジトリを clone して使う。clone には Node 26 と Yarn 4（Volta か corepack）が要る。
 
 ```sh
 # プロジェクトで、入っている kamado の版を見る（例: 3.0.0-alpha.2）
@@ -151,30 +151,30 @@ yarn install
 yarn build
 ```
 
-- 変換スクリプトは、clone の `packages/kamado/dist`（`yarn build` が作る）を読む。版によって変換の規則が違うので、この節も、checkout したタグの `docs/v3/MIGRATION.md` を読む。
-- Pug と JavaScript のパーサ（`pug-lexer`、`pug-parser`、`acorn` 8 以上）は、**変換するプロジェクト**から読む。v2 の Pug の構成なら、`pug-lexer` と `pug-parser` は、たいてい依存の依存として入っている。`acorn` は、Pug が引く 7 系しか無いことがあり、それでは新しい構文を読めない。その場合は、プロジェクトの devDependencies に `acorn` 8 以上を足す。pnpm や Yarn の PnP のように依存の依存を `node` から見せない構成では、3 つとも devDependencies に足す。PnP なら `nodeLinker: node-modules` にするか、`yarn node` で実行する。
-- 改行を消すツールが動かす kamado は、既定で**プロジェクト**の `node_modules/kamado`（`--cli` で変えられる）。
-- この節の `scripts/...` は clone の中のパスで、`<clone>` は clone したディレクトリ。
+- 変換スクリプトは、clone の`packages/kamado/dist`（`yarn build`が作る）を読む。版によって変換の規則が違うので、この節も、checkout したタグの`docs/v3/MIGRATION.md`を読む。
+- Pug と JavaScript のパーサ（`pug-lexer`、`pug-parser`、`acorn` 8 以上）は、**変換するプロジェクト**から読む。v2 の Pug の構成なら、`pug-lexer`と`pug-parser`は、たいてい依存の依存として入っている。`acorn`は、Pug が引く 7 系しか無いことがあり、それでは新しい構文を読めない。その場合は、プロジェクトの devDependencies に`acorn` 8 以上を足す。pnpm や Yarn の PnP のように依存の依存を`node`から見せない構成では、3 つとも devDependencies に足す。PnP なら`nodeLinker: node-modules`にするか、`yarn node`で実行する。
+- 改行を消すツールが動かす kamado は、既定で**プロジェクト**の`node_modules/kamado`（`--cli`で変えられる）。
+- この節の`scripts/...`は clone の中のパスで、`<clone>`は clone したディレクトリ。
 
-`node <clone>/scripts/pug-to-tsx.mjs <project> <out>` は、`__assets` の `.pug` をコンポーネント（`.tsx`）に直す。`include` はコンポーネントの呼び出し（include する側の props とスコープの変数を渡す）、`each` は `_eachOf(...).map`（配列は index、オブジェクトは key で回す Pug と同じ。補助関数 `_eachOf` は `each` のあるファイルの中に出る。手で書くなら配列は `.map`、オブジェクトは `Object.entries` でよい）、`if` は `&&` / `?:`、`pkg.production.*` は `site.*`、`filters.date` は `formatDate` になる。`mixin` は大文字で始まるコンポーネント、`else if` は入れ子の `?:`、`include` したテキスト（生の HTML）は `html()` になる。`pre` / `textarea` の中で呼んだ `mixin` と `include` は、改行と字下げを文字列で残す別のコンポーネント（`Sample` に対する `SamplePre`）を同じファイルに足して使う。`foo` と `foo-pre` のように名前がぶつかるときは止まる。表現できないもの（唯一の子でない `!{}` など）は止まるので、手で直す。出力は必ず読む。変換で見つかった点:
+`node <clone>/scripts/pug-to-tsx.mjs <project> <out>`は、`__assets`の`.pug`をコンポーネント（`.tsx`）に直す。`include`はコンポーネントの呼び出し（include する側の props とスコープの変数を渡す）、`each`は`_eachOf(...).map`（配列は index、オブジェクトは key で回す Pug と同じ。補助関数`_eachOf`は`each`のあるファイルの中に出る。手で書くなら配列は`.map`、オブジェクトは`Object.entries`でよい）、`if`は`&&`/`?:`、`pkg.production.*`は`site.*`、`filters.date`は`formatDate`になる。`mixin`は大文字で始まるコンポーネント、`else if`は入れ子の`?:`、`include`したテキスト（生の HTML）は`html()`になる。`pre`/`textarea`の中で呼んだ`mixin`と`include`は、改行と字下げを文字列で残す別のコンポーネント（`Sample`に対する`SamplePre`）を同じファイルに足して使う。`foo`と`foo-pre`のように名前がぶつかるときは止まる。表現できないもの（唯一の子でない`!{}`など）は止まるので、手で直す。出力は必ず読む。変換で見つかった点:
 
-- **属性名は React の綴り**: `charset` → `charSet`、`itemprop` → `itemProp`、`itemtype` → `itemType`、`itemid` → `itemID`。小文字のままだと、`<meta charset>` は先頭に置かれず、`<meta itemprop>`（パンくずの `position`）が `<head>` に持ち上げられる。上のほかの属性（`datetime` → `dateTime`、`srcset` → `srcSet` など）も、`@types/react` の型が求める綴りで出す。対応表は react-dom の `possibleStandardNames` から `scripts/generate-react-prop-names.mjs` が作る。出力の HTML は、どちらの綴りでも同じになる。
-- **型検査と lint に通す**: 変換結果は、`@d-zero/tsconfig`（strictest）の型検査と、型付きの eslint に通る。project の `tsconfig.json` に次を足す。
-  - `"jsx": "preserve"` と `"allowImportingTsExtensions": true`。`include` に `**/*.tsx` を足す（`**/*.ts` が `.d.ts` も拾う）。型付きの eslint は、その `tsconfig.json` を `parserOptions.project` に使う。
-  - `@types/react` を devDependency に固定で足す。`react` 自体は要らない（型だけを読む）。kamado は React の型を同梱しない。`html()` の戻り値だけは、React の `ReactElement` と同じ形の型を宣言してある。
-  - 変換スクリプトは `<out>/__assets/kamado-jsx.d.ts` も書く。`@types/react` に無い、`<html static>` の `static` と、`command` / `commandfor`（Invoker Commands）の型の補強です。`__assets` に置きます。
-  - 数字の文字列（`maxlength="255"`）は、`maxLength={255}` のように数値で出す。`on*` の文字列属性（`oncontextmenu="return false;"`）は、型が関数なので、型のつかない展開（`{...{ oncontextmenu: "..." }}`）で出す。
-  - Pug の JavaScript の無名関数の引数は `(item: any) =>` と型を付け、オブジェクトリテラルの定数は `Record<string, any>` にする。使わない `props` の引数は `_props` にする。
-  - `style` の CSS の文字列と、`hidden="until-found"`（`@types/react` の型に無い値）は `as any` を付けて出す。条件式の枝の `false` と `null`（`cond ? "_blank" : false`、`cond ? "noopener" : null`）は `undefined` にする。Pug は、`false` や `null` の属性を出さず、`undefined` と同じに扱う。`disabled` のような真偽値の prop は、`false` に意味があるので残し、`null` だけを `undefined` にする。
-  - 型を通すために `any` が入る。出力は必ず読み、必要なら型を付け直す。
-  - import は `@d-zero/eslint-config` の `import-x/order` の並び（組み込み、パッケージ、`../`、`./`、index の順で、グループの間は空行、中はパスの昇順。index は `.` / `./` / `./index` / `./index.js` だけで、`./index.tsx` は `./` に入る）で出し、`type PageProps` はその後ろに置く。分割代入は、再代入される名前だけを `let` にして `const` と分ける（オブジェクトパターンの引数も同じ。プロパティごとに分け、`...rest` を含む階層や、分けられない塊は、`let` にする名前を別名で受けて後から `let a = _a;` と宣言する）。
+- **属性名は React の綴り**: `charset` → `charSet`、`itemprop` → `itemProp`、`itemtype` → `itemType`、`itemid` → `itemID`。小文字のままだと、`<meta charset>`は先頭に置かれず、`<meta itemprop>`（パンくずの`position`）が`<head>`に持ち上げられる。上のほかの属性（`datetime` → `dateTime`、`srcset` → `srcSet`など）も、`@types/react`の型が求める綴りで出す。対応表は react-dom の`possibleStandardNames`から`scripts/generate-react-prop-names.mjs`が作る。出力の HTML は、どちらの綴りでも同じになる。
+- **型検査と lint に通す**: 変換結果は、`@d-zero/tsconfig`（strictest）の型検査と、型付きの eslint に通る。project の`tsconfig.json`に次を足す。
+  - `"jsx": "preserve"`と`"allowImportingTsExtensions": true`。`include`に`**/*.tsx`を足す（`**/*.ts`が`.d.ts`も拾う）。型付きの eslint は、その`tsconfig.json`を`parserOptions.project`に使う。
+  - `@types/react`を devDependency に固定で足す。`react`自体は要らない（型だけを読む）。kamado は React の型を同梱しない。`html()`の戻り値だけは、React の`ReactElement`と同じ形の型を宣言してある。
+  - 変換スクリプトは`<out>/__assets/kamado-jsx.d.ts`も書く。`@types/react`に無い、`<html static>`の`static`と、`command`/`commandfor`（Invoker Commands）の型の補強です。`__assets`に置きます。
+  - 数字の文字列（`maxlength="255"`）は、`maxLength={255}`のように数値で出す。`on*`の文字列属性（`oncontextmenu="return false;"`）は、型が関数なので、型のつかない展開（`{...{ oncontextmenu: "..." }}`）で出す。
+  - Pug の JavaScript の無名関数の引数は`(item: any) =>`と型を付け、オブジェクトリテラルの定数は`Record<string, any>`にする。使わない`props`の引数は`_props`にする。
+  - `style`の CSS の文字列と、`hidden="until-found"`（`@types/react`の型に無い値）は`as any`を付けて出す。条件式の枝の`false`と`null`（`cond ? "_blank" : false`、`cond ? "noopener" : null`）は`undefined`にする。Pug は、`false`や`null`の属性を出さず、`undefined`と同じに扱う。`disabled`のような真偽値の prop は、`false`に意味があるので残し、`null`だけを`undefined`にする。
+  - 型を通すために`any`が入る。出力は必ず読み、必要なら型を付け直す。
+  - import は`@d-zero/eslint-config`の`import-x/order`の並び（組み込み、パッケージ、`../`、`./`、index の順で、グループの間は空行、中はパスの昇順。index は`.`/`./`/`./index`/`./index.js`だけで、`./index.tsx`は`./`に入る）で出し、`type PageProps`はその後ろに置く。分割代入は、再代入される名前だけを`let`にして`const`と分ける（オブジェクトパターンの引数も同じ。プロパティごとに分け、`...rest`を含む階層や、分けられない塊は、`let`にする名前を別名で受けて後から`let a = _a;`と宣言する）。
   - eslint には、変換結果の TSX にだけ当てる設定を足す（flat config）。次の規則は、変換結果と合わない。
-    - `@typescript-eslint/no-explicit-any`: 外す。`--fix`（lint-staged の pre-commit も）が `any` を `unknown` に書き換えて、型が通らなくなる。
-    - `@typescript-eslint/no-unused-vars`: `argsIgnorePattern: '^_'` にする。使わない `props` の引数は `_props` で出る。あとから `props` を使わなくなった部品も、`_props` に直す。
+    - `@typescript-eslint/no-explicit-any`: 外す。`--fix`（lint-staged の pre-commit も）が`any`を`unknown`に書き換えて、型が通らなくなる。
+    - `@typescript-eslint/no-unused-vars`: `argsIgnorePattern: '^_'`にする。使わない`props`の引数は`_props`で出る。あとから`props`を使わなくなった部品も、`_props`に直す。
     - `unicorn/no-unreadable-iife`: 外す。条件式を含む出力が、即時実行関数になる。
-    - `unicorn/filename-case`: ページ（`__assets/htdocs/` の下）だけ外す。ファイル名が出力の URL になるので、変えられない。
-    - `no-irregular-whitespace`: `skipJSXText: true` にする。全角空白がテキストに入る。
-    - Pug のコードの書き方に当たる規則（`unicorn/explicit-length-check`、`unicorn/no-array-for-each`、`regexp/no-unused-capturing-group` など）: 案件に合わせて外すか、コードを直す。変換前は lint の対象外だった。
+    - `unicorn/filename-case`: ページ（`__assets/htdocs/`の下）だけ外す。ファイル名が出力の URL になるので、変えられない。
+    - `no-irregular-whitespace`: `skipJSXText: true`にする。全角空白がテキストに入る。
+    - Pug のコードの書き方に当たる規則（`unicorn/explicit-length-check`、`unicorn/no-array-for-each`、`regexp/no-unused-capturing-group`など）: 案件に合わせて外すか、コードを直す。変換前は lint の対象外だった。
 
 ```js
 {
@@ -192,134 +192,134 @@ yarn build
 },
 ```
 
-- **`&nbsp;` などの実体参照は、そのままテキストに書く**（`{"&nbsp;"}` と文字列にすると `&amp;nbsp;` になる）。
-- **他の子と並ぶ生の HTML**は、`kamado/jsx` の `html()` で書く（`import { html } from 'kamado/jsx'`、`{html(markup)}`）。Pug の `!{}` と `include` したテキストの置き換え先。
-- **`<option selected>`** は React が無視する。`<select defaultValue="...">` に書く。
-- **`<link media="all">`** は空にならず `all` のまま出る（v2 と同じ）。
-- **JSX に書けない属性名**（絵文字など、`⚠️="..."` のような印）は React が出力しない。静的なマークアップなら `html.inject` に HTML 文字列として書く。`@click` や `[x]` のように XML の Name でない名前は、変換スクリプトが `warning:` を出す（変換結果は spread のまま残るが、描画では属性が消える）。`:foo` や `日本語` は XML の Name なので書かれる。
-- **React 19 は `<img>` ごとに `<link rel="preload" as="image">` を `<head>` に足す**（Pug では出ない）。`<html static>` のページでは出ない。それ以外のページで要らなければ `html.rules` で消す: `{ "selector": "link[rel=preload][as=image]", "action": "remove" }`。
-- **Pug の `pretty`**（`createCompileHooks` の既定は `true`）は、インラインでないタグの前と、ブロックを含むタグの閉じタグの前に改行を入れる。これは空白として出力に残り、インライン要素の隣では見た目も変わる。変換スクリプトに `--pretty` を付けると、同じ規則で `{"\n"}` を書き出す（付けなければ空白は入らない）。v2 の出力と揃えるなら `--pretty`、`pretty: false` の基準と比べるなら付けない。
-  - `--pretty` が出す `{"\n"}` の大半は要らない。ブロックどうしの間は、kamado の HTML 整形（`html.format`）が改行を入れるためです。
-  - 要る `{"\n"}` は 2 種類ある。Pug がインラインとしない `button` / `input` / `label` / `select` / `time` / `svg` / `picture` / `iframe` などが、テキストやインラインの隣にある箇所（描画上の空白になる）。インラインの親の中のブロックのように、整形が詰める箇所（バイトが変わる）。どちらも**規則では見分けられない**。
-  - 要らない行は `scripts/prune-jsx-newlines.mjs` が消す。**`--pretty` で変換して基準と一致させてから**、`node <clone>/scripts/prune-jsx-newlines.mjs <project> --output <出力ディレクトリ> <TSX のあるディレクトリ>...` を実行する。ビルドの出力を基準にして、ファイルごとにすべて消し、ビルドして比べる。出力が変わるなら半分ずつに分け、必要な行だけを残す。`pretty: false` の基準と比べるときは `--pretty` を付けないので、このツールは要らない。
+- **`&nbsp;`などの実体参照は、そのままテキストに書く**（`{"&nbsp;"}`と文字列にすると`&amp;nbsp;`になる）。
+- **他の子と並ぶ生の HTML**は、`kamado/jsx`の`html()`で書く（`import { html } from 'kamado/jsx'`、`{html(markup)}`）。Pug の`!{}`と`include`したテキストの置き換え先。
+- **`<option selected>`** は React が無視する。`<select defaultValue="...">`に書く。
+- **`<link media="all">`** は空にならず`all`のまま出る（v2 と同じ）。
+- **JSX に書けない属性名**（絵文字など、`⚠️="..."`のような印）は React が出力しない。静的なマークアップなら`html.inject`に HTML 文字列として書く。`@click`や`[x]`のように XML の Name でない名前は、変換スクリプトが`warning:`を出す（変換結果は spread のまま残るが、描画では属性が消える）。`:foo`や`日本語`は XML の Name なので書かれる。
+- **React 19 は`<img>`ごとに`<link rel="preload" as="image">`を`<head>`に足す**（Pug では出ない）。`<html static>`のページでは出ない。それ以外のページで要らなければ`html.rules`で消す: `{ "selector": "link[rel=preload][as=image]", "action": "remove" }`。
+- **Pug の`pretty`**（`createCompileHooks`の既定は`true`）は、インラインでないタグの前と、ブロックを含むタグの閉じタグの前に改行を入れる。これは空白として出力に残り、インライン要素の隣では見た目も変わる。変換スクリプトに`--pretty`を付けると、同じ規則で`{"\n"}`を書き出す（付けなければ空白は入らない）。v2 の出力と揃えるなら`--pretty`、`pretty: false`の基準と比べるなら付けない。
+  - `--pretty`が出す`{"\n"}`の大半は要らない。ブロックどうしの間は、kamado の HTML 整形（`html.format`）が改行を入れるためです。
+  - 要る`{"\n"}`は 2 種類ある。Pug がインラインとしない`button`/`input`/`label`/`select`/`time`/`svg`/`picture`/`iframe`などが、テキストやインラインの隣にある箇所（描画上の空白になる）。インラインの親の中のブロックのように、整形が詰める箇所（バイトが変わる）。どちらも**規則では見分けられない**。
+  - 要らない行は`scripts/prune-jsx-newlines.mjs`が消す。**`--pretty`で変換して基準と一致させてから**、`node <clone>/scripts/prune-jsx-newlines.mjs <project> --output <出力ディレクトリ> <TSX のあるディレクトリ>...`を実行する。ビルドの出力を基準にして、ファイルごとにすべて消し、ビルドして比べる。出力が変わるなら半分ずつに分け、必要な行だけを残す。`pretty: false`の基準と比べるときは`--pretty`を付けないので、このツールは要らない。
   - 使うときの前提と注意:
-    - `<project>` は `kamado.config.jsonc` のあるディレクトリで、`--output` と各パスはそこからの相対で書く。動かす kamado は、既定ではプロジェクトの `node_modules/kamado`（npm から入れたもので、native addon も入っている）。clone の kamado を使うなら `--cli <clone>/packages/kamado/dist/cli.js` で指し、clone で `yarn build` に加えて native addon も作っておく（Rust が要る。`cargo build --locked --offline --release -p kd_napi`。`docs/v3/development.md`）。その場合も、変換した TSX は `kamado/jsx` をプロジェクトから読むので、プロジェクトに同じ版の `kamado` が要る。オプションは `scripts/prune-jsx-newlines.mjs` の先頭の説明を読む。
+    - `<project>`は`kamado.config.jsonc`のあるディレクトリで、`--output`と各パスはそこからの相対で書く。動かす kamado は、既定ではプロジェクトの`node_modules/kamado`（npm から入れたもので、native addon も入っている）。clone の kamado を使うなら`--cli <clone>/packages/kamado/dist/cli.js`で指し、clone で`yarn build`に加えて native addon も作っておく（Rust が要る。`cargo build --locked --offline --release -p kd_napi`。`docs/v3/development.md`）。その場合も、変換した TSX は`kamado/jsx`をプロジェクトから読むので、プロジェクトに同じ版の`kamado`が要る。オプションは`scripts/prune-jsx-newlines.mjs`の先頭の説明を読む。
     - ソースを書き換える。作業ツリーをきれいにして実行する。エラーや中断（Ctrl-C）のときは元に戻る。
     - 基準は実行時点の出力で、移行前の出力ではない。すでにある差は残る。ビルドが決定的でない（日時や乱数が出力に入る）と、基準にできないので止まる。
     - ビルドに使われないファイル（未使用の部品など）は、出力が変わらないので全部消える。そのようなファイルは手で見る。
-    - ビルドの回数に比例して時間がかかる（必要な行が多いファイルほど増える）。`--incremental` は試行を速くするが、キャッシュを信頼するので、使うと必要な行を消してしまうことがある。最後の確認は常に全体のビルドで行い、一致しなければ失敗して元に戻る。
-    - プロジェクトのコードと `--cli` のコードを実行する。信頼できるプロジェクトだけで実行する。
-  - 消した結果が基準と一致するかは案件の HTML による。インラインの隣にそれらの要素が無い案件では全部消えて一致し、フォームやヘッダーに多い案件では必要な行が残る。`--pretty` なしで変換すると、描画が変わる箇所を見落とすので勧めない（`pretty: false` が基準のときを除く）。
-- **Pug の出力順をそのまま保つ**: 変換スクリプトは `<html static>` を出す。React の持ち上げ（`<head>` の `async` な `script` が `title` の前に出る）と、`form` / `input` / `button` の属性の並べ替え（`action` と `name` が後ろへ）をやめ、書いた順で出す。`<html>` を持たない、`--pages=<ディレクトリ>`（既定 `htdocs`）で指したディレクトリの下のページ（フラグメント）と `extends` したページには `export const meta = { kdStatic: true }` を出す（`<html static>` の外で評価される子を持つページは、手で書くときも `kdStatic` が要る。レイアウトの外側で評価される子や、`k('html', ...)` 経由の `html` は対象外）。
-- **`on*` 属性の文字列**（`oncontextmenu="return false;"`）は、`<html static>`（`kdStatic` のページ）の中でだけ出る。React と同じく、ふだんは `on*` をすべて捨てる（データ由来の props が実行可能な属性にならないように）。
-- **`style` を CSS の文字列で渡す**（`style=\`anchor-name: ${x}\``）は、`kamado/jsx`の`styleOf()` を通してオブジェクトにする。
-- **`data-*` / `aria-*` と `draggable` / `spellcheck` / `contenteditable` に `true` と `false`**: Pug は `true` を空の属性（`data-x=""`）で出し、`false` は属性を出さない。React は `"true"` と `"false"` と書く。変換スクリプトは `true` を `""`、`false` を `undefined` にして出し、最終の HTML を移行前に合わせる。
-- **`if (x)` が `0` を返す式**: Pug は何も出さず、JSX の `x && <b/>` は `0` を出す。変換スクリプトは `!!` を付ける（`!x` や比較のように、条件がすでに真偽値の式なら付けない）。
-- **未宣言の変数への代入**（`- isHome = false`）は、変換スクリプトが `let` を足す。
-- **`#{tag}`（動的なタグ名）** は大文字の変数に入れたコンポーネントとして書く（文字列の型を `k()` が受け取る）。
-- **`extends` / `block`**: レイアウトは `slots` の props を受け取るコンポーネント、ページは `slots={{ content: (...) }}` を渡す。`block vars` の `var opts = ...` は props の既定値と、ページから渡す値になる。
-- **変換スクリプトが止まるもの**: `block append` / `block prepend`、`&attributes`、引数が仮引数より多い `+mixin`、自分自身を読む宣言（`var title = title || "x"`）。止まったら手で書く。コード中の `if` / ループは、読む変数を props から取って変換する。
-- **mixin と本文が同じファイル**（`header.c-header ...` と `mixin ...` が並ぶ）は、mixin は名前つき export、本文は `export default` のコンポーネント（`〜Body`）になる。**mixin に渡すブロック**（`+pSub` の下に書いた中身と、mixin の中の `block` / `if block`）は `children` になる。`locals["blocks-v2"]` はデータファイルの値（`props.data`）。データファイルの名前（`blog_news.yml` なら `blog_news`）は、Pug の変数として読んでいた箇所が `data.blog_news` になる。
-- **mixin だけのファイルの先頭にある宣言**（`- const TABLE = { ... }`）は、モジュールのトップレベルの定数になり、どの mixin からも読める。どの mixin も読まない宣言は書かない。ページが渡す値や `locals` / `block` を読む宣言（`- const t = pageTitle`）は定数にできないので、`warning:` を出して書かない。手で書く。mixin がその定数に代入する（`- X = ...`）ときも `warning:` を出す。
+    - ビルドの回数に比例して時間がかかる（必要な行が多いファイルほど増える）。`--incremental`は試行を速くするが、キャッシュを信頼するので、使うと必要な行を消してしまうことがある。最後の確認は常に全体のビルドで行い、一致しなければ失敗して元に戻る。
+    - プロジェクトのコードと`--cli`のコードを実行する。信頼できるプロジェクトだけで実行する。
+  - 消した結果が基準と一致するかは案件の HTML による。インラインの隣にそれらの要素が無い案件では全部消えて一致し、フォームやヘッダーに多い案件では必要な行が残る。`--pretty`なしで変換すると、描画が変わる箇所を見落とすので勧めない（`pretty: false`が基準のときを除く）。
+- **Pug の出力順をそのまま保つ**: 変換スクリプトは`<html static>`を出す。React の持ち上げ（`<head>`の`async`な`script`が`title`の前に出る）と、`form`/`input`/`button`の属性の並べ替え（`action`と`name`が後ろへ）をやめ、書いた順で出す。`<html>`を持たない、`--pages=<ディレクトリ>`（既定`htdocs`）で指したディレクトリの下のページ（フラグメント）と`extends`したページには`export const meta = { kdStatic: true }`を出す（`<html static>`の外で評価される子を持つページは、手で書くときも`kdStatic`が要る。レイアウトの外側で評価される子や、`k('html', ...)`経由の`html`は対象外）。
+- **`on*`属性の文字列**（`oncontextmenu="return false;"`）は、`<html static>`（`kdStatic`のページ）の中でだけ出る。React と同じく、ふだんは`on*`をすべて捨てる（データ由来の props が実行可能な属性にならないように）。
+- **`style`を CSS の文字列で渡す**（`style=\`anchor-name: ${x}\``）は、`kamado/jsx`の`styleOf()` を通してオブジェクトにする。
+- **`data-*` / `aria-*`と`draggable` / `spellcheck` / `contenteditable`に`true`と`false`**: Pug は`true`を空の属性（`data-x=""`）で出し、`false`は属性を出さない。React は`"true"`と`"false"`と書く。変換スクリプトは`true`を`""`、`false`を`undefined`にして出し、最終の HTML を移行前に合わせる。
+- **`if (x)`が`0`を返す式**: Pug は何も出さず、JSX の`x && <b/>`は`0`を出す。変換スクリプトは`!!`を付ける（`!x`や比較のように、条件がすでに真偽値の式なら付けない）。
+- **未宣言の変数への代入**（`- isHome = false`）は、変換スクリプトが`let`を足す。
+- **`#{tag}`（動的なタグ名）** は大文字の変数に入れたコンポーネントとして書く（文字列の型を`k()`が受け取る）。
+- **`extends` / `block`**: レイアウトは`slots`の props を受け取るコンポーネント、ページは`slots={{ content: (...) }}`を渡す。`block vars`の`var opts = ...`は props の既定値と、ページから渡す値になる。
+- **変換スクリプトが止まるもの**: `block append`/`block prepend`、`&attributes`、引数が仮引数より多い`+mixin`、自分自身を読む宣言（`var title = title || "x"`）。止まったら手で書く。コード中の`if`/ループは、読む変数を props から取って変換する。
+- **mixin と本文が同じファイル**（`header.c-header ...`と`mixin ...`が並ぶ）は、mixin は名前つき export、本文は`export default`のコンポーネント（`〜Body`）になる。**mixin に渡すブロック**（`+pSub`の下に書いた中身と、mixin の中の`block`/`if block`）は`children`になる。`locals["blocks-v2"]`はデータファイルの値（`props.data`）。データファイルの名前（`blog_news.yml`なら`blog_news`）は、Pug の変数として読んでいた箇所が`data.blog_news`になる。
+- **mixin だけのファイルの先頭にある宣言**（`- const TABLE = { ... }`）は、モジュールのトップレベルの定数になり、どの mixin からも読める。どの mixin も読まない宣言は書かない。ページが渡す値や`locals`/`block`を読む宣言（`- const t = pageTitle`）は定数にできないので、`warning:`を出して書かない。手で書く。mixin がその定数に代入する（`- X = ...`）ときも`warning:`を出す。
 - **Pug の代入**（`- breadcrumbs = pageBreadcrumbs`、`- x = true` ... `- x = false`）は、その位置で実行され、props の名前への代入はローカルの変数（初期値は props の値）になる。include したファイルと mixin には、その変数が渡る。
-- **`//` のコメント**（Pug が HTML コメントにする）は JSX に書けないので消える。
-- **データ**: `data.yml` と `blocks.js` のようなファイルは、Pug ではファイル名がそのまま変数（`data`、`blocks`）だった。v3 では `data.<ファイル名>`（`data.data`、`data.blocks`）。`.js` のデータは文字列を返すだけなら、中身の HTML をそのままデータのディレクトリに置く（`blocks.html`）。
+- **`//`のコメント**（Pug が HTML コメントにする）は JSX に書けないので消える。
+- **データ**: `data.yml`と`blocks.js`のようなファイルは、Pug ではファイル名がそのまま変数（`data`、`blocks`）だった。v3 では`data.<ファイル名>`（`data.data`、`data.blocks`）。`.js`のデータは文字列を返すだけなら、中身の HTML をそのままデータのディレクトリに置く（`blocks.html`）。
 - **レイアウトの指定**は拡張子なし（`"layout": "sub.pug"` → `"sub"`）。
-- `scripts.files` は、ページ以外の入力に合わせて絞っておくと意図が明確になる（`"js/**/*.ts"` など）。`alias` の相対パスは `__assets/_libs` のように `.` なしでも、プロジェクトにあるパスならパスとして扱う。
+- `scripts.files`は、ページ以外の入力に合わせて絞っておくと意図が明確になる（`"js/**/*.ts"`など）。`alias`の相対パスは`__assets/_libs`のように`.`なしでも、プロジェクトにあるパスならパスとして扱う。
 
 ## 4. データ
 
-- `globalData.dir` の `.json` / `.yml` / `.yaml`（v2 は `.yaml` を無視）と、文字列として読む `.html` / `.txt` が使える。キーはファイル名（拡張子なし）。
-- `.js` のデータ（default export、関数）は**廃止**。値を計算する処理は、prebuild のスクリプトで JSON に書き出す（`"prebuild": "node scripts/build-data.mjs"`）。
-- `globalData.data`（設定内のリテラル）は `data.values`。同じキーは設定が優先。
+- `globalData.dir`の`.json`/`.yml`/`.yaml`（v2 は`.yaml`を無視）と、文字列として読む`.html`/`.txt`が使える。キーはファイル名（拡張子なし）。
+- `.js`のデータ（default export、関数）は**廃止**。値を計算する処理は、prebuild のスクリプトで JSON に書き出す（`"prebuild": "node scripts/build-data.mjs"`）。
+- `globalData.data`（設定内のリテラル）は`data.values`。同じキーは設定が優先。
 
 ## 5. HTML 後処理（transforms / manipulateDOM / injectToHead / SSI）
 
 v2 の既定の transform（doctype → prettier → minifier → lineBreak）は v3 の既定のままです。独自のものは宣言的オプションに置き換えます。
 
-| v2                                                           | v3                                                                                                                                |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `manipulateDOM` で要素を削除                                 | `html.rules`: `{ "selector": "...", "action": "remove" }`                                                                         |
-| 属性の追加・変更・削除、クラスの追加・削除                   | `setAttr` / `removeAttr`（名前は `/regex/` も可）/ `addClass` / `removeClass`                                                     |
-| 要素を包む・外す、HTML の挿入                                | `wrap` / `unwrap` / `insert`                                                                                                      |
-| `ctx.getHref` / `ctx.baseURL` で URL を書き換え              | `rewriteUrl`（`absolute` / `rootRelative`、`origin`）                                                                             |
-| `injectToHead({ content, position, filter })`                | `html.inject`: `{ "html": "...", "position": "head-end", "pages": [...], "mode": "build" }`（`mode: "serve"` は開発サーバー限定） |
-| `devServer.transforms`（開発サーバーの応答の変換）           | `html.inject` の `mode: "serve"`                                                                                                  |
-| `createSSIShim`                                              | `html.includes`: `{ "preset": "ssi", "dir": "..." }`                                                                              |
-| `<!-- @include(...) -->` の独自実装                          | `{ "preset": "includeComment", "root": "..." }`                                                                                   |
-| BurgerEditor の import ブロック                              | `{ "preset": "burgerEditorImport" }`                                                                                              |
-| `characterEntities`                                          | `html.entities`: `"all"` または `{ "©": "&copy;" }`                                                                               |
-| imageSizes                                                   | `html.imageSizes`: `{ "enabled": true, "exclude": [...], "keepAuthored": false }`                                                 |
-| 特定ページだけ整形・圧縮を切る                               | `html.overrides`: `[{ "pages": ["/php/**"], "format": false, "minify": false }]`                                                  |
-| `formatOptions.parseError`（`silent` / `warning` / `error`） | `html.onError`（同じ 3 値）                                                                                                       |
+| v2                                                           | v3                                                                                                                               |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `manipulateDOM`で要素を削除                                  | `html.rules`: `{ "selector": "...", "action": "remove" }`                                                                        |
+| 属性の追加・変更・削除、クラスの追加・削除                   | `setAttr` / `removeAttr`（名前は`/regex/`も可）/ `addClass` / `removeClass`                                                      |
+| 要素を包む・外す、HTML の挿入                                | `wrap` / `unwrap` / `insert`                                                                                                     |
+| `ctx.getHref` / `ctx.baseURL`で URL を書き換え               | `rewriteUrl`（`absolute` / `rootRelative`、`origin`）                                                                            |
+| `injectToHead({ content, position, filter })`                | `html.inject`: `{ "html": "...", "position": "head-end", "pages": [...], "mode": "build" }`（`mode: "serve"`は開発サーバー限定） |
+| `devServer.transforms`（開発サーバーの応答の変換）           | `html.inject`の`mode: "serve"`                                                                                                   |
+| `createSSIShim`                                              | `html.includes`: `{ "preset": "ssi", "dir": "..." }`                                                                             |
+| `<!-- @include(...) -->`の独自実装                           | `{ "preset": "includeComment", "root": "..." }`                                                                                  |
+| BurgerEditor の import ブロック                              | `{ "preset": "burgerEditorImport" }`                                                                                             |
+| `characterEntities`                                          | `html.entities`: `"all"`または`{ "©": "&copy;" }`                                                                                |
+| imageSizes                                                   | `html.imageSizes`: `{ "enabled": true, "exclude": [...], "keepAuthored": false }`                                                |
+| 特定ページだけ整形・圧縮を切る                               | `html.overrides`: `[{ "pages": ["/php/**"], "format": false, "minify": false }]`                                                 |
+| `formatOptions.parseError`（`silent` / `warning` / `error`） | `html.onError`（同じ 3 値）                                                                                                      |
 
-`html.rules` などの `pages` は**出力 URL**に対する glob です（入力パスではない）。
+`html.rules`などの`pages`は**出力 URL**に対する glob です（入力パスではない）。
 
-`setAttr` / `removeAttr` / `addClass` / `removeClass` は、`manipulateDOM` で書いた `setAttribute` / `removeAttribute` / `classList` と同じ結果になります。足す属性は要素の先頭に入ります（`RFC.md` §9.1）。違うのは、属性名を大文字小文字を区別せず照合する点です（`RFC.md` §2 の #35）。`onclick` を消す `removeAttr` は `ONCLICK` と書かれた属性も消します。`<p CLASS=c>` への `addClass` は、v2 では 2 つ目の `class` を先頭に足していましたが、v3 は `CLASS` に書き足します。`{{attr:href}}` も `HREF` と書かれた属性を読みます。ただし `/regex/` の名前は、書かれた名前に対する正規表現のままです。
+`setAttr`/`removeAttr`/`addClass`/`removeClass`は、`manipulateDOM`で書いた`setAttribute`/`removeAttribute`/`classList`と同じ結果になります。足す属性は要素の先頭に入ります（`RFC.md` §9.1）。違うのは、属性名を大文字小文字を区別せず照合する点です（`RFC.md` §2 の #35）。`onclick`を消す`removeAttr`は`ONCLICK`と書かれた属性も消します。`<p CLASS=c>`への`addClass`は、v2 では 2 つ目の`class`を先頭に足していましたが、v3 は`CLASS`に書き足します。`{{attr:href}}`も`HREF`と書かれた属性を読みます。ただし`/regex/`の名前は、書かれた名前に対する正規表現のままです。
 
 ## 6. スタイルとスクリプト
 
-- スタイル（`styles.files`、既定 `**/*.css`）は v3 が自前で処理します（`@import` の展開、alias、圧縮、バナー、source map）。**postcss.config のプラグインは使えません**。autoprefixer などが要るなら、npm scripts で別に処理してから kamado に渡します。
-- `@import` の解決: alias（`@/x.css`）、importing ファイルからの相対パス、`node_modules`（パッケージの `style` → `.css` の `main` → `index.css`）の順。
-- **PostCSS のプラグインのうち、`@custom-media` は組み込み**です（D-ZERO の `@d-zero/postcss-config` の `postcss-custom-media`）。定義はどのファイルにあっても使え（`@layer` / `@scope` / `@container` とスタイル規則以外の at-rule、たとえば `@media` / `@supports` の中に書いた定義は、v2 と同じく使わずに出力に残します）、定義は出力から消えます。`@media (--name)` のようにクエリが参照だけなら定義のリストに、定義が括弧で囲んだ特性 1 つ（`(width < 1px)`。`not` / `and` / `or` を含まない）なら、`and` の隣でも `(not (--name))` のような括弧の中でも、その場でその特性に置き換わります。それ以外の定義（リスト、media type、`(a) and (b)` や `not (a)`）をほかの条件と並べるか `not` の後や括弧の中に書いたときは、v2 と同じく規則を `@media <定義>` の中と `@media <定義の否定>` の中に 1 回ずつ書きます。その場で置き換えられない参照 1 つごとに、その規則の CSS は倍になります。定義が別の定義を使っていても、`true` / `false` の定義も使えます。未定義の名前と、循環する定義（Media Queries 5 では、循環に含まれる定義はすべて未定義）は置き換えません。`styles.minify: false` でも置き換えます（v2 は常に展開していて、ブラウザは `@custom-media` を解釈しないため）。圧縮しないときは、定義を消し（行に定義のほかに何もなければ行ごと）、参照を置き換えるほかは書いたまま出し、規則の写しを作るときは包む `@media` を元の規則の最初の行に並べます。v2 との差は §11 にあります。**ほかのプラグイン**（autoprefixer、`postcss-extend-rule`、`postcss-base64`、`postcss-math` / `postcss-calc`、`postcss-color-mod-function`、`postcss-clip-path-polyfill`）は使えません。案件の CSS がそれらを使っているかは、`@extend`、`base64(`、`color-mod(`、`math(` を検索して確かめます。autoprefixer だけは、最新ブラウザ向けの browserslist なら足すプレフィックスが数個（`-webkit-box-decoration-break` など）なので、書いておけば済みます。
+- スタイル（`styles.files`、既定`**/*.css`）は v3 が自前で処理します（`@import`の展開、alias、圧縮、バナー、source map）。**postcss.config のプラグインは使えません**。autoprefixer などが要るなら、npm scripts で別に処理してから kamado に渡します。
+- `@import`の解決: alias（`@/x.css`）、importing ファイルからの相対パス、`node_modules`（パッケージの`style` → `.css`の`main` → `index.css`）の順。
+- **PostCSS のプラグインのうち、`@custom-media`は組み込み**です（D-ZERO の`@d-zero/postcss-config`の`postcss-custom-media`）。定義はどのファイルにあっても使え（`@layer`/`@scope`/`@container`とスタイル規則以外の at-rule、たとえば`@media`/`@supports`の中に書いた定義は、v2 と同じく使わずに出力に残します）、定義は出力から消えます。`@media (--name)`のようにクエリが参照だけなら定義のリストに、定義が括弧で囲んだ特性 1 つ（`(width < 1px)`。`not`/`and`/`or`を含まない）なら、`and`の隣でも`(not (--name))`のような括弧の中でも、その場でその特性に置き換わります。それ以外の定義（リスト、media type、`(a) and (b)`や`not (a)`）をほかの条件と並べるか`not`の後や括弧の中に書いたときは、v2 と同じく規則を`@media <定義>`の中と`@media <定義の否定>`の中に 1 回ずつ書きます。その場で置き換えられない参照 1 つごとに、その規則の CSS は倍になります。定義が別の定義を使っていても、`true`/`false`の定義も使えます。未定義の名前と、循環する定義（Media Queries 5 では、循環に含まれる定義はすべて未定義）は置き換えません。`styles.minify: false`でも置き換えます（v2 は常に展開していて、ブラウザは`@custom-media`を解釈しないため）。圧縮しないときは、定義を消し（行に定義のほかに何もなければ行ごと）、参照を置き換えるほかは書いたまま出し、規則の写しを作るときは包む`@media`を元の規則の最初の行に並べます。v2 との差は §11 にあります。**ほかのプラグイン**（autoprefixer、`postcss-extend-rule`、`postcss-base64`、`postcss-math`/`postcss-calc`、`postcss-color-mod-function`、`postcss-clip-path-polyfill`）は使えません。案件の CSS がそれらを使っているかは、`@extend`、`base64(`、`color-mod(`、`math(`を検索して確かめます。autoprefixer だけは、最新ブラウザ向けの browserslist なら足すプレフィックスが数個（`-webkit-box-decoration-break`など）なので、書いておけば済みます。
 - postcss-import と同じ扱い:
-  - `@import` のあとに書いた `@layer a, b;`（順序の宣言）は、取り込んだ内容より前、バナーより前に移る。取り込んだファイルの中の外部 URL の `@import` と `@layer` の文も同じく先頭に移る。
-  - 取り込んだファイルの `@charset` は先頭に 1 つだけ残り、値が違えばエラーになる。
-  - 外部 URL の `@import` は、取り込みの条件（`layer()`、`supports()`、メディア条件）を引き継いで書く（`@import url("f.css") layer(y)`）。同じ外部 URL の `@import` は 1 つにまとまる。
-  - `@layer` の文を挟んで続いていない `@import`、規則のあとの `@import`、読み込むファイルを名指さない `@import`、先頭にない `@charset` は、v2 と同じく出力に入れません。v3 は `kamado build` の要約に警告を出します（v2 は何も表示しませんでした）。
+  - `@import`のあとに書いた`@layer a, b;`（順序の宣言）は、取り込んだ内容より前、バナーより前に移る。取り込んだファイルの中の外部 URL の`@import`と`@layer`の文も同じく先頭に移る。
+  - 取り込んだファイルの`@charset`は先頭に 1 つだけ残り、値が違えばエラーになる。
+  - 外部 URL の`@import`は、取り込みの条件（`layer()`、`supports()`、メディア条件）を引き継いで書く（`@import url("f.css") layer(y)`）。同じ外部 URL の`@import`は 1 つにまとまる。
+  - `@layer`の文を挟んで続いていない`@import`、規則のあとの`@import`、読み込むファイルを名指さない`@import`、先頭にない`@charset`は、v2 と同じく出力に入れません。v3 は`kamado build`の要約に警告を出します（v2 は何も表示しませんでした）。
 - **v2 と違う点（レイヤー）**:
-  - `layer()` が 2 段以上ある取り込みの中の外部 URL の `@import` は、外側の条件を外側に書きます（`layer(a)` の中の `layer(b)` は `a.b`）。v2 の postcss-import は逆に書いて `b.a` になり、レイヤーの並びも変わります。
-  - `layer()` 付きの取り込みの後ろに `@layer` の文があり、先頭に移すとレイヤーの宣言の順が変わるときは、取り込みの位置に `@layer one;` を書き足します（`@import "a.css" layer(one); @import "b.css" layer(two); @layer two, one;` は `one`、`two` の順。v2 は `two`、`one`）。
-  - 隣り合う無名の `@layer` ブロックは、v2 の cssnano は 1 つにまとめますが、別のレイヤーなのでまとめません。無名の `layer` で取り込んだファイルの `@layer` の文は、v2 と違い、先頭に移さずそのファイルのブロックの中に残します。
-- スクリプト（`scripts.files`、既定 `**/*.{js,ts,jsx,tsx,mjs,cjs}`）は esbuild（`bundle: true`）です。`alias` / `define` / `target`（既定 `es2022`）/ `minify` / `sourcemap` / `banner` が使えます。**`pages.files` に一致するファイルはスクリプトとして扱いません**（`.tsx` はページ）。
-- **v2 と出力を揃えたいとき**: v2 は esbuild に `target` を渡さない（esnext）。構文が `es2022` で変わるコードでは `"scripts": { "target": "esnext" }` にする。
-- `<script>` の中身とイベントハンドラは esbuild で圧縮されます。v2（terser）とバイトは違いますが意味は同じです。
+  - `layer()`が 2 段以上ある取り込みの中の外部 URL の`@import`は、外側の条件を外側に書きます（`layer(a)`の中の`layer(b)`は`a.b`）。v2 の postcss-import は逆に書いて`b.a`になり、レイヤーの並びも変わります。
+  - `layer()`付きの取り込みの後ろに`@layer`の文があり、先頭に移すとレイヤーの宣言の順が変わるときは、取り込みの位置に`@layer one;`を書き足します（`@import "a.css" layer(one); @import "b.css" layer(two); @layer two, one;`は`one`、`two`の順。v2 は`two`、`one`）。
+  - 隣り合う無名の`@layer`ブロックは、v2 の cssnano は 1 つにまとめますが、別のレイヤーなのでまとめません。無名の`layer`で取り込んだファイルの`@layer`の文は、v2 と違い、先頭に移さずそのファイルのブロックの中に残します。
+- スクリプト（`scripts.files`、既定`**/*.{js,ts,jsx,tsx,mjs,cjs}`）は esbuild（`bundle: true`）です。`alias`/`define`/`target`（既定`es2022`）/`minify`/`sourcemap`/`banner`が使えます。**`pages.files`に一致するファイルはスクリプトとして扱いません**（`.tsx`はページ）。
+- **v2 と出力を揃えたいとき**: v2 は esbuild に`target`を渡さない（esnext）。構文が`es2022`で変わるコードでは`"scripts": { "target": "esnext" }`にする。
+- `<script>`の中身とイベントハンドラは esbuild で圧縮されます。v2（terser）とバイトは違いますが意味は同じです。
 
 ## 7. onBeforeBuild / onAfterBuild
 
 廃止です。ビルド全体で 1 回だけの処理は kamado の外に出します。
 
-- 前処理（データ生成、ファイルのコピー）→ `package.json` の `"prebuild"`。
-- 後処理（古い出力の削除、別サイトへのコピー、通知）→ `"postbuild"`。何が出力されたかは **`build.report`** に書かれた JSON（`version` / `pages` / `assets` / `warnings`）で分かる。`"build": { "report": "build-report.json" }` を設定する。
-- sitemap.xml は組み込み: `"sitemap": { "exclude": [...], "lastmod": "manifest" }`。URL の起点は `site.baseURL`（なければ `https://<site.host>`）。
-- 古い出力は削除されません（v2 と同じ）。削除は `build.report` を使う postbuild で。
+- 前処理（データ生成、ファイルのコピー）→ `package.json`の`"prebuild"`。
+- 後処理（古い出力の削除、別サイトへのコピー、通知）→ `"postbuild"`。何が出力されたかは **`build.report`** に書かれた JSON（`version`/`pages`/`assets`/`warnings`）で分かる。`"build": { "report": "build-report.json" }`を設定する。
+- sitemap.xml は組み込み: `"sitemap": { "exclude": [...], "lastmod": "manifest" }`。URL の起点は`site.baseURL`（なければ`https://<site.host>`）。
+- 古い出力は削除されません（v2 と同じ）。削除は`build.report`を使う postbuild で。
 
 ## 8. 開発サーバー
 
-`kamado server`（設定は `devServer`）。v2 との違い:
+`kamado server`（設定は`devServer`）。v2 との違い:
 
 - ファイルを監視しません（v2 と同じ）。リクエストごとに依存の stat を確かめ、変更がなければメモリの出力を返します。
-- ページファイルの**追加と削除**、設定ファイル・`pages.overrides` の変更は、**再起動**すると反映されます。
+- ページファイルの**追加と削除**、設定ファイル・`pages.overrides`の変更は、**再起動**すると反映されます。
 - コンポーネントを直すと、次のリクエストで描画用のワーカーが作り直されます（初回は少し遅い）。
 - ブラウザのライブリロードはありません。
-- `localhost`（とそのサブドメイン）、IP アドレス、`devServer.host` 以外のホスト名で開くと `403` になります。`laptop.local` やトンネルのドメインで開くなら、`devServer.allowedHosts` に足してください（`".example.test"` のように先頭が `.` の値はサブドメインにも一致します）。`devServer.host` は待ち受けるアドレスで、`0.0.0.0` にしても名前で開けるようにはなりません。別のサイトからの要求（`<script src>`、フォームの送信、`iframe` への埋め込み）も `403` です。外部のリンクからタブで開くのは通りますが、`devServer.proxy` の接頭辞の下へのリンクは通りません（アドレスバーから開けば通ります）。同じマシンの別のツール（`http://127.0.0.1:5173` など）からの要求は通ります。別のマシンのツールからの要求を通すには、そのホスト名か IP アドレスを `allowedHosts` に足してください。DNS リバインディングと、別サイトからソースや `proxy` の先の API を読まれることへの対策です。ブラウザは判定に使う `Sec-Fetch-*` ヘッダーを `https:` と `localhost` 宛てにしか送らないので、`localhost` 以外のホスト（LAN の IP アドレスや `laptop.local`）で平文のまま開いているときは、フォームの送信と fetch だけが検査され、`<script src>` や `iframe` は通ります。
+- `localhost`（とそのサブドメイン）、IP アドレス、`devServer.host`以外のホスト名で開くと`403`になります。`laptop.local`やトンネルのドメインで開くなら、`devServer.allowedHosts`に足してください（`".example.test"`のように先頭が`.`の値はサブドメインにも一致します）。`devServer.host`は待ち受けるアドレスで、`0.0.0.0`にしても名前で開けるようにはなりません。別のサイトからの要求（`<script src>`、フォームの送信、`iframe`への埋め込み）も`403`です。外部のリンクからタブで開くのは通りますが、`devServer.proxy`の接頭辞の下へのリンクは通りません（アドレスバーから開けば通ります）。同じマシンの別のツール（`http://127.0.0.1:5173`など）からの要求は通ります。別のマシンのツールからの要求を通すには、そのホスト名か IP アドレスを`allowedHosts`に足してください。DNS リバインディングと、別サイトからソースや`proxy`の先の API を読まれることへの対策です。ブラウザは判定に使う`Sec-Fetch-*`ヘッダーを`https:`と`localhost`宛てにしか送らないので、`localhost`以外のホスト（LAN の IP アドレスや`laptop.local`）で平文のまま開いているときは、フォームの送信と fetch だけが検査され、`<script src>`や`iframe`は通ります。
 
 ## 9. d-zero/builder（11ty）からの移行
 
-kamado の前身の `@d-zero/builder`（Eleventy ベース）で作られた案件も、同じ手順（変換スクリプトで Pug → TSX、`.html` はそのまま）で v3 に移せます。Shift_JIS と CRLF で配信するサイトでも、下の対応表の設定で builder の出力に揃えられます。builder の設定と v3 の対応:
+kamado の前身の`@d-zero/builder`（Eleventy ベース）で作られた案件も、同じ手順（変換スクリプトで Pug → TSX、`.html`はそのまま）で v3 に移せます。Shift_JIS と CRLF で配信するサイトでも、下の対応表の設定で builder の出力に揃えられます。builder の設定と v3 の対応:
 
-| builder（`eleventy.config.mjs`）                                                 | v3                                                                                                                                                |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `charset: { encoding: 'shift_jis', overrides: [{ paths, encoding: 'utf8' }] }`   | `html.encoding: "shift_jis"` と、`html.overrides` の `{ "pages": [...], "encoding": "utf8" }`。`pages` は**出力 URL**（`/a/index.html` は `/a/`） |
-| `lineBreak: '\r\n'`                                                              | `html.lineBreak: "crlf"`                                                                                                                          |
-| `prettier: { tabWidth: 4, useTabs: true }`                                       | `html.format: { "tabWidth": 4, "useTabs": true }`                                                                                                 |
-| `minifier: { minifyCSS: false }`（HTML Minifier の他の機能は何も有効にならない） | `html.minify: { "redundantAttributes": false, "css": false }`（空の `class=""` を残し、`style` 属性を圧縮しない）                                 |
-| `characterEntities: true`                                                        | `html.entities: "all"`                                                                                                                            |
-| builder が DOM を jsdom で書き戻す（属性の `&amp;`、`<path></path>`、`&nbsp;`）  | `html.serializer: "spec"`                                                                                                                         |
-| `autoDecode`（開発サーバーが Shift_JIS の出力を UTF-8 に戻す機能）               | 不要。開発サーバーは常に UTF-8 を返す（RFC §9.5）                                                                                                 |
-| ソースが Shift_JIS の HTML・JSX・CSS（builder の `autoDecode` の対象外）         | **未対応**。`<path>: file is not valid UTF-8` で失敗する（lossy 変換はしない）。`iconv -f CP932 -t UTF-8` 等で UTF-8 にしてから移す               |
-| `ssi`（開発サーバーで `<!--#include virtual-->` を展開）                         | ビルドでは何もしない（コメントのまま残る）。展開が要るなら `html.includes` の `ssi`                                                               |
-| `banner()`                                                                       | `styles.banner` / `scripts.banner` の文字列（`{{date:YYYY-MM-DD}}` `{{year}}`）                                                                   |
-| `eleventy-pug-plugin` の `filters.cjs`（`:name` が `data/<name>.html` を返す）   | `data/<name>.html` を置く。変換スクリプトは `:name` を `html(data[name])` にする                                                                  |
+| builder（`eleventy.config.mjs`）                                                 | v3                                                                                                                                          |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `charset: { encoding: 'shift_jis', overrides: [{ paths, encoding: 'utf8' }] }`   | `html.encoding: "shift_jis"`と、`html.overrides`の`{ "pages": [...], "encoding": "utf8" }`。`pages`は**出力 URL**（`/a/index.html`は`/a/`） |
+| `lineBreak: '\r\n'`                                                              | `html.lineBreak: "crlf"`                                                                                                                    |
+| `prettier: { tabWidth: 4, useTabs: true }`                                       | `html.format: { "tabWidth": 4, "useTabs": true }`                                                                                           |
+| `minifier: { minifyCSS: false }`（HTML Minifier の他の機能は何も有効にならない） | `html.minify: { "redundantAttributes": false, "css": false }`（空の`class=""`を残し、`style`属性を圧縮しない）                              |
+| `characterEntities: true`                                                        | `html.entities: "all"`                                                                                                                      |
+| builder が DOM を jsdom で書き戻す（属性の`&amp;`、`<path></path>`、`&nbsp;`）   | `html.serializer: "spec"`                                                                                                                   |
+| `autoDecode`（開発サーバーが Shift_JIS の出力を UTF-8 に戻す機能）               | 不要。開発サーバーは常に UTF-8 を返す（RFC §9.5）                                                                                           |
+| ソースが Shift_JIS の HTML・JSX・CSS（builder の`autoDecode`の対象外）           | **未対応**。`<path>: file is not valid UTF-8`で失敗する（lossy 変換はしない）。`iconv -f CP932 -t UTF-8`等で UTF-8 にしてから移す           |
+| `ssi`（開発サーバーで`<!--#include virtual-->`を展開）                           | ビルドでは何もしない（コメントのまま残る）。展開が要るなら`html.includes`の`ssi`                                                            |
+| `banner()`                                                                       | `styles.banner` / `scripts.banner`の文字列（`{{date:YYYY-MM-DD}}` `{{year}}`）                                                              |
+| `eleventy-pug-plugin`の`filters.cjs`（`:name`が`data/<name>.html`を返す）        | `data/<name>.html`を置く。変換スクリプトは`:name`を`html(data[name])`にする                                                                 |
 
 builder の出力と揃えるときの違い:
 
-- **インラインの `<script>`**: builder は terser、v3 は esbuild で圧縮する。意味は同じで、バイトは違う（GTM のスニペットなど）。
-- **画像の寸法**: builder は属性に書いた `height` があっても画像の実寸で上書きすることがある。v3 の `html.imageSizes`（既定）は v2 と同じ（書いてあれば残す）。SVG の寸法の丸めも違う。画像は出力ディレクトリから読むので、出力ディレクトリに画像が要る。
-- **`.html` に混ざった SSI のコメント**: そのまま残る（HTML のコメントは消えない）。
-- **Pug が `include` する出力ディレクトリのファイル**（`../../../<出力ディレクトリ>/img/icon.svg` のような SVG）: 変換スクリプトはその時点のファイルを読んで文字列にする。
-- **生の HTML を書いた Pug**（`<meta ...>` の行、`| <!--#include ... -->`）は `html("...")` になる。`//` のコメントも HTML のコメントとして残る。
-- 参照できないパッケージ（`node_modules` が無い）の TS は、`scripts.files` を絞って後回しにできる。
+- **インラインの`<script>`**: builder は terser、v3 は esbuild で圧縮する。意味は同じで、バイトは違う（GTM のスニペットなど）。
+- **画像の寸法**: builder は属性に書いた`height`があっても画像の実寸で上書きすることがある。v3 の`html.imageSizes`（既定）は v2 と同じ（書いてあれば残す）。SVG の寸法の丸めも違う。画像は出力ディレクトリから読むので、出力ディレクトリに画像が要る。
+- **`.html`に混ざった SSI のコメント**: そのまま残る（HTML のコメントは消えない）。
+- **Pug が`include`する出力ディレクトリのファイル**（`../../../<出力ディレクトリ>/img/icon.svg`のような SVG）: 変換スクリプトはその時点のファイルを読んで文字列にする。
+- **生の HTML を書いた Pug**（`<meta ...>`の行、`| <!--#include ... -->`）は`html("...")`になる。`//`のコメントも HTML のコメントとして残る。
+- 参照できないパッケージ（`node_modules`が無い）の TS は、`scripts.files`を絞って後回しにできる。
 
 ## 10. 検証
 
@@ -330,8 +330,8 @@ yarn kamado build --force   # v3 のプロジェクトで（§1 の `kamado` は
 node benchmarks/v3/compare-outputs.ts /tmp/baseline-v2 <v3 output dir>
 ```
 
-- `identical`（バイト一致）の割合を見る。`different` のファイルを 1 つ選び、差を見て §11 の表と照らす。
-- `extra`（v3 だけにあるファイル）: v2 の設定でビルドしていなかったスタイル / スクリプトが v3 では出力されている場合。意図したものか確かめる。
+- `identical`（バイト一致）の割合を見る。`different`のファイルを 1 つ選び、差を見て §11 の表と照らす。
+- `extra`（v3 だけにあるファイル）: v2 の設定でビルドしていなかったスタイル/スクリプトが v3 では出力されている場合。意図したものか確かめる。
 
 ### 10.2 差分ビルド
 
@@ -344,55 +344,55 @@ yarn kamado build --incremental        # そのページだけ built
 
 - 共有のレイアウトやコンポーネントを直すと、それを使うページだけが再ビルドされる。
 - データファイル（`data.dir`）を直すと、JSX で描画するページが再ビルドされる。
-- どれかのページのメタ（front matter、sidecar、`pages.overrides`）を直すと、`pages` / `nav` などを読むかどうかにかかわらず、JSX で描画する全ページが再ビルドされる（`.html` ページは再ビルドされない）。
+- どれかのページのメタ（front matter、sidecar、`pages.overrides`）を直すと、`pages`/`nav`などを読むかどうかにかかわらず、JSX で描画する全ページが再ビルドされる（`.html`ページは再ビルドされない）。
 
 ### 10.3 開発サーバー
 
-`kamado server` を起動し、ページ・CSS・JS・出力ディレクトリの静的ファイルを開く。コンポーネントを 1 つ直して再読み込みし、反映を確かめる。プロキシを使うなら `devServer.proxy` の経路も確かめる。
+`kamado server`を起動し、ページ・CSS・JS・出力ディレクトリの静的ファイルを開く。コンポーネントを 1 つ直して再読み込みし、反映を確かめる。プロキシを使うなら`devServer.proxy`の経路も確かめる。
 
 ## 11. 出力に差が出る既知の点
 
 意図した差です（`docs/v3/RFC.md` §2 の番号つき）。これ以外の差は、v3 の不具合か移行の誤りです。
 
-| 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | RFC  |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---- |
-| 本文中の `<?php ... ?>` を v2 は**削除**した。v3 は保持する                                                                                                                                                                                                                                                                                                                                                                                                                    | #21  |
-| `<title>` 中の `&amp;` と `&lt;` の扱い（展開すると意味が変わる並びだけ、展開しない）                                                                                                                                                                                                                                                                                                                                                                                          | #27  |
-| `<script>` の開始タグの属性値に `><` を含むとき、v2 は本文が壊れた                                                                                                                                                                                                                                                                                                                                                                                                             | #28  |
-| `characterEntities` を v2 は `<script>` / `<style>` の中も置換した。v3 は置換しない                                                                                                                                                                                                                                                                                                                                                                                            | #29  |
-| 断片の途中の `<!doctype>` で v2 は内容を落とした                                                                                                                                                                                                                                                                                                                                                                                                                               | #30  |
-| 先頭の `<?xml ... ?>` を v2 は**削除**した。v3 は先頭に保持し、そのあとに doctype を補う                                                                                                                                                                                                                                                                                                                                                                                       | #33  |
-| `outputPathField` が `.html` 以外の拡張子（`.htm` など）を指すページを、v2 は処理せず front matter 付きの入力のまま書いた。v3 は処理する                                                                                                                                                                                                                                                                                                                                       | #34  |
-| `breadcrumbs` の起点（`site.baseURL` のパス部分）                                                                                                                                                                                                                                                                                                                                                                                                                              | §7.3 |
-| YAML の日付が文字列                                                                                                                                                                                                                                                                                                                                                                                                                                                            | #19  |
-| `@custom-media` の循環する定義、`not screen and (...)` のような定義の否定、別々の `@layer` にある同じ名前の定義、定義を消して空になった `@layer`、定義の中の `var(--x)`、`--` だけの名前、一致しない定義への `not (--x)`（v2 は循環ごとに 1 つの名前だけを未定義にして残りを展開し、否定を `screen, (...)` と誤り、優先度の高いレイヤーの定義を使い、空の `@layer` を消し、`var(--x)` の名前も参照に数え、`--` も定義し、一致しない定義への `not (--x)` を効かない形に書いた） | #37  |
-| CSS の圧縮結果（cssnano と同じ意味で、バイトは違いうる。サイズは近い。`initial` を `normal` に縮める `reduce-initial` などは移植していない）。値の形、隣り合う `@media` の結合、custom property の値、プレフィックス（autoprefixer の足し引きをしない）は下の注                                                                                                                                                                                                                | §10  |
-| HTML 内の CSS（`<style>` と `style` 属性）の引用符。下の注を参照                                                                                                                                                                                                                                                                                                                                                                                                               | #32  |
-| `<script>` の圧縮結果（terser と esbuild）                                                                                                                                                                                                                                                                                                                                                                                                                                     | §10  |
-| prettier の幅（入力ごとから統一へ）                                                                                                                                                                                                                                                                                                                                                                                                                                            | #15  |
-| minify を有効にしたとき、属性の引用符の選び方（値に `"` があると v2 は `'` で囲むことがあり、v3 は `"` と `&quot;`）、minify のパーサによる壊れたマークアップの補正（`<col>` に `<colgroup>`、閉じ忘れの補完）、続く `<?php ?>` / `<% %>` の間の空白（v2 は詰める）は再現しない                                                                                                                                                                                                | §9   |
-| minify を切ったとき（`minify: false`、`minify.js: false`、esbuild が見つからない）、v2 は整形済みの JS / CSS を出し、v3 は書かれたまま出す（CSS ファイルの `styles.minify: false` でも `@custom-media` は §6 のとおり置き換える）                                                                                                                                                                                                                                              | #32  |
-| HTML のコメント（JSX には書けない）。`<head>` 内の並び（React 19 の持ち上げ）                                                                                                                                                                                                                                                                                                                                                                                                  | §7.1 |
-| フォームの属性の並び（`action` と `method` は React が最後に出す）                                                                                                                                                                                                                                                                                                                                                                                                             | §7.1 |
+| 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                           | RFC  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 本文中の`<?php ... ?>`を v2 は**削除**した。v3 は保持する                                                                                                                                                                                                                                                                                                                                                                                                      | #21  |
+| `<title>`中の`&amp;`と`&lt;`の扱い（展開すると意味が変わる並びだけ、展開しない）                                                                                                                                                                                                                                                                                                                                                                               | #27  |
+| `<script>`の開始タグの属性値に`><`を含むとき、v2 は本文が壊れた                                                                                                                                                                                                                                                                                                                                                                                                | #28  |
+| `characterEntities`を v2 は`<script>` / `<style>`の中も置換した。v3 は置換しない                                                                                                                                                                                                                                                                                                                                                                               | #29  |
+| 断片の途中の`<!doctype>`で v2 は内容を落とした                                                                                                                                                                                                                                                                                                                                                                                                                 | #30  |
+| 先頭の`<?xml ... ?>`を v2 は**削除**した。v3 は先頭に保持し、そのあとに doctype を補う                                                                                                                                                                                                                                                                                                                                                                         | #33  |
+| `outputPathField`が`.html`以外の拡張子（`.htm`など）を指すページを、v2 は処理せず front matter 付きの入力のまま書いた。v3 は処理する                                                                                                                                                                                                                                                                                                                           | #34  |
+| `breadcrumbs`の起点（`site.baseURL`のパス部分）                                                                                                                                                                                                                                                                                                                                                                                                                | §7.3 |
+| YAML の日付が文字列                                                                                                                                                                                                                                                                                                                                                                                                                                            | #19  |
+| `@custom-media`の循環する定義、`not screen and (...)`のような定義の否定、別々の`@layer`にある同じ名前の定義、定義を消して空になった`@layer`、定義の中の`var(--x)`、`--`だけの名前、一致しない定義への`not (--x)`（v2 は循環ごとに 1 つの名前だけを未定義にして残りを展開し、否定を`screen, (...)`と誤り、優先度の高いレイヤーの定義を使い、空の`@layer`を消し、`var(--x)`の名前も参照に数え、`--`も定義し、一致しない定義への`not (--x)`を効かない形に書いた） | #37  |
+| CSS の圧縮結果（cssnano と同じ意味で、バイトは違いうる。サイズは近い。`initial`を`normal`に縮める`reduce-initial`などは移植していない）。値の形、隣り合う`@media`の結合、custom property の値、プレフィックス（autoprefixer の足し引きをしない）は下の注                                                                                                                                                                                                       | §10  |
+| HTML 内の CSS（`<style>`と`style`属性）の引用符。下の注を参照                                                                                                                                                                                                                                                                                                                                                                                                  | #32  |
+| `<script>`の圧縮結果（terser と esbuild）                                                                                                                                                                                                                                                                                                                                                                                                                      | §10  |
+| prettier の幅（入力ごとから統一へ）                                                                                                                                                                                                                                                                                                                                                                                                                            | #15  |
+| minify を有効にしたとき、属性の引用符の選び方（値に`"`があると v2 は`'`で囲むことがあり、v3 は`"`と`&quot;`）、minify のパーサによる壊れたマークアップの補正（`<col>`に`<colgroup>`、閉じ忘れの補完）、続く`<?php ?>` / `<% %>`の間の空白（v2 は詰める）は再現しない                                                                                                                                                                                           | §9   |
+| minify を切ったとき（`minify: false`、`minify.js: false`、esbuild が見つからない）、v2 は整形済みの JS / CSS を出し、v3 は書かれたまま出す（CSS ファイルの`styles.minify: false`でも`@custom-media`は §6 のとおり置き換える）                                                                                                                                                                                                                                  | #32  |
+| HTML のコメント（JSX には書けない）。`<head>`内の並び（React 19 の持ち上げ）                                                                                                                                                                                                                                                                                                                                                                                   | §7.1 |
+| フォームの属性の並び（`action`と`method`は React が最後に出す）                                                                                                                                                                                                                                                                                                                                                                                                | §7.1 |
 
-HTML 内の CSS の引用符（上の表）: v2 は prettier で整形してから html-minifier-terser（clean-css）で圧縮する。prettier が引用符を `'` から `"` に変える（属性内は `&quot;`）ので、`url('x')` は `url(&quot;x&quot;)` に変わり、`style="font-family:'Helvetica Neue', Arial"` は `font-family:&quot` に壊れる。v3 は Rust の圧縮器で、引用符が要らない値は外す（`url(x)`、`font-family:Helvetica Neue,Arial`、`<style>` 内は `font-family:Foo Bar`）。v3 は元の CSS の意味を保つ。v2 の出力と比べて差が出たら、まずこの差かを確かめる（v2 で壊れていたものは、v3 では直る）。
+HTML 内の CSS の引用符（上の表）: v2 は prettier で整形してから html-minifier-terser（clean-css）で圧縮する。prettier が引用符を`'`から`"`に変える（属性内は`&quot;`）ので、`url('x')`は`url(&quot;x&quot;)`に変わり、`style="font-family:'Helvetica Neue', Arial"`は`font-family:&quot`に壊れる。v3 は Rust の圧縮器で、引用符が要らない値は外す（`url(x)`、`font-family:Helvetica Neue,Arial`、`<style>`内は`font-family:Foo Bar`）。v3 は元の CSS の意味を保つ。v2 の出力と比べて差が出たら、まずこの差かを確かめる（v2 で壊れていたものは、v3 では直る）。
 
-CSS の圧縮結果の違い（表の「CSS の圧縮結果」の行）は、値の形の違いで、意味は同じです。v2 の出力と比べて見つかる例: `border: #ccc solid 1px` は `1px solid #ccc` に、`animation: spin 1s infinite linear` は `1s linear infinite` に、`rotate(360deg)` は `rotate(1turn)` に、`unicode-range: U+0000-00FF` は `u+00??` になる。ほかに次の違いが出る。
+CSS の圧縮結果の違い（表の「CSS の圧縮結果」の行）は、値の形の違いで、意味は同じです。v2 の出力と比べて見つかる例: `border: #ccc solid 1px`は`1px solid #ccc`に、`animation: spin 1s infinite linear`は`1s linear infinite`に、`rotate(360deg)`は`rotate(1turn)`に、`unicode-range: U+0000-00FF`は`u+00??`になる。ほかに次の違いが出る。
 
-- `display: block flow` は `block` に、`display: inline flow-root` は `inline-block` になる。v3 はどこに書かれていても（CSS ファイル、`<style>`、`style` 属性）この形にする。v2 は HTML の `<style>` の中では、書かれたまま残した。
-- 間にほかのルールがなく隣り合う、同じ条件の `@media` は 1 つにまとめる（`@media screen and (min-width:769px){A}@media screen and (min-width:769px){B}` は `{AB}`）。規則の順序は変わらない。間にルールがあるものはまとめない（RFC §10 の、隣接する同一ブロックのルールの結合と同じ）。
+- `display: block flow`は`block`に、`display: inline flow-root`は`inline-block`になる。v3 はどこに書かれていても（CSS ファイル、`<style>`、`style`属性）この形にする。v2 は HTML の`<style>`の中では、書かれたまま残した。
+- 間にほかのルールがなく隣り合う、同じ条件の`@media`は 1 つにまとめる（`@media screen and (min-width:769px){A}@media screen and (min-width:769px){B}`は`{AB}`）。規則の順序は変わらない。間にルールがあるものはまとめない（RFC §10 の、隣接する同一ブロックのルールの結合と同じ）。
 - custom property の値は、v3 は書かれたまま出す（`--x: rgba(0, 0, 0, 0.24)`、`calc(3 / 18 * 1em)`）。v2 は値を縮める（`#0000003d`、`0.16667em`）。
-- プレフィックス: v2 は autoprefixer が、依存パッケージの CSS に書かれた古いもの（`-moz-column-gap`、`-o-object-fit`、`-moz-appearance: auto`）を消し、足りないもの（`-webkit-text-decoration-skip-ink` など）を足した。v3 は書かれたまま出し、足しも消しもしない。**移行の作業**: ソースの CSS が v2 の autoprefixer に頼ってプレフィックスを書いていなかったなら、v3 の出力からプレフィックスが消える。対象のブラウザで要るものは、ソースに書くか、別の工程（npm scripts）で足す（§6）。
+- プレフィックス: v2 は autoprefixer が、依存パッケージの CSS に書かれた古いもの（`-moz-column-gap`、`-o-object-fit`、`-moz-appearance: auto`）を消し、足りないもの（`-webkit-text-decoration-skip-ink`など）を足した。v3 は書かれたまま出し、足しも消しもしない。**移行の作業**: ソースの CSS が v2 の autoprefixer に頼ってプレフィックスを書いていなかったなら、v3 の出力からプレフィックスが消える。対象のブラウザで要るものは、ソースに書くか、別の工程（npm scripts）で足す（§6）。
 
-`.htm` のページ（表の #34 の行）: v2 は、出力の拡張子で処理を選ぶので、`.html` 以外の出力（`.htm` など）は処理せず、入力をそのまま書く。v2 の出力に `---` で囲んだ front matter が残っているページがそれにあたる。v3 は拡張子によらずページとして処理するので、front matter が消え、doctype の規則と、整形と圧縮が働く。`.htm` をほかのテンプレートエンジンの入力にしているときは、出力を確かめる。なお、`<style>` の中の `<![CDATA[ ... ]]>` は、ブラウザもスタイルシート全体を捨てる。`[` の中に `{}` が入り、規則が閉じないためで、v3 は `<style></style>` にする。
+`.htm`のページ（表の #34 の行）: v2 は、出力の拡張子で処理を選ぶので、`.html`以外の出力（`.htm`など）は処理せず、入力をそのまま書く。v2 の出力に`---`で囲んだ front matter が残っているページがそれにあたる。v3 は拡張子によらずページとして処理するので、front matter が消え、doctype の規則と、整形と圧縮が働く。`.htm`をほかのテンプレートエンジンの入力にしているときは、出力を確かめる。なお、`<style>`の中の`<![CDATA[ ... ]]>`は、ブラウザもスタイルシート全体を捨てる。`[`の中に`{}`が入り、規則が閉じないためで、v3 は`<style></style>`にする。
 
 v1（kamado 1.x）から直接移すと、基準が v2 の出力ではないので、v2 の挙動に合わせた次の差も出ます。
 
-- `class` の値は、解析時に正規化されます。重複するクラスと連続する空白が 1 つになり、`class="a a"` は `class="a"` に、`class="a  b"` は `class="a b"` になります。v2 が使っていた DOM 実装（linkedom）と同じ挙動で、描画には影響しません。
+- `class`の値は、解析時に正規化されます。重複するクラスと連続する空白が 1 つになり、`class="a a"`は`class="a"`に、`class="a  b"`は`class="a b"`になります。v2 が使っていた DOM 実装（linkedom）と同じ挙動で、描画には影響しません。
 
 ## 12. 困ったとき
 
 - 設定エラーは、キーのパスと理由を出して止まります。
-- ページのビルド失敗（JSX の構文エラー、存在しないレイアウト、`meta` に式を書いた）は、ファイルと行・列を出します。
-- 描画の途中で落ちたときは `Failed to render <path>: <message>`。`<path>` のコンポーネントを見ます。
-- 速度の確認: `KAMADO_TIMING=1`（JavaScript 側）と `KD_TIMING=1`（コア側）を付けて実行すると、フェーズごとの時間が出ます。
+- ページのビルド失敗（JSX の構文エラー、存在しないレイアウト、`meta`に式を書いた）は、ファイルと行・列を出します。
+- 描画の途中で落ちたときは`Failed to render <path>: <message>`。`<path>`のコンポーネントを見ます。
+- 速度の確認: `KAMADO_TIMING=1`（JavaScript 側）と`KD_TIMING=1`（コア側）を付けて実行すると、フェーズごとの時間が出ます。

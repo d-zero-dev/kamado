@@ -56,7 +56,7 @@ describe('getNavTree', () => {
 			);
 			const expected = outcome(() =>
 				v2GetNavTree(
-					{ currentPage: { url: currentUrl } as never, pages: pages.map((p) => toV2(p)) },
+					{ currentPage: { url: currentUrl }, pages: pages.map((p) => toV2(p)) },
 					options as never,
 				),
 			);
@@ -92,7 +92,7 @@ describe('getNavTree', () => {
 						{ baseDepth, comparator },
 					);
 					const expected = v2GetNavTree(
-						{ currentPage: page as never, pages: pages.map((p) => toV2(p)) },
+						{ currentPage: page, pages: pages.map((p) => toV2(p)) },
 						{ baseDepth, comparator },
 					);
 					expect(actual, `${page.url} depth ${baseDepth}`).toStrictEqual(expected);

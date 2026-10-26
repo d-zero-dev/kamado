@@ -1020,7 +1020,7 @@ function innerHtml(inner: unknown, children: unknown): string {
 			'`props.dangerouslySetInnerHTML` must be in the form `{__html: ...}`. Please visit https://react.dev/link/dangerously-set-inner-html for more information.',
 		);
 	}
-	const html = (inner as { __html: unknown }).__html;
+	const html = inner.__html;
 	return html === null || html === undefined ? '' : '' + html;
 }
 

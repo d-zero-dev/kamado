@@ -1,8 +1,8 @@
 # v3 の開発手順
 
-Rust のワークスペース（`crates/`）、Node 側のパッケージ（`packages/kamado`）、ベンチマーク・比較ツール（`benchmarks/`）の使い方。仕様は `RFC.md`、設計判断の根拠は `spike-results.md` を参照。
+Rust のワークスペース（`crates/`）、Node 側のパッケージ（`packages/kamado`）、ベンチマーク・比較ツール（`benchmarks/`）の使い方。仕様は`RFC.md`、設計判断の根拠は`spike-results.md`を参照。
 
-このリポジトリの `kamado` は v3 で、npm のワークスペースは `packages/kamado` の 1 つだけ（Lerna は版の管理と公開のために残している）。v2 は `v2` ブランチで保守していて、このブランチには無い。v2 の出力を比べる必要があるもの（oracle）は、公開済みの v2 を npm から取って使う（「v2 の oracle」）。
+このリポジトリの`kamado`は v3 で、npm のワークスペースは`packages/kamado`の 1 つだけ（Lerna は版の管理と公開のために残している）。v2 は`v2`ブランチで保守していて、このブランチには無い。v2 の出力を比べる必要があるもの（oracle）は、公開済みの v2 を npm から取って使う（「v2 の oracle」）。
 
 ## Rust
 
@@ -15,30 +15,30 @@ cargo test --locked --offline --workspace
 node scripts/check-rust-no-external-crates.mjs
 ```
 
-**前提**: `cargo test` の前に、リポジトリのルートで `yarn install` を済ませておく。一部のテストが `node_modules` の esbuild の実行ファイル（`node_modules/@esbuild/<os>-<arch>`、`crates/kd_core/src/minifiers.rs` の `esbuild_for_tests`）を呼び、無ければ「run `yarn install`」で失敗する。Node の標準機能や prettier などを比較対象（oracle）にして実行時に比べるテストもあるので、Node も要る。
+**前提**: `cargo test`の前に、リポジトリのルートで`yarn install`を済ませておく。一部のテストが`node_modules`の esbuild の実行ファイル（`node_modules/@esbuild/<os>-<arch>`、`crates/kd_core/src/minifiers.rs`の`esbuild_for_tests`）を呼び、無ければ「run `yarn install`」で失敗する。Node の標準機能や prettier などを比較対象（oracle）にして実行時に比べるテストもあるので、Node も要る。
 
-ツールチェーンの版は `.github/workflows/rust.yml` で固定している。`rust-toolchain.toml` は置かない。置くと、ローカルの `stable` とは別のツールチェーンが再インストールされ、環境によっては中途半端な状態で失敗する。
+ツールチェーンの版は`.github/workflows/rust.yml`で固定している。`rust-toolchain.toml`は置かない。置くと、ローカルの`stable`とは別のツールチェーンが再インストールされ、環境によっては中途半端な状態で失敗する。
 
 ## クレートの構成
 
 | クレート    | 担当                                                                                             | 依存するクレート               |
 | ----------- | ------------------------------------------------------------------------------------------------ | ------------------------------ |
 | `kd_hash`   | SHA-256                                                                                          | なし                           |
-| `kd_jsonc`  | JSONC のパーサと決定的な JSON 出力（`Value` 型）                                                 | なし                           |
+| `kd_jsonc`  | JSONC のパーサと決定的な JSON 出力（`Value`型）                                                  | なし                           |
 | `kd_glob`   | glob のマッチと、探索を枝刈りするための判定                                                      | なし                           |
 | `kd_yaml`   | YAML のサブセットと front matter の分割                                                          | `kd_jsonc`                     |
 | `kd_pool`   | スレッドプール                                                                                   | なし                           |
 | `kd_image`  | 画像（png / jpeg / webp / avif / svg）の寸法の読み取り                                           | なし                           |
-| `kd_css`    | CSS のトークナイザ・パーサ・圧縮（cssnano 相当）・`@custom-media` の解決（圧縮しないときも）     | なし                           |
+| `kd_css`    | CSS のトークナイザ・パーサ・圧縮（cssnano 相当）・`@custom-media`の解決（圧縮しないときも）      | なし                           |
 | `kd_js`     | TS / TSX / JSX のパーサ、型の除去、JSX → 文字列連結へのコンパイル、静的な meta の抽出            | なし                           |
 | `kd_html`   | HTML のパーサ、DOM、セレクタ、宣言的ルール、取り込み、画像寸法の付与、整形と圧縮（融合した印字） | `kd_image`                     |
 | `kd_site`   | 出力パス・URL の写像、`outputPathField`、衝突、探索、メタデータのマージ、overrides               | `kd_glob` `kd_jsonc`           |
 | `kd_build`  | 差分ビルドの manifest（バイナリ形式、stat 先行の指紋）                                           | `kd_hash` `kd_jsonc`           |
-| `kd_config` | `kamado.config.jsonc` の型・既定値・検証                                                         | `kd_glob` `kd_jsonc` `kd_site` |
+| `kd_config` | `kamado.config.jsonc`の型・既定値・検証                                                          | `kd_glob` `kd_jsonc` `kd_site` |
 | `kd_core`   | ビルドの組み立て（設定 → 探索 → メタ → 差分判定 → HTML・CSS・JS → 書き出し）と開発サーバーの核   | 上のすべて                     |
-| `kd_napi`   | Node-API の接続層とアロケータ。`unsafe` はここだけ                                               | `kd_core` `kd_hash` `kd_jsonc` |
+| `kd_napi`   | Node-API の接続層とアロケータ。`unsafe`はここだけ                                                | `kd_core` `kd_hash` `kd_jsonc` |
 
-依存の向きは上から下の一方向で、`kd_napi` が一番上位にある。パース系のクレート（`kd_jsonc` `kd_glob` `kd_yaml`）は、ユーザーが書くファイルを読むので、入れ子の深さや計算量を制限している。
+依存の向きは上から下の一方向で、`kd_napi`が一番上位にある。パース系のクレート（`kd_jsonc` `kd_glob` `kd_yaml`）は、ユーザーが書くファイルを読むので、入れ子の深さや計算量を制限している。
 
 ## N-API アドオン（`crates/kd_napi`）
 
@@ -47,22 +47,22 @@ cargo build --locked --offline --release -p kd_napi
 node --test crates/kd_napi/check/load.check.mjs
 ```
 
-`*.check.mjs` は、ネイティブのビルドが必要なので vitest の対象にしていない（`yarn test` では動かない）。
+`*.check.mjs`は、ネイティブのビルドが必要なので vitest の対象にしていない（`yarn test`では動かない）。
 
-panic の確認（`panic.check.mjs`）だけは、わざと panic する `panicCheck()` を足した別のビルドを使う。出荷するアドオンには、この関数は入れない（Cargo の feature `panic-check`）。
+panic の確認（`panic.check.mjs`）だけは、わざと panic する`panicCheck()`を足した別のビルドを使う。出荷するアドオンには、この関数は入れない（Cargo の feature `panic-check`）。
 
 ```sh
 cargo build --locked --offline --release -p kd_napi --features panic-check --target-dir target/panic-check
 node --test crates/kd_napi/check/panic.check.mjs
 ```
 
-アドオンの関数が panic すると、Node のプロセスごと落ちるのではなく、`kamado: internal error (a panic in the native core): <メッセージ>` という JS の `Error` として投げられる（`crates/kd_napi/src/lib.rs` の `guard`）。そのために、リリースのプロファイルは `panic = "unwind"` で、ハンドラは `extern "C"` ではなく通常の Rust の関数にしてある（`extern "C"` の境界で panic すると、`guard` に届く前に abort する）。`unwind` にしたことによるアドオンのサイズは約 19% 増え（2.85 MB から 3.40 MB、macOS arm64）、3000 ページのビルド時間はばらつきの範囲で変わらなかった。この `Error` の `code` は `KAMADO_PANIC`。
+アドオンの関数が panic すると、Node のプロセスごと落ちるのではなく、`kamado: internal error (a panic in the native core): <メッセージ>`という JS の`Error`として投げられる（`crates/kd_napi/src/lib.rs`の`guard`）。そのために、リリースのプロファイルは`panic = "unwind"`で、ハンドラは`extern "C"`ではなく通常の Rust の関数にしてある（`extern "C"`の境界で panic すると、`guard`に届く前に abort する）。`unwind`にしたことによるアドオンのサイズは約 19% 増え（2.85 MB から 3.40 MB、macOS arm64）、3000 ページのビルド時間はばらつきの範囲で変わらなかった。この`Error`の`code`は`KAMADO_PANIC`。
 
-panic は、途中まで更新した状態を残しうる。開発サーバーのハンドルで panic すると「使えない」印が付き、その呼び出しと以降の呼び出しは `code` が `KAMADO_SERVE_POISONED` の `Error` を投げる（`crates/kd_napi/src/serve.rs`。使えないかどうかはここだけが決める）。開発サーバー（`packages/kamado/src/server/app.ts`）は、この `code` を受けると `serveOpen` でハンドルを開き直す。描画ワーカーも止めて、全文脈を送り直させる。その要求は 500 で、同時に失敗した要求があっても、開き直すのは 1 回。開き直せなかったとき（設定を編集中で読めない等）は、1 秒の間は同じ失敗を返し、そのたびにサイトを計画し直すことはしない。ほかのハンドル（別のプロジェクトの開発サーバーやビルド）は、そのまま使える。ビルドのハンドル（`crates/kd_napi/src/session.rs`）には印を付けない。`prepare` は最後に表へ入れ、`finish` は最初に表から外すので、panic で中途半端な状態が残らない。ビルドの JS 側は、失敗したら `abort` で表から外す。
+panic は、途中まで更新した状態を残しうる。開発サーバーのハンドルで panic すると「使えない」印が付き、その呼び出しと以降の呼び出しは`code`が`KAMADO_SERVE_POISONED`の`Error`を投げる（`crates/kd_napi/src/serve.rs`。使えないかどうかはここだけが決める）。開発サーバー（`packages/kamado/src/server/app.ts`）は、この`code`を受けると`serveOpen`でハンドルを開き直す。描画ワーカーも止めて、全文脈を送り直させる。その要求は 500 で、同時に失敗した要求があっても、開き直すのは 1 回。開き直せなかったとき（設定を編集中で読めない等）は、1 秒の間は同じ失敗を返し、そのたびにサイトを計画し直すことはしない。ほかのハンドル（別のプロジェクトの開発サーバーやビルド）は、そのまま使える。ビルドのハンドル（`crates/kd_napi/src/session.rs`）には印を付けない。`prepare`は最後に表へ入れ、`finish`は最初に表から外すので、panic で中途半端な状態が残らない。ビルドの JS 側は、失敗したら`abort`で表から外す。
 
 ## Node 側のパッケージ（`packages/kamado`）
 
-v3 の本体パッケージ（`packages/kamado`、npm 名 `kamado`）。v2 は `v2` ブランチで保守している。中身は CLI、`build()` / `start()`、JSX の描画ワーカー、開発サーバー（hono）、esbuild の呼び出し、アドオンの読み込みで、ランタイム依存は `esbuild` と `hono` / `@hono/node-server` だけ。使い方は `packages/kamado/README.md`、設定の補完用に `schema.json` を同梱している（キーは `kd_config` のテストが双方向に照合する）。
+v3 の本体パッケージ（`packages/kamado`、npm 名`kamado`）。v2 は`v2`ブランチで保守している。中身は CLI、`build()`/`start()`、JSX の描画ワーカー、開発サーバー（hono）、esbuild の呼び出し、アドオンの読み込みで、ランタイム依存は`esbuild`と`hono`/`@hono/node-server`だけ。使い方は`packages/kamado/README.md`、設定の補完用に`schema.json`を同梱している（キーは`kd_config`のテストが双方向に照合する）。
 
 ```sh
 cargo build --release -p kd_napi   # アドオンを先に作る
@@ -70,71 +70,71 @@ yarn build                         # TypeScript をコンパイル
 node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --verbose --incremental
 ```
 
-アドオンは `KAMADO_NATIVE_ADDON` で指定したファイル、なければ `target/release`、`target/debug` の順に探す。
+アドオンは`KAMADO_NATIVE_ADDON`で指定したファイル、なければ`target/release`、`target/debug`の順に探す。
 
 ## 何を更新したら、何を作り直すか
 
-テーブルと golden ファイルは、v2 が使っていたライブラリ（oracle）の出力から作ってコミットしている。実行時はその依存を持たない。oracle の版は v2 に合わせて固定するのが方針で（「v2 の oracle」）、動かしたときは、次のスクリプトを実行して差分を確かめる（スクリプトの先頭のコメントに詳細がある）。oracle の置き場（ルートの `devDependencies`）は「v2 の oracle」を参照。
+テーブルと golden ファイルは、v2 が使っていたライブラリ（oracle）の出力から作ってコミットしている。実行時はその依存を持たない。oracle の版は v2 に合わせて固定するのが方針で（「v2 の oracle」）、動かしたときは、次のスクリプトを実行して差分を確かめる（スクリプトの先頭のコメントに詳細がある）。oracle の置き場（ルートの`devDependencies`）は「v2 の oracle」を参照。
 
-| 契機                                                                                                                                                        | 実行するスクリプト                      | 書き出すもの                                                               |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------- |
-| `character-entities` を上げた                                                                                                                               | `scripts/generate-entities.mjs`         | `crates/kd_html/src/entities_table.rs`                                     |
-| `prettier` を上げた                                                                                                                                         | `scripts/generate-prettier-tables.mjs`  | `crates/kd_html/src/print/tables.rs`（構造が変わると失敗する）             |
-| `html-minifier-terser` を上げた                                                                                                                             | `scripts/generate-minifier-tables.mjs`  | `crates/kd_html/src/minify/tables.rs`                                      |
-| 同上                                                                                                                                                        | `scripts/generate-minify-golden.mjs`    | `crates/kd_html/tests/minify_golden/`                                      |
-| `cssnano` を動かした（「v2 の oracle」の 3。設定は v2 の style-compiler と同じ）                                                                            | `scripts/generate-css-golden.mjs`       | `crates/kd_css/tests/golden/`                                              |
-| 同上                                                                                                                                                        | `scripts/generate-css-rule-tests.mjs`   | `crates/kd_css/tests/rules.rs`                                             |
-| 同上、または色名・プロパティ名の元データ（`mdn-data` 等）                                                                                                   | `scripts/generate-css-tables.mjs`       | `crates/kd_css/src/color_table.rs`、`property_table.rs`                    |
-| `esbuild` を上げた                                                                                                                                          | `scripts/generate-jsx-entities.mjs`     | `crates/kd_js/src/jsx_entities.rs`                                         |
-| `react` / `react-dom` を上げた                                                                                                                              | `scripts/generate-jsx-tables.mjs`       | `packages/kamado/src/jsx/attr-table.ts`、`crates/kd_js/src/react_attrs.rs` |
-| `react-dom` を上げた（Pug から TSX への変換器が使う、小文字の属性名から React の綴りへの対応表）                                                            | `scripts/generate-react-prop-names.mjs` | `scripts/react-prop-names.mjs`（構造が変わると失敗する）                   |
-| Node を上げた（型の除去の挙動が変わりうる）                                                                                                                 | `scripts/generate-kd-js-golden.mjs`     | `crates/kd_js/tests/ts_golden/`                                            |
-| Node を上げた（Shift_JIS のデコーダ）                                                                                                                       | `scripts/gen-cp932-table.mjs`           | `crates/kd_html/src/cp932_table.rs`                                        |
-| HTML の golden のケースを足した、または `kamado-v2` を上げた（v2 の DOM の直列化が oracle）                                                                 | `scripts/generate-html-golden.mjs`      | `crates/kd_html/tests/golden/`                                             |
-| 属性・クラスの golden のケースを足した、または `kamado-v2` を上げた（`html.rules` の属性・クラスの操作と `html.imageSizes` の v2 の DOM での結果が oracle） | `scripts/generate-html-attr-golden.mjs` | `crates/kd_html/tests/attr_golden/`                                        |
+| 契機                                                                                                                                                   | 実行するスクリプト                      | 書き出すもの                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | -------------------------------------------------------------------------- |
+| `character-entities`を上げた                                                                                                                           | `scripts/generate-entities.mjs`         | `crates/kd_html/src/entities_table.rs`                                     |
+| `prettier`を上げた                                                                                                                                     | `scripts/generate-prettier-tables.mjs`  | `crates/kd_html/src/print/tables.rs`（構造が変わると失敗する）             |
+| `html-minifier-terser`を上げた                                                                                                                         | `scripts/generate-minifier-tables.mjs`  | `crates/kd_html/src/minify/tables.rs`                                      |
+| 同上                                                                                                                                                   | `scripts/generate-minify-golden.mjs`    | `crates/kd_html/tests/minify_golden/`                                      |
+| `cssnano`を動かした（「v2 の oracle」の 3。設定は v2 の style-compiler と同じ）                                                                        | `scripts/generate-css-golden.mjs`       | `crates/kd_css/tests/golden/`                                              |
+| 同上                                                                                                                                                   | `scripts/generate-css-rule-tests.mjs`   | `crates/kd_css/tests/rules.rs`                                             |
+| 同上、または色名・プロパティ名の元データ（`mdn-data`等）                                                                                               | `scripts/generate-css-tables.mjs`       | `crates/kd_css/src/color_table.rs`、`property_table.rs`                    |
+| `esbuild`を上げた                                                                                                                                      | `scripts/generate-jsx-entities.mjs`     | `crates/kd_js/src/jsx_entities.rs`                                         |
+| `react` / `react-dom`を上げた                                                                                                                          | `scripts/generate-jsx-tables.mjs`       | `packages/kamado/src/jsx/attr-table.ts`、`crates/kd_js/src/react_attrs.rs` |
+| `react-dom`を上げた（Pug から TSX への変換器が使う、小文字の属性名から React の綴りへの対応表）                                                        | `scripts/generate-react-prop-names.mjs` | `scripts/react-prop-names.mjs`（構造が変わると失敗する）                   |
+| Node を上げた（型の除去の挙動が変わりうる）                                                                                                            | `scripts/generate-kd-js-golden.mjs`     | `crates/kd_js/tests/ts_golden/`                                            |
+| Node を上げた（Shift_JIS のデコーダ）                                                                                                                  | `scripts/gen-cp932-table.mjs`           | `crates/kd_html/src/cp932_table.rs`                                        |
+| HTML の golden のケースを足した、または`kamado-v2`を上げた（v2 の DOM の直列化が oracle）                                                              | `scripts/generate-html-golden.mjs`      | `crates/kd_html/tests/golden/`                                             |
+| 属性・クラスの golden のケースを足した、または`kamado-v2`を上げた（`html.rules`の属性・クラスの操作と`html.imageSizes`の v2 の DOM での結果が oracle） | `scripts/generate-html-attr-golden.mjs` | `crates/kd_html/tests/attr_golden/`                                        |
 
-生成したファイルをコミットする前に、`git diff` で変化が oracle の更新によるものか確かめる。生成したあとに `cargo test --locked --offline --workspace` を通す（`scripts/react-prop-names.mjs` は Rust が読まないので、`yarn test` の `scripts/pug-to-tsx-types.spec.ts` が、生成物が入れた react-dom と合っているかを確かめる）。`scripts/generate-jsx-tables.mjs` は実行時の出力（ランタイムと Rust のコンパイラ）が読む表を作り、`scripts/generate-react-prop-names.mjs` は変換器だけが読む表を作る。
+生成したファイルをコミットする前に、`git diff`で変化が oracle の更新によるものか確かめる。生成したあとに`cargo test --locked --offline --workspace`を通す（`scripts/react-prop-names.mjs`は Rust が読まないので、`yarn test`の`scripts/pug-to-tsx-types.spec.ts`が、生成物が入れた react-dom と合っているかを確かめる）。`scripts/generate-jsx-tables.mjs`は実行時の出力（ランタイムと Rust のコンパイラ）が読む表を作り、`scripts/generate-react-prop-names.mjs`は変換器だけが読む表を作る。
 
-ランダム入力の差分テスト（`scripts/fuzz-*.mjs`）は、コーパスをコミットしない（シードで決まる）。上のテーブルを作り直したとき、または `kd_html` / `kd_css` / `kd_js` の挙動を変えたときに、その分野のものを回す。各スクリプトの先頭に、対応する `--ignored` のテストと環境変数がある。
+ランダム入力の差分テスト（`scripts/fuzz-*.mjs`）は、コーパスをコミットしない（シードで決まる）。上のテーブルを作り直したとき、または`kd_html`/`kd_css`/`kd_js`の挙動を変えたときに、その分野のものを回す。各スクリプトの先頭に、対応する`--ignored`のテストと環境変数がある。
 
-Pug から TSX への変換器（`scripts/pug-to-tsx.mjs`）は、小さな Pug のプロジェクトを変換して、出力を確かめ、`@d-zero/tsconfig`（strictest）の型検査に通す回帰テスト（`scripts/pug-to-tsx.spec.ts`）を持つ。変換器は、変換するプロジェクトの `pug-lexer` / `pug-parser` / `acorn` を読む。テストのために、このリポジトリはそれらを devDependencies に持つ（変換器そのものは、パッケージに入らない。`docs/v3/MIGRATION.md` §3.4）。テストは `yarn build` が済んでいるときに動く。済んでいなければ、手元ではスキップし、CI では失敗する。この依存を足す前の `node_modules` のままだと失敗するので、`yarn install` を済ませる。テストが使うのは、このリポジトリが固定した版（`acorn` 8 など）で、利用者のプロジェクトの版ではない。変換器は `acorn` 7（Pug が引く版）なら、理由を出して止まる。
+Pug から TSX への変換器（`scripts/pug-to-tsx.mjs`）は、小さな Pug のプロジェクトを変換して、出力を確かめ、`@d-zero/tsconfig`（strictest）の型検査に通す回帰テスト（`scripts/pug-to-tsx.spec.ts`）を持つ。変換器は、変換するプロジェクトの`pug-lexer`/`pug-parser`/`acorn`を読む。テストのために、このリポジトリはそれらを devDependencies に持つ（変換器そのものは、パッケージに入らない。`docs/v3/MIGRATION.md` §3.4）。テストは`yarn build`が済んでいるときに動く。済んでいなければ、手元ではスキップし、CI では失敗する。この依存を足す前の`node_modules`のままだと失敗するので、`yarn install`を済ませる。テストが使うのは、このリポジトリが固定した版（`acorn` 8 など）で、利用者のプロジェクトの版ではない。変換器は`acorn` 7（Pug が引く版）なら、理由を出して止まる。
 
-| 分野                   | スクリプト                                                                                                                                                                                                           | 対応する検証                                  |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| HTML のパース・直列化  | `fuzz-html-differential.mjs`（`html-fuzz.mjs` が生成器）                                                                                                                                                             | `crates/kd_html/tests/differential.rs`        |
-| prettier の印字        | `fuzz-html-print.mjs` / `fuzz-html-json.mjs` / `fuzz-html-pipeline.mjs`                                                                                                                                              | `crates/kd_html/tests/print_differential.rs`  |
-| 圧縮                   | `fuzz-html-minify.mjs` / `fuzz-html-minify-attrs.mjs`                                                                                                                                                                | `crates/kd_html/tests/minify_differential.rs` |
-| HTML の連鎖全体        | `fuzz-html-chain.mjs`                                                                                                                                                                                                | `crates/kd_core` の `chain_matches_v2`        |
-| CSS                    | `fuzz-css.mjs` と `generate-css-oracle.mjs`、`check-css.mjs`                                                                                                                                                         | `crates/kd_css/tests/differential.rs`         |
-| CSS の `@import`       | `check-css-import.mjs`（要 `cargo build -p kd_napi` と `yarn build`）                                                                                                                                                | `crates/kd_core/src/style_import.rs` のテスト |
-| CSS の `@custom-media` | `check-css-custom-media.mjs`（要 `cargo build --release --offline -p kd_css --example minify`。oracle は v2 の `@d-zero/postcss-config` が固定する `postcss-custom-media` で、devDependencies の版をそれに合わせる） | `crates/kd_css/src/custom_media.rs` のテスト  |
-| JS / TS / JSX          | `check-kd-js-js.mjs` / `check-kd-js-types.mjs` / `check-kd-js-jsx.mjs`（`jsx-fuzz.mjs`）                                                                                                                             | 各スクリプトを直接実行                        |
+| 分野                  | スクリプト                                                                                                                                                                                                      | 対応する検証                                  |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| HTML のパース・直列化 | `fuzz-html-differential.mjs`（`html-fuzz.mjs`が生成器）                                                                                                                                                         | `crates/kd_html/tests/differential.rs`        |
+| prettier の印字       | `fuzz-html-print.mjs` / `fuzz-html-json.mjs` / `fuzz-html-pipeline.mjs`                                                                                                                                         | `crates/kd_html/tests/print_differential.rs`  |
+| 圧縮                  | `fuzz-html-minify.mjs` / `fuzz-html-minify-attrs.mjs`                                                                                                                                                           | `crates/kd_html/tests/minify_differential.rs` |
+| HTML の連鎖全体       | `fuzz-html-chain.mjs`                                                                                                                                                                                           | `crates/kd_core`の`chain_matches_v2`          |
+| CSS                   | `fuzz-css.mjs`と`generate-css-oracle.mjs`、`check-css.mjs`                                                                                                                                                      | `crates/kd_css/tests/differential.rs`         |
+| CSS の`@import`       | `check-css-import.mjs`（要`cargo build -p kd_napi`と`yarn build`）                                                                                                                                              | `crates/kd_core/src/style_import.rs`のテスト  |
+| CSS の`@custom-media` | `check-css-custom-media.mjs`（要`cargo build --release --offline -p kd_css --example minify`。oracle は v2 の`@d-zero/postcss-config`が固定する`postcss-custom-media`で、devDependencies の版をそれに合わせる） | `crates/kd_css/src/custom_media.rs`のテスト   |
+| JS / TS / JSX         | `check-kd-js-js.mjs` / `check-kd-js-types.mjs` / `check-kd-js-jsx.mjs`（`jsx-fuzz.mjs`）                                                                                                                        | 各スクリプトを直接実行                        |
 
-`check-css.mjs` は、次の 5 つの失敗がすべて 0 件のとき通る。
+`check-css.mjs`は、次の 5 つの失敗がすべて 0 件のとき通る。
 
 - `rust`: kd_css がエラーを返す
 - `parse`: 出力を postcss が読めない
-- `equivalence`（レポートでは `unexplained`）: kd_css の出力を cssnano に通した文字列が、元の入力を通した文字列と合わない
+- `equivalence`（レポートでは`unexplained`）: kd_css の出力を cssnano に通した文字列が、元の入力を通した文字列と合わない
 - `size`: ファイルが cssnano の出力の +3% と 8 バイトを超える。全ファイルの合計が +3% を超えるときも
 - `idempotence`: 2 回圧縮すると変わる
 
-`equivalence` か `size` が出たら、次の 3 つのどれかに分ける。
+`equivalence`か`size`が出たら、次の 3 つのどれかに分ける。
 
-1. kd_css が意味を変えている: `crates/kd_css/src/` を直す。
-2. kd_css が意図して cssnano と違う出力をする: `crates/kd_css/tests/common/mod.rs` の `DECISIONS` に両側の出力つきで記録する。`size` は、違いがこの記録だけでできているファイルを外す（`differential.rs` と同じ。`examples/minify.rs` が `DECISIONS` を読んで理由を返す。cssnano の出力 `<n>.out` が `<n>.in` の隣にあるファイルだけが対象で、`generate-css-oracle.mjs` が書く）。外したファイルは `larger than the bound by listed decisions only` として報告する。
-3. cssnano が縮めきれていない書式だけの差で、意味は同じ: `check-css.mjs` の `benign` に名前をつけて足す。`benign` は `equivalence` だけが使い、`size` は使わない。
+1. kd_css が意味を変えている: `crates/kd_css/src/`を直す。
+2. kd_css が意図して cssnano と違う出力をする: `crates/kd_css/tests/common/mod.rs`の`DECISIONS`に両側の出力つきで記録する。`size`は、違いがこの記録だけでできているファイルを外す（`differential.rs`と同じ。`examples/minify.rs`が`DECISIONS`を読んで理由を返す。cssnano の出力`<n>.out`が`<n>.in`の隣にあるファイルだけが対象で、`generate-css-oracle.mjs`が書く）。外したファイルは`larger than the bound by listed decisions only`として報告する。
+3. cssnano が縮めきれていない書式だけの差で、意味は同じ: `check-css.mjs`の`benign`に名前をつけて足す。`benign`は`equivalence`だけが使い、`size`は使わない。
 
-入れ子の規則を持つ規則の宣言と、規則の中のブロックの宣言は、cssnano が途中までしか縮めない（値の変換だけで、結合しない。展開した長手を戻さない）ので、そのままでは比べられない。`check-css.mjs` は、`benign` で説明できない差のときだけ、次の順に比べ直す（`scripts/css-oracle.mjs`）。(a) 両側の宣言を、cssnano がトップレベルで縮める形にそろえて比べる（値まで見る）。(b) それでも合わないものは、宣言の 1 まとまりを目印 1 つに置き換えて比べる。構造（セレクタ、at-rule、入れ子）と、入れ子の規則に対する宣言の位置は比べるが、値は比べない。(b) は検査の穴で、そこの宣言の値の誤りは見えない。kd_css はその宣言を、ほかの宣言と同じ処理で縮める。cssnano が隣り合う同名のブロックを結合しないために、同じ規則が 2 つ残る差は、結合したものを cssnano にもう一度通して比べる。
+入れ子の規則を持つ規則の宣言と、規則の中のブロックの宣言は、cssnano が途中までしか縮めない（値の変換だけで、結合しない。展開した長手を戻さない）ので、そのままでは比べられない。`check-css.mjs`は、`benign`で説明できない差のときだけ、次の順に比べ直す（`scripts/css-oracle.mjs`）。(a) 両側の宣言を、cssnano がトップレベルで縮める形にそろえて比べる（値まで見る）。(b) それでも合わないものは、宣言の 1 まとまりを目印 1 つに置き換えて比べる。構造（セレクタ、at-rule、入れ子）と、入れ子の規則に対する宣言の位置は比べるが、値は比べない。(b) は検査の穴で、そこの宣言の値の誤りは見えない。kd_css はその宣言を、ほかの宣言と同じ処理で縮める。cssnano が隣り合う同名のブロックを結合しないために、同じ規則が 2 つ残る差は、結合したものを cssnano にもう一度通して比べる。
 
-`fuzz-html-chain.mjs` の第 4 引数に `on`（圧縮あり）を渡して作ったコーパスは、`chain_matches_v2` に `KD_CHAIN_MINIFY=on` を付けて回す（圧縮の JS / CSS は両側とも切る）。付けない（または `off`）と v3 の圧縮を切る。ほかの値はエラー。
+`fuzz-html-chain.mjs`の第 4 引数に`on`（圧縮あり）を渡して作ったコーパスは、`chain_matches_v2`に`KD_CHAIN_MINIFY=on`を付けて回す（圧縮の JS/CSS は両側とも切る）。付けない（または`off`）と v3 の圧縮を切る。ほかの値はエラー。
 
-`scripts/` と `benchmarks/` は、ルートの `yarn lint:eslint` の対象外（prettier と cspell だけが見る）。
+`scripts/`と`benchmarks/`は、ルートの`yarn lint:eslint`の対象外（prettier と cspell だけが見る）。
 
 ## v2 の oracle
 
 v3 は「v2 と出力がバイト一致する」ことを目標にしているので、v2 の実物と比べる場所が 3 つある。どれも、公開済みの v2 のパッケージ（`2.0.0-alpha.17`）を npm から取り、このリポジトリに v2 のソースは置かない。
 
-**1. DOM の直列化（golden とランダム入力の差分テスト）**: ルートの `devDependencies` の `"kamado-v2": "npm:kamado@2.0.0-alpha.17"` が、v2 の `kamado` に別名を付けたもの。次のスクリプトが `import { domSerialize } from 'kamado-v2/utils/dom'` で使う。
+**1. DOM の直列化（golden とランダム入力の差分テスト）**: ルートの`devDependencies`の`"kamado-v2": "npm:kamado@2.0.0-alpha.17"`が、v2 の`kamado`に別名を付けたもの。次のスクリプトが`import { domSerialize } from 'kamado-v2/utils/dom'`で使う。
 
 - `scripts/generate-html-golden.mjs`
 - `scripts/generate-html-attr-golden.mjs`
@@ -142,9 +142,9 @@ v3 は「v2 と出力がバイト一致する」ことを目標にしている�
 - `scripts/fuzz-html-chain.mjs`
 - `scripts/v2-print.mjs`
 
-別名なのは、このブランチの `kamado`（v3、ワークスペース）と同じ名前を、同じ `node_modules` に入れられないため。`yarn install` で入る。
+別名なのは、このブランチの`kamado`（v3、ワークスペース）と同じ名前を、同じ`node_modules`に入れられないため。`yarn install`で入る。
 
-**2. ビルド全体の比較（基準の出力）**: `benchmarks/v2-baseline/` は、v2 のビルド（`kamado`、`@kamado-io/page-compiler`、`@kamado-io/jsx-compiler`）を固定した版で動かす、単独の yarn プロジェクト（`package.json` と `yarn.lock` を持ち、ルートのワークスペースには入らない）。初回だけ、そのディレクトリで依存を入れる。
+**2. ビルド全体の比較（基準の出力）**: `benchmarks/v2-baseline/`は、v2 のビルド（`kamado`、`@kamado-io/page-compiler`、`@kamado-io/jsx-compiler`）を固定した版で動かす、単独の yarn プロジェクト（`package.json`と`yarn.lock`を持ち、ルートのワークスペースには入らない）。初回だけ、そのディレクトリで依存を入れる。
 
 ```sh
 cd benchmarks/v2-baseline && yarn install
@@ -157,26 +157,26 @@ node benchmarks/v3/generate-jsx-fixtures.ts --pages=1000 --target=v2 --out=/tmp/
 node benchmarks/v2-baseline/run.ts /tmp/fixtures-v2 --out=/tmp/out-v2
 ```
 
-v3 の出力と比べるには「比較ハーネスとベンチマーク」の `compare-outputs.ts` を使う。
+v3 の出力と比べるには「比較ハーネスとベンチマーク」の`compare-outputs.ts`を使う。
 
-**3. CSS の処理（`kd_css` と `@import` の展開）**: v2 の `@kamado-io/style-compiler` が使う `cssnano`・`postcss`・`postcss-import` を、同じ版でルートの `devDependencies` に固定する（`2.0.0-alpha.17` が固定している版は `npm view @kamado-io/style-compiler@2.0.0-alpha.17 dependencies` で読める）。`cssnano` が引く `cssnano-preset-default` などは、固定せずに範囲の解決に任せる。これは `2.0.0-alpha.17` を今インストールした利用者が受け取る解決と同じで、v2 の開発時の `yarn.lock` とは版が違うことがある。`@custom-media` の oracle である `postcss-custom-media` も、v2 の `@d-zero/postcss-config` が固定する版のまま。これらは Renovate の対象から外してある（`.github/renovate.json`）。使うスクリプトは次のとおり。
+**3. CSS の処理（`kd_css`と`@import`の展開）**: v2 の`@kamado-io/style-compiler`が使う`cssnano`・`postcss`・`postcss-import`を、同じ版でルートの`devDependencies`に固定する（`2.0.0-alpha.17`が固定している版は`npm view @kamado-io/style-compiler@2.0.0-alpha.17 dependencies`で読める）。`cssnano`が引く`cssnano-preset-default`などは、固定せずに範囲の解決に任せる。これは`2.0.0-alpha.17`を今インストールした利用者が受け取る解決と同じで、v2 の開発時の`yarn.lock`とは版が違うことがある。`@custom-media`の oracle である`postcss-custom-media`も、v2 の`@d-zero/postcss-config`が固定する版のまま。これらは Renovate の対象から外してある（`.github/renovate.json`）。使うスクリプトは次のとおり。
 
-- `scripts/css-oracle.mjs`（`cssnano` を v2 の style-compiler と同じ設定で動かす。次のスクリプトが使う）
+- `scripts/css-oracle.mjs`（`cssnano`を v2 の style-compiler と同じ設定で動かす。次のスクリプトが使う）
 - `scripts/generate-css-golden.mjs`、`scripts/generate-css-rule-tests.mjs`
 - `scripts/fuzz-css.mjs`（コーパスを作る）、`scripts/generate-css-oracle.mjs`、`scripts/check-css.mjs`
-- `scripts/check-css-import.mjs`（`postcss-import` を直接読む）、`scripts/check-css-custom-media.mjs`
+- `scripts/check-css-import.mjs`（`postcss-import`を直接読む）、`scripts/check-css-custom-media.mjs`
 
-`crates/kd_css/tests/rules.rs` は `generate-css-rule-tests.mjs` が書くので、手では編集しない。手で書くテストは `crates/kd_css/tests/rules_hand.rs` に置く。
+`crates/kd_css/tests/rules.rs`は`generate-css-rule-tests.mjs`が書くので、手では編集しない。手で書くテストは`crates/kd_css/tests/rules_hand.rs`に置く。
 
 **oracle の版を動かすとき**:
 
-1. 1 は、ルートの `package.json` の `kamado-v2` の版を上げる（バージョンは固定。`^` は付けない）。`yarn install` のあと、上の 5 つのスクリプトのうち出力を書くもの（`generate-html-golden.mjs` と `generate-html-attr-golden.mjs`）を実行し、`git diff` で `crates/kd_html/tests/golden/` と `crates/kd_html/tests/attr_golden/` の変化が v2 の変更によるものか確かめる。ランダム入力のスクリプトは、差が出ないことを確かめる。
-2. 2 は、`benchmarks/v2-baseline/package.json` の 3 つの `@kamado-io/*`・`kamado` を**同じ版**に揃えて上げ、そのディレクトリで `yarn install` して `yarn.lock` を更新する。
-3. 3 は、v2 の `@kamado-io/style-compiler` が固定する版が変わったときだけ、ルートの `cssnano`・`postcss`・`postcss-import` をそれに合わせる。`postcss-custom-media` は、v2 の `@d-zero/postcss-config` が固定する版が変わったときに、同じ要領で合わせる。`yarn install` のあと、`generate-css-golden.mjs` と `generate-css-rule-tests.mjs` を実行して `git diff` を確かめ、`cargo test --locked --offline -p kd_css` を通す。ランダム入力（`fuzz-css.mjs` → `generate-css-oracle.mjs` → `check-css.mjs`）と、`check-css-import.mjs`・`check-css-custom-media.mjs` も実行する。`check-css-import.mjs` の `INTENDED` と `check-css-custom-media.mjs` の `INTENDED` は、oracle が書く文字列を含むので、版を動かすと書式の差で落ちることがある。落ちた文字列が書式だけの差か、意味の差かを見分けてから直す。
+1. 1 は、ルートの`package.json`の`kamado-v2`の版を上げる（バージョンは固定。`^`は付けない）。`yarn install`のあと、上の 5 つのスクリプトのうち出力を書くもの（`generate-html-golden.mjs`と`generate-html-attr-golden.mjs`）を実行し、`git diff`で`crates/kd_html/tests/golden/`と`crates/kd_html/tests/attr_golden/`の変化が v2 の変更によるものか確かめる。ランダム入力のスクリプトは、差が出ないことを確かめる。
+2. 2 は、`benchmarks/v2-baseline/package.json`の 3 つの`@kamado-io/*`・`kamado`を**同じ版**に揃えて上げ、そのディレクトリで`yarn install`して`yarn.lock`を更新する。
+3. 3 は、v2 の`@kamado-io/style-compiler`が固定する版が変わったときだけ、ルートの`cssnano`・`postcss`・`postcss-import`をそれに合わせる。`postcss-custom-media`は、v2 の`@d-zero/postcss-config`が固定する版が変わったときに、同じ要領で合わせる。`yarn install`のあと、`generate-css-golden.mjs`と`generate-css-rule-tests.mjs`を実行して`git diff`を確かめ、`cargo test --locked --offline -p kd_css`を通す。ランダム入力（`fuzz-css.mjs` → `generate-css-oracle.mjs` → `check-css.mjs`）と、`check-css-import.mjs`・`check-css-custom-media.mjs`も実行する。`check-css-import.mjs`の`INTENDED`と`check-css-custom-media.mjs`の`INTENDED`は、oracle が書く文字列を含むので、版を動かすと書式の差で落ちることがある。落ちた文字列が書式だけの差か、意味の差かを見分けてから直す。
 4. v2 の API が変わって import が通らなくなったら、スクリプト側を合わせる。v2 の出力が変わったなら、変わった理由が RFC §2 の意図した差に当たるか確かめ、当たらなければ v3 のほうを直す。
-5. v2 の保守が止まって oracle を更新しなくなったら、`kamado-v2` の版、`benchmarks/v2-baseline/`、CSS の `cssnano`・`postcss`・`postcss-import`・`postcss-custom-media` の版は固定したままでよい（golden はコミット済みで、実行時はこの依存を使わない）。
+5. v2 の保守が止まって oracle を更新しなくなったら、`kamado-v2`の版、`benchmarks/v2-baseline/`、CSS の`cssnano`・`postcss`・`postcss-import`・`postcss-custom-media`の版は固定したままでよい（golden はコミット済みで、実行時はこの依存を使わない）。
 
-`benchmarks/v2-baseline/.yarn/` は `.gitignore` の対象。
+`benchmarks/v2-baseline/.yarn/`は`.gitignore`の対象。
 
 ## 比較ハーネスとベンチマーク
 
@@ -188,13 +188,13 @@ node benchmarks/v3/generate-jsx-fixtures.ts --pages=1000 --out=/tmp/fixtures
 node benchmarks/v3/compare-outputs.ts <baselineDir> <candidateDir> --json=report.json
 ```
 
-比較の判定は `benchmarks/v3/compare-trees.ts` に書いてある。`.css` / `.js` / `.map` はサイズが増えないことを、それ以外はバイト一致を求める。
+比較の判定は`benchmarks/v3/compare-trees.ts`に書いてある。`.css`/`.js`/`.map`はサイズが増えないことを、それ以外はバイト一致を求める。
 
-`v2` ブランチにあった `yarn bench`（このブランチには無い）は、10 万ページ級では生成器がファイルを一斉に開いて `EMFILE` になる（macOS の上限は約 6 万）。v2 の基準値は 5 万ページまでで取る。10 万ページの基準は、`benchmarks/v3/generate-jsx-fixtures.ts` の fixture を、上の `benchmarks/v2-baseline/run.ts` で処理して取る。
+`v2`ブランチにあった`yarn bench`（このブランチには無い）は、10 万ページ級では生成器がファイルを一斉に開いて`EMFILE`になる（macOS の上限は約 6 万）。v2 の基準値は 5 万ページまでで取る。10 万ページの基準は、`benchmarks/v3/generate-jsx-fixtures.ts`の fixture を、上の`benchmarks/v2-baseline/run.ts`で処理して取る。
 
 ## JSX コンパイラの検証
 
-`kd_js` が出力する JS を、esbuild と React 19 の `renderToStaticMarkup`（v2 の jsx-compiler がやっていたこと）と比べる。ビルドはページを「チャンクの関数」としてコンパイルするので、その形（`KD_JS_FUNCTION=1`）でも同じ比較をする。
+`kd_js`が出力する JS を、esbuild と React 19 の`renderToStaticMarkup`（v2 の jsx-compiler がやっていたこと）と比べる。ビルドはページを「チャンクの関数」としてコンパイルするので、その形（`KD_JS_FUNCTION=1`）でも同じ比較をする。
 
 ```sh
 cargo build --release --offline -p kd_js --example compile
@@ -203,17 +203,17 @@ node scripts/check-kd-js-jsx.mjs fuzz 3000 7     # ランダムなコンポー�
 KD_JS_FUNCTION=1 node scripts/check-kd-js-jsx.mjs fuzz 3000 7   # 関数形式
 ```
 
-`KD_PAGE_CHUNKS=0` を付けると `build` もチャンクを使わずに、ページを 1 ファイルのモジュールとして書き出す。出力が同じことを比べるときに使う。
+`KD_PAGE_CHUNKS=0`を付けると`build`もチャンクを使わずに、ページを 1 ファイルのモジュールとして書き出す。出力が同じことを比べるときに使う。
 
 ## 性能の見方
 
-`KD_TIMING=1 KAMADO_TIMING=1 node packages/kamado/dist/cli.js build ...` で、段階ごとの時間（Rust 側と JS 側）が標準エラーに出る。`core finish: summed over N threads` の行は、書き出しの段（`finish: pages and assets`）でページが HTML の段と書き込みに使った時間を、N 本のスレッドで合算した値。壁時計の時間（スレッド数 × 段の時間）と見比べると、ページがどちらで待っているかの目安になる。スレッドがコア数より多いと、実行されていない時間もそのときいた側に数えられるので、CPU の計測ではなく目安として読む。HTML の段には文字コードの変換が含まれる。`sample`（macOS）や `perf`（Linux）で見るときは、`strip = "symbols"` を外したビルド（`CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p kd_napi --target-dir <別の場所>`）を `KAMADO_NATIVE_ADDON` で指す。HTML 段だけの時間は `cargo run --release -p kd_html --example stage_bench -- <出力ディレクトリ> [件数]`（1 スレッド、1 ページあたりの平均）。件数のあとに 3 行出る: `format` とその内訳（パース・空白の前処理・doc の構築・doc の出力・解放。`steps sum` が `format` と近ければ内訳は合っている）、`minify`、DOM の段（パース・シリアライズ・木の解放。includes などの規則は含まない）と encode（UTF-8 と Shift_JIS）。内訳は `print::format` の中身を写したもので、`format` を変えたら追従させる。`REPEAT=n` は `format` だけを n 回回す（サンプリングプロファイラ用）。
+`KD_TIMING=1 KAMADO_TIMING=1 node packages/kamado/dist/cli.js build ...`で、段階ごとの時間（Rust 側と JS 側）が標準エラーに出る。`core finish: summed over N threads`の行は、書き出しの段（`finish: pages and assets`）でページが HTML の段と書き込みに使った時間を、N 本のスレッドで合算した値。壁時計の時間（スレッド数 × 段の時間）と見比べると、ページがどちらで待っているかの目安になる。スレッドがコア数より多いと、実行されていない時間もそのときいた側に数えられるので、CPU の計測ではなく目安として読む。HTML の段には文字コードの変換が含まれる。`sample`（macOS）や`perf`（Linux）で見るときは、`strip = "symbols"`を外したビルド（`CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p kd_napi --target-dir <別の場所>`）を`KAMADO_NATIVE_ADDON`で指す。HTML 段だけの時間は`cargo run --release -p kd_html --example stage_bench -- <出力ディレクトリ> [件数]`（1 スレッド、1 ページあたりの平均）。件数のあとに 3 行出る: `format`とその内訳（パース・空白の前処理・doc の構築・doc の出力・解放。`steps sum`が`format`と近ければ内訳は合っている）、`minify`、DOM の段（パース・シリアライズ・木の解放。includes などの規則は含まない）と encode（UTF-8 と Shift_JIS）。内訳は`print::format`の中身を写したもので、`format`を変えたら追従させる。`REPEAT=n`は`format`だけを n 回回す（サンプリングプロファイラ用）。
 
-`stage_bench` で変更の前後を比べるには、出力と時間を別々に見る。
+`stage_bench`で変更の前後を比べるには、出力と時間を別々に見る。
 
-- **出力**: `DUMP=<dir>` は、`REPEAT` の最後の回の `format` の出力を、読んだ順に `<dir>/<n>.html` として書き出し、`<dir>/index.txt` に番号と元のパスを書く。変更前後のバイナリで書き出して `diff -r -x index.txt` すれば、出力が変わっていないことをバイト単位で確かめられる。整形に失敗したページは空のファイルになり、失敗した件数が出力に出て、`index.txt` のそのページの行に `(did not format)` が付く（両方の版で同じページが失敗していれば、その分は空同士の一致）
-- **時間**: マシンの負荷が高いと時間（µs）がぶれる。`/usr/bin/time -l env REPEAT=n <stage_bench> ...` が出す `instructions retired`（macOS）は負荷に左右されないので、変更の前後はそれで比べる
+- **出力**: `DUMP=<dir>`は、`REPEAT`の最後の回の`format`の出力を、読んだ順に`<dir>/<n>.html`として書き出し、`<dir>/index.txt`に番号と元のパスを書く。変更前後のバイナリで書き出して`diff -r -x index.txt`すれば、出力が変わっていないことをバイト単位で確かめられる。整形に失敗したページは空のファイルになり、失敗した件数が出力に出て、`index.txt`のそのページの行に`(did not format)`が付く（両方の版で同じページが失敗していれば、その分は空同士の一致）
+- **時間**: マシンの負荷が高いと時間（µs）がぶれる。`/usr/bin/time -l env REPEAT=n <stage_bench> ...`が出す`instructions retired`（macOS）は負荷に左右されないので、変更の前後はそれで比べる
 
-検査ソフトのない環境で cold を測るには、GitHub Actions の `Bench cold build`（`.github/workflows/bench-cold.yml`、手動実行）を使う。ページ数を指定して fixture を生成し、cold を 2 回、`--incremental` を 2 回（2 回目が warm）ビルドして、段階別の時間をジョブのサマリーに出す。ubuntu（x64 / arm64）と macOS で走る。
+検査ソフトのない環境で cold を測るには、GitHub Actions の`Bench cold build`（`.github/workflows/bench-cold.yml`、手動実行）を使う。ページ数を指定して fixture を生成し、cold を 2 回、`--incremental`を 2 回（2 回目が warm）ビルドして、段階別の時間をジョブのサマリーに出す。ubuntu（x64/arm64）と macOS で走る。
 
-ページごとの時間の大半は、`open` やファイルの作成に費やされる環境がある（開発に使っている macOS では `open` が 70〜200µs）。ファイルの数を減らすことが、CPU の最適化より効く。
+ページごとの時間の大半は、`open`やファイルの作成に費やされる環境がある（開発に使っている macOS では`open`が 70〜200µs）。ファイルの数を減らすことが、CPU の最適化より効く。
