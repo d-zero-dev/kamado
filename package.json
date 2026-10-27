@@ -70,7 +70,7 @@
 		"react": "19.3.0",
 		"react-dom": "19.3.0",
 		"typescript": "6.0.3",
-		"vitest": "4.1.12"
+		"vitest": "5.0.5"
 	},
 	"resolutions": {
 		"nx/undici": "7.30.1"
