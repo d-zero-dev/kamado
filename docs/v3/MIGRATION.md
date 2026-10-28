@@ -292,6 +292,7 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
 - ページファイルの**追加と削除**、設定ファイル・`pages.overrides`の変更は、**再起動**すると反映されます。
 - コンポーネントを直すと、次のリクエストで描画用のワーカーが作り直されます（初回は少し遅い）。
 - ブラウザのライブリロードはありません。
+- `devServer.host`が`localhost`（既定）のときは、`127.0.0.1`と`::1`の両方で待ち受けます。`http://127.0.0.1:<port>/`でも`http://[::1]:<port>/`でも開けます（v2 は OS が最初に返すほう、macOS では`::1`だけでした）。そのぶん、どちらかのアドレスで同じポートを別のツールが使っていると、`port <port> is already in use on <アドレス> (devServer.port)`で起動しません。そのツールを止めるか、`devServer.port`を変えてください。
 - `localhost`（とそのサブドメイン）、IP アドレス、`devServer.host`以外のホスト名で開くと`403`になります。`laptop.local`やトンネルのドメインで開くなら、`devServer.allowedHosts`に足してください（`".example.test"`のように先頭が`.`の値はサブドメインにも一致します）。`devServer.host`は待ち受けるアドレスで、`0.0.0.0`にしても名前で開けるようにはなりません。別のサイトからの要求（`<script src>`、フォームの送信、`iframe`への埋め込み）も`403`です。外部のリンクからタブで開くのは通りますが、`devServer.proxy`の接頭辞の下へのリンクは通りません（アドレスバーから開けば通ります）。同じマシンの別のツール（`http://127.0.0.1:5173`など）からの要求は通ります。別のマシンのツールからの要求を通すには、そのホスト名か IP アドレスを`allowedHosts`に足してください。DNS リバインディングと、別サイトからソースや`proxy`の先の API を読まれることへの対策です。ブラウザは判定に使う`Sec-Fetch-*`ヘッダーを`https:`と`localhost`宛てにしか送らないので、`localhost`以外のホスト（LAN の IP アドレスや`laptop.local`）で平文のまま開いているときは、フォームの送信と fetch だけが検査され、`<script src>`や`iframe`は通ります。
 
 ## 9. d-zero/builder（11ty）からの移行
