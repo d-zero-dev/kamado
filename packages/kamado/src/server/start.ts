@@ -1,16 +1,18 @@
 import type { RequestLog, ServeDescription } from './app.js';
+import type { ServerType } from '@hono/node-server';
 
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { styleText } from 'node:util';
 
-import { serve } from '@hono/node-server';
+import { createAdaptorServer } from '@hono/node-server';
 
 import { native } from '../native.js';
 import { RUNTIME_URL } from '../runtime-url.js';
 import { ESBUILD_VERSION, findEsbuildBinary } from '../scripts.js';
 
 import { createApp } from './app.js';
+import { close as closeServer, urlHost, listen, listenAddresses } from './listen.js';
 
 /** Options of {@link start}. */
 export interface StartOptions {
@@ -26,7 +28,7 @@ export interface StartOptions {
 export interface RunningServer {
 	/** Where it listens, with the start path. */
 	readonly location: string;
-	/** Stops the server and releases the renderer. */
+	/** Stops the server, cutting the requests in progress, and releases the renderer. */
 	readonly close: () => Promise<void>;
 }
 
@@ -100,6 +102,8 @@ export async function start(
 		) as ServeDescription;
 	const description = open();
 	const { host, port, startPath, proxy } = description.devServer;
+	// Made before listening, so that nothing fails with the servers open.
+	const location = new URL(startPath, `http://${urlHost(host)}:${port}`).toString();
 
 	const { app, close } = createApp(description, RUNTIME_URL, {
 		// The port, the host, the allowed hosts, the proxy and the start path
@@ -112,24 +116,35 @@ export async function start(
 		},
 	});
 
-	const server = serve({ fetch: app.fetch, hostname: host, port });
-	await new Promise<void>((resolve, reject) => {
-		const onError = (error: NodeJS.ErrnoException) => {
-			void close();
-			reject(
-				error.code === 'EADDRINUSE'
-					? new Error(`port ${port} is already in use (devServer.port)`, { cause: error })
-					: error,
-			);
-		};
-		server.once('listening', () => {
-			server.off('error', onError);
-			resolve();
+	let servers: ServerType[];
+	try {
+		servers = await listen(
+			// `hostname` is where a request without `Host` is taken to be sent.
+			() => createAdaptorServer({ fetch: app.fetch, hostname: urlHost(host) }),
+			listenAddresses(host),
+			port,
+		);
+	} catch (error) {
+		// The failure to start is what the caller acts on; a failure to release
+		// the renderer as well goes to the log instead of hiding it.
+		await close().catch((error_: unknown) => {
+			write(`${error_ instanceof Error ? error_.message : String(error_)}\n`);
 		});
-		server.once('error', onError);
-	});
+		const { code, address } = (error ?? {}) as NodeJS.ErrnoException & {
+			address?: string;
+		};
+		// Name the address in use (`localhost` listens on two).
+		const on = address === undefined ? '' : ` on ${address}`;
+		throw code === 'EADDRINUSE'
+			? new Error(`port ${port} is already in use${on} (devServer.port)`, {
+					cause: error,
+				})
+			: error;
+	}
+	// Requests in progress are cut: a proxied event stream never ends by itself.
+	const closeServers = () =>
+		Promise.all(servers.map((server) => closeServer(server, true)));
 
-	const location = new URL(startPath, `http://${host}:${port}`).toString();
 	const relRoot = '.' + path.sep + path.relative(process.cwd(), description.inputDir);
 	const proxyLines = Object.entries(proxy)
 		.map(([prefix, rule]) => {
@@ -146,9 +161,13 @@ export async function start(
 	);
 
 	const shutdown = () => {
-		server.close(() => {
-			void close().finally(() => process.exit(0));
-		});
+		void closeServers()
+			.catch((error: unknown) => {
+				write(`${error instanceof Error ? error.message : String(error)}\n`);
+			})
+			.then(() => {
+				void close().finally(() => process.exit(0));
+			});
 	};
 	process.once('SIGINT', shutdown);
 	process.once('SIGTERM', shutdown);
@@ -162,9 +181,7 @@ export async function start(
 		close: async () => {
 			process.off('SIGINT', shutdown);
 			process.off('SIGTERM', shutdown);
-			await new Promise<void>((resolve) => {
-				server.close(() => resolve());
-			});
+			await closeServers();
 			await close();
 		},
 	};

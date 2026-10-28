@@ -125,7 +125,13 @@ const REOPEN_RETRY_MS = 1000;
  * @example
  * ```ts
  * const { app, close } = createApp(description, runtimeUrl);
- * serve({ fetch: app.fetch, port: description.devServer.port });
+ * const { host, port } = description.devServer;
+ * // `hostname` is where a request without `Host` is taken to be sent.
+ * await listen(
+ *   () => createAdaptorServer({ fetch: app.fetch, hostname: urlHost(host) }),
+ *   listenAddresses(host),
+ *   port,
+ * );
  * ```
  */
 export function createApp(
