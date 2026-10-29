@@ -323,26 +323,34 @@ impl Hooks for Minifiers {
 	}
 }
 
-/// The esbuild binary of this checkout's `node_modules`, for tests.
+/// The esbuild binary of this checkout's `node_modules`, for tests: the one
+/// the `esbuild` package depends on, found by Node from that package the way
+/// `findEsbuildBinary` of the runtime does. Another esbuild (the oracle
+/// `esbuild-v2`) can own the platform package at the top of `node_modules`, so
+/// the place of the right one is up to the install, not to this code.
 #[cfg(test)]
 pub(crate) fn esbuild_for_tests() -> String {
-	let dir = format!("{}/../../node_modules/@esbuild", env!("CARGO_MANIFEST_DIR"));
-	// The package of this machine: several can be installed side by side.
-	let os = match std::env::consts::OS {
-		"macos" => "darwin",
-		other => other,
-	};
-	let arch = match std::env::consts::ARCH {
-		"aarch64" => "arm64",
-		"x86_64" => "x64",
-		other => other,
-	};
-	let platform = format!("{dir}/{os}-{arch}");
+	let root = format!("{}/../..", env!("CARGO_MANIFEST_DIR"));
+	let found = Command::new("node")
+		.current_dir(&root)
+		.args([
+			"--eval",
+			"const { createRequire } = require('node:module'); \
+			 const fromEsbuild = createRequire(require.resolve('esbuild')); \
+			 console.log(fromEsbuild.resolve(\
+			 `@esbuild/${process.platform}-${process.arch}/bin/esbuild`));",
+		])
+		.output()
+		.expect("node starts; the tests that run esbuild need it");
 	assert!(
-		fs::metadata(&platform).is_ok(),
-		"{platform} is missing; run `yarn install`"
+		found.status.success(),
+		"esbuild is not installed for this machine; run `yarn install`: {}",
+		String::from_utf8_lossy(&found.stderr)
 	);
-	format!("{platform}/bin/esbuild")
+	String::from_utf8(found.stdout)
+		.expect("a path is UTF-8")
+		.trim()
+		.to_owned()
 }
 
 #[cfg(test)]
@@ -362,6 +370,32 @@ mod tests {
 	}
 
 	const REFUSED: &str = "esbuild cannot read it: Expected identifier but found \"=\"";
+
+	/// The oracle of the JSX tables is another esbuild (`esbuild-v2`), which
+	/// the install may hoist to the top of `node_modules`; the binary of the
+	/// tests has to be the one of the `esbuild` package, as the runtime's is.
+	#[test]
+	fn the_esbuild_of_the_tests_is_the_version_of_the_esbuild_package() {
+		let ran = Command::new(esbuild())
+			.arg("--version")
+			.output()
+			.expect("the esbuild binary starts");
+		let ran = String::from_utf8(ran.stdout).expect("a version is UTF-8");
+		let manifest = fs::read_to_string(format!(
+			"{}/../../node_modules/esbuild/package.json",
+			env!("CARGO_MANIFEST_DIR")
+		))
+		.expect("node_modules/esbuild is installed; run `yarn install`");
+		let key = "\"version\": \"";
+		let start = manifest.find(key).expect("package.json has a version") + key.len();
+		let end = manifest[start..].find('"').expect("the version is closed");
+		let declared = &manifest[start..start + end];
+		assert_eq!(
+			ran.trim(),
+			declared,
+			"the binary is not the esbuild package's"
+		);
+	}
 
 	fn ok(text: &str) -> Answer {
 		Ok(text.to_owned())
