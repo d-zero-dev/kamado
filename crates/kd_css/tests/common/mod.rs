@@ -79,17 +79,97 @@ pub const DECISIONS: &[Decision] = &[
 		"a family name keeps its quotes only when a whole word of it is a keyword",
 	),
 	// numbers
+	// The fragments of what kd_css writes are bounded by `{`, `;` or `}` where
+	// a longer property (`max-height`, `border-width`, `padding-top`,
+	// `fill-opacity`) or value (`REDS`) would also contain them. The entries for
+	// `top`, `opacity` and `animation-name` stand for their rule, at the one
+	// place of the declaration their case has: a case that has it elsewhere
+	// needs an entry of its own.
 	d(
 		"height:0%",
+		"{height:0%",
+		"{height:0",
+		"0% is not 0 where a percentage can mean `auto` (height, top)",
+	),
+	d(
 		"height:0%",
-		"height:0",
+		";height:0%",
+		";height:0",
 		"0% is not 0 where a percentage can mean `auto` (height, top)",
 	),
 	d(
 		"width:0%",
-		"width:0%",
-		"width:0",
+		"{width:0%",
+		"{width:0",
 		"0% is not 0 where a percentage can mean `auto` (width)",
+	),
+	d(
+		"height:0%",
+		"}height:0%",
+		"}height:0",
+		"0% is not 0 where a percentage can mean `auto` (height, top)",
+	),
+	d(
+		"width:0%",
+		";width:0%",
+		";width:0",
+		"0% is not 0 where a percentage can mean `auto` (width)",
+	),
+	d(
+		"width:0%",
+		"}width:0%",
+		"}width:0",
+		"0% is not 0 where a percentage can mean `auto` (width)",
+	),
+	d(
+		"{top:0%}",
+		"{top:0%}",
+		"{top:0}",
+		"0% is not 0 where a percentage can mean `auto` (height, top)",
+	),
+	// reduce-initial is not ported (each initial value is written as is)
+	d(
+		"{opacity:initial}",
+		"{opacity:initial}",
+		"{opacity:1}",
+		"`initial` is not replaced by the initial value",
+	),
+	// a colour name where the property takes a name is that name (with a vendor
+	// prefix too; a custom property such as `--my-animation-name` is another)
+	d(
+		"{animation-name:RED}",
+		"{animation-name:RED}",
+		"{animation-name:red}",
+		"a name that is also a colour keeps its case",
+	),
+	d(
+		"{-webkit-animation-name:RED}",
+		"{-webkit-animation-name:RED}",
+		"{-webkit-animation-name:red}",
+		"a name that is also a colour keeps its case",
+	),
+	// cssnano makes `border-width:0 0 0` of it, a valid declaration in place of
+	// one the browser drops, and then drops the one before as a duplicate.
+	// Left open on the left: of the properties with `border-width` at the end of
+	// their name, `mask-border-width` has its `0%` dropped by kd_css (so what
+	// kd_css writes is not `0 0%`), and a custom property keeps its value.
+	d(
+		"border-width:0px;border-width:0px 0% 0em}",
+		"border-width:0;border-width:0 0%}",
+		"border-width:0}",
+		"a 0% the property does not take is kept, so the declaration stays invalid",
+	),
+	d(
+		"border-width:0px 0% 0em",
+		"border-width:0 0%;",
+		"border-width:0;",
+		"a 0% the property does not take is kept, so the declaration stays invalid",
+	),
+	d(
+		"border-width:0px 0% 0em",
+		"border-width:0 0%}",
+		"border-width:0}",
+		"a 0% the property does not take is kept, so the declaration stays invalid",
 	),
 	d(
 		"var(--x,0px)",
@@ -243,6 +323,22 @@ pub const DECISIONS: &[Decision] = &[
 	),
 ];
 
+/// `mine`, the output of `kd_css` for `input`, with the `mine` fragment of
+/// each decision whose `input` fragment occurs in `input` replaced by its
+/// `cssnano` fragment, in the order of `DECISIONS`; and the indexes of the
+/// decisions that replaced something.
+pub fn undo_decisions(input: &str, mine: &str) -> (String, Vec<usize>) {
+	let mut adjusted = mine.to_owned();
+	let mut used = Vec::new();
+	for (i, decision) in DECISIONS.iter().enumerate() {
+		if input.contains(decision.input) && adjusted.contains(decision.mine) {
+			adjusted = adjusted.replace(decision.mine, decision.cssnano);
+			used.push(i);
+		}
+	}
+	(adjusted, used)
+}
+
 /// Checks one case; the error says what is wrong. On success, the indexes of
 /// the decisions the case needed.
 pub fn check(input: &str, cssnano: &str) -> Result<Vec<usize>, String> {
@@ -256,14 +352,7 @@ pub fn check(input: &str, cssnano: &str) -> Result<Vec<usize>, String> {
 	if cssnano == "__ERROR__" || mine == cssnano {
 		return Ok(Vec::new());
 	}
-	let mut adjusted = mine.clone();
-	let mut used = Vec::new();
-	for (i, decision) in DECISIONS.iter().enumerate() {
-		if input.contains(decision.input) && adjusted.contains(decision.mine) {
-			adjusted = adjusted.replace(decision.mine, decision.cssnano);
-			used.push(i);
-		}
-	}
+	let (adjusted, used) = undo_decisions(input, &mine);
 	if adjusted == cssnano {
 		Ok(used)
 	} else {

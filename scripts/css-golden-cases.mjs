@@ -336,6 +336,21 @@ const sheetGroups = {
 		'@media a{@font-face{font-family:a}}@media a{.b{y:2}}',
 		'@media a{.a{x:1}}@media a{@font-face{font-family:b}}',
 	],
+	'values a property does not take': [
+		'a{border-width:0px 0% 0em}',
+		'a{border-width:0px;border-width:0px 0% 0em}',
+		'a{border-width:0px 0% 0em;color:red}',
+	],
+	'values cssnano rewrites and kd_css keeps': [
+		'a{top:0%}',
+		'a{opacity:initial}',
+		'a{animation-name:RED}',
+		'a{color:red;height:0%}',
+		'a{color:red;width:0%}',
+		'a{b{c:d}height:0%}',
+		'a{b{c:d}width:0%}',
+		'a{-webkit-animation-name:RED}',
+	],
 };
 
 /**

@@ -1,6 +1,78 @@
 import { describe, expect, test } from 'vitest';
 
-import { minifyNestedDeclarations, withoutNestedDeclarations } from './css-oracle.mjs';
+import {
+	cssnanoMinify,
+	matchesWithDecisionsUndone,
+	minifyNestedDeclarations,
+	withoutNestedDeclarations,
+} from './css-oracle.mjs';
+
+describe('matchesWithDecisionsUndone', () => {
+	// cssnano makes the invalid `0px 0% 0em` a valid `0` and drops the first
+	// `border-width:0` as a repeat of it; kd_css keeps it invalid (`0 0%`),
+	// which cssnano makes `0 0`, not a repeat.
+	const input = 'a{border-width:0px}a{border-width:bold}a{border-width:0px 0% 0em}';
+	const mine = 'a{border-width:0;border-width:bold;border-width:0 0%}';
+	const undone = 'a{border-width:0;border-width:bold;border-width:0}';
+
+	test('cssnano does not bring the output and the input to one', async () => {
+		expect(await cssnanoMinify(input)).toBe('a{border-width:bold;border-width:0}');
+		expect(await cssnanoMinify(mine)).toBe(
+			'a{border-width:0;border-width:bold;border-width:0 0}',
+		);
+	});
+
+	const same = (x: string, y: string) => x === y;
+
+	test('matches once the decisions are undone on the output', async () => {
+		const theirs = await cssnanoMinify(input);
+		expect(await matchesWithDecisionsUndone([theirs], undone, same)).toEqual({
+			matches: true,
+		});
+	});
+
+	test('does not match an output with a difference beyond the decisions', async () => {
+		const theirs = await cssnanoMinify(input);
+		expect(
+			await matchesWithDecisionsUndone(
+				[theirs],
+				'a{border-width:2px;border-width:bold;border-width:0}',
+				same,
+			),
+		).toEqual({ matches: false });
+	});
+
+	test('compares the declarations of a rule with nested rules after cssnano minified them alike', async () => {
+		// cssnano leaves a declaration in a block inside a rule less minified.
+		const theirs = 'a{@media x{color:RED}}';
+		expect(await cssnanoMinify('a{@media x{color:red}}')).not.toBe(theirs);
+		expect(
+			await matchesWithDecisionsUndone([theirs], 'a{@media x{color:red}}', same),
+		).toEqual({ matches: true });
+	});
+
+	test('compares the values of the declarations of a rule with nested rules', async () => {
+		expect(
+			await matchesWithDecisionsUndone(
+				['a{color:red;&:hover{x:1}}'],
+				'a{color:blue;&:hover{x:1}}',
+				same,
+			),
+		).toEqual({ matches: false });
+	});
+
+	test('matches any of the spellings it is given', async () => {
+		expect(
+			await matchesWithDecisionsUndone(['a{b:1}', 'a{b:0}'], 'a{b:0px}', same),
+		).toEqual({ matches: true });
+	});
+
+	test('gives the reason when cssnano rejects what is undone', async () => {
+		const result = await matchesWithDecisionsUndone(['a{b:c}'], 'a{b:"', same);
+		expect(result.matches).toBe(false);
+		expect(result.error).toMatch(/Unclosed/u);
+	});
+});
 
 describe('withoutNestedDeclarations', () => {
 	test('leaves a rule without nested rules alone', () => {

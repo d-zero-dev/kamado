@@ -152,6 +152,48 @@ export function withoutNestedDeclarations(css) {
 }
 
 /**
+ * Whether cssnano's output for the input matches what cssnano makes of the
+ * output of kd_css with the decisions it records undone (`undone` of
+ * `crates/kd_css/examples/minify.rs`), compared as `check-css.mjs` compares
+ * cssnano's minification of the output itself: as it is, then with the
+ * declarations of rules with nested rules minified alike. A decision can be
+ * one where cssnano changes the meaning (it makes an invalid declaration
+ * valid), so that cssnano does not bring the output of kd_css and the input to
+ * one. The comparison with the nested declarations replaced by markers is not
+ * made: it does not compare their values, and a file it matches is not one
+ * that differs by the decisions only.
+ * @param {readonly string[]} expected - cssnano's output for the input, and
+ * the other spellings of it to compare with (`check-css.mjs` adds the one with
+ * neighbouring blocks joined)
+ * @param {string} undone - kd_css's output with the decisions undone
+ * @param {(a: string, b: string) => boolean} same - Whether two minified style
+ * sheets are the same, with the leftovers `check-css.mjs` knows undone
+ * @returns {Promise<{ matches: boolean, error?: string }>} `error` when
+ * cssnano rejects `undone`
+ * @example
+ * await matchesWithDecisionsUndone(['a{b:0}'], 'a{b:0px}', (a, b) => a === b);
+ * // { matches: true }
+ */
+export async function matchesWithDecisionsUndone(expected, undone, same) {
+	let min;
+	try {
+		min = await cssnanoMinify(undone);
+	} catch (error) {
+		return {
+			matches: false,
+			error: (error instanceof Error ? error.message : String(error)).split('\n')[0],
+		};
+	}
+	const minNested = await minifyNestedDeclarations(min);
+	for (const theirs of expected) {
+		if (same(theirs, min) || same(await minifyNestedDeclarations(theirs), minNested)) {
+			return { matches: true };
+		}
+	}
+	return { matches: false };
+}
+
+/**
  * Parses CSS with postcss and reports whether it is accepted.
  * @param {string} css - The style sheet
  * @returns {string | null} The error message, or null when it parses
