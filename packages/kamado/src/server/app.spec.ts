@@ -127,6 +127,27 @@ describe('createApp', () => {
 		expect(await response.text()).toBe('<svg/>');
 	});
 
+	test('a ready HTML body, such as a static file with an injection, is a whole page without ranges and is logged as a page', async () => {
+		serveRequest.mockReturnValue(
+			JSON.stringify({ kind: 'text', contentType: 'text/html', body: '0123456789' }),
+		);
+		const logs: unknown[] = [];
+		const { app } = createApp(DESCRIPTION, 'file:///rt.js', {
+			renderer: fakeRenderer(),
+			onRequest: (log) => logs.push(log),
+		});
+
+		const response = await app.request('/legacy/', { headers: { Range: 'bytes=2-5' } });
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get('accept-ranges')).toBeNull();
+		expect(response.headers.get('content-range')).toBeNull();
+		expect(await response.text()).toBe('0123456789');
+		expect(logs).toEqual([
+			{ pathname: '/legacy/', status: 200, kind: 'page', ms: expect.any(Number) },
+		]);
+	});
+
 	// `@hono/node-server` fills in `text/plain` for a response without a type,
 	// which Firefox will not play as a video (#220), so this goes over real HTTP.
 	test('a video is served over HTTP with its type, its size and its parts', async () => {
