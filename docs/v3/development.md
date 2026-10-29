@@ -15,7 +15,7 @@ cargo test --locked --offline --workspace
 node scripts/check-rust-no-external-crates.mjs
 ```
 
-**前提**: `cargo test`の前に、リポジトリのルートで`yarn install`を済ませておく。一部のテストが`node_modules`の esbuild の実行ファイル（`node_modules/@esbuild/<os>-<arch>`、`crates/kd_core/src/minifiers.rs`の`esbuild_for_tests`）を呼び、無ければ「run `yarn install`」で失敗する。Node の標準機能や prettier などを比較対象（oracle）にして実行時に比べるテストもあるので、Node も要る。
+**前提**: `cargo test`の前に、リポジトリのルートで`yarn install`を済ませておく。一部のテストが`node_modules`の esbuild の実行ファイル（Node が`esbuild`パッケージから解決する`@esbuild/<os>-<arch>`。`crates/kd_core/src/minifiers.rs`の`esbuild_for_tests`。そのため Node も要る）を呼び、無ければ「run `yarn install`」で失敗する。Rust のテストが`node_modules`に頼るのは、この esbuild の実行ファイルだけで、oracle（prettier など）を実行時に呼ぶテストは無い。oracle の出力は、`scripts/`が事前にコミット済みの表と golden に書く。コミットしないコーパスを読む`--ignored`のテストは、`scripts/fuzz-*.mjs`で先にコーパスを作る（「何を更新したら、何を作り直すか」）。
 
 ツールチェーンの版は`.github/workflows/rust.yml`で固定している。`rust-toolchain.toml`は置かない。置くと、ローカルの`stable`とは別のツールチェーンが再インストールされ、環境によっては中途半端な状態で失敗する。
 
@@ -74,30 +74,30 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 
 ## 何を更新したら、何を作り直すか
 
-テーブルと golden ファイルは、v2 が使っていたライブラリ（oracle）の出力から作ってコミットしている。実行時はその依存を持たない。oracle の版は v2 に合わせて固定するのが方針で（「v2 の oracle」。v2 から版が決まらないものは Renovate の「v3 oracles」で上げる。`mdn-data`は下の段落）、動かしたときは、次のスクリプトを実行して差分を確かめる（スクリプトの先頭のコメントに詳細がある）。oracle の置き場（ルートの`devDependencies`）は「v2 の oracle」を参照。
+テーブルと golden ファイルは、v2 が使っていたライブラリ（oracle）の出力から作ってコミットしている。実行時はその依存を持たない。oracle の版は v2 に合わせて固定するのが方針で（「v2 の oracle」。v2 から版が決まらない`mdn-data`だけは Renovate が上げる。下の段落）、動かしたときは、次のスクリプトを実行して差分を確かめる（スクリプトの先頭のコメントに詳細がある）。oracle の置き場（ルートの`devDependencies`）は「v2 の oracle」を参照。
 
-| 契機                                                                                                                                                   | 実行するスクリプト                      | 書き出すもの                                                               |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | -------------------------------------------------------------------------- |
-| `character-entities`を上げた                                                                                                                           | `scripts/generate-entities.mjs`         | `crates/kd_html/src/entities_table.rs`                                     |
-| `prettier`を上げた                                                                                                                                     | `scripts/generate-prettier-tables.mjs`  | `crates/kd_html/src/print/tables.rs`（構造が変わると失敗する）             |
-| `html-minifier-terser`を上げた                                                                                                                         | `scripts/generate-minifier-tables.mjs`  | `crates/kd_html/src/minify/tables.rs`                                      |
-| 同上                                                                                                                                                   | `scripts/generate-minify-golden.mjs`    | `crates/kd_html/tests/minify_golden/`                                      |
-| `cssnano`を動かした（「v2 の oracle」の 3。設定は v2 の style-compiler と同じ）                                                                        | `scripts/generate-css-golden.mjs`       | `crates/kd_css/tests/golden/`                                              |
-| 同上                                                                                                                                                   | `scripts/generate-css-rule-tests.mjs`   | `crates/kd_css/tests/rules.rs`                                             |
-| 同上、または`mdn-data`を上げた（プロパティ名の元データ）                                                                                               | `scripts/generate-css-tables.mjs`       | `crates/kd_css/src/color_table.rs`、`property_table.rs`                    |
-| `esbuild`を上げた                                                                                                                                      | `scripts/generate-jsx-entities.mjs`     | `crates/kd_js/src/jsx_entities.rs`                                         |
-| `react` / `react-dom`を上げた                                                                                                                          | `scripts/generate-jsx-tables.mjs`       | `packages/kamado/src/jsx/attr-table.ts`、`crates/kd_js/src/react_attrs.rs` |
-| `react-dom`を上げた（Pug から TSX への変換器が使う、小文字の属性名から React の綴りへの対応表）                                                        | `scripts/generate-react-prop-names.mjs` | `scripts/react-prop-names.mjs`（構造が変わると失敗する）                   |
-| Node を上げた（型の除去の挙動が変わりうる）                                                                                                            | `scripts/generate-kd-js-golden.mjs`     | `crates/kd_js/tests/ts_golden/`                                            |
-| Node を上げた（Shift_JIS のデコーダ）                                                                                                                  | `scripts/gen-cp932-table.mjs`           | `crates/kd_html/src/cp932_table.rs`                                        |
-| HTML の golden のケースを足した、または`kamado-v2`を上げた（v2 の DOM の直列化が oracle）                                                              | `scripts/generate-html-golden.mjs`      | `crates/kd_html/tests/golden/`                                             |
-| 属性・クラスの golden のケースを足した、または`kamado-v2`を上げた（`html.rules`の属性・クラスの操作と`html.imageSizes`の v2 の DOM での結果が oracle） | `scripts/generate-html-attr-golden.mjs` | `crates/kd_html/tests/attr_golden/`                                        |
+| 契機                                                                                                                                                   | 実行するスクリプト                      | 書き出すもの                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | --------------------------------------------------------------------------------- |
+| `character-entities`を動かした（「v2 の oracle」の 4）                                                                                                 | `scripts/generate-entities.mjs`         | `crates/kd_html/src/entities_table.rs`                                            |
+| `prettier-v2`を動かした（同上。生成のあとに`cargo fmt --all`）                                                                                         | `scripts/generate-prettier-tables.mjs`  | `crates/kd_html/src/print/tables.rs`（構造が変わると失敗する）、`entity_names.rs` |
+| `html-minifier-terser`を動かした（同上）                                                                                                               | `scripts/generate-minifier-tables.mjs`  | `crates/kd_html/src/minify/tables.rs`                                             |
+| 同上                                                                                                                                                   | `scripts/generate-minify-golden.mjs`    | `crates/kd_html/tests/minify_golden/`                                             |
+| `cssnano`を動かした（「v2 の oracle」の 3。設定は v2 の style-compiler と同じ）                                                                        | `scripts/generate-css-golden.mjs`       | `crates/kd_css/tests/golden/`                                                     |
+| 同上                                                                                                                                                   | `scripts/generate-css-rule-tests.mjs`   | `crates/kd_css/tests/rules.rs`                                                    |
+| 同上、または`mdn-data`を上げた（プロパティ名の元データ）                                                                                               | `scripts/generate-css-tables.mjs`       | `crates/kd_css/src/color_table.rs`、`property_table.rs`                           |
+| `esbuild-v2`を動かした（「v2 の oracle」の 4）                                                                                                         | `scripts/generate-jsx-entities.mjs`     | `crates/kd_js/src/jsx_entities.rs`                                                |
+| `react` / `react-dom`を上げた                                                                                                                          | `scripts/generate-jsx-tables.mjs`       | `packages/kamado/src/jsx/attr-table.ts`、`crates/kd_js/src/react_attrs.rs`        |
+| `react-dom`を上げた（Pug から TSX への変換器が使う、小文字の属性名から React の綴りへの対応表）                                                        | `scripts/generate-react-prop-names.mjs` | `scripts/react-prop-names.mjs`（構造が変わると失敗する）                          |
+| Node を上げた（型の除去の挙動が変わりうる）                                                                                                            | `scripts/generate-kd-js-golden.mjs`     | `crates/kd_js/tests/ts_golden/`                                                   |
+| Node を上げた（Shift_JIS のデコーダ）                                                                                                                  | `scripts/gen-cp932-table.mjs`           | `crates/kd_html/src/cp932_table.rs`                                               |
+| HTML の golden のケースを足した、または`kamado-v2`を上げた（v2 の DOM の直列化が oracle）                                                              | `scripts/generate-html-golden.mjs`      | `crates/kd_html/tests/golden/`                                                    |
+| 属性・クラスの golden のケースを足した、または`kamado-v2`を上げた（`html.rules`の属性・クラスの操作と`html.imageSizes`の v2 の DOM での結果が oracle） | `scripts/generate-html-attr-golden.mjs` | `crates/kd_html/tests/attr_golden/`                                               |
 
 生成したファイルをコミットする前に、`git diff`で変化が oracle の更新によるものか確かめる。生成したあとに`cargo test --locked --offline --workspace`を通す（`scripts/react-prop-names.mjs`は Rust が読まないので、`yarn test`の`scripts/pug-to-tsx-types.spec.ts`が、生成物が入れた react-dom と合っているかを確かめる）。`scripts/generate-jsx-tables.mjs`は実行時の出力（ランタイムと Rust のコンパイラ）が読む表を作り、`scripts/generate-react-prop-names.mjs`は変換器だけが読む表を作る。
 
-`property_table.rs`は、kd_css が値を書き換えるプロパティの一覧で、ここに無いプロパティの値は空白を詰めるだけになる（RFC §10）。元データの`mdn-data`は、ルートの`devDependencies`に固定し、Renovate の「v3 oracles」で上げる。cssnano はすべてのプロパティの値を書き換え、プロパティの一覧を読まないので、一覧の版は v2 から決まらず、このリポジトリが宣言する。一覧が大きいほど cssnano に近い。新しい版が外したプロパティは、`generate-css-tables.mjs`の`extras`に足して一覧に残す（外すと、cssnano が書き換える値を kd_css が書き換えなくなる）。`color_table.rs`の元データの`@colordx/core`は、cssnano の colormin が引く版のまま（「v2 の oracle」の 3）。`yarn test`の`scripts/generate-css-tables.spec.ts`は、コミットした 2 つの表とインストールされている依存から生成器が作るものが同じか、`mdn-data`が宣言した版かを確かめる。作り直さずに版だけ上げた PR は、これで落ちる。作り直したら、`cargo test --locked --offline -p kd_css`と、ランダム入力の差分テスト（`fuzz-css.mjs` → `generate-css-oracle.mjs` → `check-css.mjs`）を通す。
+`property_table.rs`は、kd_css が値を書き換えるプロパティの一覧で、ここに無いプロパティの値は空白を詰めるだけになる（RFC §10）。元データの`mdn-data`は、ルートの`devDependencies`に固定し、Renovate が上げる（`.github/renovate.json`の`mdn-data`のグループ）。cssnano はすべてのプロパティの値を書き換え、プロパティの一覧を読まないので、一覧の版は v2 から決まらず、このリポジトリが宣言する。一覧が大きいほど cssnano に近い。新しい版が外したプロパティは、`generate-css-tables.mjs`の`extras`に足して一覧に残す（外すと、cssnano が書き換える値を kd_css が書き換えなくなる）。`color_table.rs`の元データの`@colordx/core`は、cssnano の colormin が引く版のまま（「v2 の oracle」の 3）。`yarn test`の`scripts/generate-css-tables.spec.ts`は、コミットした 2 つの表とインストールされている依存から生成器が作るものが同じか、`mdn-data`が宣言した版かを確かめる。作り直さずに版だけ上げた PR は、これで落ちる。作り直したら、`cargo test --locked --offline -p kd_css`と、ランダム入力の差分テスト（`fuzz-css.mjs` → `generate-css-oracle.mjs` → `check-css.mjs`）を通す。
 
-ランダム入力の差分テスト（`scripts/fuzz-*.mjs`）は、コーパスをコミットしない（シードで決まる）。上のテーブルを作り直したとき、または`kd_html`/`kd_css`/`kd_js`の挙動を変えたときに、その分野のものを回す。各スクリプトの先頭に、対応する`--ignored`のテストと環境変数がある。
+ランダム入力の差分テスト（`scripts/fuzz-*.mjs`）は、コーパスをコミットしない（シードで決まる）。上のテーブルを作り直したとき、または`kd_html`/`kd_css`/`kd_js`の挙動を変えたときに、その分野のものを回す。各スクリプトの先頭に、対応する`--ignored`のテストと環境変数がある。`fuzz-html-pipeline.mjs`と`fuzz-html-chain.mjs`は、コード（`<script>` `<style>`、`style`属性、イベントハンドラ）を含むページをコーパスから除く（v3 はコードを整形しない。RFC §2）。そのコードは、圧縮の差分テスト（`fuzz-html-minify.mjs`、`check-kd-js-*.mjs`）で見る。
 
 Pug から TSX への変換器（`scripts/pug-to-tsx.mjs`）は、小さな Pug のプロジェクトを変換して、出力を確かめ、`@d-zero/tsconfig`（strictest）の型検査に通す回帰テスト（`scripts/pug-to-tsx.spec.ts`）を持つ。変換器は、変換するプロジェクトの`pug-lexer`/`pug-parser`/`acorn`を読む。テストのために、このリポジトリはそれらを devDependencies に持つ（変換器そのものは、パッケージに入らない。`docs/v3/MIGRATION.md` §3.4）。テストは`yarn build`が済んでいるときに動く。済んでいなければ、手元ではスキップし、CI では失敗する。この依存を足す前の`node_modules`のままだと失敗するので、`yarn install`を済ませる。テストが使うのは、このリポジトリが固定した版（`acorn` 8 など）で、利用者のプロジェクトの版ではない。変換器は`acorn` 7（Pug が引く版）なら、理由を出して止まる。
 
@@ -134,7 +134,7 @@ Pug から TSX への変換器（`scripts/pug-to-tsx.mjs`）は、小さな Pug 
 
 ## v2 の oracle
 
-v3 は「v2 と出力がバイト一致する」ことを目標にしているので、v2 の実物と比べる場所が 3 つある。どれも、公開済みの v2 のパッケージ（`2.0.0-alpha.17`）を npm から取り、このリポジトリに v2 のソースは置かない。
+v3 は「v2 と出力がバイト一致する」ことを目標にしているので、v2 の実物と比べる場所が 4 つある。どれも、公開済みの v2 のパッケージ（`2.0.0-alpha.17`）を npm から取り、このリポジトリに v2 のソースは置かない。
 
 **1. DOM の直列化（golden とランダム入力の差分テスト）**: ルートの`devDependencies`の`"kamado-v2": "npm:kamado@2.0.0-alpha.17"`が、v2 の`kamado`に別名を付けたもの。次のスクリプトが`import { domSerialize } from 'kamado-v2/utils/dom'`で使う。
 
@@ -170,13 +170,21 @@ v3 の出力と比べるには「比較ハーネスとベンチマーク」の`c
 
 `crates/kd_css/tests/rules.rs`は`generate-css-rule-tests.mjs`が書くので、手では編集しない。手で書くテストは`crates/kd_css/tests/rules_hand.rs`に置く。
 
+**4. HTML の整形・圧縮と JSX（`kd_html`・`kd_js`のテーブルと、ランダム入力の差分テスト）**: v2 の`@kamado-io/page-compiler`が使う`prettier`・`html-minifier-terser`・`character-entities`と、`@kamado-io/jsx-compiler`が使う`esbuild`を、同じ版でルートの`devDependencies`に固定する（`npm view @kamado-io/page-compiler@2.0.0-alpha.17 dependencies`と`npm view @kamado-io/jsx-compiler@2.0.0-alpha.17 dependencies`で読める）。`prettier`と`esbuild`は、このリポジトリが別の用途でも使う（`yarn lint`の整形と、`kamado`のランタイム依存）ので、oracle は`kamado-v2`と同じ`npm:`の別名にする: `prettier-v2`と`esbuild-v2`。ルートの`prettier`と`esbuild`は oracle ではなく、Renovate が通常どおり上げる。`html-minifier-terser`（`@types/html-minifier-terser`も）と`character-entities`は別名にしない。これらは Renovate の対象から外してある（`.github/renovate.json`）。使うスクリプトは次のとおり。
+
+- `scripts/generate-prettier-tables.mjs`（`prettier-v2`のプラグインから表を読む）、`scripts/generate-jsx-entities.mjs`（`esbuild-v2`に尋ねる）、`scripts/generate-entities.mjs`、`scripts/generate-minifier-tables.mjs`、`scripts/generate-minify-golden.mjs`
+- `scripts/v2-print.mjs`（`prettier-v2`と`html-minifier-terser`を v2 と同じ設定で動かす。`fuzz-html-print.mjs`・`fuzz-html-json.mjs`・`fuzz-html-pipeline.mjs`・`fuzz-html-chain.mjs`・`fuzz-html-minify.mjs`が使う）、`scripts/check-kd-js-jsx.mjs`（`esbuild-v2`で case を bundle する）
+
+別名の esbuild を足すと、`yarn install`が`@esbuild/<os>-<arch>`をトップに置くのはどちらの版か決まらない。そのため、`kd_core`のテストが呼ぶ実行ファイルは、Node が`esbuild`パッケージから解決するもの（`esbuild_for_tests`。ランタイムの`findEsbuildBinary`と同じ解決）にしてある。
+
 **oracle の版を動かすとき**:
 
 1. 1 は、ルートの`package.json`の`kamado-v2`の版を上げる（バージョンは固定。`^`は付けない）。`yarn install`のあと、上の 5 つのスクリプトのうち出力を書くもの（`generate-html-golden.mjs`と`generate-html-attr-golden.mjs`）を実行し、`git diff`で`crates/kd_html/tests/golden/`と`crates/kd_html/tests/attr_golden/`の変化が v2 の変更によるものか確かめる。ランダム入力のスクリプトは、差が出ないことを確かめる。
 2. 2 は、`benchmarks/v2-baseline/package.json`の 3 つの`@kamado-io/*`・`kamado`を**同じ版**に揃えて上げ、そのディレクトリで`yarn install`して`yarn.lock`を更新する。
 3. 3 は、v2 の`@kamado-io/style-compiler`が固定する版が変わったときだけ、ルートの`cssnano`・`postcss`・`postcss-import`をそれに合わせる。`postcss-custom-media`は、v2 の`@d-zero/postcss-config`が固定する版が変わったときに、同じ要領で合わせる。`yarn install`のあと、`generate-css-golden.mjs`と`generate-css-rule-tests.mjs`を実行して`git diff`を確かめ、`cargo test --locked --offline -p kd_css`を通す。ランダム入力（`fuzz-css.mjs` → `generate-css-oracle.mjs` → `check-css.mjs`）と、`check-css-import.mjs`・`check-css-custom-media.mjs`も実行する。`check-css-import.mjs`の`INTENDED`と`check-css-custom-media.mjs`の`INTENDED`は、oracle が書く文字列を含むので、版を動かすと書式の差で落ちることがある。落ちた文字列が書式だけの差か、意味の差かを見分けてから直す。
-4. v2 の API が変わって import が通らなくなったら、スクリプト側を合わせる。v2 の出力が変わったなら、変わった理由が RFC §2 の意図した差に当たるか確かめ、当たらなければ v3 のほうを直す。
-5. v2 の保守が止まって oracle を更新しなくなったら、`kamado-v2`の版、`benchmarks/v2-baseline/`、CSS の`cssnano`・`postcss`・`postcss-import`・`postcss-custom-media`の版は固定したままでよい（golden はコミット済みで、実行時はこの依存を使わない）。
+4. 4 は、v2 の`@kamado-io/page-compiler`が固定する版が変わったときに、ルートの`prettier-v2`・`html-minifier-terser`（と`@types/html-minifier-terser`）・`character-entities`をそれに合わせる。`@kamado-io/jsx-compiler`が固定する版が変わったときは、`esbuild-v2`を合わせる。`yarn install`のあと、動かした依存に当たる「何を更新したら、何を作り直すか」の表のスクリプトを実行する（`tables.rs`は生成のあとに`cargo fmt --all`）。`git diff`で、変化が v2 の版の差によるものか確かめ、`cargo test --locked --offline --workspace`と`yarn test`を通す。`prettier-v2`なら`fuzz-html-print.mjs`・`fuzz-html-json.mjs`・`fuzz-html-pipeline.mjs`・`fuzz-html-chain.mjs`・`fuzz-html-minify.mjs`、`esbuild-v2`なら`check-kd-js-jsx.mjs`（手書きと`fuzz`、`KD_JS_FUNCTION=1`も）を実行して、差が出ないことを確かめる。差が出たら、v2 の版の差か kd_html・kd_js の差かを分け、後者を直す。
+5. v2 の API が変わって import が通らなくなったら、スクリプト側を合わせる。v2 の出力が変わったなら、変わった理由が RFC §2 の意図した差に当たるか確かめ、当たらなければ v3 のほうを直す。
+6. v2 の保守が止まって oracle を更新しなくなったら、`kamado-v2`の版、`benchmarks/v2-baseline/`、CSS の`cssnano`・`postcss`・`postcss-import`・`postcss-custom-media`の版、`prettier-v2`・`esbuild-v2`・`html-minifier-terser`・`character-entities`の版は固定したままでよい（golden はコミット済みで、実行時はこの依存を使わない）。
 
 `benchmarks/v2-baseline/.yarn/`は`.gitignore`の対象。
 
