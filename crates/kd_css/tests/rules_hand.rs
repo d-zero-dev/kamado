@@ -94,3 +94,57 @@ fn adjacent_blocks_take_the_rules_of_the_next_one_when_the_rules_are_neighbours(
 		),
 	]);
 }
+
+#[test]
+fn a_decision_does_not_apply_to_a_longer_property_or_value() {
+	// The input has the fragment of a decision, the output only a longer
+	// property or value that contains it.
+	for (input, output) in [
+		("a{height:0%;max-height:0%}", "a{height:0;max-height:0%}"),
+		("a{width:0%;min-width:0%}", "a{width:0;min-width:0%}"),
+		("a{width:0%;border-width:0%}", "a{width:0;border-width:0%}"),
+		("a{top:0%}b{padding-top:0%}", "a{top:0}b{padding-top:0%}"),
+		(
+			"a{opacity:initial}b{fill-opacity:initial}",
+			"a{opacity:1}b{fill-opacity:initial}",
+		),
+		(
+			"a{animation-name:RED}b{animation-name:REDS}",
+			"a{animation-name:red}b{animation-name:REDS}",
+		),
+		(
+			"a{animation-name:RED}b{--my-animation-name:RED}",
+			"a{animation-name:red}b{--my-animation-name:RED}",
+		),
+		(
+			"a{border-width:0px 0% 0em}b{mask-border-width:0px 0% 0em}",
+			"a{border-width:0}b{mask-border-width:0 0 0}",
+		),
+	] {
+		let (undone, used) = common::undo_decisions(input, output);
+		assert_eq!((undone.as_str(), used), (output, Vec::new()), "{input}");
+	}
+}
+
+#[test]
+fn the_properties_of_mdn_data_have_their_values_rewritten() {
+	common::check_all(&[
+		("a{stroke-color:RED}", "a{stroke-color:red}"),
+		(
+			"a{corner-shape:superellipse(2.0)}",
+			"a{corner-shape:superellipse(2)}",
+		),
+		("a{text-box-edge:0px}", "a{text-box-edge:0}"),
+	]);
+}
+
+#[test]
+fn a_property_that_mdn_data_no_longer_lists_keeps_having_its_value_rewritten() {
+	// cssnano rewrites the value of every property, so dropping a name would
+	// widen the difference from it.
+	common::check_all(&[
+		("a{azimuth:0px}", "a{azimuth:0}"),
+		("a{image-region:0px}", "a{image-region:0}"),
+		("a{input-security:RED}", "a{input-security:red}"),
+	]);
+}
