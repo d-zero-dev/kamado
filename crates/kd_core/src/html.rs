@@ -586,6 +586,28 @@ impl Pipeline {
 	}
 }
 
+impl Pipeline {
+	/// The injections the dev server writes into the static HTML file at `url`
+	/// (the URL its path has: `/dir/` for `index<outputExtension>`, else
+	/// `/path/file.html`): the ones of `mode: serve` and `mode: both` whose
+	/// `pages` and `exclude` match it, with the overrides of `html.overrides`
+	/// applied. Asked before the file is read, so a file nothing is written
+	/// into is not read at all. Nothing else of the pipeline runs on such a
+	/// file (no includes, rules, image sizes, doctype, entities, formatter or
+	/// minifier, and no `html.onError`: no stage can fail): the caller splices
+	/// these in with `inject::apply_to_text`, which keeps the ones of the phase
+	/// again (a public function cannot rely on its caller having done it);
+	/// the filter here is what lets the caller skip reading the file.
+	pub(crate) fn static_injects(&self, url: &str) -> Vec<&Inject> {
+		self.effective(url)
+			.inject
+			.iter()
+			.filter(|i| i.applies(url) && i.item.applies_in(Phase::Serve))
+			.map(|i| &i.item)
+			.collect()
+	}
+}
+
 // ----- reading files, recording what was read -----
 
 /// Reads for the includes and the image sizes and remembers every file asked
