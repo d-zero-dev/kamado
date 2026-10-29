@@ -38,6 +38,13 @@
  * An attribute name that the runtime does not write (`@click`, an emoji) is printed as
  * `warning: <file>: ...` after the count of files; the page would lose the attribute.
  *
+ * A sidecar `.json` (a JSON with a page of its name, `.pug` `.html` `.tsx` or `.jsx`, next to
+ * it) and the front matter of an `.html` under `<project>/__assets` that name a
+ * `.pug` in `layout` are written to `<out>` with the name as a layout has it (no extension),
+ * and printed as `layout rewritten: <file>`; the files in the project are not touched. A
+ * `warning:` follows a name that no converted file ends with (the copy is written), and a `.json`
+ * that is not valid JSON or has no string for `layout` at the top level (no copy is written).
+ *
  * Read the output before using it: the names of the data variables
  * (`data`, `blocks`) follow the files of the data directory (see MIGRATION.md 3.4).
  */
@@ -97,9 +104,15 @@ const VOID = new Set(
 );
 // html attribute name (lower case) -> React prop name
 const { REACT_PROP_NAMES } = await import('./react-prop-names.mjs');
-const { PROPS } = await import(
+const { ELEMENT_BOOLEAN_PROPS, PROPS } = await import(
 	new URL('../packages/kamado/dist/jsx/attr-table.js', import.meta.url).href
 );
+if (ELEMENT_BOOLEAN_PROPS === undefined) {
+	console.error(
+		'packages/kamado/dist is older than the table of attributes (no ELEMENT_BOOLEAN_PROPS): run `yarn build`',
+	);
+	process.exit(1);
+}
 const { el } = await import(
 	new URL('../packages/kamado/dist/jsx/runtime.js', import.meta.url).href
 );
@@ -145,6 +158,10 @@ for (const [prop, attr, kind] of PROPS) {
 	propOf.set(prop.toLowerCase(), prop);
 	kindOf.set(prop, kind);
 }
+// `tag:prop` of the boolean props that only one element writes (`option:selected`).
+const elementBooleans = new Set(
+	ELEMENT_BOOLEAN_PROPS.map(([tag, prop]) => `${tag}:${prop}`),
+);
 // The types of `@types/react` know only the React spelling (`dateTime`, `srcSet`), which
 // the table of the runtime has no entry for (React writes them as they are). Names of
 // React 19 that `possibleStandardNames` lacks are added by hand after them.
@@ -1344,33 +1361,6 @@ function useStmt(stmt, ctx) {
  * @param tag
  * @param ctx
  */
-/**
- * The `value` (as a JSX attribute value) of the first option marked `selected` below `nodes`.
- * @param nodes
- */
-function selectedValue(nodes) {
-	for (const n of nodes) {
-		if (n.type === 'Tag' && n.name === 'option') {
-			const has = n.attrs.some((a) => a.name === 'selected');
-			const value = n.attrs.find((a) => a.name === 'value');
-			if (has && value && typeof value.val === 'string') {
-				return isStringLiteral(value.val)
-					? `{${JSON.stringify(value.val.slice(1, -1).replaceAll(/\\(["'\\])/g, '$1'))}}`
-					: `{${value.val}}`;
-			}
-		}
-		const inner = n.block?.nodes ?? n.consequent?.nodes ?? [];
-		const found = selectedValue(inner);
-		if (found !== undefined) return found;
-	}
-	return;
-}
-
-/**
- *
- * @param tag
- * @param ctx
- */
 function attrsOf(tag, ctx) {
 	const classes = [];
 	const out = [];
@@ -1425,9 +1415,15 @@ function attrsOf(tag, ctx) {
 		}
 		const prop = propOf.get(name.toLowerCase()) ?? name;
 		const kind = kindOf.get(prop);
-		if (val === true) {
-			// BOOLEAN kinds are bare; others are empty strings.
-			out.push(kind === 1 || kind === 2 ? prop : `${prop}=""`);
+		// `selected` of an option and `checked` of an input are not in the table (React writes
+		// them in the code of the element). `disabled="disabled"` of Pug is the attribute
+		// `disabled`, and the types of these props take a boolean, not a string (the kind
+		// OVERLOADED_BOOLEAN, `download`, takes a string: it stays as written).
+		const element = elementBooleans.has(`${tag.name}:${prop}`);
+		if (val === true || ((element || kind === 1) && isString && strValue === name)) {
+			// BOOLEAN kinds are bare; others are empty strings. An empty string is not selected
+			// or checked.
+			out.push(kind === 1 || kind === 2 || element ? prop : `${prop}=""`);
 		} else if (
 			isString &&
 			NUMBER_PROPS.has(prop) &&
@@ -1533,17 +1529,9 @@ function node(n, ctx, depth) {
 		}
 		case 'Tag': {
 			const attrs = attrsOf(n, ctx);
-			if (n.name === 'select') {
-				// React ignores `selected` on an option: the select says which one is.
-				const chosen = selectedValue(n.block ? n.block.nodes : []);
-				if (chosen !== undefined) attrs.push(`defaultValue=${chosen}`);
-			}
-			if (n.name === 'option') {
-				const at = attrs.findIndex((a) => a === 'selected' || a.startsWith('selected='));
-				if (at !== -1) attrs.splice(at, 1);
-			}
 			// Pug writes a page in the order it was written: nothing moves into the
-			// head and form controls keep the order of their attributes.
+			// head, form controls keep the order of their attributes and so does the
+			// `selected` of an option (a `defaultValue` on the select would move it last).
 			if (n.name === 'html') attrs.push('static');
 			const open = attrs.length > 0 ? `${n.name} ${attrs.join(' ')}` : n.name;
 			const kids = n.block ? n.block.nodes : [];
@@ -1883,12 +1871,151 @@ for (let again = true; again;) {
 		again = true;
 	}
 }
+// The name of a layout has no extension (RFC §6), and the `.pug` that a sidecar `.json` or the
+// front matter of a page names became a component: the name without `.pug` is written in a
+// copy of the file under `<out>`, where the source is not touched. The rest of the file stays
+// as it was, so that nothing else in a diff against the source moves. A name that no converted
+// file ends with is written the same (the component may be written by hand) and warned of.
+const converters = [...converted.keys()].map((f) => f.split(path.sep).join('/'));
+const layoutRewritten = [];
+/**
+ * Writes the copy of a file whose `layout` names a `.pug` to the output.
+ * @param file - The file in the project
+ * @param name - The `layout` it has, with `.pug`
+ * @param text - The text of the file with the name rewritten
+ */
+function writeLayoutCopy(file, name, text) {
+	const rel = path.relative(srcRoot, file);
+	const copy = path.join(outRoot, rel);
+	mkdirSync(path.dirname(copy), { recursive: true });
+	writeFileSync(copy, text);
+	layoutRewritten.push(rel);
+	// A name may start with `/` or `./`: what is looked for is the path it ends with.
+	const tail = name.replace(/^(?:\.?\/)+/, '');
+	if (!converters.some((c) => c.endsWith(`/${tail}`))) {
+		warnings.add(`${rel}: layout "${name}" names no converted file`);
+	}
+}
+/**
+ * Where the text of the string that is the value of the top-level `layout` key of a JSON text
+ * lies: the offsets of what is between its quotes (a `layout` of an object inside does not count).
+ * With the key twice it is the last one, which `JSON.parse` reads.
+ * @param text - The JSON text, which parses
+ * @returns The offsets, or `undefined` when the key has no string as its value
+ */
+function topLevelLayout(text) {
+	let found;
+	const endOfString = (from) => {
+		let end = from;
+		while (text[end] !== '"') end += text[end] === '\\' ? 2 : 1;
+		return end;
+	};
+	let depth = 0;
+	for (let i = 0; i < text.length; i++) {
+		switch (text[i]) {
+			case '"': {
+				const end = endOfString(i + 1);
+				if (depth === 1 && text.slice(i + 1, end) === 'layout') {
+					const colon = /^\s*:\s*"/.exec(text.slice(end + 1));
+					if (colon) {
+						const start = end + 1 + colon[0].length;
+						found = [start, endOfString(start)];
+					}
+				}
+				i = end;
+				break;
+			}
+			case '{':
+			case '[': {
+				depth++;
+				break;
+			}
+			case '}':
+			case ']': {
+				depth--;
+				break;
+			}
+		}
+	}
+	return found;
+}
+/**
+ * Writes the copy of a sidecar JSON whose top-level `layout` names a `.pug`.
+ * @param f - The JSON in the project
+ */
+function rewriteSidecarLayout(f) {
+	const rel = path.relative(srcRoot, f);
+	// A JSON is the sidecar of a page only with a page of its name next to it (`about.pug`,
+	// `about.html`, `about.tsx`, `about.jsx`); any other is data, which is not read.
+	const stem = f.slice(0, -'.json'.length);
+	if (!['.pug', '.html', '.jsx', '.tsx'].some((ext) => existsSync(`${stem}${ext}`)))
+		return;
+	const text = readFileSync(f, 'utf8');
+	let name;
+	try {
+		name = JSON.parse(text)?.layout;
+	} catch {
+		const named = /"layout"\s*:\s*"([^"\\]*\.pug)"/.exec(text)?.[1];
+		if (named !== undefined) {
+			warnings.add(`${rel}: not valid JSON, the layout "${named}" is not rewritten`);
+		}
+		return;
+	}
+	if (typeof name !== 'string' || !name.endsWith('.pug')) return;
+	const at = topLevelLayout(text);
+	if (at === undefined || !text.slice(at[0], at[1]).endsWith('.pug')) {
+		warnings.add(`${rel}: the layout "${name}" is not rewritten`);
+		return;
+	}
+	// Only `.pug` is cut from the text: no replacement string reads `$` in a name.
+	writeLayoutCopy(f, name, text.slice(0, at[1] - 4) + text.slice(at[1]));
+}
+/**
+ * Writes the copy of a page whose front matter has a `layout` that names a `.pug`.
+ * @param f - The `.html` in the project
+ */
+function rewriteFrontMatterLayout(f) {
+	const rel = path.relative(srcRoot, f);
+	const text = readFileSync(f, 'utf8');
+	// A byte order mark in front of the `---` is not a part of the front matter.
+	const bom = text.startsWith(String.fromCodePoint(0xfe_ff)) ? 1 : 0;
+	const front = /^---\r?\n[\s\S]*?\r?\n---(?=\r?\n|$)/.exec(text.slice(bom))?.[0];
+	if (front === undefined) return;
+	const line =
+		/^layout[ \t]*:[ \t]*(["']?)([^"'\s#][^"'\r\n#]*?\.pug)\1(?=[ \t]*(?:#.*)?\r?$)/m.exec(
+			front,
+		);
+	if (!line) {
+		// A `layout` of a form that is not read (a `#` in the name, a flow style): the page
+		// would keep naming the `.pug`, and the build of v3 would not find the layout.
+		if (/^layout[ \t]*:.*\.pug/m.test(front)) {
+			warnings.add(`${rel}: the layout of the front matter is not rewritten`);
+		}
+		return;
+	}
+	const end = bom + line.index + line[0].length - line[1].length;
+	writeLayoutCopy(f, line[2], text.slice(0, end - 4) + text.slice(end));
+}
+walkDir(path.join(srcRoot, '__assets'), (f) => {
+	if (SKIPS.some((text) => f.includes(text))) return;
+	switch (path.extname(f)) {
+		case '.json': {
+			rewriteSidecarLayout(f);
+			break;
+		}
+		case '.html': {
+			rewriteFrontMatterLayout(f);
+			break;
+		}
+	}
+});
 // The pages use `<html static>` and may use `command` / `commandfor`: the types of
 // @types/react do not know them, so they are declared next to the pages.
 const declarations = path.join(outRoot, '__assets', 'kamado-jsx.d.ts');
 mkdirSync(path.dirname(declarations), { recursive: true });
 writeFileSync(declarations, jsxDeclarations());
 console.log([...converted].length, 'files converted');
+for (const rel of layoutRewritten) console.log(`layout rewritten: ${rel}`);
 for (const warning of warnings) console.log(`warning: ${warning}`);
 for (const [f, message] of failures)
 	console.log(`not converted: ${path.relative(srcRoot, f)}: ${message}`);
