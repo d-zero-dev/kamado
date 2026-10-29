@@ -28,10 +28,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { domSerialize } from 'kamado-v2/utils/dom';
-
 import { createInputGenerator } from './html-fuzz.mjs';
-import { addDoctype, prettierHtml, v2Minify } from './v2-print.mjs';
+import { addDoctype, hasCode, prettierHtml, v2Minify, v2Serialize } from './v2-print.mjs';
 
 const [outDirArg, countArg = '1000', seedArg = '1', minifyArg = 'off'] =
 	process.argv.slice(2);
@@ -52,13 +50,11 @@ for (let n = 0; n < count; n++) {
 	const input = nextInput();
 	let expected;
 	try {
-		const serialized = await domSerialize(input, { hook: () => {} });
-		// Prettier formats the code in `<script>`, `<style>`, `style` attributes
-		// and event handlers, and v2 minified that code right afterwards. With
-		// the code minifiers off here, such pages would only show prettier's
-		// code layout, which is not what v2 outputs; the code is compared
-		// together with the code minifiers.
-		if (/<(?:script|style)\b|\sstyle=|\son[a-z]+=/i.test(serialized)) {
+		const serialized = await v2Serialize(input);
+		// With the code minifiers off here, pages with code would only show
+		// prettier's code layout, which is not what v2 outputs; the code is
+		// compared together with the code minifiers.
+		if (hasCode(serialized)) {
 			skipped++;
 			continue;
 		}

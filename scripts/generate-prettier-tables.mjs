@@ -1,34 +1,57 @@
 /**
- * Generates `crates/kd_html/src/print/tables.rs` from the HTML plugin of the
- * installed prettier: the known HTML element names and the known attribute
- * names per element, which the printer uses to lower-case names the way
- * prettier does (an unknown name keeps its case).
+ * Generates `crates/kd_html/src/print/tables.rs` and `entity_names.rs` from the
+ * HTML plugin of prettier: the known HTML element names and the known
+ * attribute names per element, which the printer uses to lower-case names the
+ * way prettier does (an unknown name keeps its case), and the named character
+ * references the lexer accepts.
  *
- * Source of truth: `node_modules/prettier/plugins/html.mjs`. The two tables
- * are found by their first entries rather than by variable names, which the
- * bundle mangles. A prettier upgrade that changes the structure makes this
- * script fail loudly instead of writing a wrong table.
- * Run it when prettier is upgraded: `node scripts/generate-prettier-tables.mjs`.
+ * Source of truth: `node_modules/prettier-v2/plugins/html.mjs`, the prettier
+ * that the published v2 pins (`prettier-v2` is an alias of it: `docs/v3/development.md`,
+ * "v2 の oracle"; the root `prettier` is the one `yarn lint` formats with). The
+ * two tables are found by their first entries rather than by variable names,
+ * which the bundle mangles. A prettier change that alters the structure makes
+ * this script fail loudly instead of writing a wrong table.
+ *
+ * Run it when `prettier-v2` is changed: `node scripts/generate-prettier-tables.mjs`,
+ * then `cargo fmt --all` (the committed `tables.rs` is formatted).
+ * `scripts/generate-prettier-tables.spec.ts` fails while the committed tables are
+ * not what it writes.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
-const source = readFileSync(
-	path.join(root, 'node_modules', 'prettier', 'plugins', 'html.mjs'),
-	'utf8',
-);
-const version = JSON.parse(
-	readFileSync(path.join(root, 'node_modules', 'prettier', 'package.json'), 'utf8'),
-).version;
+const require = createRequire(import.meta.url);
+const outDir = path.join(root, 'crates', 'kd_html', 'src', 'print');
+
+/**
+ * Reads what the tables are made from, out of `node_modules`.
+ * @returns {{ source: string, version: string }} The source of the HTML plugin
+ * of `prettier-v2`, and its installed version
+ * @example
+ * const { source, version } = readSources();
+ * version; // what package.json declares for `prettier-v2`
+ */
+export function readSources() {
+	const manifest = require.resolve('prettier-v2/package.json');
+	return {
+		source: readFileSync(
+			path.join(path.dirname(manifest), 'plugins', 'html.mjs'),
+			'utf8',
+		),
+		version: require('prettier-v2/package.json').version,
+	};
+}
 
 /**
  * Evaluates the bracketed literal that starts at `open` (an index of `(`),
  * i.e. the argument of `new Map(` / `new Set(`.
+ * @param {string} source - The source of the HTML plugin
  * @param {number} open - Index of the opening parenthesis
  * @returns {unknown} The evaluated literal
  */
-function literalAt(open) {
+function literalAt(source, open) {
 	let depth = 0;
 	for (let i = open; i < source.length; i++) {
 		const c = source[i];
@@ -45,10 +68,11 @@ function literalAt(open) {
 }
 
 /**
+ * @param {string} source - The source of the HTML plugin
  * @param {string} anchor - Text that starts the constructor call
  * @returns {number} Index of the opening parenthesis of the call
  */
-function callStart(anchor) {
+function callStart(source, anchor) {
 	const at = source.indexOf(anchor);
 	if (at === -1) {
 		throw new Error(`anchor not found: ${anchor}`);
@@ -56,78 +80,136 @@ function callStart(anchor) {
 	return at + anchor.indexOf('(');
 }
 
-const attributes = literalAt(callStart('new Map([["*",new Set(["accesskey"'));
-const names = literalAt(
-	callStart('new Set(["a","abbr","acronym","address","applet","area"'),
-);
-if (!Array.isArray(attributes) || !Array.isArray(names) || names.length < 100) {
-	throw new Error('the tables have an unexpected shape');
+/**
+ * The element and attribute tables of `tables.rs`.
+ * @param {string} source - The source of the HTML plugin
+ * @param {string} version - The version of prettier it belongs to
+ * @returns {{ text: string, elements: number, attributeLists: number }}
+ * The file, and how many elements and attribute lists it holds
+ * @example
+ * const { source, version } = readSources();
+ * renderElementTables(source, version).text.split('\n')[1]; // '// Source: prettier <version> (plugins/html.mjs).'
+ */
+export function renderElementTables(source, version) {
+	const attributes = literalAt(
+		source,
+		callStart(source, 'new Map([["*",new Set(["accesskey"'),
+	);
+	const names = literalAt(
+		source,
+		callStart(source, 'new Set(["a","abbr","acronym","address","applet","area"'),
+	);
+	if (!Array.isArray(attributes) || !Array.isArray(names) || names.length < 100) {
+		throw new Error('the tables have an unexpected shape');
+	}
+	const lines = [
+		'// @generated by scripts/generate-prettier-tables.mjs — do not edit by hand.',
+		`// Source: prettier ${version} (plugins/html.mjs).`,
+		'',
+		'/// Known HTML element names (lower case), sorted.',
+		`pub static ELEMENT_NAMES: [&str; ${names.length}] = [`,
+		...[...names].toSorted().map((n) => `\t${JSON.stringify(n)},`),
+		'];',
+		'',
+		'/// Known attribute names per element (`*` for every element), sorted by element.',
+		`pub static ATTRIBUTES: [(&str, &[&str]); ${attributes.length}] = [`,
+		...[...attributes]
+			.toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+			.map(
+				([element, set]) =>
+					`\t(${JSON.stringify(element)}, &[${[...set]
+						.toSorted()
+						.map((n) => JSON.stringify(n))
+						.join(', ')}]),`,
+			),
+		'];',
+		'',
+	];
+	return {
+		text: lines.join('\n'),
+		elements: names.length,
+		attributeLists: attributes.length,
+	};
 }
 
-const lines = [
-	'// @generated by scripts/generate-prettier-tables.mjs — do not edit by hand.',
-	`// Source: prettier ${version} (plugins/html.mjs).`,
-	'',
-	'/// Known HTML element names (lower case), sorted.',
-	`pub static ELEMENT_NAMES: [&str; ${names.length}] = [`,
-	...[...names].toSorted().map((n) => `\t${JSON.stringify(n)},`),
-	'];',
-	'',
-	'/// Known attribute names per element (`*` for every element), sorted by element.',
-	`pub static ATTRIBUTES: [(&str, &[&str]); ${attributes.length}] = [`,
-	...[...attributes]
-		.toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-		.map(
-			([element, set]) =>
-				`\t(${JSON.stringify(element)}, &[${[...set]
-					.toSorted()
-					.map((n) => JSON.stringify(n))
-					.join(', ')}]),`,
-		),
-	'];',
-	'',
-];
-const out = path.join(root, 'crates', 'kd_html', 'src', 'print', 'tables.rs');
-writeFileSync(out, lines.join('\n'));
-process.stdout.write(
-	`wrote ${path.relative(root, out)}: ${names.length} elements, ${attributes.length} attribute lists\n`,
-);
+/**
+ * The named character references the lexer accepts (Angular's table: a name
+ * outside it in `&name;` is a parse error). The object literal runs from its
+ * first entry to the `zwnj` entry that closes it; the lexer adds `ngsp` after
+ * it, which is added here too.
+ * @param {string} source - The source of the HTML plugin
+ * @param {string} version - The version of prettier it belongs to
+ * @returns {{ text: string, count: number }} The file, and how many names it holds
+ * @example
+ * const { source, version } = readSources();
+ * renderEntityNames(source, version).count; // the number of names in `entity_names.rs`
+ */
+export function renderEntityNames(source, version) {
+	const entityStart = source.indexOf('{AElig:"');
+	const entityEnd = source.indexOf('zwnj:"\\u200C"}', entityStart);
+	if (entityStart === -1 || entityEnd === -1) {
+		throw new Error('the entity table was not found');
+	}
+	const entities = new Function(
+		`return (${source.slice(entityStart, entityEnd + 'zwnj:"\\u200C"}'.length)});`,
+	)();
+	// The lexer sets it to a private use character, which the filter below keeps
+	// (a name with an empty text is not a reference). Adding it here has to follow
+	// the lexer, so the table fails to be made when the lexer stops adding it.
+	if (!source.includes('.ngsp="\\uE500"')) {
+		throw new Error('the lexer does not add ngsp');
+	}
+	entities.ngsp = String.fromCodePoint(0xe5_00);
+	const entityNames = Object.keys(entities)
+		.filter((name) => entities[name])
+		.toSorted();
+	if (entityNames.length < 2000) {
+		throw new Error('the entity table has an unexpected size');
+	}
+	const lines = [
+		'// @generated by scripts/generate-prettier-tables.mjs — do not edit by hand.',
+		`// Source: prettier ${version} (plugins/html.mjs, the lexer's named character references).`,
+		'',
+		`static NAMES: [&str; ${entityNames.length}] = [`,
+		...entityNames.map((n) => `\t${JSON.stringify(n)},`),
+		'];',
+		'',
+		'/// Whether `&name;` is a character reference the lexer accepts.',
+		'#[must_use]',
+		'pub fn is_known(name: &str) -> bool {',
+		'\tNAMES.binary_search(&name).is_ok()',
+		'}',
+		'',
+	];
+	return { text: lines.join('\n'), count: entityNames.length };
+}
 
-// The named character references the lexer accepts (Angular's table: a name
-// outside it in `&name;` is a parse error). The object literal runs from its
-// first entry to the `zwnj` entry that closes it; `ngsp` is added after it.
-const entityStart = source.indexOf('{AElig:"');
-const entityEnd = source.indexOf('zwnj:"\\u200C"}', entityStart);
-if (entityStart === -1 || entityEnd === -1) {
-	throw new Error('the entity table was not found');
+/**
+ * Whether Node was started with this file. Node resolves the main module
+ * through symbolic links while `argv[1]` keeps the path as given; a runner or
+ * `--eval` has no path of a file that exists.
+ * @returns {boolean} Whether this is the script that runs
+ */
+function isMain() {
+	try {
+		return realpathSync(process.argv[1]) === import.meta.filename;
+	} catch {
+		return false;
+	}
 }
-const entities = new Function(
-	`return (${source.slice(entityStart, entityEnd + 'zwnj:"\\u200C"}'.length)});`,
-)();
-entities.ngsp = '';
-const entityNames = Object.keys(entities)
-	.filter((name) => entities[name])
-	.toSorted();
-if (entityNames.length < 2000) {
-	throw new Error('the entity table has an unexpected size');
+
+if (isMain()) {
+	const { source, version } = readSources();
+	const tables = renderElementTables(source, version);
+	const out = path.join(outDir, 'tables.rs');
+	writeFileSync(out, tables.text);
+	process.stdout.write(
+		`wrote ${path.relative(root, out)}: ${tables.elements} elements, ${tables.attributeLists} attribute lists\n`,
+	);
+	const entities = renderEntityNames(source, version);
+	const entityOut = path.join(outDir, 'entity_names.rs');
+	writeFileSync(entityOut, entities.text);
+	process.stdout.write(
+		`wrote ${path.relative(root, entityOut)}: ${entities.count} names\n`,
+	);
 }
-const entityLines = [
-	'// @generated by scripts/generate-prettier-tables.mjs — do not edit by hand.',
-	`// Source: prettier ${version} (plugins/html.mjs, the lexer's named character references).`,
-	'',
-	`static NAMES: [&str; ${entityNames.length}] = [`,
-	...entityNames.map((n) => `\t${JSON.stringify(n)},`),
-	'];',
-	'',
-	'/// Whether `&name;` is a character reference the lexer accepts.',
-	'#[must_use]',
-	'pub fn is_known(name: &str) -> bool {',
-	'\tNAMES.binary_search(&name).is_ok()',
-	'}',
-	'',
-];
-const entityOut = path.join(root, 'crates', 'kd_html', 'src', 'print', 'entity_names.rs');
-writeFileSync(entityOut, entityLines.join('\n'));
-process.stdout.write(
-	`wrote ${path.relative(root, entityOut)}: ${entityNames.length} names\n`,
-);

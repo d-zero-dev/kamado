@@ -9,7 +9,7 @@
  */
 import { minify } from 'html-minifier-terser';
 import { domSerialize } from 'kamado-v2/utils/dom';
-import { format } from 'prettier';
+import { format } from 'prettier-v2';
 
 /**
  * html-minifier-terser as v2 calls it, without the code minifiers (those are
@@ -57,6 +57,23 @@ export async function prettierHtml(html, options = {}) {
 }
 
 /**
+ * Whether a serialized page holds code that prettier formats: the content of
+ * `<script>` and `<style>`, `style` attributes and event handlers. v2 minified
+ * that code right afterwards, and v3 does not format it (RFC §2), so a corpus
+ * of the layout alone leaves such pages out: they show prettier's layout of
+ * the code, which v2 did not output.
+ * @param {string} content - The serialized page
+ * @returns {boolean} Whether the page holds code
+ * @example
+ * hasCode('<script>a</script>'); // true
+ * hasCode('<p class="a">b</p>'); // false
+ * hasCode('<p>a one=b</p>'); // false: the attribute has to sit in a tag
+ */
+export function hasCode(content) {
+	return /<(?:script|style)\b|<[a-z][^<>]*\s(?:style|on[a-z]+)=/i.test(content);
+}
+
+/**
  * v2's `doctype` transform: a document that starts with `<html` and has no
  * doctype gets `<!DOCTYPE html>` and a line break in front.
  * @param {string} content - The serialized page
@@ -71,13 +88,25 @@ export function addDoctype(content) {
 }
 
 /**
+ * What v2 does first to an HTML string: parse and serialize it with linkedom
+ * (`domSerialize`). Kept apart from the layout so that a corpus can look at
+ * the serialized page (`hasCode`) before prettier formats it.
+ * @param {string} html - The markup as authored
+ * @returns {Promise<string>} The serialized page
+ * @example
+ * await v2Serialize('<p>a'); // '<p>a</p>'
+ */
+export async function v2Serialize(html) {
+	return await domSerialize(html, { hook: () => {} });
+}
+
+/**
  * Everything v2 does to an HTML string before minifying: parse and serialize
- * with linkedom (`domSerialize`), add the doctype, format with prettier.
+ * with linkedom (`v2Serialize`), add the doctype, format with prettier.
  * @param {string} html - The markup as authored
  * @param {PrintOptions} [options] - Formatting options
  * @returns {Promise<string>} The formatted HTML
  */
 export async function v2Layout(html, options = {}) {
-	const serialized = await domSerialize(html, { hook: () => {} });
-	return await prettierHtml(addDoctype(serialized), options);
+	return await prettierHtml(addDoctype(await v2Serialize(html)), options);
 }
