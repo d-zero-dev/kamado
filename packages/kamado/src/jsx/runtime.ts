@@ -56,10 +56,12 @@
  * - A page written in the order of its template: `<html static>` (or a page
  * whose meta has `kdStatic: true`, for a fragment with no `<html>`) hoists
  * nothing into the head, writes the attributes of `form` / `input` / `button`
- * in the order they were given, and writes a string value of an `on*` prop
- * (`onclick="..."`) as an attribute. `<head hoist={false}>` alone keeps the
- * order of the head. Outside this mode every `on*` prop is dropped, as React
- * does (a prop that comes from data must not become script).
+ * in the order they were given, writes the `selected` of an `option` where it
+ * was given (the `value` / `defaultValue` of the enclosing `select`, when it has
+ * one, still says which option is selected), and writes a string value of an
+ * `on*` prop (`onclick="..."`) as an attribute. `<head hoist={false}>` alone
+ * keeps the order of the head. Outside this mode every `on*` prop is dropped,
+ * as React does (a prop that comes from data must not become script).
  * - `styleOf()` turns CSS text into the `style` object; `html()` writes raw
  * markup next to other children.
  * - Left out: Suspense, context, hooks, class components, portals, refs, `use`,
@@ -726,7 +728,7 @@ interface Scope {
 	readonly svg: boolean;
 	readonly noscript: boolean;
 	readonly picture: boolean;
-	/** Inside `<html static>`: form controls keep the order of their attributes. */
+	/** Inside `<html static>`: form controls keep the order of their attributes, and so does the `selected` of an option. */
 	readonly plain: boolean;
 	/** The enclosing `<select>`'s `value` / `defaultValue`. */
 	readonly selected: unknown;
@@ -739,7 +741,7 @@ const ROOT_SCOPE: Scope = {
 	plain: false,
 	selected: null,
 };
-/** The scope of `<html static>`: nothing is hoisted and form controls keep their order. */
+/** The scope of `<html static>`: nothing is hoisted, form controls keep their order and an option its `selected`. */
 const STATIC_SCOPE: Scope = { ...ROOT_SCOPE, noscript: true, plain: true };
 let scope: Scope = ROOT_SCOPE;
 
@@ -1116,6 +1118,9 @@ function option(info: TagInfo, props: Props, children: unknown): string {
 	let value: unknown = null;
 	let selected: unknown = null;
 	let inner: unknown = null;
+	// In a static page the `selected` of the option is where the template had it, unless
+	// the enclosing select says which option is selected.
+	const inPlace = scope.plain && scope.selected == null;
 	for (const key in props) {
 		const v = props[key];
 		if (v == null) {
@@ -1126,7 +1131,13 @@ function option(info: TagInfo, props: Props, children: unknown): string {
 				break;
 			}
 			case 'selected': {
-				selected = v;
+				if (inPlace) {
+					if (v) {
+						out += ' selected=""';
+					}
+				} else {
+					selected = v;
+				}
 				break;
 			}
 			case 'dangerouslySetInnerHTML': {

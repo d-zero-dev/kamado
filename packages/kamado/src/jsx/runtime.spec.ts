@@ -1768,6 +1768,77 @@ describe('deliberate deviations from React', () => {
 		);
 	});
 
+	test('a static page writes the selected of an option where it was written, once', () => {
+		const option = (): Markup =>
+			el('option', { selected: true, disabled: true, value: '/2026/' }, 'y');
+		const expected = '<option selected="" disabled="" value="/2026/">y</option>';
+		expect(render(option, { meta: { kdStatic: true } })).toBe(expected);
+		expect(
+			render((): Markup => el('html', { static: true }, () => option()), {}),
+		).toContain(expected);
+		const off = (): Markup => el('option', { selected: false, value: 'a' }, 'y');
+		expect(render(off, { meta: { kdStatic: true } })).toBe(
+			'<option value="a">y</option>',
+		);
+	});
+
+	test('a static page writes the selected of each option of a select that has no value where it was written', () => {
+		const select = (): Markup =>
+			el('select', { multiple: true }, () => [
+				el('option', { selected: true, value: 'a' }, 'A'),
+				el('option', { value: 'b' }, 'B'),
+				el('optgroup', { label: 'g' }, () => [
+					el('option', { disabled: true, selected: true, value: 'c' }, 'C'),
+				]),
+			]);
+		expect(render(select, { meta: { kdStatic: true } })).toBe(
+			'<select multiple=""><option selected="" value="a">A</option><option value="b">B</option><optgroup label="g"><option disabled="" selected="" value="c">C</option></optgroup></select>',
+		);
+	});
+
+	test('a static page lets the value of the select say which option is selected as the defaultValue does', () => {
+		const select = (): Markup =>
+			el('select', { value: 'b' }, () => [
+				el('option', { selected: true, value: 'a' }, 'A'),
+				el('option', { value: 'b' }, 'B'),
+			]);
+		const expected =
+			'<select><option value="a">A</option><option value="b" selected="">B</option></select>';
+		expect(render(select, { meta: { kdStatic: true } })).toBe(expected);
+		expect(render(select, {})).toBe(expected);
+	});
+
+	test('an empty string is not selected and not checked, in a static page or not', () => {
+		for (const meta of [{ kdStatic: true }, {}]) {
+			expect(
+				render((): Markup => el('option', { selected: '', value: 'a' }, 'A'), { meta }),
+			).toBe('<option value="a">A</option>');
+			expect(
+				render((): Markup => el('input', { type: 'checkbox', checked: '' }), { meta }),
+			).toBe('<input type="checkbox"/>');
+		}
+	});
+
+	test('a page that is not static writes the selected of an option last (as React does)', () => {
+		const option = (): Markup =>
+			el('option', { selected: true, disabled: true, value: '/2026/' }, 'y');
+		expect(render(option, {})).toBe(
+			'<option disabled="" value="/2026/" selected="">y</option>',
+		);
+	});
+
+	test('a static page lets the select say which option is selected, as a page that is not static does', () => {
+		const select = (): Markup =>
+			el('select', { defaultValue: 'b' }, () => [
+				el('option', { selected: true, value: 'a' }, 'A'),
+				el('option', { value: 'b' }, 'B'),
+			]);
+		const expected =
+			'<select><option value="a">A</option><option value="b" selected="">B</option></select>';
+		expect(render(select, { meta: { kdStatic: true } })).toBe(expected);
+		expect(render(select, {})).toBe(expected);
+	});
+
 	const staticHead = (): Markup[] => [
 		el('script', { src: '/a.js', async: true }),
 		el('title', null, 'T'),
