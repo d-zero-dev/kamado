@@ -2,7 +2,8 @@
  * Differential check of the v3 JSX path against v2's: each TSX case is
  * compiled by `kd_js` and rendered by the v3 runtime, and bundled by esbuild
  * and rendered by React 19 `renderToStaticMarkup` (what `@kamado-io/jsx-compiler`
- * did). The two strings are compared as they are.
+ * did). The two strings are compared as they are. The esbuild is `esbuild-v2`,
+ * the version v2 pins; it bundles the v3 runtime for the check too.
  *
  * ```sh
  * cargo build --release --offline -p kd_js --example compile
@@ -20,7 +21,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { buildSync } from 'esbuild';
+import { buildSync } from 'esbuild-v2';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
