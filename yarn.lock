@@ -7465,6 +7465,7 @@ __metadata:
     husky: "npm:9.1.7"
     kamado-v2: "npm:kamado@2.0.0-alpha.17"
     lerna: "npm:10.1.1"
+    mdn-data: "npm:2.37.2"
     npm-run-all2: "npm:9.0.3"
     postcss: "npm:8.5.25"
     postcss-custom-media: "npm:12.0.1"
@@ -8171,6 +8172,13 @@ __metadata:
   version: 2.27.1
   resolution: "mdn-data@npm:2.27.1"
   checksum: 10c0/eb8abf5d22e4d1e090346f5e81b67d23cef14c83940e445da5c44541ad874dc8fb9f6ca236e8258c3a489d9fb5884188a4d7d58773adb9089ac2c0b966796393
+  languageName: node
+  linkType: hard
+
+"mdn-data@npm:2.37.2":
+  version: 2.37.2
+  resolution: "mdn-data@npm:2.37.2"
+  checksum: 10c0/d909477912e0db920d332421997c47b01fe3f6e563cace3919c555ff98c96ba90fb2a989c6992813728dd5cecad27ec8745de9b86960457d42792312834f7621
   languageName: node
   linkType: hard
 
