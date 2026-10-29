@@ -46,11 +46,14 @@ use crate::{BuildOptions, Loaded, Page, PageKind};
 pub enum Served {
 	/// A response body that is ready.
 	Text {
-		/// `text/html`, `text/css`, `text/javascript`.
+		/// `text/html`, `text/css`, `text/javascript`. `text/html` is also a
+		/// static `.html`/`.htm` of the output directory that `html.inject`
+		/// wrote into.
 		content_type: &'static str,
 		body: String,
 	},
-	/// A file of the output directory, to be sent as it is.
+	/// A file of the output directory, to be sent as it is (a static HTML that
+	/// no `html.inject` writes into too).
 	File {
 		path: String,
 	},
@@ -148,6 +151,18 @@ pub struct Serve {
 	env: String,
 	next_token: AtomicU64,
 	state: Mutex<State>,
+}
+
+/// The URL a static file has for `html.inject` and `html.overrides` (the
+/// `pages` globs match it): its path from the output directory with a
+/// leading `/`, and `/dir/` for the file named `index<output_extension>`.
+fn static_url(rel: &str, output_extension: &str) -> String {
+	let index = format!("index{output_extension}");
+	match rel.rsplit_once('/') {
+		Some((dir, name)) if name == index => format!("/{dir}/"),
+		None if rel == index => "/".to_owned(),
+		_ => format!("/{rel}"),
+	}
 }
 
 /// A percent-decoded path, or `None` when it is not valid UTF-8 or holds a NUL.
@@ -270,7 +285,10 @@ impl Serve {
 	}
 
 	/// Answers a request for `url_path` (a path, percent-encoded as it came
-	/// in; query and fragment are ignored).
+	/// in; query and fragment are ignored). A page or asset the build makes
+	/// is built; any other file of the output directory is sent as it is,
+	/// except that a static `.html`/`.htm` gets the `html.inject` entries of
+	/// `mode` `serve` and `both` that match it written in.
 	///
 	/// # Errors
 	///
@@ -337,11 +355,39 @@ impl Serve {
 			return self.asset(&mut st, index);
 		}
 		drop(st);
-		Ok(if fs::metadata(&path).is_ok_and(|m| m.is_file()) {
-			Served::File { path }
-		} else {
-			Served::NotFound
+		if !fs::metadata(&path).is_ok_and(|m| m.is_file()) {
+			return Ok(Served::NotFound);
+		}
+		Ok(match self.inject_into_static(&path, &output_dir) {
+			Some(body) => Served::Text {
+				content_type: "text/html",
+				body,
+			},
+			None => Served::File { path },
 		})
+	}
+
+	/// The static HTML file at `path` (inside `output_dir`, both normalized by
+	/// `kd_site::path`) with the `mode: serve` and `mode: both` injections
+	/// written into it. `None` when it is sent as it is: it is not `.html` or
+	/// `.htm`, no injection applies to its URL (it is not even read then), it
+	/// cannot be read or is not UTF-8 (nothing is converted; the Node side
+	/// reports a file that cannot be read when it opens it), or nothing was
+	/// written (a fragment, or the markup is there already). `path` is inside
+	/// `output_dir` by the check of `request_as`, so the prefix is always there.
+	fn inject_into_static(&self, path: &str, output_dir: &str) -> Option<String> {
+		let extension = std::path::Path::new(path).extension()?.to_str()?;
+		if !extension.eq_ignore_ascii_case("html") && !extension.eq_ignore_ascii_case("htm") {
+			return None;
+		}
+		let rel = path.strip_prefix(&format!("{}/", output_dir.trim_end_matches('/')))?;
+		let url = static_url(rel, &self.loaded.config.pages.output_extension);
+		let injects = self.pipeline.static_injects(&url);
+		if injects.is_empty() {
+			return None;
+		}
+		let source = String::from_utf8(fs::read(path).ok()?).ok()?;
+		kd_html::inject::apply_to_text(&source, injects, kd_html::inject::Phase::Serve)
 	}
 
 	/// Reads the data again when its directory changed.
@@ -813,6 +859,12 @@ mod tests {
 			std::thread::sleep(std::time::Duration::from_millis(5));
 		}
 
+		fn write_bytes(&self, rel: &str, bytes: &[u8]) {
+			let path = format!("{}/{rel}", self.root);
+			fs::create_dir_all(std::path::Path::new(&path).parent().unwrap()).unwrap();
+			fs::write(&path, bytes).unwrap();
+		}
+
 		fn serve(&self, extra: &str) -> Serve {
 			self.write(
 				"kamado.config.jsonc",
@@ -1211,6 +1263,254 @@ mod tests {
 		assert_eq!(
 			serve.finish_render(99, "<p/>").unwrap_err(),
 			"no page is waiting for token 99"
+		);
+	}
+
+	const LINK: &str = r#"<link href="/css/dev.css" rel="stylesheet">"#;
+	const STATIC_DOC: &str = "<!DOCTYPE html>\r\n<html>\r\n<head>\r\n<title>t</title>\r\n</head>\r\n<body>\r\n<p>x</p>\r\n</body>\r\n</html>\r\n";
+
+	/// `STATIC_DOC` with the link written before `</head>`, as an injection
+	/// at `head-end` does.
+	fn with_link() -> String {
+		STATIC_DOC.replace("</head>", &format!("{LINK}\n</head>"))
+	}
+
+	/// The `html` section of a config with one injection at `head-end`.
+	fn inject_config(mode: &str, scope: &str) -> String {
+		format!(
+			r#", "html": {{ "inject": [ {{ "position": "head-end", "mode": "{mode}"{scope}, "html": "<link href=\"/css/dev.css\" rel=\"stylesheet\">" }} ] }}"#
+		)
+	}
+
+	fn file_of(site: &Site, rel: &str) -> Served {
+		Served::File {
+			path: format!("{}/out/{rel}", site.root),
+		}
+	}
+
+	#[test]
+	fn a_static_html_file_gets_the_serve_injections_and_keeps_every_other_byte() {
+		let site = Site::new("static-inject");
+		site.write("out/legacy/index.html", STATIC_DOC);
+		site.write("out/img/logo.svg", "<svg/>");
+		let serve = site.serve(&inject_config("serve", ""));
+
+		assert_eq!(
+			text(serve.request("/legacy/").unwrap()),
+			("text/html".to_owned(), with_link())
+		);
+		assert_eq!(
+			text(serve.request("/legacy/index.html").unwrap()).1,
+			with_link()
+		);
+		assert_eq!(
+			text(serve.request("/legacy/?x=1#top").unwrap()).1,
+			with_link()
+		);
+		// What is not HTML is sent as it is.
+		assert_eq!(
+			serve.request("/img/logo.svg").unwrap(),
+			file_of(&site, "img/logo.svg")
+		);
+	}
+
+	#[test]
+	fn a_static_html_file_follows_the_mode_of_the_injection() {
+		let site = Site::new("static-mode");
+		site.write("out/a.html", STATIC_DOC);
+		let both = site.serve(&inject_config("both", ""));
+		assert_eq!(text(both.request("/a.html").unwrap()).1, with_link());
+
+		let build = site.serve(&inject_config("build", ""));
+		assert_eq!(build.request("/a.html").unwrap(), file_of(&site, "a.html"));
+	}
+
+	#[test]
+	fn the_pages_and_exclude_of_an_injection_and_html_overrides_select_the_static_files() {
+		let site = Site::new("static-scope");
+		site.write("out/legacy/a.html", STATIC_DOC);
+		site.write("out/other/a.html", STATIC_DOC);
+		let pages = site.serve(&inject_config("serve", r#", "pages": ["/legacy/**"]"#));
+		assert_eq!(
+			text(pages.request("/legacy/a.html").unwrap()).1,
+			with_link()
+		);
+		assert_eq!(
+			pages.request("/other/a.html").unwrap(),
+			file_of(&site, "other/a.html")
+		);
+
+		let exclude = site.serve(&inject_config("serve", r#", "exclude": ["/other/**"]"#));
+		assert_eq!(
+			text(exclude.request("/legacy/a.html").unwrap()).1,
+			with_link()
+		);
+		assert_eq!(
+			exclude.request("/other/a.html").unwrap(),
+			file_of(&site, "other/a.html")
+		);
+
+		let overridden = site.serve(&format!(
+			r#", "html": {{ "inject": [ {{ "position": "head-end", "mode": "serve", "html": "{}" }} ], "overrides": [ {{ "pages": ["/legacy/**"], "inject": [] }} ] }}"#,
+			LINK.replace('"', "\\\"")
+		));
+		assert_eq!(
+			overridden.request("/legacy/a.html").unwrap(),
+			file_of(&site, "legacy/a.html")
+		);
+		assert_eq!(
+			text(overridden.request("/other/a.html").unwrap()).1,
+			with_link()
+		);
+	}
+
+	#[test]
+	fn the_extension_of_a_static_html_file_is_taken_in_any_case_and_htm_is_html() {
+		let site = Site::new("static-ext");
+		site.write("out/a.htm", STATIC_DOC);
+		site.write("out/b.HTML", STATIC_DOC);
+		let serve = site.serve(&inject_config("serve", ""));
+
+		assert_eq!(text(serve.request("/a.htm").unwrap()).1, with_link());
+		assert_eq!(text(serve.request("/b.HTML").unwrap()).1, with_link());
+	}
+
+	#[test]
+	fn the_url_of_a_static_file_is_its_path_and_only_index_of_the_output_extension_is_a_directory()
+	{
+		let site = Site::new("static-url");
+		site.write("out/legacy/index.htm", STATIC_DOC);
+		let serve = site.serve(&inject_config(
+			"serve",
+			r#", "pages": ["/legacy/index.htm"]"#,
+		));
+		assert_eq!(
+			text(serve.request("/legacy/index.htm").unwrap()).1,
+			with_link()
+		);
+		let directory = site.serve(&inject_config("serve", r#", "pages": ["/legacy/"]"#));
+		assert_eq!(
+			directory.request("/legacy/index.htm").unwrap(),
+			file_of(&site, "legacy/index.htm")
+		);
+
+		site.write("out/a/index.html", STATIC_DOC);
+		let php = site.serve(&format!(
+			r#"{}, "pages": {{ "outputExtension": ".php" }}"#,
+			inject_config("serve", r#", "pages": ["/a/index.html"]"#)
+		));
+		assert_eq!(text(php.request("/a/index.html").unwrap()).1, with_link());
+	}
+
+	#[test]
+	fn a_fragment_and_a_file_that_has_the_markup_already_are_sent_as_they_are() {
+		let site = Site::new("static-noop");
+		site.write("out/fragment.html", "<p>x</p>\r\n");
+		site.write("out/done.html", &with_link());
+		let serve = site.serve(&inject_config("serve", ""));
+
+		assert_eq!(
+			serve.request("/fragment.html").unwrap(),
+			file_of(&site, "fragment.html")
+		);
+		assert_eq!(
+			serve.request("/done.html").unwrap(),
+			file_of(&site, "done.html")
+		);
+	}
+
+	#[test]
+	fn a_static_file_that_is_not_utf8_is_sent_as_it_is() {
+		let site = Site::new("static-sjis");
+		// `<html><head></head></html>` with a Shift_JIS character in the title.
+		site.write_bytes(
+			"out/a.html",
+			b"<html><head><title>\x93\xfa</title></head></html>",
+		);
+		let serve = site.serve(&inject_config("serve", ""));
+
+		assert_eq!(serve.request("/a.html").unwrap(), file_of(&site, "a.html"));
+	}
+
+	#[test]
+	fn an_output_directory_written_with_a_dot_and_a_trailing_slash_gives_the_same_urls() {
+		let site = Site::new("static-dot-dir");
+		site.write("out/legacy/index.html", STATIC_DOC);
+		site.write(
+			"kamado.config.jsonc",
+			&format!(
+				r#"{{ "dir": {{ "input": "src", "output": "./out/" }}, "build": {{ "cacheDir": ".cache" }}{} }}"#,
+				inject_config("serve", r#", "pages": ["/legacy/"]"#)
+			),
+		);
+		let loaded = crate::load(&format!("{}/kamado.config.jsonc", site.root)).unwrap();
+		let serve = Serve::open(
+			loaded,
+			BuildOptions {
+				esbuild_version: Some("0.1.0".to_owned()),
+				..Default::default()
+			},
+			"file:///runtime.js",
+		)
+		.unwrap();
+
+		assert_eq!(text(serve.request("/legacy/").unwrap()).1, with_link());
+	}
+
+	#[test]
+	fn a_page_wins_over_a_static_file_at_its_output_path_and_gets_the_injection_once() {
+		let site = Site::new("static-page-wins");
+		site.write("src/a.html", &STATIC_DOC.replace("<title>t", "<title>page"));
+		site.write(
+			"out/a.html",
+			&STATIC_DOC.replace("<title>t", "<title>stale"),
+		);
+		let serve = site.serve(&inject_config("serve", ""));
+
+		let (content_type, body) = text(serve.request("/a.html").unwrap());
+		assert_eq!(content_type, "text/html");
+		assert!(body.contains("<title>page"), "{body}");
+		assert!(!body.contains("stale"), "{body}");
+		assert_eq!(body.matches("/css/dev.css").count(), 1);
+	}
+
+	#[test]
+	fn the_index_of_the_output_directory_has_the_url_of_the_root() {
+		let site = Site::new("static-root");
+		site.write("out/index.html", STATIC_DOC);
+		let root = site.serve(&inject_config("serve", r#", "pages": ["/"]"#));
+		assert_eq!(text(root.request("/").unwrap()).1, with_link());
+		let file = site.serve(&inject_config("serve", r#", "pages": ["/index.html"]"#));
+		assert_eq!(file.request("/").unwrap(), file_of(&site, "index.html"));
+	}
+
+	#[test]
+	fn a_static_file_keeps_its_bom_non_ascii_text_quotes_and_missing_final_line_break() {
+		let site = Site::new("static-bytes");
+		let source = "\u{feff}<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>日本語</title></head><body><a href='x'>リンク</a>\t<p>\r</p></body></html>";
+		site.write("out/a.html", source);
+		let serve = site.serve(&inject_config("serve", ""));
+
+		assert_eq!(
+			text(serve.request("/a.html").unwrap()).1,
+			"\u{feff}<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>日本語</title><link href=\"/css/dev.css\" rel=\"stylesheet\">\n</head><body><a href='x'>リンク</a>\t<p>\r</p></body></html>"
+		);
+	}
+
+	#[test]
+	fn nothing_but_the_injection_runs_on_a_static_file() {
+		let site = Site::new("static-only-inject");
+		site.write("out/a.html", "<!DOCTYPE html>\r\n<html>\r\n<head>\r\n<title>©</title>\r\n</head>\r\n<body>\r\n<!-- @include(/part.html) -->\r\n<img src='/img/a.svg'>  <p class=\"a  b\" hidden=\"\">  x  </p>\r\n</body>\r\n</html>\r\n");
+		site.write("out/part.html", "<p>part</p>");
+		site.write("out/img/a.svg", "<svg width=\"4\" height=\"3\"></svg>");
+		let serve = site.serve(&format!(
+			r#", "html": {{ "inject": [ {{ "position": "head-end", "mode": "serve", "html": "{}" }} ], "entities": "all", "lineBreak": "lf", "doctype": true, "serializer": "spec", "format": {{}}, "minify": {{}}, "imageSizes": {{ "enabled": true }}, "includes": [ {{ "preset": "includeComment", "root": "out" }} ], "rules": [ {{ "selector": "p", "action": "remove" }} ] }}"#,
+			LINK.replace('"', "\\\"")
+		));
+
+		assert_eq!(
+			text(serve.request("/a.html").unwrap()).1,
+			"<!DOCTYPE html>\r\n<html>\r\n<head>\r\n<title>©</title>\r\n<link href=\"/css/dev.css\" rel=\"stylesheet\">\n</head>\r\n<body>\r\n<!-- @include(/part.html) -->\r\n<img src='/img/a.svg'>  <p class=\"a  b\" hidden=\"\">  x  </p>\r\n</body>\r\n</html>\r\n"
 		);
 	}
 }
