@@ -80,19 +80,25 @@
 			"matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"]
 		},
 		{
-			"description": "html-minifier-terser is DefinitelyTyped-typed and an oracle of v3",
-			"groupName": "html-minifier-terser",
-			"matchPackageNames": ["html-minifier-terser", "@types/html-minifier-terser"]
-		},
-		{
 			"description": "The parser reads the tokens of the lexer, so they move together; acorn, the converter's third package, is independent of them",
 			"groupName": "pug",
 			"matchPackageNames": ["pug-lexer", "pug-parser"]
 		},
 		{
-			"description": "Oracles of v3: golden files and tables are generated from them (docs/v3/development.md)",
-			"groupName": "v3 oracles",
-			"matchPackageNames": ["prettier", "character-entities", "esbuild", "mdn-data"]
+			"description": "The source of a table that v2 does not decide: the table is regenerated in the same PR (docs/v3/development.md)",
+			"groupName": "mdn-data",
+			"matchPackageNames": ["mdn-data"]
+		},
+		{
+			"description": "prettier-v2, esbuild-v2, character-entities and html-minifier-terser are the versions the published v2 page-compiler and jsx-compiler pin, the oracles of the HTML and JSX tables and differential checks; they do not move on their own (docs/v3/development.md). The root prettier (yarn lint) and esbuild (the runtime) are not oracles and move as usual",
+			"matchDepNames": [
+				"prettier-v2",
+				"esbuild-v2",
+				"character-entities",
+				"html-minifier-terser",
+				"@types/html-minifier-terser"
+			],
+			"enabled": false
 		},
 		{
 			"description": "The v2 oracles are the published v2 on purpose and do not move (docs/v3/development.md)",
