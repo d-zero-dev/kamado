@@ -320,7 +320,7 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
 | 要素を包む・外す、HTML の挿入                                | `wrap` / `unwrap` / `insert`                                                                                                     |
 | `ctx.getHref` / `ctx.baseURL`で URL を書き換え               | `rewriteUrl`（`absolute` / `rootRelative`、`origin`）                                                                            |
 | `injectToHead({ content, position, filter })`                | `html.inject`: `{ "html": "...", "position": "head-end", "pages": [...], "mode": "build" }`（`mode: "serve"`は開発サーバー限定） |
-| `devServer.transforms`（開発サーバーの応答の変換）           | `html.inject`の`mode: "serve"`                                                                                                   |
+| `devServer.transforms`（開発サーバーの応答の変換）           | `html.inject`の`mode: "serve"`（出力ディレクトリの静的な`.html`/`.htm`にも入る。§8）                                             |
 | `createSSIShim`                                              | `html.includes`: `{ "preset": "ssi", "dir": "..." }`                                                                             |
 | `<!-- @include(...) -->`の独自実装                           | `{ "preset": "includeComment", "root": "..." }`                                                                                  |
 | BurgerEditor の import ブロック                              | `{ "preset": "burgerEditorImport" }`                                                                                             |
@@ -365,6 +365,7 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
 `kamado server`（設定は`devServer`）。v2 との違い:
 
 - ファイルを監視しません（v2 と同じ）。リクエストごとに依存の stat を確かめ、変更がなければメモリの出力を返します。
+- `html.inject`の`mode: "serve"`と`"both"`は、ページだけでなく、出力ディレクトリにあって対応するページのない`.html`/`.htm`にも入ります（v2 の`devServer.transforms`と同じ。kamado がビルドしない静的なサイトの開発時に、CSS などを足す使い方）。文字列の挿入で、`includes`・`rules`・整形・圧縮は当たらず、挿入以外のバイトは変わりません。入れる先の開始タグと終了タグの両方が書かれていないファイル（終了タグを省略した文書、`<head>`のない文書、断片）、UTF-8 でないファイル、すでに同じマークアップがあるファイルはそのまま返します。`pages`の glob と`html.overrides`の`pages`はファイルのパス（`index<outputExtension>`は`/dir/`）に照らします（RFC §9.3）。
 - ページファイルの**追加と削除**、設定ファイル・`pages.overrides`の変更は、**再起動**すると反映されます。
 - コンポーネントを直すと、次のリクエストで描画用のワーカーが作り直されます（初回は少し遅い）。
 - ブラウザのライブリロードはありません。
@@ -425,7 +426,7 @@ yarn kamado build --incremental        # そのページだけ built
 
 ### 10.3 開発サーバー
 
-`kamado server`を起動し、ページ・CSS・JS・出力ディレクトリの静的ファイルを開く。コンポーネントを 1 つ直して再読み込みし、反映を確かめる。プロキシを使うなら`devServer.proxy`の経路も確かめる。
+`kamado server`を起動し、ページ・CSS・JS・出力ディレクトリの静的ファイルを開く。コンポーネントを 1 つ直して再読み込みし、反映を確かめる。プロキシを使うなら`devServer.proxy`の経路も確かめる。`mode: "serve"`の`html.inject`を書いているなら、静的な HTML にも入っていることを確かめる。
 
 ## 11. 出力に差が出る既知の点
 
