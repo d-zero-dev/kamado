@@ -1334,3 +1334,35 @@ fn adjacent_blocks() {
 		),
 	]);
 }
+
+#[test]
+fn values_a_property_does_not_take() {
+	common::check_all(&[
+		("a{border-width:0px 0% 0em}", "a{border-width:0}"),
+		(
+			"a{border-width:0px;border-width:0px 0% 0em}",
+			"a{border-width:0}",
+		),
+		(
+			"a{border-width:0px 0% 0em;color:red}",
+			"a{border-width:0;color:red}",
+		),
+	]);
+}
+
+#[test]
+fn values_cssnano_rewrites_and_kd_css_keeps() {
+	common::check_all(&[
+		("a{top:0%}", "a{top:0}"),
+		("a{opacity:initial}", "a{opacity:1}"),
+		("a{animation-name:RED}", "a{animation-name:red}"),
+		("a{color:red;height:0%}", "a{color:red;height:0}"),
+		("a{color:red;width:0%}", "a{color:red;width:0}"),
+		("a{b{c:d}height:0%}", "a{b{c:d}height:0}"),
+		("a{b{c:d}width:0%}", "a{b{c:d}width:0}"),
+		(
+			"a{-webkit-animation-name:RED}",
+			"a{-webkit-animation-name:red}",
+		),
+	]);
+}

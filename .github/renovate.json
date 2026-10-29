@@ -92,7 +92,7 @@
 		{
 			"description": "Oracles of v3: golden files and tables are generated from them (docs/v3/development.md)",
 			"groupName": "v3 oracles",
-			"matchPackageNames": ["prettier", "character-entities", "esbuild"]
+			"matchPackageNames": ["prettier", "character-entities", "esbuild", "mdn-data"]
 		},
 		{
 			"description": "The v2 oracles are the published v2 on purpose and do not move (docs/v3/development.md)",

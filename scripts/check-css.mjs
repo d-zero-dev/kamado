@@ -6,7 +6,10 @@
  * 2. it must mean what the input meant: `cssnano(mine) === cssnano(original)`,
  *    compared as strings (the declarations of a rule with nested rules, and of
  *    a block inside a rule, are first brought to one form by cssnano; where that
- *    fails their values are not compared, see `css-oracle.mjs`),
+ *    fails their values are not compared, see `css-oracle.mjs`); a file where
+ *    that holds once the decisions listed in `crates/kd_css/tests/common/mod.rs`
+ *    are undone on mine is reported, not failed (a decision can be one where
+ *    cssnano changes the meaning, so that it does not bring both to one),
  * 3. it must not be larger than cssnano's output by more than 3 %, unless the
  *    difference is made of the decisions listed in
  *    `crates/kd_css/tests/common/mod.rs` only (reported, as in
@@ -32,6 +35,7 @@ import { gzipSync } from 'node:zlib';
 import { dropRepeatedAtRules, joinAdjacentAtRules } from './css-compare.mjs';
 import {
 	cssnanoMinify,
+	matchesWithDecisionsUndone,
 	minifyNestedDeclarations,
 	postcssError,
 	withoutNestedDeclarations,
@@ -54,6 +58,15 @@ const limit = 1.03;
  * @type {Map<string, string[]>}
  */
 const decisionsByPath = new Map();
+/**
+ * The output with the listed decisions that apply to the input undone, and
+ * their reasons, by path (whatever the size). The equivalence check compares
+ * cssnano's minification of it when that of the output does not match: a
+ * decision can be one where cssnano changes the meaning (it makes an invalid
+ * declaration valid, kd_css keeps it invalid).
+ * @type {Map<string, { css: string, decisions: string[] }>}
+ */
+const undoneByPath = new Map();
 
 const names = readdirSync(dir)
 	.filter((n) => n.endsWith('.in'))
@@ -81,6 +94,9 @@ function runRust(files) {
 		out.set(r.path, r.error === undefined ? r.css : `__ERROR__ ${r.error}`);
 		if (r.decisions?.length > 0) {
 			decisionsByPath.set(r.path, r.decisions);
+		}
+		if (r.undone) {
+			undoneByPath.set(r.path, r.undone);
 		}
 	}
 	return out;
@@ -268,6 +284,8 @@ const second = runRust(again);
 const failures = { rust: [], parse: [], equivalence: [], size: [], idempotence: [] };
 /** @type {string[]} */
 const deliberate = [];
+/** @type {string[]} */
+const deliberateMeaning = [];
 /** @type {Map<string, number>} */
 const categories = new Map();
 let strictEqual = 0;
@@ -311,12 +329,14 @@ for (const n of names) {
 				strictEqual++;
 			} else {
 				let category = categoryOf(theirs, mineMin);
+				/** @type {string | undefined} */
+				let joined;
 				if (category === null) {
 					// cssnano does not join two neighbouring blocks that hold rules
 					// with nested rules (or a selector like `:is()`), and so does not
 					// see what is then the same rule twice. Join them and let it
 					// minify once more.
-					const joined = await cssnanoMinify(joinAdjacentAtRules(theirs));
+					joined = await cssnanoMinify(joinAdjacentAtRules(theirs));
 					if (
 						joined !== theirs &&
 						(joined === mineMin || categoryOf(joined, mineMin) !== null)
@@ -350,7 +370,26 @@ for (const n of names) {
 						category = 'values of nested declarations not compared';
 					}
 				}
-				if (category === null) {
+				// A listed decision where cssnano changes the meaning keeps the two
+				// apart: undo the decisions on mine and let cssnano minify it again.
+				const undone = undoneByPath.get(path.join(dir, `${n}.in`));
+				let deliberateBy = null;
+				let undoneError = '';
+				if (category === null && undone) {
+					const same = (/** @type {string} */ a, /** @type {string} */ b) =>
+						a === b || categoryOf(a, b) !== null;
+					const expected =
+						joined === undefined ? [theirs] : [...new Set([theirs, joined])];
+					const result = await matchesWithDecisionsUndone(expected, undone.css, same);
+					if (result.matches) {
+						deliberateBy = undone.decisions;
+					} else if (result.error) {
+						undoneError = ` (cssnano rejects it undone: ${result.error})`;
+					}
+				}
+				if (deliberateBy) {
+					deliberateMeaning.push(`${n}: ${[...new Set(deliberateBy)].join('; ')}`);
+				} else if (category === null) {
 					// Show what is left once the known leftovers are undone (and the
 					// declarations that are not compared are gone).
 					const left = (/** @type {string} */ css) => {
@@ -360,7 +399,9 @@ for (const n of names) {
 						}
 						return acc;
 					};
-					failures.equivalence.push(`${n}: ${diffOf(left(theirs), left(mineMin))}`);
+					failures.equivalence.push(
+						`${n}: ${diffOf(left(theirs), left(mineMin))}${undoneError}`,
+					);
 				} else {
 					categories.set(category, (categories.get(category) ?? 0) + 1);
 				}
@@ -434,10 +475,13 @@ if (deliberate.length > 0) {
 if (mode === '') {
 	const benignTotal = [...categories.values()].reduce((a, b) => a + b, 0);
 	process.stdout.write(
-		`cssnano(mine) === cssnano(original): ${strictEqual} identical, ${benignTotal} differ only by a known cssnano leftover, ${failures.equivalence.length} unexplained\n`,
+		`cssnano(mine) === cssnano(original): ${strictEqual} identical, ${benignTotal} differ only by a known cssnano leftover, ${deliberateMeaning.length} by listed decisions only, ${failures.equivalence.length} unexplained\n`,
 	);
 	for (const [name, count] of categories) {
 		process.stdout.write(`  ${count} x ${name}\n`);
+	}
+	for (const d of deliberateMeaning.slice(0, show)) {
+		process.stdout.write(`  listed decisions only: ${d}\n`);
 	}
 }
 let bad = 0;

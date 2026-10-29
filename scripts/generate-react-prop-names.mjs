@@ -11,7 +11,7 @@
  *
  * Run it when react-dom is upgraded: `node scripts/generate-react-prop-names.mjs`.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -74,7 +74,9 @@ ${rows.join('\n')}
 `;
 }
 
-if (process.argv[1] === import.meta.filename) {
+// Node resolves the main module through symbolic links, `argv[1]` keeps the path
+// as given.
+if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) {
 	const source = readFileSync(
 		path.join(dir, 'cjs', 'react-dom-server.node.development.js'),
 		'utf8',

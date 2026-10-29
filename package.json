@@ -60,6 +60,7 @@
 		"husky": "9.1.7",
 		"kamado-v2": "npm:kamado@2.0.0-alpha.17",
 		"lerna": "10.1.1",
+		"mdn-data": "2.37.2",
 		"npm-run-all2": "9.0.3",
 		"postcss": "8.5.25",
 		"postcss-custom-media": "12.0.1",

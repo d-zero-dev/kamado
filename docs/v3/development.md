@@ -74,7 +74,7 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 
 ## 何を更新したら、何を作り直すか
 
-テーブルと golden ファイルは、v2 が使っていたライブラリ（oracle）の出力から作ってコミットしている。実行時はその依存を持たない。oracle の版は v2 に合わせて固定するのが方針で（「v2 の oracle」）、動かしたときは、次のスクリプトを実行して差分を確かめる（スクリプトの先頭のコメントに詳細がある）。oracle の置き場（ルートの`devDependencies`）は「v2 の oracle」を参照。
+テーブルと golden ファイルは、v2 が使っていたライブラリ（oracle）の出力から作ってコミットしている。実行時はその依存を持たない。oracle の版は v2 に合わせて固定するのが方針で（「v2 の oracle」。v2 から版が決まらないものは Renovate の「v3 oracles」で上げる。`mdn-data`は下の段落）、動かしたときは、次のスクリプトを実行して差分を確かめる（スクリプトの先頭のコメントに詳細がある）。oracle の置き場（ルートの`devDependencies`）は「v2 の oracle」を参照。
 
 | 契機                                                                                                                                                   | 実行するスクリプト                      | 書き出すもの                                                               |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | -------------------------------------------------------------------------- |
@@ -84,7 +84,7 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 | 同上                                                                                                                                                   | `scripts/generate-minify-golden.mjs`    | `crates/kd_html/tests/minify_golden/`                                      |
 | `cssnano`を動かした（「v2 の oracle」の 3。設定は v2 の style-compiler と同じ）                                                                        | `scripts/generate-css-golden.mjs`       | `crates/kd_css/tests/golden/`                                              |
 | 同上                                                                                                                                                   | `scripts/generate-css-rule-tests.mjs`   | `crates/kd_css/tests/rules.rs`                                             |
-| 同上、または色名・プロパティ名の元データ（`mdn-data`等）                                                                                               | `scripts/generate-css-tables.mjs`       | `crates/kd_css/src/color_table.rs`、`property_table.rs`                    |
+| 同上、または`mdn-data`を上げた（プロパティ名の元データ）                                                                                               | `scripts/generate-css-tables.mjs`       | `crates/kd_css/src/color_table.rs`、`property_table.rs`                    |
 | `esbuild`を上げた                                                                                                                                      | `scripts/generate-jsx-entities.mjs`     | `crates/kd_js/src/jsx_entities.rs`                                         |
 | `react` / `react-dom`を上げた                                                                                                                          | `scripts/generate-jsx-tables.mjs`       | `packages/kamado/src/jsx/attr-table.ts`、`crates/kd_js/src/react_attrs.rs` |
 | `react-dom`を上げた（Pug から TSX への変換器が使う、小文字の属性名から React の綴りへの対応表）                                                        | `scripts/generate-react-prop-names.mjs` | `scripts/react-prop-names.mjs`（構造が変わると失敗する）                   |
@@ -94,6 +94,8 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 | 属性・クラスの golden のケースを足した、または`kamado-v2`を上げた（`html.rules`の属性・クラスの操作と`html.imageSizes`の v2 の DOM での結果が oracle） | `scripts/generate-html-attr-golden.mjs` | `crates/kd_html/tests/attr_golden/`                                        |
 
 生成したファイルをコミットする前に、`git diff`で変化が oracle の更新によるものか確かめる。生成したあとに`cargo test --locked --offline --workspace`を通す（`scripts/react-prop-names.mjs`は Rust が読まないので、`yarn test`の`scripts/pug-to-tsx-types.spec.ts`が、生成物が入れた react-dom と合っているかを確かめる）。`scripts/generate-jsx-tables.mjs`は実行時の出力（ランタイムと Rust のコンパイラ）が読む表を作り、`scripts/generate-react-prop-names.mjs`は変換器だけが読む表を作る。
+
+`property_table.rs`は、kd_css が値を書き換えるプロパティの一覧で、ここに無いプロパティの値は空白を詰めるだけになる（RFC §10）。元データの`mdn-data`は、ルートの`devDependencies`に固定し、Renovate の「v3 oracles」で上げる。cssnano はすべてのプロパティの値を書き換え、プロパティの一覧を読まないので、一覧の版は v2 から決まらず、このリポジトリが宣言する。一覧が大きいほど cssnano に近い。新しい版が外したプロパティは、`generate-css-tables.mjs`の`extras`に足して一覧に残す（外すと、cssnano が書き換える値を kd_css が書き換えなくなる）。`color_table.rs`の元データの`@colordx/core`は、cssnano の colormin が引く版のまま（「v2 の oracle」の 3）。`yarn test`の`scripts/generate-css-tables.spec.ts`は、コミットした 2 つの表とインストールされている依存から生成器が作るものが同じか、`mdn-data`が宣言した版かを確かめる。作り直さずに版だけ上げた PR は、これで落ちる。作り直したら、`cargo test --locked --offline -p kd_css`と、ランダム入力の差分テスト（`fuzz-css.mjs` → `generate-css-oracle.mjs` → `check-css.mjs`）を通す。
 
 ランダム入力の差分テスト（`scripts/fuzz-*.mjs`）は、コーパスをコミットしない（シードで決まる）。上のテーブルを作り直したとき、または`kd_html`/`kd_css`/`kd_js`の挙動を変えたときに、その分野のものを回す。各スクリプトの先頭に、対応する`--ignored`のテストと環境変数がある。
 
@@ -121,7 +123,7 @@ Pug から TSX への変換器（`scripts/pug-to-tsx.mjs`）は、小さな Pug 
 `equivalence`か`size`が出たら、次の 3 つのどれかに分ける。
 
 1. kd_css が意味を変えている: `crates/kd_css/src/`を直す。
-2. kd_css が意図して cssnano と違う出力をする: `crates/kd_css/tests/common/mod.rs`の`DECISIONS`に両側の出力つきで記録する。`size`は、違いがこの記録だけでできているファイルを外す（`differential.rs`と同じ。`examples/minify.rs`が`DECISIONS`を読んで理由を返す。cssnano の出力`<n>.out`が`<n>.in`の隣にあるファイルだけが対象で、`generate-css-oracle.mjs`が書く）。外したファイルは`larger than the bound by listed decisions only`として報告する。
+2. kd_css が意図して cssnano と違う出力をする: `crates/kd_css/tests/common/mod.rs`の`DECISIONS`に両側の出力つきで記録する。`size`は、違いがこの記録だけでできているファイルを外す（`differential.rs`と同じ。`examples/minify.rs`が`DECISIONS`を読んで理由を返す。cssnano の出力`<n>.out`が`<n>.in`の隣にあるファイルだけが対象で、`generate-css-oracle.mjs`が書く）。外したファイルは`larger than the bound by listed decisions only`として報告する。`equivalence`は、cssnano が意味を変える差（不正な宣言を有効にする cssnano に対して、kd_css は不正なまま残す）だと、記録しても両側が 1 つにならない。そのため合わないときは、kd_css の出力に、入力に当たる記録を逆に当てたもの（`examples/minify.rs`の`undone`）を cssnano に通して比べ直し、合えば`by listed decisions only`として数える（`scripts/css-oracle.mjs`の`matchesWithDecisionsUndone`）。`size`はこの比べ直しを使わないので、そういうファイルが上限を超えれば`size`の失敗として残る（比べ直しで外すと、cssnano が縮める別の取り残しまで隠れる）。
 3. cssnano が縮めきれていない書式だけの差で、意味は同じ: `check-css.mjs`の`benign`に名前をつけて足す。`benign`は`equivalence`だけが使い、`size`は使わない。
 
 入れ子の規則を持つ規則の宣言と、規則の中のブロックの宣言は、cssnano が途中までしか縮めない（値の変換だけで、結合しない。展開した長手を戻さない）ので、そのままでは比べられない。`check-css.mjs`は、`benign`で説明できない差のときだけ、次の順に比べ直す（`scripts/css-oracle.mjs`）。(a) 両側の宣言を、cssnano がトップレベルで縮める形にそろえて比べる（値まで見る）。(b) それでも合わないものは、宣言の 1 まとまりを目印 1 つに置き換えて比べる。構造（セレクタ、at-rule、入れ子）と、入れ子の規則に対する宣言の位置は比べるが、値は比べない。(b) は検査の穴で、そこの宣言の値の誤りは見えない。kd_css はその宣言を、ほかの宣言と同じ処理で縮める。cssnano が隣り合う同名のブロックを結合しないために、同じ規則が 2 つ残る差は、結合したものを cssnano にもう一度通して比べる。

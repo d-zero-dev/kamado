@@ -8,7 +8,9 @@
 //! from the input's meaning:
 //! - `0%` becomes `0` only in properties where the two are the same thing
 //!   (see [`percent_may_drop`]); `height: 0%` is not `height: 0` when the
-//!   containing block's height is not known.
+//!   containing block's height is not known. A `0%` in a property that takes
+//!   no percentage stays too, so the declaration stays as invalid as it was
+//!   (cssnano makes `border-width: 0%` a valid `0`).
 //! - Words inside `var()` and `env()` are left alone: a fallback `0px` may
 //!   end up inside a `calc()` where a bare `0` is invalid.
 //! - `0%` stays in `rgb()`, `lab()`, `oklch()` and the other colour functions.

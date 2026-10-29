@@ -1,7 +1,7 @@
 //! Minifies many files in one process, for the differential scripts in
 //! `scripts/`: reads one path per line from standard input and writes one JSON
-//! object per line (`{"path": ..., "css": ...}` or `{"path": ..., "error":
-//! ...}`). `KD_CSS_MODE` picks what the files hold: a style sheet (the
+//! object per line (`{"path": ..., "css": ...}`, with the keys below in the
+//! default mode, or `{"path": ..., "error": ...}`). `KD_CSS_MODE` picks what the files hold: a style sheet (the
 //! default), `declarations` (a `style` attribute) or `media` (a `media`
 //! attribute).
 //!
@@ -12,6 +12,14 @@
 //! is empty when the output is within the bound, or when the difference is
 //! not made of the recorded decisions alone. `scripts/check-css.mjs` does not
 //! hold a file with reasons to the size bound, like `tests/differential.rs`.
+//! `"undone"` is the output with the recorded decisions that apply to the
+//! input undone (`{"css": ..., "decisions": [...]}`, or `null` when none
+//! applies, there is no `<n>.out` or the output is cssnano's), whatever the
+//! size: a decision
+//! can be one where cssnano changes what the CSS means (an invalid declaration
+//! made valid), so that cssnano does not bring the two outputs to one, and the
+//! equivalence check of the script compares cssnano's minification of this
+//! one instead.
 
 // The decisions are the ones the tests assert, so that the size check cannot
 // disagree with them; the test module has helpers this example does not call.
@@ -41,14 +49,24 @@ fn json_string(text: &str) -> String {
 
 /// The reasons, one per decision of `common::DECISIONS` that the file needed,
 /// as a JSON array; `[]` unless the output is over the size bound and is the
-/// cssnano output with only those decisions undone.
+/// cssnano output with only those decisions undone. (`main` reads `<n>.out`
+/// once for this and [`undone`], and calls [`decisions_for`].)
+#[cfg(test)]
 fn decisions_of(path: &str, src: &str, mine: &str) -> String {
-	let Some(stem) = path.strip_suffix(".in") else {
-		return "[]".to_owned();
-	};
-	let Ok(theirs) = std::fs::read_to_string(format!("{stem}.out")) else {
-		return "[]".to_owned();
-	};
+	match cssnano_output_of(path) {
+		Some(theirs) => decisions_for(src, mine, &theirs),
+		None => "[]".to_owned(),
+	}
+}
+
+/// The cssnano output `<n>.out` next to the corpus input `<n>.in`.
+fn cssnano_output_of(path: &str) -> Option<String> {
+	let stem = path.strip_suffix(".in")?;
+	std::fs::read_to_string(format!("{stem}.out")).ok()
+}
+
+/// [`decisions_of`] with the cssnano output read.
+fn decisions_for(src: &str, mine: &str, theirs: &str) -> String {
 	// The same bound as `scripts/check-css.mjs` and `tests/differential.rs`;
 	// `check` minifies twice, so it runs only for the few files that need it.
 	if mine.len() as f64 <= theirs.len() as f64 * 1.03 + 8.0 {
@@ -56,12 +74,33 @@ fn decisions_of(path: &str, src: &str, mine: &str) -> String {
 	}
 	// An error is a difference beyond the decisions (or an output that is not
 	// stable, which the idempotence check of the script reports): no reasons.
-	let used = common::check(src, &theirs).unwrap_or_default();
+	let used = common::check(src, theirs).unwrap_or_default();
+	reasons_json(&used)
+}
+
+/// The reasons of decisions of `common::DECISIONS`, as a JSON array.
+fn reasons_json(used: &[usize]) -> String {
 	let reasons: Vec<String> = used
 		.iter()
 		.map(|&i| json_string(common::DECISIONS[i].why))
 		.collect();
 	format!("[{}]", reasons.join(","))
+}
+
+/// The output with the decisions of `common::DECISIONS` that apply to `src`
+/// undone, and their reasons, as a JSON object `{"css", "decisions"}`;
+/// `null` when none applies. `main` asks only for a corpus input with the
+/// cssnano output next to it, the only files the script compares.
+fn undone(src: &str, mine: &str) -> String {
+	let (css, used) = common::undo_decisions(src, mine);
+	if used.is_empty() {
+		return "null".to_owned();
+	}
+	format!(
+		"{{\"css\":{},\"decisions\":{}}}",
+		json_string(&css),
+		reasons_json(&used)
+	)
 }
 
 fn main() {
@@ -74,6 +113,7 @@ fn main() {
 			continue;
 		}
 		let mut decisions = "[]".to_owned();
+		let mut undone_json = "null".to_owned();
 		let result = match std::fs::read_to_string(&path) {
 			Err(e) => Err(format!("cannot read: {e}")),
 			Ok(src) => {
@@ -84,15 +124,20 @@ fn main() {
 				};
 				if !matches!(mode.as_str(), "declarations" | "media")
 					&& let Ok(css) = &minified
+					&& let Some(theirs) = cssnano_output_of(&path)
 				{
-					decisions = decisions_of(&path, &src, css);
+					decisions = decisions_for(&src, css, &theirs);
+					// The script compares it only when the output is not cssnano's.
+					if *css != theirs {
+						undone_json = undone(&src, css);
+					}
 				}
 				minified
 			}
 		};
 		let json = match result {
 			Ok(css) => format!(
-				"{{\"path\":{},\"css\":{},\"decisions\":{decisions}}}",
+				"{{\"path\":{},\"css\":{},\"decisions\":{decisions},\"undone\":{undone_json}}}",
 				json_string(&path),
 				json_string(&css)
 			),
@@ -108,7 +153,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-	use super::decisions_of;
+	use super::{cssnano_output_of, decisions_of, undone};
 	use std::path::PathBuf;
 
 	/// A directory of its own under the system's, removed when dropped.
@@ -185,5 +230,34 @@ mod tests {
 		dir.write("1.out", "a{--c:3px;--d:0}");
 
 		assert_eq!(decisions_of(&path, INPUT, KEPT), "[]");
+	}
+
+	#[test]
+	fn the_decisions_are_undone_wherever_they_are_in_the_output() {
+		let input = "a{border-width:0px;color:red;border-width:0px 0% 0em;color:blue}";
+		let mine = "a{border-width:0;color:red;border-width:0 0%;color:blue}";
+
+		assert_eq!(
+			undone(input, mine),
+			"{\"css\":\"a{border-width:0;color:red;border-width:0;color:blue}\",\"decisions\":[\"a 0% the property does not take is kept, so the declaration stays invalid\"]}"
+		);
+	}
+
+	#[test]
+	fn nothing_is_undone_without_the_input_of_a_decision() {
+		assert_eq!(undone("a{b:c}", "a{b:c}"), "null");
+	}
+
+	#[test]
+	fn only_a_corpus_input_has_a_cssnano_output() {
+		let dir = Scratch::new("cssnano-output");
+		let with_out = dir.write("1.in", "a{b:c}");
+		dir.write("1.out", "a{b:c}");
+		let without_out = dir.write("2.in", "a{b:c}");
+		let not_an_input = dir.write("1.css", "a{b:c}");
+
+		assert_eq!(cssnano_output_of(&with_out).as_deref(), Some("a{b:c}"));
+		assert_eq!(cssnano_output_of(&without_out), None);
+		assert_eq!(cssnano_output_of(&not_an_input), None);
 	}
 }
