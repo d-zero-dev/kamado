@@ -78,6 +78,82 @@ v3 の設定は **JSONC のみ**（関数は書けない）。ファイルは`pa
 - **別のコンパイラ設定が同じファイルを別の transform で処理していたとき**（サブサイトだけ`manipulateDOM`と include を外していた、など）は`html.overrides`の`pages`に URL の glob を書いて、`includes`/`rules`を`[]`にする。
 - **ビルド出力を`include`していた Pug**（出力の`header.html`を別の Pug が読む）は、v3 では出力の順序に依存させず、元のコンポーネントを直接呼ぶ。
 
+**`pageList`を`pages.overrides`に書き出す prebuild の例**。v2 の`pageList(pageAssetFiles, config)`の本体を`scripts/page-list.mjs`に移し（引数と戻り値の形は v2 のまま。`kamado-v2`には依存させない）、`"prebuild"`が呼ぶ`scripts/prebuild.mjs`でその結果を JSON にする。`pageList`に渡す一覧は、入力ディレクトリのページファイルから、v2 の`pageAssetFiles`と同じ`url`の書き方で作る。`pageList`が`fileSlug`などほかのフィールドや`config`の値を読むなら、同じ規則で足して渡す。v2 の`date`は読んだ時刻（`new Date()`）なので、`lastmod`には写さない。
+
+```js
+// scripts/prebuild.mjs
+import { readdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+import { pageList } from './page-list.mjs';
+
+const input = 'src';
+const ignore = ['_libs/**']; // pages.ignore と同じ
+
+// ページの URL（RFC §6）。`index.html`は`/dir/`、それ以外は拡張子`.html`付き
+// （`pages.outputExtension`が既定のとき。`""`なら`.html`を付けない）
+const urlOf = (file) =>
+	`/${file.replace(/\.(?:html|tsx)$/, '.html').replace(/(?<=\/|^)index\.html$/, '')}`;
+
+// v2 の`pageAssetFiles`にあたる、入力ディレクトリのページファイルの一覧
+const files = readdirSync(input, { recursive: true, withFileTypes: true })
+	.filter((entry) => entry.isFile())
+	.map((entry) =>
+		path
+			.relative(input, path.join(entry.parentPath, entry.name))
+			.split(path.sep)
+			.join('/'),
+	)
+	.filter(
+		(file) =>
+			/\.(?:html|tsx)$/.test(file) &&
+			!ignore.some((glob) => path.matchesGlob(file, glob)),
+	)
+	.toSorted()
+	.map((file) => ({ inputPath: path.join(input, file), url: urlOf(file) }));
+const existing = new Set(files.map((file) => file.url));
+
+const pages = (await pageList(files, { dir: { input, output: 'htdocs' } })).map(
+	({ url, metaData }) => {
+		// `/a/index.html`と書かれた URL は、v3 では`/a/`
+		const normalized = url.replace(/(?<=\/)index\.html$/, '');
+		// `null`を書くと、ページ自身の front matter の同じキーを隠すので、一覧に値があるキーだけを書く
+		const meta = Object.fromEntries(
+			Object.entries(metaData ?? {}).filter(([, value]) => value != null && value !== ''),
+		);
+		return {
+			url: normalized,
+			// 入力ファイルが無い URL は仮想ページ
+			...(existing.has(normalized) ? {} : { virtual: true }),
+			...(Object.keys(meta).length > 0 ? { meta } : {}),
+		};
+	},
+);
+
+writeFileSync(
+	'pages.overrides.json',
+	`${JSON.stringify({ version: 1, pages }, null, '\t')}\n`,
+);
+```
+
+`package.json`に`"prebuild": "node scripts/prebuild.mjs"`、`kamado.config.jsonc`に`"pages": { "overrides": "pages.overrides.json" }`を書く。`pageList`が`/`、`/a/index.html`、`/a/b.html`、`/ext/`を返し、`/ext/`の入力ファイルが無いなら、書き出される JSON は次のとおりで、`kamado build`は`1 virtual`と数える。
+
+```json
+{
+	"version": 1,
+	"pages": [
+		{ "url": "/", "meta": { "title": "Home" } },
+		{ "url": "/a/", "meta": { "title": "A", "navHidden": true } },
+		{ "url": "/a/b.html", "meta": { "title": "B" } },
+		{
+			"url": "/ext/",
+			"virtual": true,
+			"meta": { "title": "External", "realHref": "https://example.com/" }
+		}
+	]
+}
+```
+
 ## 3. ページ: Pug → JSX
 
 v3 のページは **`.html`（front matter 付き）と`.tsx`の 2 種類**です。Pug は廃止しました。
@@ -194,7 +270,7 @@ yarn build
 
 - **`&nbsp;`などの実体参照は、そのままテキストに書く**（`{"&nbsp;"}`と文字列にすると`&amp;nbsp;`になる）。
 - **他の子と並ぶ生の HTML**は、`kamado/jsx`の`html()`で書く（`import { html } from 'kamado/jsx'`、`{html(markup)}`）。Pug の`!{}`と`include`したテキストの置き換え先。
-- **`<option selected>`** は React が無視する。`<select defaultValue="...">`に書く。
+- **`<option selected>`**: 変換スクリプトは`selected`をそのまま残す。`<html static>`（`kdStatic`のページ）では書いた位置に出る（Pug と同じ順）。static でないページでは、React と同じく属性の最後に出る。囲む`<select>`に`value`/`defaultValue`を書いたときは、`select`が選ぶ`option`を決める（`option`の`selected`は無視され、選ばれた`option`の最後に`selected`が付く）。値なしの`selected`（`option(selected)`）と`checked`（`input(checked)`）は、`selected`、`checked`と裸の属性で出す（`checked=""`にすると、空文字が偽なので描画から消える）。属性名と同じ文字列の真偽値属性（`disabled="disabled"`、`selected="selected"`、`checked="checked"`。型が boolean なので文字列は通らない）も、`disabled`などの裸の属性で出す。
 - **`<link media="all">`** は空にならず`all`のまま出る（v2 と同じ）。
 - **JSX に書けない属性名**（絵文字など、`⚠️="..."`のような印）は React が出力しない。静的なマークアップなら`html.inject`に HTML 文字列として書く。`@click`や`[x]`のように XML の Name でない名前は、変換スクリプトが`warning:`を出す（変換結果は spread のまま残るが、描画では属性が消える）。`:foo`や`日本語`は XML の Name なので書かれる。
 - **React 19 は`<img>`ごとに`<link rel="preload" as="image">`を`<head>`に足す**（Pug では出ない）。`<html static>`のページでは出ない。それ以外のページで要らなければ`html.rules`で消す: `{ "selector": "link[rel=preload][as=image]", "action": "remove" }`。
@@ -224,7 +300,7 @@ yarn build
 - **Pug の代入**（`- breadcrumbs = pageBreadcrumbs`、`- x = true` ... `- x = false`）は、その位置で実行され、props の名前への代入はローカルの変数（初期値は props の値）になる。include したファイルと mixin には、その変数が渡る。
 - **`//`のコメント**（Pug が HTML コメントにする）は JSX に書けないので消える。
 - **データ**: `data.yml`と`blocks.js`のようなファイルは、Pug ではファイル名がそのまま変数（`data`、`blocks`）だった。v3 では`data.<ファイル名>`（`data.data`、`data.blocks`）。`.js`のデータは文字列を返すだけなら、中身の HTML をそのままデータのディレクトリに置く（`blocks.html`）。
-- **レイアウトの指定**は拡張子なし（`"layout": "sub.pug"` → `"sub"`）。
+- **レイアウトの指定**は拡張子なし（`"layout": "sub.pug"` → `"sub"`）。変換スクリプトは、`__assets`の下の sidecar（同じ場所に同名のページ`.pug`/`.html`/`.tsx`/`.jsx`がある`.json`。ページと対でない JSON はデータなので読まない）の最上位の`layout`と、`.html`の front matter にある`layout`が`.pug`で終わるものを、拡張子を外した写しにして`<out>`の同じパスに書く（ソースは書き換えない）。書いたファイルは`layout rewritten: <パス>`で出る。`warning:`が出るのは 3 つの場合: 名前に一致する変換済みの`.pug`が無い（レイアウトを手で書くなら、その名前の`.tsx`を置く）、`.json`が不正で読めない（写しは書かない）、`layout`が最上位の文字列として取れない（写しは書かない）。`layout`をページの`export const meta`に書いた`.tsx`は、手で書くものなので対象外。
 - `scripts.files`は、ページ以外の入力に合わせて絞っておくと意図が明確になる（`"js/**/*.ts"`など）。`alias`の相対パスは`__assets/_libs`のように`.`なしでも、プロジェクトにあるパスならパスとして扱う。
 
 ## 4. データ
