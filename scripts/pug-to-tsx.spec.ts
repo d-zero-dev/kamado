@@ -885,5 +885,290 @@ block content
 				`acorn 7.4.1 is too old: the converter needs acorn 8 or later in ${project} (add it to its devDependencies)\n`,
 			);
 		});
+
+		// A project of its own, converted as a real one is: the files, the output and what
+		// the converter said.
+		const convertProject = (name: string, files: Record<string, string>) => {
+			const project = path.join(root, name);
+			const output = path.join(root, `${name}-out`);
+			for (const [file, text] of Object.entries({
+				'package.json': '{ "name": "fixture", "private": true }\n',
+				...files,
+			})) {
+				mkdirSync(path.dirname(path.join(project, file)), { recursive: true });
+				writeFileSync(path.join(project, file), text);
+			}
+			symlinkSync(path.join(repo, 'node_modules'), path.join(project, 'node_modules'));
+			const said = execFileSync(
+				process.execPath,
+				[path.join(repo, 'scripts', 'pug-to-tsx.mjs'), project, output],
+				{ encoding: 'utf8', stdio: 'pipe' },
+			);
+			return { project, output, said };
+		};
+
+		test('keeps the selected of an option, which a page written in order shows where it was written', () => {
+			const { output } = convertProject('selected', {
+				'__assets/htdocs/index.pug': `- var cond = true
+html
+	body
+		select
+			option(selected disabled value="/2026/") y
+			option(selected=cond value="a") a
+			option(value="b") b
+`,
+			});
+			const page = readFileSync(path.join(output, '__assets/htdocs/index.tsx'), 'utf8');
+			expect(page).toContain('<option selected disabled value="/2026/">');
+			expect(page).toContain('<option selected={cond} value="a">');
+			expect(page).not.toContain('defaultValue');
+		});
+
+		test('writes a checked that has no value as a bare attribute, as it does a selected (an empty string is not checked)', () => {
+			const { output } = convertProject('checked', {
+				'__assets/htdocs/index.pug': `html
+	body
+		input(type="checkbox" checked)
+		input(type="checkbox" checked=cond)
+		div(checked)
+		div(selected)
+`,
+			});
+			const page = readFileSync(path.join(output, '__assets/htdocs/index.tsx'), 'utf8');
+			expect(page).toContain('<input type="checkbox" checked />');
+			expect(page).toContain('<input type="checkbox" checked={cond} />');
+			expect(page).not.toContain('<input type="checkbox" checked="" />');
+			// React writes them in the code of `input` and `option` only: any other element drops them.
+			expect(page).toContain('<div checked=""></div>');
+			expect(page).toContain('<div selected=""></div>');
+		});
+
+		test('types what it writes for a boolean attribute that Pug writes as its own name, in the strictest configuration', () => {
+			const { output } = convertProject('typed-booleans', {
+				'__assets/htdocs/index.pug': `html
+	body
+		button(disabled="disabled") b
+		input(type="text" required="required")
+		a(href="/a" download="download") a
+		select
+			option(selected disabled value="/2026/") y
+			option(selected="selected" value="a") a
+			option(selected=cond value="b") b
+		input(type="checkbox" checked)
+		input(type="checkbox" checked="checked")
+		input(type="checkbox" checked=cond)
+`,
+			});
+			writeFileSync(
+				path.join(output, 'tsconfig.json'),
+				JSON.stringify({
+					extends: path.join(
+						repo,
+						'node_modules',
+						'@d-zero',
+						'tsconfig',
+						'tsconfig.json',
+					),
+					compilerOptions: {
+						noEmit: true,
+						jsx: 'preserve',
+						allowImportingTsExtensions: true,
+						typeRoots: [path.join(repo, 'node_modules', '@types')],
+						types: ['react'],
+						paths: {
+							react: [path.join(repo, 'node_modules', '@types', 'react')],
+							'kamado/jsx': [path.join(dist, 'runtime.d.ts')],
+						},
+					},
+					include: ['__assets/**/*.tsx', '__assets/**/*.d.ts'],
+				}),
+			);
+			let said = '';
+			try {
+				execFileSync(
+					process.execPath,
+					[path.join(repo, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', output],
+					{ encoding: 'utf8', stdio: 'pipe' },
+				);
+			} catch (error) {
+				said = String((error as { stdout?: string }).stdout);
+			}
+			expect(said).toBe('');
+			const page = readFileSync(path.join(output, '__assets/htdocs/index.tsx'), 'utf8');
+			expect(page).toContain('<option selected value="a">');
+			expect(page).toContain('<input type="checkbox" checked />');
+			expect(page).toContain('<button disabled>');
+			expect(page).toContain('<input type="text" required />');
+			// `download` takes a string in the types: it stays as it was written.
+			expect(page).toContain('download="download"');
+		}, 120_000);
+
+		describe('the layout of a sidecar and of a front matter', () => {
+			const layouts: Record<string, string> = {
+				'__assets/_libs/layouts/price.pug': 'html\n\tbody\n\t\tblock content\n',
+				'__assets/htdocs/price/index.pug':
+					'extends /layouts/price.pug\nblock content\n\tp x\n',
+				'__assets/htdocs/price/index.json':
+					'{\n\t"title": "T",\n\t"layout": "price.pug"\n}\n',
+				'__assets/htdocs/about.html':
+					'---\ntitle: T\nlayout: "layouts/price.pug"\n---\n<p>layout: price.pug</p>\n',
+				'__assets/htdocs/gone.html': '<p>x</p>\n',
+				'__assets/htdocs/gone.json': '{ "layout": "gone.pug" }\n',
+				'__assets/htdocs/plain.html': '<p>x</p>\n',
+				'__assets/htdocs/plain.json': '{ "layout": "price" }\n',
+				'__assets/_libs/data/frag.html': '<hr>\n',
+			};
+
+			test('writes a copy of the sidecar and of the page with the extension left out, and says which', () => {
+				const { project, output, said } = convertProject('layout', layouts);
+				const copy = (file: string) => readFileSync(path.join(output, file), 'utf8');
+				expect(copy('__assets/htdocs/price/index.json')).toBe(
+					'{\n\t"title": "T",\n\t"layout": "price"\n}\n',
+				);
+				expect(copy('__assets/htdocs/about.html')).toBe(
+					'---\ntitle: T\nlayout: "layouts/price"\n---\n<p>layout: price.pug</p>\n',
+				);
+				expect(said).toContain('layout rewritten: __assets/htdocs/price/index.json');
+				expect(said).toContain('layout rewritten: __assets/htdocs/about.html');
+				expect(
+					readFileSync(path.join(project, '__assets/htdocs/price/index.json'), 'utf8'),
+				).toContain('price.pug');
+			});
+
+			test('warns of a layout that names no converted file, and still writes the name without the extension', () => {
+				const { output, said } = convertProject('layout-gone', layouts);
+				expect(said).toContain(
+					'warning: __assets/htdocs/gone.json: layout "gone.pug" names no converted file',
+				);
+				expect(readFileSync(path.join(output, '__assets/htdocs/gone.json'), 'utf8')).toBe(
+					'{ "layout": "gone" }\n',
+				);
+			});
+
+			test('rewrites the layout of the top level, whatever comes before it, and a name with $ as it is', () => {
+				const { output, said } = convertProject('layout-edge', {
+					'__assets/htdocs/nested.html': '<p>x</p>\n',
+					'__assets/htdocs/bad.html': '<p>x</p>\n',
+					'__assets/htdocs/nested.json':
+						'{ "blocks": { "layout": "price.pug" }, "layout": "price.pug" }\n',
+					'__assets/htdocs/dollar.json': '{ "layout": "a$&b.pug" }\n',
+					'__assets/htdocs/dollar.html': '---\nlayout: "a$&b.pug"\n---\n<p>x</p>\n',
+					'__assets/htdocs/bad.json': '{ "layout": "price.pug", }\n',
+				});
+				const copy = (file: string) => readFileSync(path.join(output, file), 'utf8');
+				expect(copy('__assets/htdocs/nested.json')).toBe(
+					'{ "blocks": { "layout": "price.pug" }, "layout": "price" }\n',
+				);
+				expect(copy('__assets/htdocs/dollar.json')).toBe('{ "layout": "a$&b" }\n');
+				expect(copy('__assets/htdocs/dollar.html')).toBe(
+					'---\nlayout: "a$&b"\n---\n<p>x</p>\n',
+				);
+				expect(said).toContain(
+					'warning: __assets/htdocs/bad.json: not valid JSON, the layout "price.pug" is not rewritten',
+				);
+				expect(existsSync(path.join(output, '__assets/htdocs/bad.json'))).toBe(false);
+			});
+
+			test('rewrites the layout of a front matter in each way it is written, and warns of one it does not read', () => {
+				const page = (front: string) => `---\n${front}\n---\n<p>x</p>\n`;
+				// A byte order mark, which a text editor of Windows may put first in a file.
+				const bom = String.fromCodePoint(0xfe_ff);
+				const { output, said } = convertProject('layout-forms', {
+					'__assets/htdocs/bom.html': bom + page('layout: layouts/price.pug'),
+					'__assets/_libs/layouts/price.pug': 'html\n\tbody\n\t\tblock content\n',
+					'__assets/htdocs/unquoted.html': page('layout: layouts/price.pug'),
+					'__assets/htdocs/single.html': page("layout: 'layouts/price.pug'"),
+					'__assets/htdocs/comment.html': page('layout: "layouts/price.pug" # c'),
+					'__assets/htdocs/crlf.html':
+						'---\r\nlayout: layouts/price.pug\r\n---\r\n<p>x</p>\r\n',
+					'__assets/htdocs/spaced.html': page('layout : layouts/price.pug'),
+					'__assets/htdocs/slash.html': page('layout: /layouts/price.pug'),
+					'__assets/htdocs/gone.html': page('layout: gone.pug'),
+					'__assets/htdocs/unmatched.html': page('layout: "a#b.pug"'),
+					'__assets/htdocs/body.html': '---\ntitle: T\n---\n<p>layout: price.pug</p>\n',
+					'__assets/htdocs/dup.html': '<p>x</p>\n',
+					'__assets/htdocs/escaped.html': '<p>x</p>\n',
+					// The last of two keys is the one that JSON.parse reads.
+					'__assets/htdocs/dup.json':
+						'{"layout":"other.pug","x":1,"layout":"layouts/price.pug"}\n',
+					'__assets/htdocs/escaped.json': '{ "layout": "layouts/price\\u002epug" }\n',
+				});
+				const copy = (file: string) => readFileSync(path.join(output, file), 'utf8');
+				expect(copy('__assets/htdocs/unquoted.html')).toBe(page('layout: layouts/price'));
+				expect(copy('__assets/htdocs/single.html')).toBe(page("layout: 'layouts/price'"));
+				expect(copy('__assets/htdocs/comment.html')).toBe(
+					page('layout: "layouts/price" # c'),
+				);
+				expect(copy('__assets/htdocs/crlf.html')).toBe(
+					'---\r\nlayout: layouts/price\r\n---\r\n<p>x</p>\r\n',
+				);
+				expect(copy('__assets/htdocs/bom.html')).toBe(
+					bom + page('layout: layouts/price'),
+				);
+				expect(copy('__assets/htdocs/spaced.html')).toBe(page('layout : layouts/price'));
+				expect(copy('__assets/htdocs/slash.html')).toBe(page('layout: /layouts/price'));
+				expect(copy('__assets/htdocs/gone.html')).toBe(page('layout: gone'));
+				expect(copy('__assets/htdocs/dup.json')).toBe(
+					'{"layout":"other.pug","x":1,"layout":"layouts/price"}\n',
+				);
+				for (const file of ['unmatched.html', 'body.html', 'escaped.json']) {
+					expect(existsSync(path.join(output, '__assets/htdocs', file))).toBe(false);
+				}
+				// Exactly these: a name that a converted file ends with, with or without a leading
+				// `/`, is not warned of.
+				expect(said.split('\n').filter((line) => line.startsWith('warning:'))).toEqual([
+					'warning: __assets/htdocs/escaped.json: the layout "layouts/price.pug" is not rewritten',
+					'warning: __assets/htdocs/gone.html: layout "gone.pug" names no converted file',
+					'warning: __assets/htdocs/unmatched.html: the layout of the front matter is not rewritten',
+				]);
+			});
+
+			test('does not warn of a layout that a converted file is', () => {
+				const { said } = convertProject('layout-clean', layouts);
+				// Only `gone.json` of the fixture names a layout that no converted file is.
+				expect(said.split('\n').filter((line) => line.startsWith('warning:'))).toEqual([
+					'warning: __assets/htdocs/gone.json: layout "gone.pug" names no converted file',
+				]);
+			});
+
+			test('reads a JSON only when a page of its name is next to it, whatever the page is written in', () => {
+				const named = '{ "layout": "layouts/price.pug" }\n';
+				const { output, said } = convertProject('layout-sidecars', {
+					'__assets/_libs/layouts/price.pug': 'html\n\tbody\n\t\tblock content\n',
+					'__assets/htdocs/home.pug':
+						'extends /layouts/price.pug\nblock content\n\tp x\n',
+					'__assets/htdocs/home.json': named,
+					'__assets/htdocs/faq.html': '<p>x</p>\n',
+					'__assets/htdocs/faq.json': named,
+					'__assets/htdocs/about.tsx': 'export default () => null;\n',
+					'__assets/htdocs/about.json': named,
+					'__assets/htdocs/legacy.jsx': 'export default () => null;\n',
+					'__assets/htdocs/legacy.json': named,
+					// No page of the name: data, not the sidecar of a page.
+					'__assets/htdocs/lone.json': named,
+					'__assets/_libs/data/menu.json': '{ "layout": "gone.pug" }\n',
+				});
+				for (const file of ['home', 'faq', 'about', 'legacy']) {
+					expect(
+						readFileSync(path.join(output, `__assets/htdocs/${file}.json`), 'utf8'),
+					).toBe('{ "layout": "layouts/price" }\n');
+				}
+				expect(existsSync(path.join(output, '__assets/htdocs/lone.json'))).toBe(false);
+				expect(existsSync(path.join(output, '__assets/_libs/data/menu.json'))).toBe(
+					false,
+				);
+				expect(said).not.toContain('lone.json');
+				expect(said).not.toContain('menu.json');
+			});
+
+			test('does not write a file whose layout is not a pug', () => {
+				const { output, said } = convertProject('layout-plain', layouts);
+				expect(existsSync(path.join(output, '__assets/htdocs/plain.json'))).toBe(false);
+				expect(existsSync(path.join(output, '__assets/_libs/data/frag.html'))).toBe(
+					false,
+				);
+				expect(said).not.toContain('plain.json');
+			});
+		});
 	},
 );

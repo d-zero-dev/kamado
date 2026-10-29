@@ -14,10 +14,16 @@
  * unknown handler aborts the generation, so a React upgrade that adds a new
  * shape fails loudly instead of silently producing a wrong table;
  * - the void elements are the labels of the "no end tag" switch in
- * `renderElement` (minus the elements that merely have no *separate* end tag).
+ * `renderElement` (minus the elements that merely have no *separate* end tag);
+ * - `ELEMENT_BOOLEAN_PROPS` (`attr-table.ts` only: the runtime and the Rust compiler do not
+ * read it, `scripts/pug-to-tsx.mjs` does) names the boolean props that React writes in the
+ * code of one element, not in `pushAttribute` (`selected` of `option`, `checked` of
+ * `input`). The generation fails when the code of the element no longer handles the prop, so
+ * a React upgrade that moves it is not missed.
  *
  * Nothing is probed by rendering. Run it when react-dom is upgraded:
- * `node scripts/generate-jsx-tables.mjs`.
+ * `node scripts/generate-jsx-tables.mjs`, then `cargo fmt --all` (the Rust table is written
+ * unformatted) and `yarn build` (the converter reads the build of `attr-table.ts`).
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -248,13 +254,43 @@ function classify(group) {
  * @returns {string[]} The tag names, sorted
  */
 function readVoidElements() {
-	const body = between('task = newProps.chunks;', 'break a;');
+	const body = between('var target = segment.chunks,', 'break a;');
 	const tags = [...body.matchAll(/case "([^"]+)":/g)].map((m) => m[1]);
 	return tags.filter((t) => !['title', 'style', 'script'].includes(t)).toSorted();
 }
 
+/**
+ * Reads the boolean props that React writes in the code of one element, not in the generic
+ * `pushAttribute` switch: `selected` of `<option>` and `checked` of `<input>`. On any other
+ * element React drops them as unknown props, so they cannot be rows of the table above. The
+ * props are the ones named here; the source is read to see that React still handles them in the
+ * code of the element, and a React upgrade that moves them fails the generation.
+ * @returns {[string, string][]} (tag, prop) pairs, sorted
+ */
+function readElementBooleans() {
+	const wanted = [
+		['input', 'checked'],
+		['option', 'selected'],
+	];
+	return wanted.map(([tag, prop]) => {
+		const from = `\n    case "${tag}":\n`;
+		const start = source.indexOf(from);
+		if (start === -1 || source.includes(from, start + 1)) {
+			// Another function with the same label would be read instead of this one.
+			throw new Error(`the code of <${tag}> not found, or found more than once`);
+		}
+		const end = source.indexOf('\n    case "', start + from.length);
+		const body = source.slice(start, end === -1 ? undefined : end);
+		if (!body.includes(`case "${prop}":`)) {
+			throw new Error(`<${tag}> does not handle ${prop} in its own code any more`);
+		}
+		return [tag, prop];
+	});
+}
+
 const unitless = readUnitless();
 const voidElements = readVoidElements();
+const elementBooleans = readElementBooleans();
 
 /** @type {Map<string, [string, number]>} */
 const props = new Map();
@@ -310,6 +346,18 @@ tsLines.push(
 );
 for (const [prop, name, kind] of rows) {
 	tsLines.push(`\t[${ts(prop)}, ${ts(name)}, ${KIND_NAMES[kind]}],`);
+}
+tsLines.push(
+	'];',
+	'',
+	'/**',
+	' * `[tag, React prop name]` of the boolean props that React writes in the code of the element, which',
+	' * the table above does not have (on any other element React drops them), sorted.',
+	' */',
+	'export const ELEMENT_BOOLEAN_PROPS: readonly (readonly [string, string])[] = [',
+);
+for (const [tag, prop] of elementBooleans) {
+	tsLines.push(`\t[${ts(tag)}, ${ts(prop)}],`);
 }
 tsLines.push(
 	'];',
