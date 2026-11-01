@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /* eslint-disable no-console -- the CLI's job is to print */
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs, styleText } from 'node:util';
 
-import { build } from './build.js';
+import { buildFrom } from './build-from.js';
 import { parseJobs } from './jobs.js';
 import { start } from './server/start.js';
 import { summarize } from './summary.js';
@@ -50,7 +50,9 @@ function progressLine(): {
 
 /**
  * Resolves the config file: `--config` relative to the cwd, else
- * `kamado.config.jsonc` in the cwd.
+ * `kamado.config.jsonc` in the cwd. The path is the real one (symbolic links
+ * resolved), as the cwd is: the input files and the globs of `build` are both
+ * made from them, and a link on one side only would make no glob match.
  * @param configFlag - The `--config` value
  */
 function resolveConfig(configFlag: string | undefined): string {
@@ -58,7 +60,7 @@ function resolveConfig(configFlag: string | undefined): string {
 	if (!existsSync(file)) {
 		throw new Error(`config file not found: ${file}`);
 	}
-	return file;
+	return realpathSync(file);
 }
 
 /**
@@ -93,18 +95,23 @@ async function main(argv: readonly string[]): Promise<number> {
 			const progress = progressLine();
 			let report;
 			try {
-				report = await build(configPath, {
-					onProgress: progress.update,
-					incremental: values.incremental,
-					force: values.force,
-					skipUnchanged: values['skip-unchanged'],
-					targets: rest,
-					jobs,
-					cacheDir:
-						values['cache-dir'] === undefined
-							? undefined
-							: path.resolve(process.cwd(), values['cache-dir']),
-				});
+				// The globs typed at the prompt are relative to where they were typed.
+				report = await buildFrom(
+					configPath,
+					{
+						onProgress: progress.update,
+						incremental: values.incremental,
+						force: values.force,
+						skipUnchanged: values['skip-unchanged'],
+						targets: rest,
+						jobs,
+						cacheDir:
+							values['cache-dir'] === undefined
+								? undefined
+								: path.resolve(process.cwd(), values['cache-dir']),
+					},
+					process.cwd(),
+				);
 			} finally {
 				// An error message must not follow the progress line on the same row.
 				progress.clear();

@@ -1,45 +1,26 @@
-import type { RenderContext } from './props.js';
-import type { Rendered, RenderJob } from './render.js';
+import path from 'node:path';
 
-import { native } from './native.js';
-import { renderJobs } from './render.js';
-import { RUNTIME_URL } from './runtime-url.js';
-import {
-	buildScripts,
-	ESBUILD_VERSION,
-	findEsbuildBinary,
-	type ScriptRequest,
-} from './scripts.js';
-
-/**
- * The frames `feed` takes: a little-endian `u32` page, a `u32` byte length
- * and the UTF-8 bytes of the HTML, for each page.
- * @param rendered - Pages and their HTML
- */
-function frames(rendered: readonly Rendered[]): Buffer {
-	const lengths = rendered.map(([, html]) => Buffer.byteLength(html, 'utf8'));
-	let size = 0;
-	for (const length of lengths) {
-		size += 8 + length;
-	}
-	const buffer = Buffer.allocUnsafe(size);
-	let at = 0;
-	for (const [i, [page, html]] of rendered.entries()) {
-		const length = lengths[i]!;
-		buffer.writeUInt32LE(page, at);
-		buffer.writeUInt32LE(length, at + 4);
-		buffer.write(html, at + 8, length, 'utf8');
-		at += 8 + length;
-	}
-	return buffer;
-}
+import { buildFrom } from './build-from.js';
 
 /** Build-time switches; every field is optional and defaults to the config. */
 export interface BuildOptions {
 	readonly incremental?: boolean;
 	readonly force?: boolean;
 	readonly skipUnchanged?: boolean;
-	/** Globs relative to the input directory; only matching pages are built. */
+	/**
+	 * Only the pages, stylesheets and scripts whose input file matches are
+	 * built. A relative entry is relative to the directory of the config file
+	 * (to the cwd from the CLI); an absolute one is used without a base. An
+	 * entry with a glob character (`*` `?` `[` `]` `{` `}`) is a glob; any other
+	 * entry is a path: a directory stands for every file under it, and a path
+	 * that does not exist is an error. An entry that selects no page,
+	 * stylesheet or script is a warning of the report. A negated glob (`!a/**`)
+	 * is an error.
+	 * @example
+	 * ```ts
+	 * await build('/site/kamado.config.jsonc', { targets: ['src/css/style.css', 'src/news/**'] });
+	 * ```
+	 */
 	readonly targets?: readonly string[];
 	readonly jobs?: number;
 	readonly cacheDir?: string;
@@ -75,19 +56,11 @@ export interface BuildReport {
 	readonly elapsedMs: number;
 }
 
-/** What `prepare` of the core returns. */
-interface Prepared {
-	readonly handle: string;
-	readonly jobs: readonly RenderJob[];
-	/** `null` when there is nothing to render. */
-	readonly context: RenderContext | null;
-	/** `null` when no script is stale. */
-	readonly scripts: ScriptRequest | null;
-}
-
 /**
  * Builds the site described by `configPath` (an absolute path to
  * `kamado.config.jsonc`). Errors from the core are thrown as `Error`.
+ * Relative entries of `targets` are relative to the directory of the config
+ * file, as the paths in the config are.
  *
  * The core plans the build and compiles the JSX modules; the pages that need
  * JavaScript (JSX pages, pages with a layout) are rendered here, in worker
@@ -96,68 +69,18 @@ interface Prepared {
  * @param configPath - Absolute path of the config file
  * @param options - Build switches
  * @returns The build report
+ * @throws {Error} when an entry of `targets` is a path that does not exist or a negated glob
  * @example
  * ```ts
  * const report = await build('/site/kamado.config.jsonc', { incremental: true });
  * console.log(report.pages.filter((p) => p.status === 'built').length);
+ * // Only /site/src/news/** (relative to the directory of the config file)
+ * await build('/site/kamado.config.jsonc', { targets: ['src/news/**'] });
  * ```
  */
 export async function build(
 	configPath: string,
 	options: BuildOptions = {},
 ): Promise<BuildReport> {
-	const core = native();
-	const timing = process.env['KAMADO_TIMING'] === '1';
-	const started = performance.now();
-	const lap = (what: string) => {
-		if (timing) {
-			// eslint-disable-next-line no-console
-			console.error(
-				`  ${what}: ${Math.round(performance.now() - started)}ms (since start)`,
-			);
-		}
-	};
-	const { onProgress, ...coreOptions } = options;
-	const prepared = JSON.parse(
-		core.prepare(
-			configPath,
-			JSON.stringify({
-				...coreOptions,
-				// The banner's dates are local time, which the core cannot tell.
-				tzOffsetMinutes: 0 - new Date().getTimezoneOffset(),
-				esbuildVersion: ESBUILD_VERSION,
-				esbuildBinary: findEsbuildBinary(),
-			}),
-			RUNTIME_URL,
-		),
-	) as Prepared;
-	lap(`prepared (${prepared.jobs.length} jobs)`);
-	try {
-		// Pages render in worker threads while esbuild bundles the scripts. The
-		// HTML goes to the core as each batch is done, not after the last one.
-		let done = 0;
-		const [, scripts] = await Promise.all([
-			prepared.context && prepared.jobs.length > 0
-				? renderJobs(prepared.jobs, prepared.context, {
-						runtimeUrl: RUNTIME_URL,
-						parallelism: options.jobs,
-						onRendered: (rendered) => {
-							core.feed(prepared.handle, frames(rendered));
-							done += rendered.length;
-							onProgress?.(done, prepared.jobs.length);
-						},
-					})
-				: [],
-			prepared.scripts ? buildScripts(prepared.scripts) : [],
-		]);
-		lap('rendered');
-		const results = JSON.stringify({ scripts });
-		lap('serialized');
-		const report = JSON.parse(core.finish(prepared.handle, results)) as BuildReport;
-		lap('finished');
-		return report;
-	} catch (error) {
-		core.abort(prepared.handle);
-		throw error;
-	}
+	return buildFrom(configPath, options, path.dirname(configPath));
 }
