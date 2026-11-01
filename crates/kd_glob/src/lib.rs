@@ -673,6 +673,18 @@ mod tests {
 	}
 
 	#[test]
+	fn an_escaped_directory_name_with_extglob_and_class_characters_matches_as_written() {
+		assert!(m(
+			"/s \\(c\\)\\|\\+\\@\\!/a\\[1\\]\\{2\\}/*.html",
+			"/s (c)|+@!/a[1]{2}/p.html"
+		));
+		assert!(!m(
+			"/s \\(c\\)\\|\\+\\@\\!/a\\[1\\]\\{2\\}/*.html",
+			"/s (c)|+@!/a1/p.html"
+		));
+	}
+
+	#[test]
 	fn leading_dot_slash_is_ignored_on_both_sides() {
 		assert!(m("./a/*.html", "a/index.html"));
 		assert!(m("a/*.html", "./a/index.html"));
