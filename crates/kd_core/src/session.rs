@@ -12,7 +12,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -104,7 +104,7 @@ struct Shared {
 	pipeline: html::Pipeline,
 	/// Minifies the code inside pages (inline scripts and handlers).
 	minifiers: Minifiers,
-	targets: Vec<kd_glob::Pattern>,
+	targets: Vec<Target>,
 	skip_unchanged: bool,
 	assets: Vec<Asset>,
 	sitemap: Option<sitemap::Settings>,
@@ -178,6 +178,58 @@ type AssetOutcome = Result<(AssetResult, Option<kd_build::Entry>, Vec<String>), 
 
 /// The compiled layout (its module) and the fingerprints of its import closure.
 pub(crate) type LayoutModule = (String, BTreeMap<String, kd_build::Dep>);
+
+/// One glob of `BuildOptions::targets`, and whether it selected a file. An
+/// absolute glob (the form the Node side passes: relative to the cwd for the
+/// CLI, to the config file for the API) is matched against the input path;
+/// a relative one against the input path relative to the input directory.
+struct Target {
+	pattern: kd_glob::Pattern,
+	source: String,
+	absolute: bool,
+	/// Set from the threads that decide the pages.
+	hit: AtomicBool,
+}
+
+impl Target {
+	fn new(source: &str, pattern: kd_glob::Pattern) -> Target {
+		let bytes = source.as_bytes();
+		// `/a/b` here, `C:/a/b` on Windows.
+		let absolute = source.starts_with('/')
+			|| (bytes.len() > 2
+				&& bytes[1] == b':'
+				&& bytes[2] == b'/'
+				&& bytes[0].is_ascii_alphabetic());
+		Target {
+			pattern,
+			source: source.to_owned(),
+			absolute,
+			hit: AtomicBool::new(false),
+		}
+	}
+}
+
+/// Whether a file is built: there are no targets, or one of them matches it.
+/// A target not yet hit is tried even after another one matched, so that every
+/// target that selects something is marked; once the file is selected, the
+/// targets already hit are not tried again.
+fn targeted(targets: &[Target], rel: &str, input_path: &str) -> bool {
+	if targets.is_empty() {
+		return true;
+	}
+	let mut any = false;
+	for target in targets {
+		if any && target.hit.load(Ordering::Relaxed) {
+			continue;
+		}
+		let path = if target.absolute { input_path } else { rel };
+		if target.pattern.matches(path) {
+			target.hit.store(true, Ordering::Relaxed);
+			any = true;
+		}
+	}
+	any
+}
 
 /// Whether JavaScript renders the page: a JSX page, or a page that names a
 /// layout (a layout is a component).
@@ -590,7 +642,11 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 				.to_owned(),
 		);
 	}
-	let targets = compile_globs(&options.targets)?;
+	let targets: Vec<Target> = compile_globs(&options.targets)?
+		.into_iter()
+		.zip(&options.targets)
+		.map(|(pattern, source)| Target::new(source, pattern))
+		.collect();
 	let env = page_env(loaded, options);
 	let pipeline = html::Pipeline::compile(config)?;
 	let sitemap = crate::sitemap::settings(config)?;
@@ -646,7 +702,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 			return First::Done(Decision::Virtual);
 		}
 		let rel = kd_site::path::relative(&config.dir.input, &page.file.input_path);
-		if !targets.is_empty() && !targets.iter().any(|t| t.matches(&rel)) {
+		if !targeted(&targets, &rel, &page.file.input_path) {
 			return First::Done(Decision::Skipped);
 		}
 		let page_env = if needs_js(page) { &env_js } else { &env };
@@ -822,7 +878,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	let mut asset_decisions = Vec::with_capacity(assets.len());
 	let mut script_entries = Vec::new();
 	for (i, asset) in assets.iter().enumerate() {
-		if !targets.is_empty() && !targets.iter().any(|t| t.matches(&asset.rel)) {
+		if !targeted(&targets, &asset.rel, &asset.input_path) {
 			asset_decisions.push(Decision::Skipped);
 			continue;
 		}
@@ -888,6 +944,14 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	};
 
 	lap(&mut lap_at, "assets and context");
+	// A glob that selects nothing is most likely written from the wrong
+	// directory or misspelt: the build goes on, but says so.
+	for target in targets.iter().filter(|t| !t.hit.load(Ordering::Relaxed)) {
+		plan.warnings.push(format!(
+			"build target \"{}\" matched no page, stylesheet or script",
+			target.source
+		));
+	}
 	let page_count = plan.pages.len();
 	let asset_count = assets.len();
 	Ok(Prepared {
@@ -1490,6 +1554,20 @@ pub fn write_report(config: &kd_config::Config, report: &Report) -> Result<(), S
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_target_is_absolute_with_a_leading_slash_or_a_drive_and_a_slash() {
+		let absolute = |s: &str| Target::new(s, kd_glob::Pattern::new("x").unwrap()).absolute;
+		assert!(absolute("/a/b"));
+		assert!(absolute("C:/a"));
+		assert!(absolute("c:/a"));
+		assert!(!absolute("C:a"));
+		assert!(!absolute("C:"));
+		assert!(!absolute("a/b"));
+		// A drive with a backslash is not one: the glob reads `\` as an escape,
+		// so absolute globs are written with `/` on Windows too.
+		assert!(!absolute("C:\\a"));
+	}
 
 	#[test]
 	fn the_time_of_a_part_is_summed_only_when_timing_is_on() {

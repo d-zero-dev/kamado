@@ -496,7 +496,33 @@ mod tests {
 		fs::write(&temp, format!("#!/bin/sh\ncat > /dev/null\n{body}\n")).unwrap();
 		fs::set_permissions(&temp, fs::Permissions::from_mode(0o755)).unwrap();
 		fs::rename(&temp, &path).unwrap();
+		wait_until_executable(&path);
 		path
+	}
+
+	/// Runs `path` until it starts. A test running beside this one may fork
+	/// while the script is open for writing: the child holds a copy of that
+	/// descriptor until it execs, and starting the script fails with
+	/// "Text file busy" meanwhile. The descriptor here is closed already, so
+	/// once a start succeeds no later one can be busy.
+	#[cfg(unix)]
+	fn wait_until_executable(path: &str) {
+		use std::process::{Command, Stdio};
+		for _ in 0..500 {
+			match Command::new(path)
+				.stdin(Stdio::null())
+				.stdout(Stdio::null())
+				.stderr(Stdio::null())
+				.status()
+			{
+				Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+					std::thread::sleep(std::time::Duration::from_millis(10));
+				}
+				Err(e) => panic!("cannot start {path}: {e}"),
+				Ok(_) => return,
+			}
+		}
+		panic!("{path} stayed busy");
 	}
 
 	#[cfg(unix)]

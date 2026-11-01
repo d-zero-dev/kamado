@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
 const prepare =
 	vi.fn<(configPath: string, optionsJson: string, runtimeUrl: string) => string>();
@@ -32,6 +36,8 @@ vi.mock('./scripts.js', () => ({
 }));
 
 const { build } = await import('./build.js');
+const { buildFrom } = await import('./build-from.js');
+const { resolveTargets } = await import('./targets.js');
 
 const REPORT = JSON.stringify({
 	version: 1,
@@ -85,7 +91,9 @@ describe('build', () => {
 		expect(JSON.parse(prepare.mock.calls[0]![1])).toEqual({
 			incremental: true,
 			force: false,
-			targets: ['sub/**'],
+			// Behavior change: relative targets are resolved from the directory of the config file
+			targets: ['/site/sub/**'],
+			// targets: ['sub/**'], // previous
 			jobs: 4,
 			cacheDir: '/cache',
 			tzOffsetMinutes: expect.any(Number),
@@ -263,5 +271,152 @@ describe('build', () => {
 			'cannot write /o/index.html',
 		);
 		expect(abort).toHaveBeenCalledExactlyOnceWith('7');
+	});
+});
+
+describe('resolveTargets', () => {
+	let root = '';
+	let site = '';
+	let odd = '';
+	let extglob = '';
+
+	beforeAll(() => {
+		root = mkdtempSync(path.join(tmpdir(), 'kamado-targets-'));
+		site = path.join(root, 'site');
+		mkdirSync(path.join(site, 'css'), { recursive: true });
+		writeFileSync(path.join(site, 'css', 'style.css'), '');
+		odd = path.join(root, 'a[1]{2}');
+		mkdirSync(odd, { recursive: true });
+		writeFileSync(path.join(odd, 'p.html'), '');
+		extglob = path.join(root, 'site (copy)|+@!');
+		mkdirSync(extglob, { recursive: true });
+		writeFileSync(path.join(extglob, 'p.html'), '');
+	});
+
+	afterAll(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	test('a path without glob characters is a file of the base directory, written as an exact pattern', () => {
+		expect(resolveTargets(['css/style.css'], site)).toEqual([`${site}/css/style.css`]);
+		expect(resolveTargets(['./css/../css/style.css'], site)).toEqual([
+			`${site}/css/style.css`,
+		]);
+		expect(resolveTargets(['../css/style.css'], path.join(site, 'css'))).toEqual([
+			`${site}/css/style.css`,
+		]);
+	});
+
+	test('a glob is put under the base directory, and an absolute one is kept', () => {
+		expect(resolveTargets(['css/*.css', '**/*.html'], site)).toEqual([
+			`${site}/css/*.css`,
+			`${site}/**/*.html`,
+		]);
+		expect(resolveTargets(['../css/*.css'], path.join(site, 'css'))).toEqual([
+			`${site}/css/*.css`,
+		]);
+		expect(
+			resolveTargets([`${site}/css/*.css`, `${site}/css/style.css`], '/elsewhere'),
+		).toEqual([`${site}/css/*.css`, `${site}/css/style.css`]);
+	});
+
+	test('a path without glob characters that does not exist is an error', () => {
+		expect(() => resolveTargets(['css/nope.css'], site)).toThrow(
+			`target not found: css/nope.css (${site}/css/nope.css)`,
+		);
+	});
+
+	test('the glob characters of the base directory are escaped', () => {
+		const escaped = `${root}/a\\[1\\]\\{2\\}`;
+		expect(resolveTargets(['p.html', '*.html'], odd)).toEqual([
+			`${escaped}/p.html`,
+			`${escaped}/*.html`,
+		]);
+	});
+
+	test('the characters the glob refuses as extglob syntax are escaped in the base directory too', () => {
+		const escaped = `${root}/site \\(copy\\)\\|\\+\\@\\!`;
+		expect(resolveTargets(['p.html', '*.html'], extglob)).toEqual([
+			`${escaped}/p.html`,
+			`${escaped}/*.html`,
+		]);
+	});
+
+	test('a directory stands for every file under it', () => {
+		expect(resolveTargets(['css', `${site}/css`], site)).toEqual([
+			`${site}/css/**`,
+			`${site}/css/**`,
+		]);
+	});
+
+	test('a negated glob is an error, as the core refuses it', () => {
+		expect(() => resolveTargets(['!css/*.css'], site)).toThrow(
+			'negated glob "!css/*.css" is not supported',
+		);
+	});
+
+	test('an absolute glob is normalized, and an absolute path that does not exist is an error', () => {
+		expect(resolveTargets([`${site}/css/../css/*.css`], '/elsewhere')).toEqual([
+			`${site}/css/*.css`,
+		]);
+		expect(() => resolveTargets([`${site}/nope.css`], '/elsewhere')).toThrow(
+			`target not found: ${site}/nope.css (${site}/nope.css)`,
+		);
+	});
+
+	test('a path and a base directory that go through a symbolic link keep the link, as the input files do', () => {
+		const link = path.join(root, 'link');
+		symlinkSync(site, link);
+
+		expect(resolveTargets(['link/css/style.css'], root)).toEqual([
+			`${link}/css/style.css`,
+		]);
+		expect(resolveTargets(['css/*.css'], link)).toEqual([`${link}/css/*.css`]);
+	});
+
+	test('an empty entry is an error, not the whole base directory', () => {
+		expect(() => resolveTargets([''], site)).toThrow('an empty target is not supported');
+	});
+
+	test('the dot segments after the first glob segment are kept as written', () => {
+		expect(resolveTargets(['./css/*/../x.css'], site)).toEqual([
+			`${site}/css/*/../x.css`,
+		]);
+		expect(resolveTargets(['../site/*.html'], odd)).toEqual([`${root}/site/*.html`]);
+	});
+});
+
+describe('the base directory of targets', () => {
+	beforeEach(() => {
+		prepare.mockReset();
+		finish.mockReset();
+		prepare.mockReturnValue(NOTHING_TO_RENDER);
+		finish.mockReturnValue(REPORT);
+	});
+
+	test('build resolves them from the directory of the config file', async () => {
+		await build('/site/kamado.config.jsonc', { targets: ['css/*.css'] });
+
+		expect(JSON.parse(prepare.mock.calls[0]![1]).targets).toEqual(['/site/css/*.css']);
+	});
+
+	test('buildFrom resolves them from the directory it is given, as the CLI gives the cwd', async () => {
+		await buildFrom(
+			'/site/kamado.config.jsonc',
+			{ targets: ['__assets/*.css'] },
+			'/work',
+		);
+
+		expect(JSON.parse(prepare.mock.calls[0]![1]).targets).toEqual([
+			'/work/__assets/*.css',
+		]);
+	});
+
+	test('no targets give the core no targets, and an empty list stays empty', async () => {
+		await build('/site/kamado.config.jsonc', {});
+		await build('/site/kamado.config.jsonc', { targets: [] });
+
+		expect(JSON.parse(prepare.mock.calls[0]![1])).not.toHaveProperty('targets');
+		expect(JSON.parse(prepare.mock.calls[1]![1]).targets).toEqual([]);
 	});
 });

@@ -410,6 +410,7 @@ node benchmarks/v3/compare-outputs.ts /tmp/baseline-v2 <v3 output dir>
 
 - `identical`（バイト一致）の割合を見る。`different`のファイルを 1 つ選び、差を見て §11 の表と照らす。
 - `extra`（v3 だけにあるファイル）: v2 の設定でビルドしていなかったスタイル/スクリプトが v3 では出力されている場合。意図したものか確かめる。
+- 一部だけをビルドする`kamado build <パス>`のパスは、v2 と同じく打った場所から書く（`yarn kamado build src/css/style.css`）。v2 と違い、無いファイルはエラーになり、ディレクトリを渡すとその中をすべてビルドし、何も選ばなかったパスは警告が出る（RFC §2 の #40）。スクリプトや手順書に書いたパスは、ここで確かめる。
 
 ### 10.2 差分ビルド
 

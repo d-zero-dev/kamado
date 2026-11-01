@@ -11,8 +11,15 @@
  * so that vitest does not pick it up: it needs the native build.
  */
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	symlinkSync,
+	writeFileSync,
+} from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
@@ -361,4 +368,47 @@ test('a page that throws fails the build with its path', async () => {
 	);
 
 	await assert.rejects(build(config, {}), /plain\.tsx.*boom|boom.*plain\.tsx/s);
+});
+
+test('kamado build takes its globs from the cwd, also with the config file named through a symbolic link', () => {
+	const config = makeSite(0);
+	const site = path.dirname(config);
+	mkdirSync(path.join(site, 'src', 'css'), { recursive: true });
+	writeFileSync(path.join(site, 'src', 'css', 's.css'), 'a { color: red }\n');
+	writeFileSync(path.join(site, 'src', 'css', 't.css'), 'b { color: red }\n');
+	mkdirSync(path.join(site, 'src', 'js'), { recursive: true });
+	writeFileSync(path.join(site, 'src', 'js', 'a.js'), 'console.log("a");\n');
+	writeFileSync(path.join(site, 'src', 'js', 'b.js'), 'console.log("b");\n');
+	const link = path.join(path.dirname(site), `${path.basename(site)}-link`);
+	symlinkSync(site, link);
+	const cli = path.join(dist, 'cli.js');
+	const run = (...args) =>
+		spawnSync(process.execPath, [cli, 'build', ...args], { cwd: site, encoding: 'utf8' });
+	const built = (file) => existsSync(path.join(site, 'out', file));
+
+	const selected = run(
+		'--config',
+		path.join(link, 'kamado.config.jsonc'),
+		'src/css/s.css',
+		'src/js/a.js',
+		'src/plain.tsx',
+	);
+	assert.equal(selected.status, 0, selected.stderr);
+	assert.deepEqual(
+		['css/s.css', 'css/t.css', 'js/a.js', 'js/b.js', 'plain.html', 'index.html'].map(
+			built,
+		),
+		[true, false, true, false, true, false],
+	);
+
+	const missing = run('src/nope.css');
+	assert.equal(missing.status, 1);
+	assert.match(missing.stderr, /target not found: src\/nope\.css/);
+
+	const none = run('src/none/**');
+	assert.equal(none.status, 0, none.stderr);
+	assert.match(
+		`${none.stdout}${none.stderr}`,
+		/src\/none\/\*\*" matched no page, stylesheet or script/,
+	);
 });
