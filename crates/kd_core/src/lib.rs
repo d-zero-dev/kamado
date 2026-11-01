@@ -711,7 +711,12 @@ pub struct BuildOptions {
 	/// Ignore the manifest's cached entries (new ones are still recorded).
 	pub force: bool,
 	pub skip_unchanged: bool,
-	/// Only build pages whose input path (relative to the input dir) matches.
+	/// Only build the pages, stylesheets and scripts whose input file matches
+	/// one of these globs: an absolute glob against the input path, a relative
+	/// one against the input path relative to the input dir. The Node side
+	/// passes absolute globs (resolved from the cwd for the CLI, from the
+	/// directory of the config file for `build()`). A glob that matches no
+	/// page, stylesheet or script is a warning of the report.
 	pub targets: Vec<String>,
 	/// Thread count override.
 	pub jobs: Option<usize>,
@@ -1471,6 +1476,155 @@ mod tests {
 		assert_eq!(
 			statuses(&after),
 			[("/a.html", "cached"), ("/sub/b.html", "cached")]
+		);
+	}
+
+	#[test]
+	fn absolute_targets_match_the_input_files_and_select_pages_and_stylesheets() {
+		let site = Site::new("abs_targets");
+		site.write("src/a.html", "<p>a</p>");
+		site.write("src/sub/b.html", "<p>b</p>");
+		site.write("src/css/s.css", "a { color: red }");
+		site.write("src/css/t.css", "b { color: red }");
+		let loaded = site.config("");
+		let report = build(
+			&loaded,
+			&BuildOptions {
+				targets: vec![
+					format!("{}/src/sub/**", site.root),
+					format!("{}/src/css/s.css", site.root),
+				],
+				jobs: Some(1),
+				..Default::default()
+			},
+		)
+		.unwrap();
+
+		assert_eq!(
+			statuses(&report),
+			[("/a.html", "skipped"), ("/sub/b.html", "built")]
+		);
+		let assets: Vec<(&str, &str)> = report
+			.assets
+			.iter()
+			.map(|a| (a.input_path.rsplit('/').next().unwrap(), a.status.as_str()))
+			.collect();
+		assert_eq!(assets, [("s.css", "built"), ("t.css", "skipped")]);
+		assert!(
+			report.warnings.iter().all(|w| !w.contains("matched no")),
+			"{:?}",
+			report.warnings
+		);
+	}
+
+	/// A path as the Node side writes it into a glob: every character the
+	/// glob reads, escaped.
+	fn as_literal_glob(path: &str) -> String {
+		let mut out = String::new();
+		for c in path.chars() {
+			if "*?[]{}()|!+@\\".contains(c) {
+				out.push('\\');
+			}
+			out.push(c);
+		}
+		out
+	}
+
+	#[test]
+	fn an_escaped_absolute_target_selects_a_page_in_a_directory_named_with_glob_characters() {
+		let site = Site::new("escaped_targets");
+		site.write("src/a[1]{2}/p.html", "<p>p</p>");
+		site.write("src/s (c)|+@!/q.html", "<p>q</p>");
+		site.write("src/other.html", "<p>o</p>");
+		let loaded = site.config("");
+		let report = build(
+			&loaded,
+			&BuildOptions {
+				targets: vec![
+					as_literal_glob(&format!("{}/src/a[1]{{2}}/p.html", site.root)),
+					format!(
+						"{}/*.html",
+						as_literal_glob(&format!("{}/src/s (c)|+@!", site.root))
+					),
+				],
+				jobs: Some(1),
+				..Default::default()
+			},
+		)
+		.unwrap();
+
+		assert_eq!(
+			statuses(&report),
+			[
+				("/a[1]{2}/p.html", "built"),
+				("/other.html", "skipped"),
+				("/s (c)|+@!/q.html", "built")
+			]
+		);
+		assert!(
+			report.warnings.iter().all(|w| !w.contains("matched no")),
+			"{:?}",
+			report.warnings
+		);
+	}
+
+	#[test]
+	fn an_absolute_and_a_relative_target_that_select_the_same_page_are_both_hit() {
+		let site = Site::new("both_targets");
+		site.write("src/a.html", "<p>a</p>");
+		site.write("src/b.html", "<p>b</p>");
+		let loaded = site.config("");
+		let report = build(
+			&loaded,
+			&BuildOptions {
+				targets: vec![format!("{}/src/a.html", site.root), "a.html".to_string()],
+				jobs: Some(1),
+				..Default::default()
+			},
+		)
+		.unwrap();
+
+		assert_eq!(
+			statuses(&report),
+			[("/a.html", "built"), ("/b.html", "skipped")]
+		);
+		assert!(
+			report.warnings.iter().all(|w| !w.contains("matched no")),
+			"{:?}",
+			report.warnings
+		);
+	}
+
+	#[test]
+	fn a_target_that_matches_nothing_is_a_warning_and_the_build_goes_on() {
+		let site = Site::new("unmatched_targets");
+		site.write("src/a.html", "<p>a</p>");
+		site.write("src/sub/b.html", "<p>b</p>");
+		let loaded = site.config("");
+		let none = format!("{}/src/none/**", site.root);
+		let report = build(
+			&loaded,
+			&BuildOptions {
+				targets: vec![none.clone(), "sub/**".to_string()],
+				jobs: Some(1),
+				..Default::default()
+			},
+		)
+		.unwrap();
+
+		assert_eq!(
+			statuses(&report),
+			[("/a.html", "skipped"), ("/sub/b.html", "built")]
+		);
+		assert_eq!(
+			report
+				.warnings
+				.iter()
+				.filter(|w| w.contains("matched no"))
+				.collect::<Vec<_>>(),
+			[&format!(
+				"build target \"{none}\" matched no page, stylesheet or script"
+			)]
 		);
 	}
 
