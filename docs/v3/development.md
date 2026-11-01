@@ -174,6 +174,7 @@ v3 の出力と比べるには「比較ハーネスとベンチマーク」の`c
 
 - `scripts/generate-prettier-tables.mjs`（`prettier-v2`のプラグインから表を読む）、`scripts/generate-jsx-entities.mjs`（`esbuild-v2`に尋ねる）、`scripts/generate-entities.mjs`、`scripts/generate-minifier-tables.mjs`、`scripts/generate-minify-golden.mjs`
 - `scripts/v2-print.mjs`（`prettier-v2`と`html-minifier-terser`を v2 と同じ設定で動かす。`fuzz-html-print.mjs`・`fuzz-html-json.mjs`・`fuzz-html-pipeline.mjs`・`fuzz-html-chain.mjs`・`fuzz-html-minify.mjs`が使う）、`scripts/check-kd-js-jsx.mjs`（`esbuild-v2`で case を bundle する）
+- `benchmarks/v3/html-normalize.ts`（比較ハーネスの`--semantic`が、文字参照を展開するのに`character-entities`の表を読む。oracle ではなく、WHATWG の名前付き文字参照の表として使う。移行する利用者が clone で動かすので、oracle を外すときもこの依存は残す）
 
 別名の esbuild を足すと、`yarn install`が`@esbuild/<os>-<arch>`をトップに置くのはどちらの版か決まらない。そのため、`kd_core`のテストが呼ぶ実行ファイルは、Node が`esbuild`パッケージから解決するもの（`esbuild_for_tests`。ランタイムの`findEsbuildBinary`と同じ解決）にしてある。
 
@@ -184,7 +185,7 @@ v3 の出力と比べるには「比較ハーネスとベンチマーク」の`c
 3. 3 は、v2 の`@kamado-io/style-compiler`が固定する版が変わったときだけ、ルートの`cssnano`・`postcss`・`postcss-import`をそれに合わせる。`postcss-custom-media`は、v2 の`@d-zero/postcss-config`が固定する版が変わったときに、同じ要領で合わせる。`yarn install`のあと、`generate-css-golden.mjs`と`generate-css-rule-tests.mjs`を実行して`git diff`を確かめ、`cargo test --locked --offline -p kd_css`を通す。ランダム入力（`fuzz-css.mjs` → `generate-css-oracle.mjs` → `check-css.mjs`）と、`check-css-import.mjs`・`check-css-custom-media.mjs`も実行する。`check-css-import.mjs`の`INTENDED`と`check-css-custom-media.mjs`の`INTENDED`は、oracle が書く文字列を含むので、版を動かすと書式の差で落ちることがある。落ちた文字列が書式だけの差か、意味の差かを見分けてから直す。
 4. 4 は、v2 の`@kamado-io/page-compiler`が固定する版が変わったときに、ルートの`prettier-v2`・`html-minifier-terser`（と`@types/html-minifier-terser`）・`character-entities`をそれに合わせる。`@kamado-io/jsx-compiler`が固定する版が変わったときは、`esbuild-v2`を合わせる。`yarn install`のあと、動かした依存に当たる「何を更新したら、何を作り直すか」の表のスクリプトを実行する（`tables.rs`は生成のあとに`cargo fmt --all`）。`git diff`で、変化が v2 の版の差によるものか確かめ、`cargo test --locked --offline --workspace`と`yarn test`を通す。`prettier-v2`なら`fuzz-html-print.mjs`・`fuzz-html-json.mjs`・`fuzz-html-pipeline.mjs`・`fuzz-html-chain.mjs`・`fuzz-html-minify.mjs`、`esbuild-v2`なら`check-kd-js-jsx.mjs`（手書きと`fuzz`、`KD_JS_FUNCTION=1`も）を実行して、差が出ないことを確かめる。差が出たら、v2 の版の差か kd_html・kd_js の差かを分け、後者を直す。
 5. v2 の API が変わって import が通らなくなったら、スクリプト側を合わせる。v2 の出力が変わったなら、変わった理由が RFC §2 の意図した差に当たるか確かめ、当たらなければ v3 のほうを直す。
-6. v2 の保守が止まって oracle を更新しなくなったら、`kamado-v2`の版、`benchmarks/v2-baseline/`、CSS の`cssnano`・`postcss`・`postcss-import`・`postcss-custom-media`の版、`prettier-v2`・`esbuild-v2`・`html-minifier-terser`・`character-entities`の版は固定したままでよい（golden はコミット済みで、実行時はこの依存を使わない）。
+6. v2 の保守が止まって oracle を更新しなくなったら、`kamado-v2`の版、`benchmarks/v2-baseline/`、CSS の`cssnano`・`postcss`・`postcss-import`・`postcss-custom-media`の版、`prettier-v2`・`esbuild-v2`・`html-minifier-terser`・`character-entities`の版は固定したままでよい（golden はコミット済みで、kamado の実行時はこの依存を使わない）。`character-entities`は比較ハーネスの`--semantic`も読むので、外さない。
 
 `benchmarks/v2-baseline/.yarn/`は`.gitignore`の対象。
 
@@ -199,6 +200,8 @@ node benchmarks/v3/compare-outputs.ts <baselineDir> <candidateDir> --json=report
 ```
 
 比較の判定は`benchmarks/v3/compare-trees.ts`に書いてある。`.css`/`.js`/`.map`はサイズが増えないことを、それ以外はバイト一致を求める。
+
+`--semantic`（と`--diff=<相対パス>`）は、利用者が v2 からの移行を確かめるためのもの（MIGRATION §10.1）。ページを`benchmarks/v3/html-normalize.ts`でそろえてから比べ、`equivalent`を数える。v3 の開発で v2 との一致を確かめるときは付けない（バイト比較のまま）。
 
 `v2`ブランチにあった`yarn bench`（このブランチには無い）は、10 万ページ級では生成器がファイルを一斉に開いて`EMFILE`になる（macOS の上限は約 6 万）。v2 の基準値は 5 万ページまでで取る。10 万ページの基準は、`benchmarks/v3/generate-jsx-fixtures.ts`の fixture を、上の`benchmarks/v2-baseline/run.ts`で処理して取る。
 

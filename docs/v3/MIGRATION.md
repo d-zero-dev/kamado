@@ -24,6 +24,15 @@ cp -R <output dir> /tmp/baseline-v2   # 出力ディレクトリを丸ごと保�
 ```
 
 - 確認: 出力ディレクトリのファイル数を控える。
+- 出力をリポジトリにコミットしているなら、それも基準になります。上とは別のディレクトリに取り出します（`<ブランチ>:<output dir>`と書くと、`<output dir>/`を付けずに取り出せる）。
+
+  ```sh
+  mkdir -p /tmp/baseline-v2-committed
+  git archive <ブランチ>:<output dir> | tar -x -C /tmp/baseline-v2-committed
+  ```
+
+  公開中の出力が古い v2 の版でビルドされているときは、今の v2 でビルドし直したもの（`/tmp/baseline-v2`）と、コミット済みのものの両方と比べます。v2 の版の違いで出力が変わっていることがあります。
+
 - v3 の整形に**幅の設定はありません**（`html.format.printWidth`は廃止。書くと設定エラー）。長い行も折り返さず、折れるのは強制改行のときだけです。v2 が幅 100000 で整形していた出力（`.html`の既定）とは、100000 桁を超える行（巨大な`data:` URI を持つ属性など）を除いて、バイトまで一致します。v2 の prettier 設定が入力の種類で違い（`.pug`/`.tsx`は幅 90、など）、幅 90 で折り返された出力は、長い行の折り返しの位置が一致しません（意味は同じ）。基準の出力で、属性が 1 行ずつに折り返されていないかを見て確かめます。
 
 ## 2. 設定ファイル（TS / JS → `kamado.config.jsonc`）
@@ -405,10 +414,30 @@ builder の出力と揃えるときの違い:
 
 ```sh
 yarn kamado build --force   # v3 のプロジェクトで（§1 の `kamado` は v2、ここは v3）
-node benchmarks/v3/compare-outputs.ts /tmp/baseline-v2 <v3 output dir>
+node <clone>/benchmarks/v3/compare-outputs.ts /tmp/baseline-v2 <v3 output dir> --semantic
+node <clone>/benchmarks/v3/compare-outputs.ts /tmp/baseline-v2 <v3 output dir> --diff=<ページの相対パス>
 ```
 
-- `identical`（バイト一致）の割合を見る。`different`のファイルを 1 つ選び、差を見て §11 の表と照らす。
+`<clone>`は §3.4 で clone して`yarn install`したこのリポジトリ（比較のスクリプトは npm パッケージに入っていない）。比べる相手は、§1 で作った基準（コミット済みの出力を取り出したなら、`/tmp/baseline-v2-committed`とも比べる）。
+
+`--semantic`を付けると、バイトが違うページ（`.html`/`.htm`）を、意味の変わらない差をそろえてから比べます。そろえるのは次のものです。prettier の幅の違い（§1）で折り返しの位置が違うだけのページは、ここで一致します。
+
+- 描画されない空白: 連続する空白、ブロックの要素の境目の空白、続く空白（コメント、表示されない要素、インラインのタグをまたいでも 1 つにする）、`button`・`select`・`textarea`の内側の端、`head`の要素の間と`title`の前後。`pre`・`listing`・`textarea`の中は書かれたまま比べる（開始タグの直後の改行 1 つはパーサーと同じく落とす）
+- 属性の順と引用符、タグ名と属性名の大文字小文字、空の値と値なし（`disabled=""`と`disabled`）、`class`の値の中の空白
+- 文字参照の書き方（`&nbsp;`と`&#160;`、`&amp;`と`&`）、doctype の大文字小文字、自己終了の`/`、省略した`</head>`
+- UTF-8 でないページ（Shift_JIS など）は、バイトのまま比べる（文字参照と空白はそろえる）
+
+結果の見方:
+
+- `identical`（バイト一致）と`equivalent`（そろえると一致）の割合を見る。`different`のページは、`--diff=<ページの相対パス>`で、そろえたあとの差を行単位で見て、§11 の表と照らす。`--diff`はページだけを比べ、差が無ければ終了コード 0、あれば 1 を返す。
+- `smaller`/`larger`は CSS/JS/ソースマップで、サイズだけを比べる。`smaller`は合格、`larger`は終了コードを 1 にする。v3 の CSS が大きくなるのは、§11 の CSS の圧縮結果の差（custom property を書かれたまま出す、v2 の autoprefixer が消した古いプレフィックスが残るなど）で起きる。中身を見て、意図した差か確かめる。
+- `equivalent`のうち、そろえる対象から外したものが違うページは、「equivalent pages left to check」に種類ごとの件数が出る（終了コードは 1）。そのページも`--diff`で、外したものの差を見られる。
+  - `inline-script`: `<script>`の中身。§11 の圧縮器の違い（terser と esbuild）で、処理の内容が同じかを確かめる。
+  - `inline-style`: `<style>`の中身と`style`属性の値。§11 の CSS の圧縮結果と引用符の差か確かめる。
+  - `empty-class`: 空の`class=""`が付いている要素。`class=""`は CSS の`[class]`と`:not([class])`に当たり、属性が無い要素には当たらない。候補の出力の CSS ファイルと、そのページの`<style>`から、当たり方が変わりうるセレクタ（`[class]`、`:not([class])`、`[class=""]`）が「selectors that test the class attribute」に一覧で出る。増減した要素に当たるものがあるかを確かめる。`[class^=icon-]`のように値の中身を見るものは、空の値に当たらないので一覧に出ない。
+- 違う`.css`は、ベンダープレフィックスの付いた宣言（プロパティ、値、セレクタ、at-rule のどこかにプレフィックスがあるもの）のうち、片方にだけあるものが「prefixes」に出る（`-`は v2 だけ、`+`は v3 だけ）。v3 はプレフィックスを足しも消しもしない（§11 の注）。`-`が 1 つでもあると終了コードは 1 になる。`-`のうち対象のブラウザで要るものは、ソースに書く。`+`（v2 の autoprefixer が消していた古いプレフィックスが残ったもの）は一覧に出るだけ。空白の書き方はそろえるが、値の書き方が違う宣言（`#fff`と`#ffffff`）は両方に出る。
+- 一覧（差のあるファイル、prefixes、セレクタ）は、それぞれ`--show`（既定 20）の件数まで出る。
+- そろえ方の限界: 空白は要素の既定の`display`と`white-space`で判断する。CSS でこれを変えている要素（`div`を`display: inline`にする、`white-space: pre`を付けるなど）では、同じ表示でも`different`になることも、境目の空白の違いが`equivalent`に紛れることもある。ほかにも、同じ表示が`different`になることがある（次の文字が空白で始まるときの、インラインの要素の中の末尾の空白、`</p>`・`<body>`・`<tbody>`などの省略、`noscript`の中）。HTML のコメント、`<?php ?>`、`xmp`・`iframe`・`noembed`・`noframes`の中は書かれたまま比べる。
 - `extra`（v3 だけにあるファイル）: v2 の設定でビルドしていなかったスタイル/スクリプトが v3 では出力されている場合。意図したものか確かめる。
 - 一部だけをビルドする`kamado build <パス>`のパスは、v2 と同じく打った場所から書く（`yarn kamado build src/css/style.css`）。v2 と違い、無いファイルはエラーになり、ディレクトリを渡すとその中をすべてビルドし、何も選ばなかったパスは警告が出る（RFC §2 の #40）。スクリプトや手順書に書いたパスは、ここで確かめる。
 
