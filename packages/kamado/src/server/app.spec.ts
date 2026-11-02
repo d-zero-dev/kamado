@@ -127,6 +127,62 @@ describe('createApp', () => {
 		expect(await response.text()).toBe('<svg/>');
 	});
 
+	describe('a static file in a character encoding of its own', () => {
+		// <title>日本語</title> in Shift_JIS: a header of charset=utf-8 would override
+		// the `<meta charset>` and the browser would show it garbled. That the core
+		// answers `file` for such a file, `html.inject` or not, is tested where the core
+		// is (`a_static_file_that_is_not_utf8_is_sent_as_it_is` in `serve.rs`).
+		const JAPANESE = Buffer.from('93fa967b8cea', 'hex');
+		const HTML = Buffer.concat([
+			Buffer.from('<meta charset="shift_jis"><title>'),
+			JAPANESE,
+			Buffer.from('</title>'),
+		]);
+		const CSS = Buffer.concat([
+			Buffer.from('@charset "Shift_JIS"; a::after { content: "'),
+			JAPANESE,
+			Buffer.from('"; }'),
+		]);
+
+		const serveFile = async (name: string, bytes: Buffer) => {
+			const file = path.join(dir, name);
+			await writeFile(file, bytes);
+			serveRequest.mockReturnValue(JSON.stringify({ kind: 'file', path: file }));
+			return createApp(DESCRIPTION, 'file:///rt.js', { renderer: fakeRenderer() }).app;
+		};
+
+		test.each([
+			['a.html', HTML, 'text/html'],
+			['a.css', CSS, 'text/css'],
+		])(
+			'%s is sent as it is, with no charset, so that its own declaration decides',
+			async (name, bytes, type) => {
+				const app = await serveFile(name, bytes);
+
+				const response = await app.request(`/${name}`);
+
+				expect(response.status).toBe(200);
+				expect(response.headers.get('content-type')).toBe(type);
+				expect(Buffer.from(await response.arrayBuffer()).equals(bytes)).toBe(true);
+			},
+		);
+
+		test('a ranged or HEAD request has no charset either', async () => {
+			const app = await serveFile('a.html', HTML);
+
+			const part = await app.request('/a.html', { headers: { Range: 'bytes=0-3' } });
+			const head = await app.request('/a.html', { method: 'HEAD' });
+
+			expect(part.status).toBe(206);
+			expect(part.headers.get('content-type')).toBe('text/html');
+			expect(Buffer.from(await part.arrayBuffer()).equals(HTML.subarray(0, 4))).toBe(
+				true,
+			);
+			expect(head.status).toBe(200);
+			expect(head.headers.get('content-type')).toBe('text/html');
+		});
+	});
+
 	test('a ready HTML body, such as a static file with an injection, is a whole page without ranges and is logged as a page', async () => {
 		serveRequest.mockReturnValue(
 			JSON.stringify({ kind: 'text', contentType: 'text/html', body: '0123456789' }),

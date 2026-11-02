@@ -20,7 +20,7 @@ import { native } from '../native.js';
 import { buildScripts } from '../scripts.js';
 
 import { setGuard } from './guard.js';
-import { contentTypeOf } from './mime.js';
+import { contentTypeOf, withUtf8 } from './mime.js';
 import { setProxyRoutes } from './proxy.js';
 import { byteRange } from './range.js';
 import { ServeRenderer } from './renderer.js';
@@ -289,7 +289,7 @@ export function createApp(
 				case 'text': {
 					log(200, kind);
 					return ctx.body(result.body, 200, {
-						'Content-Type': `${result.contentType}; charset=utf-8`,
+						'Content-Type': withUtf8(result.contentType),
 					});
 				}
 				case 'file': {
@@ -312,6 +312,7 @@ export function createApp(
 					const status = range ? 206 : 200;
 					log(status, 'file');
 					const headers = {
+						// No charset, unlike a body above: the bytes are not read (see `TYPES`).
 						'Content-Type': contentTypeOf(result.path),
 						'Content-Length': String(range ? range.end - range.start + 1 : info.size),
 						'Accept-Ranges': 'bytes',
