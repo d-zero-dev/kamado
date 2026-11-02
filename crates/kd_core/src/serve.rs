@@ -44,7 +44,8 @@ use crate::{BuildOptions, Loaded, Page, PageKind};
 /// How to answer a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Served {
-	/// A response body that is ready.
+	/// A response body that is ready. It is a `String`, so it is UTF-8: the
+	/// caller sends it with `charset=utf-8`.
 	Text {
 		/// `text/html`, `text/css`, `text/javascript`. `text/html` is also a
 		/// static `.html`/`.htm` of the output directory that `html.inject`
@@ -53,7 +54,8 @@ pub enum Served {
 		body: String,
 	},
 	/// A file of the output directory, to be sent as it is (a static HTML that
-	/// no `html.inject` writes into too).
+	/// no `html.inject` writes into too). Its bytes are not read here, so the
+	/// caller sends it with no `charset` and the file's own declaration decides.
 	File {
 		path: String,
 	},

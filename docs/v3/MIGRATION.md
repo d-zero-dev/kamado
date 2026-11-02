@@ -376,7 +376,7 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
 `kamado server`（設定は`devServer`）。v2 との違い:
 
 - ファイルを監視しません（v2 と同じ）。リクエストごとに依存の stat を確かめ、変更がなければメモリの出力を返します。
-- `html.inject`の`mode: "serve"`と`"both"`は、ページだけでなく、出力ディレクトリにあって対応するページのない`.html`/`.htm`にも入ります（v2 の`devServer.transforms`と同じ。kamado がビルドしない静的なサイトの開発時に、CSS などを足す使い方）。文字列の挿入で、`includes`・`rules`・整形・圧縮は当たらず、挿入以外のバイトは変わりません。入れる先の開始タグと終了タグの両方が書かれていないファイル（終了タグを省略した文書、`<head>`のない文書、断片）、UTF-8 でないファイル、すでに同じマークアップがあるファイルはそのまま返します。`pages`の glob と`html.overrides`の`pages`はファイルのパス（`index<outputExtension>`は`/dir/`）に照らします（RFC §9.3）。
+- `html.inject`の`mode: "serve"`と`"both"`は、ページだけでなく、出力ディレクトリにあって対応するページのない`.html`/`.htm`にも入ります（v2 の`devServer.transforms`と同じ。kamado がビルドしない静的なサイトの開発時に、CSS などを足す使い方）。文字列の挿入で、`includes`・`rules`・整形・圧縮は当たらず、挿入以外のバイトは変わりません。入れる先の開始タグと終了タグの両方が書かれていないファイル（終了タグを省略した文書、`<head>`のない文書、断片）、UTF-8 でないファイル、すでに同じマークアップがあるファイルはそのまま返します。入れたファイルは`Content-Type: text/html; charset=utf-8`で、そのまま返すファイルは`charset`を付けません（RFC §9.3、§12）。`pages`の glob と`html.overrides`の`pages`はファイルのパス（`index<outputExtension>`は`/dir/`）に照らします（RFC §9.3）。
 - ページファイルの**追加と削除**、設定ファイル・`pages.overrides`の変更は、**再起動**すると反映されます。
 - コンポーネントを直すと、次のリクエストで描画用のワーカーが作り直されます（初回は少し遅い）。
 - ブラウザのライブリロードはありません。
@@ -395,7 +395,7 @@ kamado の前身の`@d-zero/builder`（Eleventy ベース）で作られた案�
 | `minifier: { minifyCSS: false }`（HTML Minifier の他の機能は何も有効にならない） | `html.minify: { "redundantAttributes": false, "css": false }`（空の`class=""`を残し、`style`属性を圧縮しない）                              |
 | `characterEntities: true`                                                        | `html.entities: "all"`                                                                                                                      |
 | builder が DOM を jsdom で書き戻す（属性の`&amp;`、`<path></path>`、`&nbsp;`）   | `html.serializer: "spec"`                                                                                                                   |
-| `autoDecode`（開発サーバーが Shift_JIS の出力を UTF-8 に戻す機能）               | 不要。開発サーバーは常に UTF-8 を返す（RFC §9.5）                                                                                           |
+| `autoDecode`（開発サーバーが Shift_JIS の出力を UTF-8 に戻す機能）               | 不要。開発サーバーが作るページは常に UTF-8 で返す。出力ディレクトリの静的なファイルはそのまま返す（RFC §9.5）                               |
 | ソースが Shift_JIS の HTML・JSX・CSS（builder の`autoDecode`の対象外）           | **未対応**。`<path>: file is not valid UTF-8`で失敗する（lossy 変換はしない）。`iconv -f CP932 -t UTF-8`等で UTF-8 にしてから移す           |
 | `ssi`（開発サーバーで`<!--#include virtual-->`を展開）                           | ビルドでは何もしない（コメントのまま残る）。展開が要るなら`html.includes`の`ssi`                                                            |
 | `banner()`                                                                       | `styles.banner` / `scripts.banner`の文字列（`{{date:YYYY-MM-DD}}` `{{year}}`）                                                              |
