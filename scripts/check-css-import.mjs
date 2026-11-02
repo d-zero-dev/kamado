@@ -55,6 +55,17 @@ const FILES = {
 		"@import 'theme.css' layer;\n@import 'print.css' layer;\n.m11 { color : red }\n",
 	'css/main9.css':
 		"@import 'theme.css' layer(base);\n@import 'print.css' layer(base);\n@import 'layers.css' layer(y);\n.m9 { color : red }\n",
+	// A layer order after the imports that names their layers in the same order:
+	// nothing is declared in front of it.
+	'css/main12.css':
+		"@import 'theme.css' layer(one);\n@import 'print.css' layer(two);\n@import 'base/reset.css' layer(two);\n@layer one, two;\n.m12 { color : red }\n",
+	// A layer block in an imported file, and a layer order after the import that
+	// names another layer first.
+	'css/body-layer.css': '@layer z { .z { color : red } }\n',
+	'css/main13.css': "@import 'body-layer.css';\n@layer w, z;\n.m13 { color : red }\n",
+	// A remote import between two layered imports.
+	'css/main14.css':
+		"@import 'theme.css' layer(b);\n@import 'https://example.com/font.css';\n@import 'print.css' layer(a);\n.m14 { color : red }\n",
 };
 
 for (const [name, content] of Object.entries(FILES)) {
@@ -131,27 +142,45 @@ const INTENDED = {
 		v3: '@layer{.theme{background:red;color:rgba(0,0,0,.5)}}@layer{.print{display:none}}.m11{color:red}',
 		why: 'each anonymous layer is a layer of its own, so two of them side by side stay apart; cssnano joins adjacent `@layer` blocks, which puts the rules of one in the layer of the other',
 	},
+	'main13.css': {
+		v3: '@layer z;@layer w, z;@layer z{.z{color:red}}.m13{color:red}',
+		why: 'the imported file declares `z` with its block before the order names `w`; postcss-import moves the order in front of the block, which declares `w` first',
+	},
+	'main14.css': {
+		v3: '@layer b;@import "https://example.com/font.css";@layer b{.theme{background:red;color:rgba(0,0,0,.5)}}@layer a{.print{display:none}}.m14{color:red}',
+		why: 'the remote sheet may declare `a` and `b` itself, and `b` is declared before it as in the source; postcss-import moves the remote import in front of the layers',
+	},
 	'main9.css': {
 		v3: '@layer base;@layer y{@layer p, q}@layer base{.theme{background:red;color:rgba(0,0,0,.5)}.print{display:none}}@layer y{.layers{color:blue}}.m9{color:red}',
 		why: 'the layers are declared in the order of the imports (`base`, then `y`); postcss-import moves the `@layer` statement of an imported file in front, which declares `y` first',
 	},
 };
 
+const entries = Object.keys(FILES)
+	.map((name) => name.match(/^css\/(main(\d+)\.css)$/))
+	.filter(Boolean)
+	.toSorted((a, b) => Number(a[2]) - Number(b[2]))
+	.map((match) => match[1]);
 let failures = 0;
-for (let n = 1; n <= 11; n++) {
-	const input = path.join(root, 'src/css', `main${n}.css`);
+// An intended difference for an entry that is not in the fixture compares nothing.
+for (const name of Object.keys(INTENDED).filter((key) => !entries.includes(key))) {
+	failures++;
+	console.log(`${name}: an intended difference without an entry in the fixture`);
+}
+for (const name of entries) {
+	const input = path.join(root, 'src/css', name);
 	const expected = await v2(input);
-	const actual = readFileSync(path.join(root, 'out/css', `main${n}.css`), 'utf8');
-	const intended = INTENDED[`main${n}.css`];
+	const actual = readFileSync(path.join(root, 'out/css', name), 'utf8');
+	const intended = INTENDED[name];
 	if (expected === actual) {
-		console.log(`main${n}.css: identical (${actual.length} bytes)`);
+		console.log(`${name}: identical (${actual.length} bytes)`);
 	} else if (intended?.v3 === actual) {
 		console.log(
-			`main${n}.css: differs on purpose (${intended.why})\n  v2: ${expected}\n  v3: ${actual}`,
+			`${name}: differs on purpose (${intended.why})\n  v2: ${expected}\n  v3: ${actual}`,
 		);
 	} else {
 		failures++;
-		console.log(`main${n}.css: differs\n  v2: ${expected}\n  v3: ${actual}`);
+		console.log(`${name}: differs\n  v2: ${expected}\n  v3: ${actual}`);
 	}
 }
 rmSync(root, { recursive: true, force: true });

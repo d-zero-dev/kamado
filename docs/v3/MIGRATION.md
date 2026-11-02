@@ -354,7 +354,9 @@ v2 の既定の transform（doctype → prettier → minifier → lineBreak）�
   - `@layer`の文を挟んで続いていない`@import`、規則のあとの`@import`、読み込むファイルを名指さない`@import`、先頭にない`@charset`は、v2 と同じく出力に入れません。v3 は`kamado build`の要約に警告を出します（v2 は何も表示しませんでした）。
 - **v2 と違う点（レイヤー）**:
   - `layer()`が 2 段以上ある取り込みの中の外部 URL の`@import`は、外側の条件を外側に書きます（`layer(a)`の中の`layer(b)`は`a.b`）。v2 の postcss-import は逆に書いて`b.a`になり、レイヤーの並びも変わります。
-  - `layer()`付きの取り込みの後ろに`@layer`の文があり、先頭に移すとレイヤーの宣言の順が変わるときは、取り込みの位置に`@layer one;`を書き足します（`@import "a.css" layer(one); @import "b.css" layer(two); @layer two, one;`は`one`、`two`の順。v2 は`two`、`one`）。
+  - `@layer`の文や外部 URL の`@import`を先頭に移すと、レイヤーが最初に宣言される順がソースの順と変わるときは、取り込みの位置に`@layer one;`を書き足します（`@import "a.css" layer(one); @import "b.css" layer(two); @layer two, one;`は`one`、`two`の順。v2 は`two`、`one`）。変わらないときは何も書き足しません（`@layer one, two;`なら v2 と同じ）。順は同じ親を持つレイヤーの間で比べます。
+    - 取り込んだファイルの本文にある`@layer x { … }`と`@layer x;`（`@media`/`@supports`の中のものはその条件のもとで）も、取り込みの位置で宣言されたものとして数えます（`@import "a.css"; @layer w, z;`で`a.css`が`@layer z { … }`を持つなら`@layer z;`を書き足す。v2 は`w`、`z`の順）。
+    - 外部 URL の`@import`は、読み込むシートが何を宣言するかが分からないので、その手前で宣言されたレイヤーは手前に残します（`@import "b.css" layer(b); @import url(x.css); @import "a.css" layer(a);`は`@layer b;`を`@import url(x.css)`の前に書く。`x.css`が`@layer a, b;`を持っていても`b`が先）。
   - 隣り合う無名の`@layer`ブロックは、v2 の cssnano は 1 つにまとめますが、別のレイヤーなのでまとめません。無名の`layer`で取り込んだファイルの`@layer`の文は、v2 と違い、先頭に移さずそのファイルのブロックの中に残します。
 - スクリプト（`scripts.files`、既定`**/*.{js,ts,jsx,tsx,mjs,cjs}`）は esbuild（`bundle: true`）です。`alias`/`define`/`target`（既定`es2022`）/`minify`/`sourcemap`/`banner`が使えます。**`pages.files`に一致するファイルはスクリプトとして扱いません**（`.tsx`はページ）。
 - **v2 と出力を揃えたいとき**: v2 は esbuild に`target`を渡さない（esnext）。構文が`es2022`で変わるコードでは`"scripts": { "target": "esnext" }`にする。

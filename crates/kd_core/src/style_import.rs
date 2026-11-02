@@ -30,8 +30,10 @@
 //! - The layers an import declares are declared in the order they appear in
 //!   the source. postcss-import moves the `@layer` statements and the remote
 //!   imports in front of the body, which would declare a layer of the body
-//!   only after them; where that changes the order, `@layer name;` is written
-//!   at the place of the import.
+//!   (the layer of the import, and the `@layer` blocks and statements in the
+//!   file) only after them; where that changes the order, `@layer name;` is
+//!   written at the place of the import. A remote import without a layer may
+//!   declare any layer, so the layers declared in front of it stay in front.
 //!
 //! An `@import` after an `@layer` statement that follows another `@import` is
 //! invalid in CSS (§ 2: imports must be consecutive), and postcss-import drops
@@ -163,8 +165,10 @@ enum Kind {
 	Import,
 	/// An `@layer` statement of a file.
 	Layer,
-	/// `@layer name;` written for the layer of a local import, so that the
-	/// layer is declared where the source declares it.
+	/// `@layer name;` for the layer of a local import or a layer the body of
+	/// its file declares, so that the layer is declared where the source
+	/// declares it. Written only where it changes the order
+	/// (`keep_declarations`).
 	Declare,
 }
 
@@ -517,6 +521,29 @@ fn parse_text(
 	{
 		run.last_of_file = true;
 	}
+	// The source declares the layers of the body here, before what comes after
+	// the import; the bundle writes every body after the header. `@layer name;`
+	// for each is a candidate that `keep_declarations` keeps only where leaving it
+	// out would change the order.
+	// Inside an anonymous layer there is no name to write. The body of the
+	// entry comes after the whole header in the source too.
+	let declared_in_body: Vec<Header> = flat
+		.body
+		.iter()
+		.filter(|c| {
+			!is_entry && c.file == index && !c.chain.iter().any(|l| l.layer.as_deref() == Some(""))
+		})
+		.flat_map(|c| {
+			body_layers(&text[c.from..c.to])
+				.into_iter()
+				.filter_map(|(conditions, inner)| {
+					let mut chain = c.chain.clone();
+					chain.extend(conditions);
+					declare_path(&chain, &inner)
+				})
+		})
+		.collect();
+	flat.header.extend(declared_in_body);
 	Ok(flat)
 }
 
@@ -614,6 +641,135 @@ fn misplaced_statements(
 		}
 	}
 	found
+}
+
+/// The layers that the `@layer` blocks and statements in a run of a body
+/// declare, in order, each as its names inside the layers of the run (`@layer
+/// a { @layer b; }` gives `["a"]` and `["a", "b"]`), with the `@media` and
+/// `@supports` it is inside (as conditions, outermost first). An anonymous
+/// block has no name to declare, nor have the layers inside it. A layer inside
+/// a rule or another at-rule (`@container`, `@scope`) depends on what the
+/// bundler does not read, and so does an invalid `@layer` (no name, a block
+/// with two names), which a browser drops: neither is listed.
+fn body_layers(text: &str) -> Vec<(Chain, Vec<String>)> {
+	let mut out = Vec::new();
+	// Most runs have no layer in them.
+	if text
+		.as_bytes()
+		.windows(6)
+		.any(|w| w.eq_ignore_ascii_case(b"@layer"))
+	{
+		body_layers_in(text, 0, text.len(), &Vec::new(), &[], &mut out);
+	}
+	out
+}
+
+fn body_layers_in(
+	text: &str,
+	from: usize,
+	to: usize,
+	conditions: &Chain,
+	parent: &[String],
+	out: &mut Vec<(Chain, Vec<String>)>,
+) {
+	let bytes = text.as_bytes();
+	let path_of = |name: &str| {
+		let mut path = parent.to_vec();
+		path.extend(name.split('.').map(|s| s.trim().to_owned()));
+		path
+	};
+	let mut i = from;
+	while i < to {
+		match bytes[i] {
+			b' ' | b'\t' | b'\n' | b'\r' | 0x0C | b'}' => i += 1,
+			b'/' if bytes.get(i + 1) == Some(&b'*') => {
+				i = text[i + 2..].find("*/").map_or(to, |p| i + 2 + p + 2);
+			}
+			b'<' if text[i..].starts_with("<!--") => i += 4,
+			b'-' if text[i..].starts_with("-->") => i += 3,
+			_ => {
+				let name_end = (bytes[i] == b'@').then(|| {
+					text[i + 1..]
+						.find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+						.map_or(to, |p| i + 1 + p)
+				});
+				// A statement also ends at the `}` of the block it is in, or at the
+				// end of the text (CSS Syntax § 5.4.2).
+				let (end, terminator) = find_statement_end(text, name_end.unwrap_or(i))
+					.filter(|&(end, _)| end < to)
+					.unwrap_or((to, b';'));
+				let name = name_end.map(|n| text[i + 1..n].to_ascii_lowercase());
+				let prelude = name_end.map(|n| without_comments(&text[n..end]));
+				let prelude = prelude.as_deref().map(str::trim).unwrap_or_default();
+				// Each name is identifiers joined by `.`, with nothing in between.
+				let valid_names = |names: &str| {
+					names
+						.split(',')
+						.all(|n| n.trim().split('.').all(is_layer_ident))
+				};
+				if terminator == b';' {
+					if name.as_deref() == Some("layer") && valid_names(prelude) {
+						out.extend(prelude.split(',').map(|n| (conditions.clone(), path_of(n))));
+					}
+					i = end + 1;
+					continue;
+				}
+				let close = skip_block(text, end).min(to);
+				// A block that the text ends in has no `}` to leave out.
+				let closed = close > end + 1 && bytes[close - 1] == b'}';
+				let inner = (end + 1, if closed { close - 1 } else { close });
+				match name.as_deref() {
+					Some("layer") if !prelude.contains(',') && valid_names(prelude) => {
+						let path = path_of(prelude);
+						out.push((conditions.clone(), path.clone()));
+						body_layers_in(text, inner.0, inner.1, conditions, &path, out);
+					}
+					Some(rule @ ("media" | "supports")) if !prelude.is_empty() => {
+						let mut nested = conditions.clone();
+						nested.push(Condition {
+							layer: None,
+							// As `supports()` of an import has it: without the parentheses
+							// that the at-rule needs around it.
+							supports: (rule == "supports")
+								.then(|| unwrap_parens(prelude).to_owned()),
+							media: (rule == "media").then(|| prelude.to_owned()),
+						});
+						body_layers_in(text, inner.0, inner.1, &nested, parent, out);
+					}
+					_ => {}
+				}
+				i = close;
+			}
+		}
+	}
+}
+
+/// Whether `s` is one name of a layer: an identifier (no white space, not
+/// starting with a digit; an escape or a character outside ASCII is part of
+/// it).
+fn is_layer_ident(s: &str) -> bool {
+	!s.is_empty()
+		&& !s.starts_with(|c: char| c.is_ascii_digit())
+		&& s.chars()
+			.all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '\\') || !c.is_ascii())
+}
+
+/// `s` without the parentheses around all of it: `(a)` gives `a`, but
+/// `(a) and (b)` stays as it is.
+fn unwrap_parens(s: &str) -> &str {
+	let Some(inner) = s.strip_prefix('(').and_then(|r| r.strip_suffix(')')) else {
+		return s;
+	};
+	let mut depth = 0usize;
+	for c in inner.chars() {
+		match c {
+			'(' => depth += 1,
+			')' if depth == 0 => return s,
+			')' => depth -= 1,
+			_ => {}
+		}
+	}
+	inner
 }
 
 /// The offset after the block that opens at `open` (a `{`), or the end of the
@@ -732,6 +888,13 @@ fn remote_import_declares(ctx: &mut Context<'_>, chain: &Chain) -> Vec<Decl> {
 /// media and supports conditions of the import. `None` when a layer of the
 /// chain is anonymous: it has no name to write.
 fn declare_layer(chain: &Chain) -> Option<Header> {
+	declare_path(chain, &[])
+}
+
+/// `@layer a.b.c;` for the layer `inner` (`["c"]`) inside the layers of
+/// `chain` (`a.b`), under the media and supports conditions of the chain.
+/// `None` when a layer of the chain is anonymous: it has no name to write.
+fn declare_path(chain: &Chain, inner: &[String]) -> Option<Header> {
 	if chain.iter().any(|c| c.layer.as_deref() == Some("")) {
 		return None;
 	}
@@ -739,6 +902,7 @@ fn declare_layer(chain: &Chain) -> Option<Header> {
 		.iter()
 		.filter_map(|c| c.layer.as_deref())
 		.flat_map(|l| l.split('.').map(|s| s.trim().to_owned()))
+		.chain(inner.iter().cloned())
 		.collect();
 	let conditions: Chain = chain
 		.iter()
@@ -764,56 +928,208 @@ fn declare_layer(chain: &Chain) -> Option<Header> {
 }
 
 /// Drops the `@layer name;` that would not change the order in which the
-/// layers are declared: one whose layer is declared before it already, or
-/// that has no statement after it that declares a layer (the body declares it
-/// then, and nothing can come in between), or whose layer is the first that
-/// the next statement declares, under the same conditions (so that it is
-/// declared first anyway), or the first that every statement after it
-/// declares (a statement under a condition that does not hold declares
-/// nothing, and then no other layer comes first either).
+/// layers are declared. The order the source means is that of every statement
+/// of the header, the written ones at the place of their import; the body then
+/// declares the layer of every import that has rules, and the layers of the
+/// `@layer` blocks and statements in it, in the order of those statements.
+///
+/// A statement is decided one at a time from the last (a written one is what
+/// an earlier one has to come in front of). Left out, it no longer declares
+/// the layers it is the first to declare; each is then first declared where it
+/// is next named. That changes the order when a sibling of the layer (a layer
+/// of the same parent, § 6.4.3) that the source declares after the statement is
+/// declared in between. Deciding by the next statement alone would miss a
+/// written one that comes in between: `@layer one;` left out in front of
+/// `@layer two;` and `@layer one, two;` declares `two` first. Once the body is
+/// reached nothing can come in between: what the body declares before the
+/// layer, the statements in front of this one declared already.
+///
+/// A statement under a condition declares nothing where the condition does
+/// not hold, so it is decided where its own condition holds: alone, and
+/// together with each other condition (a layer it would let come first is
+/// declared by a statement under one condition). A condition holds only when
+/// the conditions it is nested in do. Every combination of conditions would
+/// grow as 2 to their number.
+///
+/// A remote import may declare any layer (inside its own, if it has one), so
+/// it counts as declaring a layer no statement names: the layers the source
+/// declares in front of it stay in front of it.
+///
+/// Each statement looks only at the statements kept after it, up to the next
+/// place its layer is named, and stops at the body: the `@layer` blocks of a
+/// body, which come one after another, are each decided in a few steps.
+/// Recomputing the whole order for each statement grows as the square of
+/// their number, seconds for a few thousand blocks on every rebuild.
 fn keep_declarations(items: Vec<Header>) -> Vec<Header> {
-	let mut declared: BTreeSet<Decl> = BTreeSet::new();
-	let mut keep = Vec::with_capacity(items.len());
-	for (i, item) in items.iter().enumerate() {
+	let mut keep = vec![true; items.len()];
+	// A statement that something before it declares already is never needed.
+	// Deciding it below would drop it too; this is for speed, as every
+	// `@layer` block of a body is a statement here.
+	let mut declared: BTreeSet<(&str, &[String])> = BTreeSet::new();
+	for (item, kept) in items.iter().zip(keep.iter_mut()) {
 		if item.kind == Kind::Declare {
-			let key = &item.declares[0];
-			let later: Vec<&Header> = items[i + 1..]
-				.iter()
-				.filter(|n| n.kind != Kind::Declare && !n.declares.is_empty())
-				.collect();
-			let next_first = later.first().is_some_and(|n| {
-				n.declares[0].wrappers == key.wrappers && n.declares[0].path.starts_with(&key.path)
-			});
-			let all_first = later
-				.iter()
-				.all(|n| n.declares[0].path.starts_with(&key.path));
-			// With nothing later, the body declares the layer, unless the file has
-			// no body to do it with.
-			let skip = if later.is_empty() {
-				!item.pinned
-			} else {
-				next_first || all_first
-			};
-			if skip || declared.contains(key) {
-				keep.push(false);
+			let d = &item.declares[0];
+			if declared.contains(&(d.wrappers.as_str(), d.path.as_slice())) {
+				*kept = false;
 				continue;
 			}
 		}
 		for d in &item.declares {
 			for n in 1..=d.path.len() {
-				declared.insert(Decl {
-					wrappers: d.wrappers.clone(),
-					path: d.path[..n].to_vec(),
-				});
+				declared.insert((d.wrappers.as_str(), &d.path[..n]));
 			}
 		}
-		keep.push(true);
+	}
+	// Only the body declares anything, in the order of the statements, unless
+	// the file of an import has no body to declare its layer with. Deciding
+	// each statement below would drop all of them too; this is for speed.
+	if items.iter().all(|h| h.kind == Kind::Declare && !h.pinned) {
+		return Vec::new();
+	}
+	let mut seen_imports: BTreeSet<String> = BTreeSet::new();
+	let unknown: Vec<Option<Decl>> = items
+		.iter()
+		.enumerate()
+		.map(|(i, h)| {
+			if h.kind != Kind::Import {
+				return None;
+			}
+			// The same import is written once (`write_header`).
+			if !seen_imports.insert(import_statement(h)) {
+				return None;
+			}
+			let mut path = h
+				.declares
+				.first()
+				.map(|d| d.path.clone())
+				.unwrap_or_default();
+			path.push(format!("\0remote{i}"));
+			Some(Decl {
+				wrappers: wrappers_key(&h.chain),
+				path,
+			})
+		})
+		.collect();
+	let decls_of = |j: usize| items[j].declares.iter().chain(&unknown[j]);
+	let mut conditions: Vec<&str> = (0..items.len())
+		.flat_map(decls_of)
+		.map(|d| d.wrappers.as_str())
+		.filter(|w| !w.is_empty())
+		.collect();
+	conditions.sort_unstable();
+	conditions.dedup();
+	// A condition with the conditions it is nested in.
+	let with_outer = |w: &str| -> BTreeSet<&str> {
+		conditions
+			.iter()
+			.copied()
+			.filter(|outer| !w.is_empty() && nests_in(w, outer))
+			.collect()
+	};
+	// Where the source first declares each layer, under the conditions that
+	// hold. The body declares nothing first: each of its layers is the layer
+	// of a statement.
+	let mut first: BTreeMap<BTreeSet<&str>, BTreeMap<&[String], usize>> = BTreeMap::new();
+	// The statements kept after the one being decided, last first.
+	let mut kept_after: Vec<usize> = Vec::new();
+	for i in (0..items.len()).rev() {
+		if items[i].kind != Kind::Declare || !keep[i] {
+			if keep[i] {
+				kept_after.push(i);
+			}
+			continue;
+		}
+		let own = &items[i].declares[0];
+		let base = with_outer(&own.wrappers);
+		let mut worlds = vec![base.clone()];
+		worlds.extend(conditions.iter().map(|k| {
+			let mut world = base.clone();
+			world.extend(with_outer(k));
+			world
+		}));
+		worlds.sort();
+		worlds.dedup();
+		let changes = worlds.into_iter().any(|world| {
+			let holds = |d: &Decl| d.wrappers.is_empty() || world.contains(d.wrappers.as_str());
+			let first = first.entry(world.clone()).or_insert_with(|| {
+				let mut at = BTreeMap::new();
+				for j in 0..items.len() {
+					for d in decls_of(j).filter(|d| holds(d)) {
+						for n in 1..=d.path.len() {
+							at.entry(&d.path[..n]).or_insert(j);
+						}
+					}
+				}
+				at
+			});
+			(1..=own.path.len())
+				.map(|n| &own.path[..n])
+				.filter(|layer| first.get(layer) == Some(&i))
+				.any(|layer| {
+					let parent = &layer[..layer.len() - 1];
+					// Whether `d` names the layer, or else declares a sibling of it
+					// first, which would then come before it.
+					let mut verdict = |d: &Decl| -> Option<bool> {
+						if d.path.starts_with(layer) {
+							return Some(false);
+						}
+						let sibling = d.path.len() > parent.len() && d.path.starts_with(parent);
+						(sibling
+							&& first
+								.get(&d.path[..=parent.len()])
+								.is_some_and(|&at| at > i))
+						.then_some(true)
+					};
+					let in_header = kept_after
+						.iter()
+						.rev()
+						.flat_map(|&j| decls_of(j))
+						.filter(|d| holds(d))
+						.find_map(&mut verdict);
+					match in_header {
+						Some(changes) => changes,
+						// The body names it, and nothing comes first in between.
+						None if !items[i].pinned => false,
+						None => items[i + 1..]
+							.iter()
+							.filter(|h| h.kind == Kind::Declare && !h.pinned)
+							.flat_map(|h| &h.declares)
+							.filter(|d| holds(d))
+							.find_map(&mut verdict)
+							.unwrap_or(true),
+					}
+				})
+		});
+		keep[i] = changes;
+		if changes {
+			kept_after.push(i);
+		}
 	}
 	items
 		.into_iter()
 		.zip(keep)
 		.filter_map(|(item, keep)| keep.then_some(item))
 		.collect()
+}
+
+/// Whether the conditions `inner` holds under include all of `outer`'s: the
+/// keys of [`wrappers_key`] list the conditions outermost first, so `outer`
+/// is the first parts of `inner`.
+fn nests_in(inner: &str, outer: &str) -> bool {
+	inner == outer
+		|| inner
+			.strip_prefix(outer)
+			.is_some_and(|rest| rest.starts_with(';'))
+}
+
+/// The statement a remote import is written as: as written in the source, or,
+/// under conditions, with them. Two imports with the same statement are one.
+fn import_statement(item: &Header) -> String {
+	if item.chain.is_empty() {
+		item.text.clone()
+	} else {
+		format!("@import {};", import_params(&item.uri, &item.chain))
+	}
 }
 
 /// Writes the header, one statement per line.
@@ -826,11 +1142,7 @@ fn write_header(out: &mut Out, header: Vec<Header>) {
 	let mut written: BTreeSet<String> = BTreeSet::new();
 	for (i, item) in items.iter().enumerate() {
 		if item.kind == Kind::Import {
-			let statement = if item.chain.is_empty() {
-				item.text.clone()
-			} else {
-				format!("@import {};", import_params(&item.uri, &item.chain))
-			};
+			let statement = import_statement(item);
 			if !written.insert(statement.clone()) {
 				continue;
 			}
@@ -2085,6 +2397,479 @@ mod tests {
 				.starts_with("@layer one {\n"),
 			"nothing is declared after it"
 		);
+	}
+
+	#[test]
+	fn layers_that_a_later_statement_declares_in_the_same_order_are_not_declared_again() {
+		let dir = Dir::new("declare-run");
+		dir.write("a.css", "a{b:c}\n");
+		dir.write("b.css", "b{b:c}\n");
+		dir.write("c.css", "c{b:c}\n");
+		dir.write(
+			"main.css",
+			"@import 'a.css' layer(one);\n@import 'b.css' layer(two);\n@import 'c.css' layer(two);\n@layer one, two;\nx{y:z}\n",
+		);
+		// The statement declares `one` and then `two`, as the imports do: nothing
+		// is written for them, and `two` does not come in front of `one`.
+		assert_eq!(
+			css(&dir, "main.css", &[]),
+			"@layer one, two;\n@layer one {\na{b:c}\n}\n\n@layer two {\nb{b:c}\n}\n\n@layer two {\nc{b:c}\n}\n\nx{y:z}\n"
+		);
+	}
+
+	#[test]
+	fn a_layer_that_the_body_of_an_imported_file_declares_is_declared_at_the_import() {
+		let dir = Dir::new("declare-body");
+		dir.write("a.css", "@layer z {\na{b:c}\n}\n");
+		let entry = dir.write("main.css", "@import 'a.css';\n@layer w, z;\nx{y:z}\n");
+		let bundle = bundle(&entry, &[]).unwrap();
+		// The block of `a.css` declares `z` before the statement declares `w`; in
+		// the bundle the block comes after the statement.
+		assert!(
+			bundle
+				.css
+				.starts_with("@layer z;\n@layer w, z;\n@layer z {\n"),
+			"{}",
+			bundle.css
+		);
+		every_segment_is_a_copy(&bundle);
+	}
+
+	#[test]
+	fn a_layer_inside_another_is_ordered_only_against_its_siblings() {
+		let dir = Dir::new("declare-nested-body");
+		dir.write("a.css", "@layer x {\na{b:c}\n}\n");
+		dir.write("b.css", "b{b:c}\n");
+		let entry = dir.write(
+			"main.css",
+			"@import 'a.css' layer(a);\n@import 'b.css' layer(b);\n@layer a, b;\nx{y:z}\n",
+		);
+		let bundle = bundle(&entry, &[]).unwrap();
+		// `a.x` is declared after `b` in the bundle, but `b` is not a sibling of
+		// `x`: nothing has to be written for it.
+		assert!(
+			bundle.css.starts_with("@layer a, b;\n@layer a {\n"),
+			"{}",
+			bundle.css
+		);
+	}
+
+	#[test]
+	fn the_layers_of_a_body_are_its_layer_blocks_and_statements_with_their_names() {
+		let path = |names: &[&str]| names.iter().map(|&n| n.to_owned()).collect::<Vec<_>>();
+		let paths = |text: &str| -> Vec<Vec<String>> {
+			body_layers(text).into_iter().map(|(_, p)| p).collect()
+		};
+		assert_eq!(
+			paths(
+				"a{b:c}\n@layer x.y {\n@layer z;\n@LAYER w { b{c:d} }\n}\n@layer p, /* c */ q;\n"
+			),
+			[
+				path(&["x", "y"]),
+				path(&["x", "y", "z"]),
+				path(&["x", "y", "w"]),
+				path(&["p"]),
+				path(&["q"]),
+			]
+		);
+		assert_eq!(
+			paths(
+				"@layer { @layer a; }\n@container (width > 1px) { @layer b {} }\nc{ content: '@layer d;' }\n"
+			),
+			Vec::<Vec<String>>::new(),
+			"an anonymous block, another at-rule and a string declare nothing"
+		);
+		assert_eq!(
+			paths("@layer p, q { a{b:c} }\n@layer;\n@layer a, ;\n@layer .b {}\n"),
+			Vec::<Vec<String>>::new(),
+			"an invalid prelude, which a browser drops, declares nothing"
+		);
+	}
+
+	/// `(media, supports)` of a condition.
+	type Wrapper = (Option<String>, Option<String>);
+
+	/// What `body_layers` finds, as the wrappers of each condition and the path.
+	fn found(text: &str) -> Vec<(Vec<Wrapper>, Vec<String>)> {
+		body_layers(text)
+			.into_iter()
+			.map(|(conditions, path)| {
+				(
+					conditions
+						.into_iter()
+						.map(|c| (c.media, c.supports))
+						.collect(),
+					path,
+				)
+			})
+			.collect()
+	}
+
+	fn names(names: &[&str]) -> Vec<String> {
+		names.iter().map(|&n| n.to_owned()).collect()
+	}
+
+	#[test]
+	fn a_layer_inside_media_or_supports_in_a_body_is_under_its_conditions() {
+		let print = (Some("print".to_owned()), None);
+		let grid = (None, Some("display: grid".to_owned()));
+		let screen = (Some("screen".to_owned()), None);
+		assert_eq!(
+			found(
+				"@media print {\n@supports (display: grid) {\n@layer x;\n}\n}\n@layer y { @media screen { @layer z {} } }\n"
+			),
+			[
+				(vec![print, grid], names(&["x"])),
+				(vec![], names(&["y"])),
+				(vec![screen], names(&["y", "z"])),
+			]
+		);
+	}
+
+	#[test]
+	fn a_statement_ends_at_the_end_of_its_block_or_of_the_text() {
+		assert_eq!(
+			found("@layer a { @layer b }\n"),
+			[(vec![], names(&["a"])), (vec![], names(&["a", "b"]))],
+			"a statement that the `}}` of its block ends"
+		);
+		assert_eq!(
+			found("@layer a { @layer b;"),
+			[(vec![], names(&["a"])), (vec![], names(&["a", "b"]))],
+			"the last statement of a block the text ends in"
+		);
+		assert_eq!(
+			found("@media print { @layer y;"),
+			[(vec![(Some("print".to_owned()), None)], names(&["y"]))],
+			"a statement in a media block the text ends in"
+		);
+	}
+
+	#[test]
+	fn a_layer_is_declared_when_two_conditions_hold_and_a_third_does_not() {
+		let dir = Dir::new("declare-two-conditions");
+		dir.write("a.css", "a{b:c}\n");
+		dir.write("b.css", "@layer y;\n");
+		dir.write("c.css", "c{b:c}\n");
+		let entry = dir.write(
+			"main.css",
+			"@import 'c.css' layer(x) print;\n@import 'a.css' layer(x) (min-width: 1px);\n@import 'b.css' (min-width: 2px);\nx{y:z}\n",
+		);
+		let bundle = bundle(&entry, &[]).unwrap();
+		// At 2px wide and not in print, only the second import declares `x`
+		// before `y`.
+		assert!(
+			bundle.css.starts_with(
+				"@media print {\n@layer x;\n}\n@media (min-width: 1px) {\n@layer x;\n}\n@media (min-width: 2px) {\n@layer y;\n}\n@media print {\n@layer x {\n"
+			),
+			"{}",
+			bundle.css
+		);
+		every_segment_is_a_copy(&bundle);
+	}
+
+	#[test]
+	fn a_layer_in_front_of_a_remote_import_in_its_parent_layer_is_declared() {
+		let dir = Dir::new("declare-before-remote-in-layer");
+		dir.write("g.css", "g{b:c}\n");
+		dir.write(
+			"f.css",
+			"@import 'g.css' layer(x);\n@import url(https://example.com/r.css);\nf{b:c}\n",
+		);
+		let entry = dir.write("main.css", "@import 'f.css' layer(a);\nx{y:z}\n");
+		let bundle = bundle(&entry, &[]).unwrap();
+		// The remote sheet is in `a` and may declare `a.y` before `a.x`.
+		assert!(
+			bundle.css.starts_with(
+				"@layer a.x;\n@import url(https://example.com/r.css) layer(a);\n@layer a {\n"
+			),
+			"{}",
+			bundle.css
+		);
+		every_segment_is_a_copy(&bundle);
+	}
+
+	#[test]
+	fn a_layer_in_front_of_a_conditional_remote_import_is_declared() {
+		let dir = Dir::new("declare-before-conditional-remote");
+		dir.write("a.css", "a{b:c}\n");
+		let entry = dir.write(
+			"main.css",
+			"@import 'a.css' layer(one);\n@import url(https://example.com/r.css) print;\nx{y:z}\n",
+		);
+		let bundle = bundle(&entry, &[]).unwrap();
+		// In print the remote sheet may declare layers before `one`.
+		assert!(
+			bundle.css.starts_with(
+				"@layer one;\n@import url(https://example.com/r.css) print;\n@layer one {\n"
+			),
+			"{}",
+			bundle.css
+		);
+		every_segment_is_a_copy(&bundle);
+	}
+
+	#[test]
+	fn a_layer_declared_already_is_not_declared_again_under_a_condition() {
+		let dir = Dir::new("declare-once-conditional");
+		dir.write("a.css", "a{b:c}\n");
+		dir.write("b.css", "b{b:c}\n");
+		dir.write("c.css", "c{b:c}\n");
+		let entry = dir.write(
+			"main.css",
+			"@import 'a.css' layer(one);\n@import 'b.css' layer(one) screen;\n@import 'c.css' layer(two);\n@layer two, one;\nx{y:z}\n",
+		);
+		let bundle = bundle(&entry, &[]).unwrap();
+		// The first import declares `one`; the one under `screen` does not
+		// declare it first.
+		assert!(
+			bundle
+				.css
+				.starts_with("@layer one;\n@layer two, one;\n@layer one {\n"),
+			"{}",
+			bundle.css
+		);
+		every_segment_is_a_copy(&bundle);
+	}
+
+	#[test]
+	fn the_layer_of_an_empty_file_is_declared_where_nothing_after_names_it() {
+		let dir = Dir::new("declare-empty-last");
+		dir.write("a.css", "a{b:c}\n");
+		dir.write("e.css", "\n");
+		let entry = dir.write(
+			"main.css",
+			"@import 'a.css' layer(x);\n@import 'e.css' layer(one);\nx{y:z}\n",
+		);
+		let bundle = bundle(&entry, &[]).unwrap();
+		// The body has no block for `one`: the statement is what declares it, and
+		// `x` has to come before it.
+		assert!(
+			bundle
+				.css
+				.starts_with("@layer x;\n@layer one;\n@layer x {\n"),
+			"{}",
+			bundle.css
+		);
+		every_segment_is_a_copy(&bundle);
+	}
+
+	#[test]
+	fn a_layer_block_written_in_capitals_in_a_body_counts() {
+		let dir = Dir::new("declare-body-capitals");
+		dir.write("a.css", "@LAYER z {\na{b:c}\n}\n");
+		let entry = dir.write("main.css", "@import 'a.css';\n@layer w, z;\nx{y:z}\n");
+		let bundle = bundle(&entry, &[]).unwrap();
+		assert!(
+			bundle.css.starts_with("@layer z;\n@layer w, z;\n"),
+			"{}",
+			bundle.css
+		);
+		every_segment_is_a_copy(&bundle);
+	}
+
+	#[test]
+	fn the_layers_in_a_file_imported_into_an_anonymous_layer_are_not_declared() {
+		let dir = Dir::new("declare-body-anonymous");
+		dir.write("a.css", "@layer z {\na{b:c}\n}\n");
+		let entry = dir.write("main.css", "@import 'a.css' layer;\n@layer w, z;\nx{y:z}\n");
+		let bundle = bundle(&entry, &[]).unwrap();
+		// The `z` of the file is inside the anonymous layer, which has no name
+		// to write.
+		assert!(
+			bundle.css.starts_with("@layer w, z;\n@layer {\n"),
+			"{}",
+			bundle.css
+		);
+		every_segment_is_a_copy(&bundle);
+	}
+
+	#[test]
+	fn a_remote_import_under_a_condition_in_a_layer_declares_nothing_where_it_does_not_hold() {
+		let dir = Dir::new("declare-conditional-remote-in-layer");
+		dir.write(
+			"r.css",
+			"@import url(https://example.com/r.css) print;\nf{b:c}\n",
+		);
+		dir.write("b.css", "b{b:c}\n");
+		let entry = dir.write(
+			"main.css",
+			"@import 'r.css' layer(a);\n@import 'b.css' layer(b);\n@layer b, a;\nx{y:z}\n",
+		);
+		let bundle = bundle(&entry, &[]).unwrap();
+		// Out of print the remote import declares nothing, and the statement
+		// would declare `b` first: `a` has to be declared in front of it.
+		let a = bundle.css.find("@layer a;\n");
+		let order = bundle.css.find("@layer b, a;\n");
+		assert!(a.is_some() && a < order, "{}", bundle.css);
+	}
+
+	#[test]
+	fn a_name_that_is_not_an_identifier_declares_nothing() {
+		assert!(is_layer_ident("a-b_c"));
+		assert!(is_layer_ident("名前"));
+		assert!(!is_layer_ident("1a"));
+		assert!(!is_layer_ident("b a"));
+		assert!(!is_layer_ident(""));
+		assert_eq!(
+			body_layers("@layer y x {}\n@layer a .b;\n@media print { @layer b a{c:d} }\n"),
+			Vec::<(Chain, Vec<String>)>::new()
+		);
+	}
+
+	#[test]
+	fn the_parentheses_around_a_whole_condition_are_left_out() {
+		assert_eq!(unwrap_parens("(display: grid)"), "display: grid");
+		assert_eq!(unwrap_parens("((a) or (b))"), "(a) or (b)");
+		assert_eq!(unwrap_parens("(a) and (b)"), "(a) and (b)");
+		assert_eq!(unwrap_parens("not (a)"), "not (a)");
+	}
+
+	#[test]
+	fn a_supports_block_in_a_body_is_the_same_condition_as_supports_of_an_import() {
+		let dir = Dir::new("declare-body-supports");
+		dir.write(
+			"a.css",
+			"@supports (display: grid) {\n@layer z {\na{b:c}\n}\n}\n",
+		);
+		let entry = dir.write(
+			"main.css",
+			"@import 'a.css' supports(display: grid);\n@layer w, z;\nx{y:z}\n",
+		);
+		let bundle = bundle(&entry, &[]).unwrap();
+		assert!(
+			bundle.css.starts_with(
+				"@supports (display: grid) {\n@supports (display: grid) {\n@layer z;\n}\n}\n@layer w, z;\n"
+			),
+			"{}",
+			bundle.css
+		);
+	}
+
+	#[test]
+	fn conditions_nest_in_the_conditions_they_start_with() {
+		assert!(nests_in("A;B;C", "A"));
+		assert!(nests_in("A;B;C", "A;B"));
+		assert!(nests_in("A", "A"));
+		assert!(!nests_in("A;B", "A;BC"));
+		assert!(!nests_in("AB", "A"));
+		assert!(!nests_in("A", "A;B"));
+	}
+
+	#[test]
+	fn a_layer_under_three_nested_conditions_is_decided_with_all_of_them() {
+		let dir = Dir::new("declare-three-conditions");
+		dir.write("a.css", "a{b:c}\n");
+		dir.write("y.css", "@layer y;\n");
+		dir.write(
+			"mid.css",
+			"@import 'a.css' layer(x) (min-width: 3px);\n@import 'y.css' (min-width: 4px);\n",
+		);
+		dir.write("outer.css", "@import 'mid.css' (min-width: 2px);\n");
+		let entry = dir.write(
+			"main.css",
+			"@import 'outer.css' (min-width: 1px);\nx{y:z}\n",
+		);
+		let bundle = bundle(&entry, &[]).unwrap();
+		// Where all four hold, `x` is declared before `y`, as in the source.
+		let x = bundle.css.find("@layer x;\n");
+		let y = bundle.css.find("@layer y;\n");
+		assert!(x.is_some() && x < y, "{}", bundle.css);
+	}
+
+	#[test]
+	fn the_same_remote_import_twice_counts_once() {
+		let dir = Dir::new("declare-remote-twice");
+		dir.write("a.css", "a{b:c}\n");
+		dir.write(
+			"main.css",
+			"@import url(https://example.com/x.css);\n@import 'a.css' layer(a);\n@import url(https://example.com/x.css);\nx{y:z}\n",
+		);
+		// The second import is not written, so nothing comes between the first
+		// and the body that declares `a`.
+		assert_eq!(
+			css(&dir, "main.css", &[]),
+			"@import url(https://example.com/x.css);\n@layer a {\na{b:c}\n}\n\nx{y:z}\n"
+		);
+	}
+
+	#[test]
+	fn a_layer_of_a_body_under_a_media_query_is_declared_under_it() {
+		let dir = Dir::new("declare-body-media");
+		dir.write("a.css", "@media print {\n@layer z {\na{b:c}\n}\n}\n");
+		let entry = dir.write("main.css", "@import 'a.css';\n@layer w, z;\nx{y:z}\n");
+		let bundle = bundle(&entry, &[]).unwrap();
+		// In print, the source declares `z` before `w`.
+		assert!(
+			bundle
+				.css
+				.starts_with("@media print {\n@layer z;\n}\n@layer w, z;\n"),
+			"{}",
+			bundle.css
+		);
+	}
+
+	#[test]
+	fn a_layer_in_front_of_a_remote_import_without_a_layer_is_declared() {
+		let dir = Dir::new("declare-before-remote");
+		dir.write("a.css", "a{b:c}\n");
+		dir.write("b.css", "b{b:c}\n");
+		let entry = dir.write(
+			"main.css",
+			"@import 'b.css' layer(b);\n@import url(https://example.com/x.css);\n@import 'a.css' layer(a);\nx{y:z}\n",
+		);
+		let bundle = bundle(&entry, &[]).unwrap();
+		// The remote sheet may declare layers of its own (`@layer a, b;`): `b`
+		// has to be declared before it, as the source does.
+		assert!(
+			bundle
+				.css
+				.starts_with("@layer b;\n@import url(https://example.com/x.css);\n@layer b {\n"),
+			"{}",
+			bundle.css
+		);
+	}
+
+	#[test]
+	fn layers_under_many_conditions_that_the_body_declares_in_order_are_not_declared() {
+		let dir = Dir::new("declare-many-conditions");
+		dir.write("a.css", "a{b:c}\n");
+		let imports: String = (1..=9)
+			.map(|n| format!("@import 'a.css' layer(l{n}) (min-width: {n}px);\n"))
+			.collect();
+		let entry = dir.write("main.css", &format!("{imports}x{{y:z}}\n"));
+		let bundle = bundle(&entry, &[]).unwrap();
+		// Nothing comes in front of the body, which declares them in order.
+		assert!(
+			bundle
+				.css
+				.starts_with("@media (min-width: 1px) {\n@layer l1 {\n"),
+			"{}",
+			bundle.css
+		);
+	}
+
+	#[test]
+	fn a_layer_that_the_next_statement_declares_is_declared_when_another_comes_in_between() {
+		let dir = Dir::new("declare-between");
+		dir.write("a.css", "a{b:c}\n");
+		dir.write("b.css", "b{b:c}\n");
+		dir.write("c.css", "c{b:c}\n");
+		let entry = dir.write(
+			"main.css",
+			"@import 'a.css' layer(one);\n@import 'b.css' layer(two);\n@import 'c.css' layer(three);\n@layer one, three;\nx{y:z}\n",
+		);
+		let bundle = bundle(&entry, &[]).unwrap();
+		// `two` has to be declared before the statement declares `three`, and
+		// `one` before `two`.
+		assert!(
+			bundle
+				.css
+				.starts_with("@layer one;\n@layer two;\n@layer one, three;\n"),
+			"{}",
+			bundle.css
+		);
+		every_segment_is_a_copy(&bundle);
 	}
 
 	#[test]
