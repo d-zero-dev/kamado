@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [3.0.0-alpha.4](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.3...v3.0.0-alpha.4) (2026-11-02)
+
+### Bug Fixes
+
+- **repo:** write [@layer](https://github.com/layer) name; only where leaving it out would change the layer order ([9ff5861](https://github.com/d-zero-dev/kamado/commit/9ff58619db088afef0c3eeac2081f42982f6e24c))
+
 # [3.0.0-alpha.3](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.2...v3.0.0-alpha.3) (2026-11-02)
 
 ### Bug Fixes
