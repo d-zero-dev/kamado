@@ -3,8 +3,16 @@
  * A first pass of Pug to TSX for a migration to kamado v3 (docs/v3/MIGRATION.md).
  *
  * ```sh
- * node scripts/pug-to-tsx.mjs <project> <out> [libs dir, default <project>/__assets/_libs] [--pretty] [--pages=<dir>] [--skip=<text>]...
+ * node scripts/pug-to-tsx.mjs <project> <out> [libs dir, default <project>/__assets/_libs] [--pretty] [--pages=<dir>] [--skip=<text>]... [--include-comment=<root>]
  * ```
+ *
+ * An `include` of a file that is not Pug is written with `html()`: one of the data
+ * directory reads its value of `props.data`, and any other is copied in as it is on the
+ * day of the conversion (a `warning:` says that a later edit of it does not reach the
+ * output). `--include-comment=<root>` (from the project) writes
+ * `<!-- @include(/<path from root>) -->` for a file under `<root>` instead, which the
+ * `includeComment` preset of `html.includes` with the same root reads at each build. A
+ * file of the data directory reads `props.data` even under `<root>`.
  *
  * `--pretty` writes out the white space that Pug's `pretty` puts between tags
  * (a line break before a tag that is not inline and before the closing tag of
@@ -23,10 +31,12 @@
  * props of the file that includes it and the variables in scope; `each` and `if` become
  * `map` (over `_eachOf()`, which loops over an array by index and over an object by
  * key as Pug does, and is written in the file that needs it) and `&&` / `?:`; `pkg.production.*` becomes `site.*` and `filters.date`
- * `formatDate`; comments and the doctype are dropped. What it cannot express it
+ * `formatDate`; comments and the doctype are dropped. A mixin becomes a component, one
+ * defined inside a tag, a block or another mixin too (not exported). What it cannot express it
  * stops on (an unescaped value that is not the only child, `&attributes`):
  * fix the source or the output by hand. It needs the pug packages of the project
- * (`pug-lexer`, `pug-parser`, `acorn`) and a build of kamado.
+ * (`pug-lexer`, `pug-parser`, `acorn`), a build of kamado, and the `typescript` of the
+ * clone (`yarn install`), whose parser reads the TSX it writes.
  *
  * The output is written to pass the type check of `@d-zero/tsconfig` (strictest) with
  * `@types/react`: the attributes are spelt as React spells them (`dateTime`, `srcSet`),
@@ -63,6 +73,7 @@ import {
 	blockText,
 	booleanCondition,
 	isIdentifierUsed,
+	readNames,
 	jsxDeclarations,
 	literalKeys,
 	omittedBranchesToUndefined,
@@ -81,9 +92,46 @@ const flagValues = (name) =>
 		.map((a) => a.slice(name.length + 3));
 const PAGES_DIR = flagValues('pages').at(-1) ?? 'htdocs';
 const SKIPS = flagValues('skip');
+// The `root` of the includeComment preset of the project: an include of a file under it
+// becomes an @include, which a build reads each time.
+const includeRootFlag = flagValues('include-comment').at(-1);
+const INCLUDE_ROOT =
+	includeRootFlag === undefined
+		? undefined
+		: path.resolve(srcRoot ?? '', includeRootFlag);
 const inPages = (file) => file.includes(`${path.sep}${PAGES_DIR}${path.sep}`);
 if (!srcRoot || !outRoot) {
-	console.error('usage: node scripts/pug-to-tsx.mjs <project> <out> [libs dir]');
+	console.error(
+		'usage: node scripts/pug-to-tsx.mjs <project> <out> [libs dir] [--pretty] [--pages=<dir>] [--skip=<text>]... [--include-comment=<root>]',
+	);
+	process.exit(1);
+}
+// A flag that takes a value is written with `=`: without it, the value would be read as
+// the libs directory, and the flag ignored.
+for (const name of ['pages', 'skip', 'include-comment']) {
+	if (process.argv.slice(2).includes(`--${name}`)) {
+		console.error(`--${name} takes its value after "=" (--${name}=<value>)`);
+		process.exit(1);
+	}
+}
+// The root is a directory inside of the project: an empty value or `.` would make the
+// project itself the root, and every include an @include that no preset of it reads.
+const rootFromProject =
+	INCLUDE_ROOT === undefined
+		? undefined
+		: path.relative(path.resolve(srcRoot), INCLUDE_ROOT);
+if (
+	rootFromProject !== undefined &&
+	(rootFromProject === '' ||
+		rootFromProject === '..' ||
+		rootFromProject.startsWith(`..${path.sep}`) ||
+		path.isAbsolute(rootFromProject) ||
+		!existsSync(INCLUDE_ROOT) ||
+		!statSync(INCLUDE_ROOT).isDirectory())
+) {
+	console.error(
+		`--include-comment=${includeRootFlag}: name the directory that is the root of the includeComment preset, from the project (for example --include-comment=__assets/_libs)`,
+	);
 	process.exit(1);
 }
 const require = createRequire(path.join(path.resolve(srcRoot), 'package.json'));
@@ -529,7 +577,14 @@ function newContext(file) {
 		mixins: new Map(),
 		scope: [],
 		nesting: 0,
+		// The declarations at the top of the component: a string is always written (the
+		// `let` of a name the code assigns, a default of the vars of a layout), and a
+		// `declarationEntry` is left out when nothing reads it (`keptHoisted`).
 		hoisted: [],
+		// The names the code assigns without declaring them.
+		undeclared: new Set(),
+		// The names of the `each` loops the code has (a write to one stays in the loop).
+		loopVars: new Set(),
 	};
 }
 
@@ -741,6 +796,126 @@ function renameReads(expression, alias, edits) {
 	return inFunction;
 }
 
+// What running an expression may do besides giving its value. A function written in it
+// is not run where it is written.
+const EFFECTS = new Set([
+	'CallExpression',
+	'NewExpression',
+	'AssignmentExpression',
+	'UpdateExpression',
+	'TaggedTemplateExpression',
+	'AwaitExpression',
+	'YieldExpression',
+	'ImportExpression',
+]);
+
+/**
+ * Whether evaluating the node can do something besides giving a value.
+ * @param node
+ */
+function mayDoSomething(node) {
+	if (!node || typeof node.type !== 'string') return false;
+	if (EFFECTS.has(node.type)) return true;
+	if (node.type === 'UnaryExpression' && node.operator === 'delete') return true;
+	if (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression') {
+		return false;
+	}
+	for (const [key, value] of Object.entries(node)) {
+		if (key === 'type' || key === 'start' || key === 'end') continue;
+		const children = Array.isArray(value) ? value : [value];
+		if (children.some((c) => c && typeof c === 'object' && mayDoSomething(c)))
+			return true;
+	}
+	return false;
+}
+
+/**
+ * A declaration that goes to the top of a component, with the names it declares and
+ * whether it can be left out when nothing reads them.
+ * @param source - The Pug code
+ * @param code - The code written for it
+ */
+function declarationEntry(source, code) {
+	const program = acorn.parse(mapExpr(source), { ecmaVersion: 'latest' });
+	const names = [];
+	let sideEffects = false;
+	for (const st of program.body) {
+		if (st.type === 'FunctionDeclaration') {
+			names.push(st.id.name);
+			continue;
+		}
+		for (const d of st.declarations) {
+			names.push(...bindingNames(d.id));
+			if (mayDoSomething(d.init) || mayDoSomething(d.id)) sideEffects = true;
+		}
+	}
+	return { code, names, sideEffects };
+}
+
+/**
+ * The declarations at the top of a component that something reads. One that nothing
+ * reads is left out (the types refuse an unused local), unless its code may do something:
+ * that one is written, with a `warning:`.
+ *
+ * Why the parser here and not `isIdentifierUsed` (which the mixins and the constants of
+ * a module use): leaving out a declaration that is read breaks the component, and a name
+ * that only the text of an attribute holds (`property="og:url"`) would keep one that the
+ * types refuse. `isIdentifierUsed` errs only on the side of keeping what could go, which
+ * is enough to decide whether a component or a constant of the module is written.
+ * @param ctx
+ * @param rest - The rest of the component, as TSX statements
+ */
+function keptHoisted(ctx, rest) {
+	const entries = ctx.hoisted.map((h) => (typeof h === 'string' ? { code: h } : h));
+	// Nothing that could go: the parser is not run.
+	if (!entries.some((e) => e.names))
+		return { hoisted: entries.map((e) => e.code), reads: undefined };
+	const restReads = readNames(rest);
+	// Code the parser cannot read is kept as it is: nothing is left out.
+	if (restReads === undefined) {
+		return { hoisted: entries.map((e) => e.code), reads: undefined };
+	}
+	const readsOf = new Map(entries.map((e) => [e, readNames(e.code)]));
+	const out = new Set();
+	// A declaration the parser cannot read counts as reading every name.
+	const reads = (e, n) => {
+		const r = readsOf.get(e);
+		return r === undefined || r.has(n);
+	};
+	const readByRest = (entry) =>
+		entry.names.some(
+			(n) =>
+				restReads.has(n) ||
+				entries.some((e) => e !== entry && !out.has(e) && reads(e, n)),
+		);
+	for (let changed = true; changed;) {
+		changed = false;
+		for (const entry of entries) {
+			if (!entry.names || out.has(entry) || entry.sideEffects || readByRest(entry))
+				continue;
+			out.add(entry);
+			changed = true;
+		}
+	}
+	for (const entry of entries) {
+		if (entry.names && entry.sideEffects && !readByRest(entry)) {
+			warnings.add(
+				`${path.relative(srcRoot, ctx.file)}: nothing reads ${entry.names.join(', ')}, and its code may do something, so it is written: write it by hand`,
+			);
+		}
+	}
+	const kept = entries.filter((e) => !out.has(e));
+	if (out.size === 0) return { hoisted: kept.map((e) => e.code), reads: undefined };
+	// What the component still reads, for the names it takes from the props.
+	const all = new Set(restReads);
+	for (const e of kept) {
+		const r = readsOf.get(e);
+		if (r === undefined) return { hoisted: kept.map((e) => e.code), reads: undefined };
+		for (const n of r) all.add(n);
+	}
+	return { hoisted: kept.map((e) => e.code), reads: all };
+}
+
 /**
  * The code of one component: the function (the imports are written by the caller).
  * @param ctx
@@ -750,7 +925,21 @@ function renameReads(expression, alias, edits) {
  * @param params
  */
 function componentText(ctx, name, body, exported, params) {
-	const needsExt = [...ctx.used].filter((n) => !ctx.declared.has(n) && !GLOBALS.has(n));
+	// The defaults of the parameters read names too (`{ b = a } = {}`).
+	const rest = [
+		`(\n${body}\n);`,
+		...params.filter((p) => p.init).map((p) => `(${p.init});`),
+		...params.filter((p) => p.pattern).map((p) => `const ${p.pattern} = {};`),
+	].join('\n');
+	const { hoisted, reads: stillRead } = keptHoisted(ctx, rest);
+	// A name that only a declaration left out read is not taken from the props (the types
+	// would call it unused). Without a declaration left out, `stillRead` is undefined.
+	const needsExt = [...ctx.used].filter(
+		(n) =>
+			!ctx.declared.has(n) &&
+			!GLOBALS.has(n) &&
+			(stillRead === undefined || stillRead.has(n)),
+	);
 	const fromProps = needsExt.filter((n) => PROP_NAMES.has(n) && n !== 'meta');
 	const dataVars = needsExt.filter((n) => DATA_VARS.has(n));
 	const external = needsExt.filter((n) => !PROP_NAMES.has(n) && !DATA_VARS.has(n));
@@ -820,7 +1009,7 @@ function componentText(ctx, name, body, exported, params) {
 			),
 		);
 	}
-	for (const h of ctx.hoisted) lines.push(`\t${h}`);
+	for (const h of hoisted) lines.push(`\t${h}`);
 	lines.push(`\treturn (\n${body}\n\t);`);
 	lines.push('}');
 	// A parameter that is not read is an error of `noUnusedParameters`: its name starts
@@ -870,6 +1059,109 @@ function importLines(...contexts) {
 }
 
 /**
+ * The mixins defined below the top of a file: inside a tag, a block, a branch or
+ * another mixin. Each is a component of the module like a mixin at the top (not
+ * exported), and what it reads of the scope around it comes with each call, which
+ * passes the names in scope there.
+ *
+ * Why not where Pug defines it: Pug defines a mixin when the template reaches the
+ * definition, so a call before it, or after a branch that was not taken, fails at the
+ * render. The component exists in the whole module, so such a call renders it instead.
+ * @param nodes
+ */
+function innerMixins(nodes) {
+	const found = [];
+	const walk = (n) => {
+		// A named block of a page that extends a layout holds its nodes itself.
+		const children = [
+			n.block,
+			n.consequent,
+			n.alternate,
+			Array.isArray(n.nodes) ? n : null,
+		];
+		for (const child of children) {
+			if (!child) continue;
+			if (!Array.isArray(child.nodes)) {
+				// The `alternate` of an `else if` is the next `Conditional`, not a block.
+				walk(child);
+				continue;
+			}
+			for (const c of child.nodes) {
+				if (c.type === 'Mixin' && !c.call) found.push(c);
+				walk(c);
+			}
+		}
+	};
+	for (const n of nodes) walk(n);
+	return found;
+}
+
+/**
+ * Stops on a mixin defined below the top that writes a variable of the scope around it
+ * (`- n++`, `- n = 1` of a name it does not declare). Pug writes the variable around it;
+ * the component gets a copy through its props, so the write would not reach the rest.
+ * @param def
+ * @param ctx - The context the mixin was converted in
+ */
+function assertNoOuterWrites(def, ctx) {
+	const written = [
+		...ctx.undeclared,
+		...[...ctx.assigned].filter((n) => !ctx.declared.has(n) && !ctx.loopVars.has(n)),
+	];
+	if (written.length > 0) {
+		throw new Error(
+			`the mixin ${def.name} assigns to ${[...new Set(written)].join(', ')}, which it does not declare (Pug writes it outside of the mixin): write it by hand`,
+		);
+	}
+}
+
+/**
+ * Stops on a mixin defined below the top that reads a name that an `each` around one of
+ * its calls declares too. Pug reads the variable of the scope where the mixin is defined;
+ * the call would pass the variable of the loop.
+ * @param def
+ * @param entry - The mixin as `ctx.mixins` has it, with the names of the loops around its calls
+ * @param reads - What the component of the mixin reads from its props
+ */
+function assertNoHiddenReads(def, entry, reads) {
+	const hidden = [...(entry?.loopsAround ?? [])].filter((n) => reads.has(n));
+	if (hidden.length > 0) {
+		throw new Error(
+			`the mixin ${def.name} reads ${hidden.join(', ')}, which a loop around a call of it declares too (Pug reads the one where the mixin is defined): write it by hand`,
+		);
+	}
+}
+
+/**
+ * Stops on two mixins of one file that would be one component, and on a mixin defined
+ * below the top that takes the name of a component of the file itself.
+ * @param defs
+ * @param inner - Those of `defs` defined below the top
+ * @param file
+ */
+function assertOneOfEach(defs, inner, file) {
+	const own = new Set(
+		[pascal(file), `${pascal(file)}Body`].flatMap((n) => [n, `${n}Pre`]),
+	);
+	for (const def of inner) {
+		if (own.has(component(def.name))) {
+			throw new Error(
+				`the mixin ${def.name} takes the name of a component of the file (${component(def.name)}): write it by hand`,
+			);
+		}
+	}
+	const seen = new Set();
+	for (const def of defs) {
+		if (seen.has(component(def.name))) {
+			throw new Error(
+				`the mixin ${def.name} is defined twice in the file: write it by hand`,
+			);
+		}
+		seen.add(component(def.name));
+	}
+}
+
+/**
  *
  * @param file
  */
@@ -885,6 +1177,8 @@ function convertFile(file) {
 	const rel = path.relative(path.join(srcRoot, '__assets'), file);
 	const outFile = path.join(outRoot, '__assets', rel.replace(/\.pug$/, '.tsx'));
 	const defs = ast.nodes.filter((n) => n.type === 'Mixin' && !n.call);
+	const inner = innerMixins(ast.nodes);
+	assertOneOfEach([...defs, ...inner], inner, file);
 	const extended = ast.nodes.find((n) => n.type === 'Extends');
 	let text;
 	if (extended) {
@@ -893,13 +1187,15 @@ function convertFile(file) {
 		// A file of mixins: one exported component per mixin.
 		const contexts = [];
 		const parts = [];
+		const mixinParts = [];
 		// A mixin of the file may call another one of it, whichever comes first.
 		const sameFile = new Map();
-		for (const def of defs) {
+		for (const def of [...defs, ...inner]) {
 			sameFile.set(component(def.name), {
 				name: component(def.name),
 				params: mixinParams(def.args),
 				file,
+				inner: inner.includes(def),
 			});
 		}
 		// What the file includes at its top level (other files of mixins) is seen by
@@ -933,9 +1229,11 @@ function convertFile(file) {
 			// What the code needs of the runtime (`html()`, `formatDate()`) is imported.
 			contexts.push(read);
 		}
-		for (const def of defs) {
+		for (const def of [...defs, ...inner]) {
 			const params = mixinParams(def.args);
-			info.mixins.push({ name: component(def.name), params, file });
+			// What a file that includes this one sees: the mixins at the top.
+			const isInner = inner.includes(def);
+			if (!isInner) info.mixins.push({ name: component(def.name), params, file });
 			// The component, and one for a call in a `pre` when there is one.
 			const variants = [[component(def.name), 0]];
 			if (wantsPre.has(component(def.name)))
@@ -958,8 +1256,18 @@ function convertFile(file) {
 					else ctx.declared.add(p.name);
 				}
 				const body = block(def.block.nodes, ctx, 1);
+				if (isInner) assertNoOuterWrites(def, ctx);
 				contexts.push(ctx);
-				parts.push(componentText(ctx, componentName, body, 'export', params));
+				// An inner mixin is the file's own; the one of the two that no call uses would be
+				// an unused local, so both are exported then.
+				const exported = isInner && variants.length === 1 ? '' : 'export';
+				mixinParts.push({
+					name: componentName,
+					text: componentText(ctx, componentName, body, exported, params).trim(),
+					droppable: exported === '',
+					def: isInner ? def : undefined,
+					reads: ctx.used,
+				});
 				for (const name of constants) {
 					if (ctx.assigned.has(name)) {
 						warnings.add(
@@ -969,27 +1277,9 @@ function convertFile(file) {
 				}
 			}
 		}
-		// A constant that no mixin reads is not written at the top of the module (the
-		// types would call it unused); the body below declares its own.
-		// One that only another constant reads is kept with it.
-		const usedConstants = [];
-		let reachable = parts.join('\n');
-		for (let grew = true; grew;) {
-			grew = false;
-			for (const constant of constantCode) {
-				if (
-					!usedConstants.includes(constant) &&
-					constant.names.some((name) => isIdentifierUsed(reachable, name))
-				) {
-					usedConstants.push(constant);
-					reachable += `\n${constant.code}`;
-					grew = true;
-				}
-			}
-		}
-		usedConstants.sort((a, b) => constantCode.indexOf(a) - constantCode.indexOf(b));
 		// What the file writes besides its mixins is a component of its own (the
 		// default export), which is what including the file shows.
+		const bodyParts = [];
 		const rest = ast.nodes.filter(
 			(n) =>
 				!(n.type === 'Mixin' && !n.call) &&
@@ -1012,10 +1302,35 @@ function convertFile(file) {
 					1,
 				);
 				contexts.push(ctx);
-				parts.push(componentText(ctx, name, body, pre ? 'export' : 'export default', []));
+				bodyParts.push(
+					componentText(ctx, name, body, pre ? 'export' : 'export default', []),
+				);
 			}
 			info.hasBody = true;
 		}
+		assertNoImportedTwin(inner, contexts);
+		for (const p of mixinParts)
+			if (p.def) assertNoHiddenReads(p.def, sameFile.get(component(p.def.name)), p.reads);
+		parts.push(...calledParts(mixinParts, bodyParts), ...bodyParts);
+		// A constant that no mixin reads is not written at the top of the module (the
+		// types would call it unused); the body declares its own.
+		// One that only another constant reads is kept with it.
+		const usedConstants = [];
+		let reachable = parts.slice(0, parts.length - bodyParts.length).join('\n');
+		for (let grew = true; grew;) {
+			grew = false;
+			for (const constant of constantCode) {
+				if (
+					!usedConstants.includes(constant) &&
+					constant.names.some((name) => isIdentifierUsed(reachable, name))
+				) {
+					usedConstants.push(constant);
+					reachable += `\n${constant.code}`;
+					grew = true;
+				}
+			}
+		}
+		usedConstants.sort((a, b) => constantCode.indexOf(a) - constantCode.indexOf(b));
 		text = pruneUnusedImports(
 			importLines(...contexts).join('\n') +
 				'\n\n' +
@@ -1025,21 +1340,43 @@ function convertFile(file) {
 		);
 	} else {
 		const ctx = newContext(file);
+		for (const def of inner) {
+			ctx.mixins.set(component(def.name), {
+				name: component(def.name),
+				params: mixinParams(def.args),
+				file,
+				inner: true,
+			});
+		}
 		const body = block(ast.nodes, ctx, 1);
 		// A page that is a fragment has no `<html static>` to say it is written in
 		// the order of the template: its meta says so.
 		const fragmentPage =
 			inPages(file) && !ast.nodes.some((n) => n.type === 'Tag' && n.name === 'html');
 		const contexts = [ctx];
-		const parts = [componentText(ctx, pascal(file), body, 'export default', [])];
+		const mixinParts = mixinComponents(
+			file,
+			inner,
+			ctx,
+			wantsPre,
+			contexts,
+			new Set(inner),
+		);
+		const pageParts = [componentText(ctx, pascal(file), body, 'export default', [])];
 		// What a `pre` includes of this file is the same text, written as strings.
 		if (wantsPre.has(PRE_BODY)) {
 			const preCtx = newContext(file);
 			preCtx.pre = 1;
+			preCtx.mixins = ctx.mixins;
 			const preBody = block(ast.nodes, preCtx, 1);
 			contexts.push(preCtx);
-			parts.push(componentText(preCtx, `${pascal(file)}Pre`, preBody, 'export', []));
+			pageParts.push(componentText(preCtx, `${pascal(file)}Pre`, preBody, 'export', []));
 		}
+		assertNoImportedTwin(inner, contexts);
+		for (const p of mixinParts)
+			if (p.def)
+				assertNoHiddenReads(p.def, ctx.mixins.get(component(p.def.name)), p.reads);
+		const parts = [...calledParts(mixinParts, pageParts), ...pageParts];
 		text = pruneUnusedImports(
 			importLines(...contexts).join('\n') +
 				'\n\n' +
@@ -1051,6 +1388,114 @@ function convertFile(file) {
 	mkdirSync(path.dirname(outFile), { recursive: true });
 	writeFileSync(outFile, text);
 	return info;
+}
+
+/**
+ * The components of the mixins that a page writes itself, not exported (a file that
+ * includes a page does not call them). Each reads the names of the page that a call
+ * passes, and calls the others through the mixins of the page. Their contexts are added
+ * to `contexts` for the imports.
+ * @param file
+ * @param defs
+ * @param page - The context of the page, whose mixins and imports they share
+ * @param wantsPre
+ * @param contexts
+ * @param inner - Those of `defs` defined below the top
+ * @returns `{ name, text, droppable }` for `calledParts`
+ */
+function mixinComponents(file, defs, page, wantsPre, contexts, inner = new Set()) {
+	const parts = [];
+	for (const def of defs) {
+		const params = mixinParams(def.args);
+		// The component, and one for a call in a `pre` when there is one.
+		const variants = [[component(def.name), 0]];
+		if (wantsPre.has(component(def.name))) {
+			if (defs.some((d) => component(d.name) === `${component(def.name)}Pre`)) {
+				throw new Error(
+					`the mixin ${def.name} is called in a pre, and ${component(def.name)}Pre is a mixin of the file already: write it by hand`,
+				);
+			}
+			variants.push([`${component(def.name)}Pre`, 1]);
+		}
+		for (const [componentName, pre] of variants) {
+			const mixCtx = newContext(file);
+			mixCtx.pre = pre;
+			mixCtx.mixins = page.mixins;
+			// A mixin of a file the page includes is imported by the page's module.
+			for (const [spec, names] of page.named) mixCtx.named.set(spec, names);
+			for (const p of params) {
+				if (p.pattern) for (const n of p.names) mixCtx.declared.add(n);
+				else mixCtx.declared.add(p.name);
+			}
+			const body = block(def.block.nodes, mixCtx, 1);
+			if (inner.has(def)) assertNoOuterWrites(def, mixCtx);
+			contexts.push(mixCtx);
+			// Of the two, the one that no call uses would be an unused local of the page.
+			const exported = variants.length > 1 ? 'export' : '';
+			parts.push({
+				name: componentName,
+				text: componentText(mixCtx, componentName, body, exported, params).trim(),
+				droppable: exported === '' && inner.has(def),
+				def: inner.has(def) ? def : undefined,
+				reads: mixCtx.used,
+			});
+		}
+	}
+	return parts;
+}
+
+/**
+ * The texts of the components of a module, without a mixin defined below the top that
+ * nothing calls (Pug writes nothing for it; an unused local fails the type check).
+ * @param parts - `{ name, text, droppable }`
+ * @param others - The rest of the module
+ */
+function calledParts(parts, others) {
+	if (!parts.some((p) => p.droppable)) return parts.map((p) => p.text);
+	// A name in the text of the page (`p Card`) is not a call. Code the parser cannot
+	// read counts by the text of its names, which only keeps what could go.
+	const readsOf = new Map();
+	const reads = (text, name) => {
+		if (!readsOf.has(text)) readsOf.set(text, readNames(text));
+		const r = readsOf.get(text);
+		return r === undefined ? isIdentifierUsed(text, name) : r.has(name);
+	};
+	const out = new Set();
+	for (let changed = true; changed;) {
+		changed = false;
+		for (const part of parts) {
+			if (!part.droppable || out.has(part)) continue;
+			const rest = [
+				...others,
+				...parts.filter((p) => p !== part && !out.has(p)).map((p) => p.text),
+			];
+			if (rest.some((text) => reads(text, part.name))) continue;
+			out.add(part);
+			changed = true;
+		}
+	}
+	return parts.filter((p) => !out.has(p)).map((p) => p.text);
+}
+
+/**
+ * Stops on a mixin defined below the top whose name a file it includes has too: the
+ * module would import a name it also declares.
+ * @param inner - The mixins defined below the top
+ * @param contexts
+ */
+function assertNoImportedTwin(inner, contexts) {
+	const imported = new Set();
+	for (const ctx of contexts) {
+		for (const name of ctx.imports.keys()) imported.add(name);
+		for (const names of ctx.named.values()) for (const n of names) imported.add(n);
+	}
+	for (const def of inner) {
+		if (imported.has(component(def.name))) {
+			throw new Error(
+				`the mixin ${def.name} is defined in the file, and a file it includes has one of the same name: write it by hand`,
+			);
+		}
+	}
 }
 
 /**
@@ -1080,44 +1525,20 @@ function convertChild(file, ast, extended) {
 	if (!spec.startsWith('.')) spec = `./${spec}`;
 	ctx.imports.set(parentName, spec);
 
-	// Mixins written in the page are components of the same module.
-	const defs = ast.nodes.filter((n) => n.type === 'Mixin' && !n.call);
+	// Mixins written in the page are components of the same module: those at the top,
+	// and those inside its blocks.
+	const inner = innerMixins(ast.nodes);
+	const defs = [...ast.nodes.filter((n) => n.type === 'Mixin' && !n.call), ...inner];
 	for (const def of defs) {
 		ctx.mixins.set(component(def.name), {
 			name: component(def.name),
 			params: mixinParams(def.args),
 			file,
+			inner: inner.includes(def),
 		});
 	}
 	const contexts = [ctx];
-	const parts = [];
-	for (const def of defs) {
-		const params = mixinParams(def.args);
-		// The component, and one for a call in a `pre` when there is one.
-		const variants = [[component(def.name), 0]];
-		if (wantsPre.has(component(def.name))) {
-			if (defs.some((d) => component(d.name) === `${component(def.name)}Pre`)) {
-				throw new Error(
-					`the mixin ${def.name} is called in a pre, and ${component(def.name)}Pre is a mixin of the file already: write it by hand`,
-				);
-			}
-			variants.push([`${component(def.name)}Pre`, 1]);
-		}
-		for (const [componentName, pre] of variants) {
-			const mixCtx = newContext(file);
-			mixCtx.pre = pre;
-			mixCtx.mixins = ctx.mixins;
-			for (const p of params) {
-				if (p.pattern) for (const n of p.names) mixCtx.declared.add(n);
-				else mixCtx.declared.add(p.name);
-			}
-			const body = block(def.block.nodes, mixCtx, 1);
-			contexts.push(mixCtx);
-			// Of the two, the one that no call uses would be an unused local of the page.
-			const exported = variants.length > 1 ? 'export' : '';
-			parts.push(componentText(mixCtx, componentName, body, exported, params).trim());
-		}
-	}
+	const mixinParts = mixinComponents(file, defs, ctx, wantsPre, contexts, new Set(inner));
 
 	const blocks = ast.nodes.filter((n) => n.type === 'NamedBlock');
 	for (const b of blocks) {
@@ -1157,6 +1578,10 @@ function convertChild(file, ast, extended) {
 		const body = `\t\t<${parentName} {...props}${given.length > 0 ? ` {...{ ${given.join(', ')} }}` : ''} slots={{\n${slots.join(',\n')},\n\t\t}} />`;
 		return componentText(pageCtx, name, body, exported, []);
 	});
+	assertNoImportedTwin(inner, contexts);
+	for (const p of mixinParts)
+		if (p.def) assertNoHiddenReads(p.def, ctx.mixins.get(component(p.def.name)), p.reads);
+	const parts = calledParts(mixinParts, pages);
 	// A fragment of slots is evaluated before the layout's `<html static>` is
 	// reached, so the page says it is static itself.
 	return pruneUnusedImports(
@@ -1216,7 +1641,7 @@ function children(nodes, ctx, depth) {
 			// A declaration is visible to the rest of the template: it goes to the
 			// top. An assignment stays where it is, so that what comes before it
 			// sees the old value (`- x = true` ... `- x = false` ...).
-			ctx.hoisted.push(useStmt(n.val, ctx));
+			ctx.hoisted.push(declarationEntry(n.val, useStmt(n.val, ctx)));
 			continue;
 		}
 		if (n.type === 'Code' && !n.buffer) {
@@ -1325,6 +1750,7 @@ function useStmt(stmt, ctx) {
 				// Pug code may assign a variable it never declared: it becomes a local.
 				read(e.right, [e.left.name]);
 				declare.push(e.left.name);
+				ctx.undeclared.add(e.left.name);
 				local.push(e.left.name);
 				ctx.declared.add(e.left.name);
 			} else {
@@ -1645,7 +2071,10 @@ function node(n, ctx, depth) {
 			const obj = use(n.obj, ctx);
 			const added = [n.val, n.key].filter(Boolean);
 			const before = new Set(ctx.declared);
-			for (const a of added) ctx.declared.add(a);
+			for (const a of added) {
+				ctx.declared.add(a);
+				ctx.loopVars.add(a);
+			}
 			ctx.scope.push(added);
 			ctx.nesting++;
 			const inner = block(n.block.nodes, ctx, depth + 2);
@@ -1741,12 +2170,47 @@ function node(n, ctx, depth) {
 				const key = path.basename(abs, path.extname(abs));
 				return [`${pad}{html((props.data as any)[${JSON.stringify(key)}])}`];
 			}
+			// The preset reads a path that starts with `/` from its root.
+			// The project may be named by a relative path (`.`): both sides are absolute.
+			if (
+				INCLUDE_ROOT !== undefined &&
+				path.resolve(abs).startsWith(INCLUDE_ROOT + path.sep)
+			) {
+				const fromRoot = path
+					.relative(INCLUDE_ROOT, path.resolve(abs))
+					.split(path.sep)
+					.join('/');
+				return [`${pad}{html(${JSON.stringify(`<!-- @include(/${fromRoot}) -->`)})}`];
+			}
+			// Anything else is copied in: the TSX keeps the text of the day of the conversion.
+			warnings.add(
+				`${path.relative(srcRoot, ctx.file)}: the text of ${path.relative(srcRoot, abs)} is copied in, and a later edit of it does not reach the output (${
+					INCLUDE_ROOT === undefined
+						? '--include-comment=<root> writes an @include of the includeComment preset instead'
+						: 'it is not under the root of --include-comment'
+				})`,
+			);
 			return [`${pad}{html(${JSON.stringify(readFileSync(abs, 'utf8'))})}`];
 		}
 		case 'Mixin': {
-			if (!n.call) throw new Error(`a mixin defined in the middle of ${ctx.file}`);
+			// A definition is a component of the module (`innerMixins`): it writes nothing here.
+			// One that `innerMixins` did not find would be lost.
+			if (!n.call) {
+				if (!ctx.mixins.has(component(n.name))) {
+					throw new Error(
+						`the mixin ${n.name} is defined where the converter does not look for one: write it by hand`,
+					);
+				}
+				return [];
+			}
 			const mixin = ctx.mixins.get(component(n.name));
 			if (!mixin) throw new Error(`+${n.name} is called in ${ctx.file} but not included`);
+			// The loops around the call of a mixin defined below the top (`assertNoHiddenReads`).
+			if (mixin.inner) {
+				mixin.loopsAround ??= new Set();
+				for (const names of ctx.scope)
+					for (const name of names) mixin.loopsAround.add(name);
+			}
 			// The arguments, split where acorn says they are.
 			const source = `[${n.args ?? ''}]`;
 			const list = n.args

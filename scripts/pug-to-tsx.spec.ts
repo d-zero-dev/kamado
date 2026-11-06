@@ -888,7 +888,11 @@ block content
 
 		// A project of its own, converted as a real one is: the files, the output and what
 		// the converter said.
-		const convertProject = (name: string, files: Record<string, string>) => {
+		const convertProject = (
+			name: string,
+			files: Record<string, string>,
+			flags: string[] = [],
+		) => {
 			const project = path.join(root, name);
 			const output = path.join(root, `${name}-out`);
 			for (const [file, text] of Object.entries({
@@ -901,10 +905,49 @@ block content
 			symlinkSync(path.join(repo, 'node_modules'), path.join(project, 'node_modules'));
 			const said = execFileSync(
 				process.execPath,
-				[path.join(repo, 'scripts', 'pug-to-tsx.mjs'), project, output],
+				[path.join(repo, 'scripts', 'pug-to-tsx.mjs'), project, output, ...flags],
 				{ encoding: 'utf8', stdio: 'pipe' },
 			);
 			return { project, output, said };
+		};
+
+		// What the type check of the strictest configuration says of an output ('' when it
+		// passes).
+		const typeErrorsOf = (output: string) => {
+			writeFileSync(
+				path.join(output, 'tsconfig.json'),
+				JSON.stringify({
+					extends: path.join(
+						repo,
+						'node_modules',
+						'@d-zero',
+						'tsconfig',
+						'tsconfig.json',
+					),
+					compilerOptions: {
+						noEmit: true,
+						jsx: 'preserve',
+						allowImportingTsExtensions: true,
+						typeRoots: [path.join(repo, 'node_modules', '@types')],
+						types: ['react'],
+						paths: {
+							react: [path.join(repo, 'node_modules', '@types', 'react')],
+							'kamado/jsx': [path.join(dist, 'runtime.d.ts')],
+						},
+					},
+					include: ['__assets/**/*.tsx', '__assets/**/*.d.ts'],
+				}),
+			);
+			try {
+				execFileSync(
+					process.execPath,
+					[path.join(repo, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', output],
+					{ encoding: 'utf8', stdio: 'pipe' },
+				);
+			} catch (error) {
+				return String((error as { stdout?: string }).stdout);
+			}
+			return '';
 		};
 
 		test('keeps the selected of an option, which a page written in order shows where it was written', () => {
@@ -1001,6 +1044,660 @@ html
 			expect(page).toContain('<input type="text" required />');
 			// `download` takes a string in the types: it stays as it was written.
 			expect(page).toContain('download="download"');
+		}, 120_000);
+
+		describe('a mixin defined inside a tag, a block or another mixin', () => {
+			const files: Record<string, string> = {
+				// In a file of mixins, inside the tag of a mixin: it reads a constant of that mixin.
+				'__assets/_libs/component/c-head.pug': `mixin c-head(isH1 = false)
+	- const label = "site"
+	header.c-head
+		mixin c-head__logo(isHeading)
+			#{isHeading ? "h1" : "div"}.c-head__logo= label
+		+c-head__logo(isH1)
+		nav
+			+c-head__logo(false)
+`,
+				'__assets/_libs/layouts/base.pug': 'html\n\tbody\n\t\tblock content\n',
+				// In a block of a page that extends a layout: it reads a variable of the block.
+				'__assets/htdocs/counter.pug': `extends /layouts/base.pug
+block content
+	- var names = { a: "A", b: "B" }
+	mixin card(id)
+		p.card= names[id]
+	+card("a")
+	+card("b")
+`,
+				// In the body of a page that extends nothing.
+				'__assets/htdocs/index.pug': `include /component/c-head.pug
+html
+	body
+		+c-head(true)
+		mixin item(text)
+			li= text
+		ul
+			+item("x")
+			+item("y")
+`,
+			};
+			let output: string;
+			let said: string;
+			const page = (file: string) => readFileSync(path.join(output, file), 'utf8');
+
+			beforeAll(() => {
+				({ output, said } = convertProject('nested-mixins', files));
+			}, 60_000);
+
+			test('converts the files instead of stopping on them', () => {
+				expect(said).not.toContain('not converted');
+				expect(said).toContain('4 files converted');
+			});
+
+			test('writes the mixin as a component of the module that the calls render', () => {
+				const head = page('__assets/_libs/component/c-head.tsx');
+				expect(head).toContain('function CHeadLogo(props: ');
+				// Only the mixin of the file is exported: the inner one is its own.
+				expect(head).not.toContain('export function CHeadLogo');
+				expect(head).toContain('export function CHead(props: ');
+				expect(head).toMatch(/<CHeadLogo \{\.\.\.props\}[^\n]* isHeading=\{isH1\} \/>/);
+				expect(head).toMatch(/<CHeadLogo \{\.\.\.props\}[^\n]* isHeading=\{false\} \/>/);
+				// What it reads of the mixin around it comes with the call.
+				expect(head).toMatch(/<CHeadLogo \{\.\.\.props\} [^\n]*label=\{label\}/);
+				const counter = page('__assets/htdocs/counter.tsx');
+				expect(counter).toContain('function Card(props: ');
+				expect(counter).toMatch(
+					/<Card \{\.\.\.props\} [^\n]*names=\{names\}[^\n]* id=\{"a"\} \/>/,
+				);
+				const index = page('__assets/htdocs/index.tsx');
+				expect(index).toContain('function Item(props: ');
+				expect(index).toMatch(/<Item \{\.\.\.props\}[^\n]* text=\{"x"\} \/>/);
+			});
+
+			test('writes nothing where the mixin is defined', () => {
+				const index = page('__assets/htdocs/index.tsx');
+				expect(index).not.toContain('mixin');
+				// The body has the two calls and nothing else of the mixin.
+				expect(index.match(/<Item\b/g)).toHaveLength(2);
+				const body = index.slice(index.indexOf('export default function Index'));
+				expect(body).not.toMatch(/function Item|\{\}|<li>/);
+			});
+
+			test('passes the type check of the strictest configuration', () => {
+				expect(typeErrorsOf(output)).toBe('');
+			}, 120_000);
+		});
+
+		test('leaves out a declaration that nothing reads, and warns of one whose code may do something', () => {
+			const { output, said } = convertProject('unused-declarations', {
+				'__assets/htdocs/index.pug': `- const unused = site.host + page.url
+- const used = "a"
+- const onlyByUnused = 1
+- const alsoUnused = onlyByUnused + 1
+- function helper() { return 1 }
+- const tracked = track()
+- const url = site.host + page.url
+- const id = page.slug
+- const t = title
+html
+	head
+		meta(property="og:url" content=site.host + page.url)
+		meta(name="title")
+	body
+		p= used
+		a(href="?id=" + id + "&x=1") a
+`,
+			});
+			const page = readFileSync(path.join(output, '__assets/htdocs/index.tsx'), 'utf8');
+			expect(page).toContain('const used = "a"');
+			expect(page).not.toContain('unused');
+			expect(page).not.toContain('onlyByUnused');
+			expect(page).not.toContain('alsoUnused');
+			expect(page).not.toContain('helper');
+			// The name in the value of an attribute is not a read of it.
+			expect(page).not.toContain('const url');
+			// A read between two strings is a read.
+			expect(page).toContain('const id = page.slug');
+			// What only a declaration left out read is not taken from the props.
+			expect(page).not.toContain('const t ');
+			expect(page).not.toMatch(/\{[^}]*\btitle\b[^}]*\} = /);
+			// A call may do something: the declaration stays, and the run says so.
+			expect(page).toContain('const tracked = track()');
+			expect(said).toContain(
+				'warning: __assets/htdocs/index.pug: nothing reads tracked, and its code may do something, so it is written: write it by hand',
+			);
+		});
+
+		describe('a file that is not Pug, included by a template', () => {
+			const files: Record<string, string> = {
+				'__assets/_libs/component/frag.html': '<div class="frag">a</div>\n',
+				'__assets/_libs/data/note.html': '<p>note</p>\n',
+				'__assets/outside.html': '<p>outside</p>\n',
+				'__assets/htdocs/index.pug': `html
+	body
+		include /component/frag.html
+		include ../_libs/component/frag.html
+		include /data/note.html
+		include ../outside.html
+`,
+			};
+			const convertWith = (name: string, flags: string[]) => {
+				const { output, said } = convertProject(name, files, flags);
+				const page = readFileSync(path.join(output, '__assets/htdocs/index.tsx'), 'utf8');
+				return { said, page };
+			};
+
+			test('copies the text in and says that a later edit of the file does not reach the output', () => {
+				const { said, page } = convertWith('raw-copied', []);
+				expect(page).toContain(
+					`{html(${JSON.stringify('<div class="frag">a</div>\n')})}`,
+				);
+				expect(page).toContain(`{html(${JSON.stringify('<p>outside</p>\n')})}`);
+				expect(said).toContain(
+					'warning: __assets/htdocs/index.pug: the text of __assets/_libs/component/frag.html is copied in, and a later edit of it does not reach the output (--include-comment=<root> writes an @include of the includeComment preset instead)',
+				);
+				expect(said).toContain(
+					'warning: __assets/htdocs/index.pug: the text of __assets/outside.html is copied in, and a later edit of it does not reach the output (--include-comment=<root> writes an @include of the includeComment preset instead)',
+				);
+				// One of the data directory is a value of the data, which a build reads each time.
+				expect(page).toContain('{html((props.data as any)["note"])}');
+				expect(said).not.toContain('data/note.html is copied');
+			});
+
+			test('writes an @include of the includeComment preset for a file under the root that the option names', () => {
+				const { said, page } = convertWith('raw-comment', [
+					'--include-comment=__assets/_libs',
+				]);
+				// The path is from the root, as the preset reads a path that starts with `/`.
+				expect(
+					page.match(/\{html\("<!-- @include\(\/component\/frag\.html\) -->"\)\}/g),
+				).toHaveLength(2);
+				expect(page).not.toContain('class=\\"frag\\"');
+				expect(said).not.toContain('frag.html is copied');
+				// A file outside of the root is copied in, with a warning.
+				expect(page).toContain(`{html(${JSON.stringify('<p>outside</p>\n')})}`);
+				expect(said).toContain(
+					'warning: __assets/htdocs/index.pug: the text of __assets/outside.html is copied in, and a later edit of it does not reach the output (it is not under the root of --include-comment)',
+				);
+				expect(page).toContain('{html((props.data as any)["note"])}');
+			});
+
+			test('writes the @include when the project is named by a relative path', () => {
+				convertProject('raw-relative', files);
+				const said = execFileSync(
+					process.execPath,
+					[
+						path.join(repo, 'scripts', 'pug-to-tsx.mjs'),
+						'raw-relative',
+						'raw-relative-from-cwd',
+						'--include-comment=__assets/_libs',
+					],
+					{ cwd: root, encoding: 'utf8', stdio: 'pipe' },
+				);
+				const page = readFileSync(
+					path.join(root, 'raw-relative-from-cwd', '__assets/htdocs/index.tsx'),
+					'utf8',
+				);
+				expect(
+					page.match(/\{html\("<!-- @include\(\/component\/frag\.html\) -->"\)\}/g),
+				).toHaveLength(2);
+				expect(said).not.toContain('frag.html is copied');
+			});
+		});
+
+		// A run of the converter that is expected to fail: its exit status and what it said.
+		const failedRun = (
+			name: string,
+			files: Record<string, string>,
+			flags: string[] = [],
+		) => {
+			try {
+				convertProject(name, files, flags);
+			} catch (error) {
+				const { status, stdout, stderr } = error as {
+					status: number;
+					stdout?: string;
+					stderr?: string;
+				};
+				return { status, said: `${stdout ?? ''}${stderr ?? ''}` };
+			}
+			return { status: 0, said: '' };
+		};
+
+		test('fails the run when a mixin defined inside a tag writes a variable of the scope around it', () => {
+			const { status, said } = failedRun('nested-mixin-write', {
+				'__assets/htdocs/index.pug': `- var n = 0
+html
+	body
+		mixin item
+			- n++
+			li= n
+		ul
+			+item
+			+item
+`,
+			});
+			expect(status).toBe(1);
+			expect(said).toContain(
+				'not converted: __assets/htdocs/index.pug: the mixin item assigns to n, which it does not declare (Pug writes it outside of the mixin): write it by hand',
+			);
+		}, 60_000);
+
+		test('fails the run when a mixin defined inside a tag assigns a name that nothing declares', () => {
+			const { status, said } = failedRun('nested-mixin-undeclared', {
+				'__assets/htdocs/index.pug': `html
+	body
+		mixin item
+			- fresh = 1
+			li= fresh
+		ul
+			+item
+`,
+			});
+			expect(status).toBe(1);
+			expect(said).toContain(
+				'not converted: __assets/htdocs/index.pug: the mixin item assigns to fresh, which it does not declare (Pug writes it outside of the mixin): write it by hand',
+			);
+		}, 60_000);
+
+		test('converts a mixin defined inside a tag that assigns the variable of its own loop', () => {
+			const { output, said } = convertProject('nested-mixin-own-loop', {
+				'__assets/htdocs/index.pug': `html
+	body
+		mixin item(list)
+			each v in list
+				- v = v + 1
+				li= v
+		ul
+			+item([1, 2])
+`,
+			});
+			expect(said).not.toContain('not converted');
+			expect(
+				readFileSync(path.join(output, '__assets/htdocs/index.tsx'), 'utf8'),
+			).toContain('function Item(');
+		}, 60_000);
+
+		test('fails the run when a loop around the call of a mixin defined inside a tag hides a name it reads', () => {
+			const { status, said } = failedRun('nested-mixin-hidden', {
+				'__assets/htdocs/index.pug': `- var item = "outer"
+html
+	body
+		mixin show
+			p= item
+		each item in ["a", "b"]
+			+show
+`,
+			});
+			expect(status).toBe(1);
+			expect(said).toContain(
+				'not converted: __assets/htdocs/index.pug: the mixin show reads item, which a loop around a call of it declares too (Pug reads the one where the mixin is defined): write it by hand',
+			);
+		}, 60_000);
+
+		test('fails the run when a mixin defined inside a tag takes the name of a component of the file', () => {
+			const { status, said } = failedRun('nested-mixin-page-name', {
+				'__assets/htdocs/index.pug': `html
+	body
+		mixin index
+			p x
+		+index
+`,
+			});
+			expect(status).toBe(1);
+			expect(said).toContain(
+				'not converted: __assets/htdocs/index.pug: the mixin index takes the name of a component of the file (Index): write it by hand',
+			);
+		}, 60_000);
+
+		test('fails the run when a mixin defined inside a tag takes the name of a mixin of a file it includes', () => {
+			const { status, said } = failedRun('nested-mixin-imported-twin', {
+				'__assets/_libs/component/c-head.pug': 'mixin c-head\n\tp head\n',
+				'__assets/htdocs/index.pug': `include /component/c-head.pug
+html
+	body
+		mixin c-head
+			p own
+		+c-head
+`,
+			});
+			expect(status).toBe(1);
+			expect(said).toContain(
+				'not converted: __assets/htdocs/index.pug: the mixin c-head is defined in the file, and a file it includes has one of the same name: write it by hand',
+			);
+		}, 60_000);
+
+		test('leaves out a mixin defined inside a tag that nothing calls, and passes the type check', () => {
+			const { output } = convertProject('nested-mixin-uncalled', {
+				'__assets/_libs/component/c-sample.pug': 'mixin c-sample\n\tspan s\n',
+				'__assets/htdocs/index.pug': `include /component/c-sample.pug
+html
+	body
+		mixin unused
+			p never
+		mixin wrap
+			pre
+				+c-sample
+		+wrap
+`,
+			});
+			const page = readFileSync(path.join(output, '__assets/htdocs/index.tsx'), 'utf8');
+			expect(page).not.toContain('Unused');
+			// A mixin of an included file called in a pre inside a mixin of the page.
+			expect(page).toContain('function Wrap(');
+			expect(page).toContain('<CSamplePre {...props}');
+			expect(typeErrorsOf(output)).toBe('');
+		}, 120_000);
+
+		test('leaves out a mixin that nothing calls even when the text of the page has its name', () => {
+			const { output } = convertProject('nested-mixin-name-in-text', {
+				'__assets/htdocs/index.pug': `html
+	body
+		mixin card
+			p c
+		p Card
+`,
+			});
+			const page = readFileSync(path.join(output, '__assets/htdocs/index.tsx'), 'utf8');
+			expect(page).not.toContain('function Card(');
+			expect(typeErrorsOf(output)).toBe('');
+		}, 120_000);
+
+		test('refuses a flag that takes a value written without "="', () => {
+			const { status, said } = failedRun(
+				'flag-without-equals',
+				{ '__assets/htdocs/index.pug': 'html\n\tbody\n' },
+				['--include-comment', '__assets/_libs'],
+			);
+			expect(status).toBe(1);
+			expect(said).toContain(
+				'--include-comment takes its value after "=" (--include-comment=<value>)',
+			);
+		}, 60_000);
+
+		test('takes a root whose name starts with two dots inside of the project', () => {
+			const { output, said } = convertProject(
+				'include-comment-dots',
+				{
+					'__assets/..parts/frag.html': '<p>f</p>\n',
+					'__assets/htdocs/index.pug': 'html\n\tbody\n\t\tinclude ../..parts/frag.html\n',
+				},
+				['--include-comment=__assets/..parts'],
+			);
+			expect(said).not.toContain('copied in');
+			expect(
+				readFileSync(path.join(output, '__assets/htdocs/index.tsx'), 'utf8'),
+			).toContain('@include(/frag.html)');
+		}, 60_000);
+
+		test('converts a mixin defined in the branch of an else if', () => {
+			const { output, said } = convertProject('nested-mixin-else-if', {
+				'__assets/htdocs/index.pug': `- var a = false
+- var b = true
+html
+	body
+		if a
+			p a
+		else if b
+			mixin foo
+				p foo
+			+foo
+`,
+			});
+			expect(said).not.toContain('not converted');
+			const page = readFileSync(path.join(output, '__assets/htdocs/index.tsx'), 'utf8');
+			expect(page).toContain('function Foo(');
+			expect(page).toContain('<Foo {...props}');
+		}, 60_000);
+
+		test.each([
+			['include-comment-empty', '--include-comment='],
+			['include-comment-missing', '--include-comment=__assets/nothing'],
+			['include-comment-project', '--include-comment=.'],
+			['include-comment-outside', '--include-comment=..'],
+			['include-comment-absolute', '--include-comment=/'],
+		])(
+			'refuses an --include-comment that names no directory inside of the project (%s)',
+			(name, flag) => {
+				const { status, said } = failedRun(
+					name,
+					{ '__assets/htdocs/index.pug': 'html\n\tbody\n' },
+					[flag],
+				);
+				expect(status).toBe(1);
+				expect(said).toContain(
+					`${flag}: name the directory that is the root of the includeComment preset, from the project (for example --include-comment=__assets/_libs)`,
+				);
+			},
+			60_000,
+		);
+
+		test('fails the run when a mixin defined inside a tag takes the name of another mixin of the module', () => {
+			const { status, said } = failedRun('nested-mixin-collision', {
+				'__assets/htdocs/index.pug': `mixin item
+	| a
+html
+	body
+		mixin item
+			| b
+		+item
+`,
+			});
+			expect(status).toBe(1);
+			expect(said).toContain(
+				'not converted: __assets/htdocs/index.pug: the mixin item is defined twice in the file: write it by hand',
+			);
+		}, 60_000);
+
+		describe('a mixin defined inside a tag of a file of mixins or of a page that extends a layout', () => {
+			const layout = {
+				'__assets/_libs/layouts/base.pug': 'html\n\tbody\n\t\tblock content\n',
+			};
+			const page = (file: string) => ({
+				'__assets/htdocs/index.pug': `include ${file}\nhtml\n\tbody\n\t\t+c-a\n`,
+			});
+
+			test.each([
+				[
+					'file of mixins: a write outside',
+					{
+						'__assets/_libs/component/c-a.pug': `mixin c-a
+	- var n = 0
+	div
+		mixin inner
+			- n++
+			p= n
+		+inner
+`,
+						...page('/component/c-a.pug'),
+					},
+					'__assets/_libs/component/c-a.pug: the mixin inner assigns to n, which it does not declare (Pug writes it outside of the mixin): write it by hand',
+				],
+				[
+					'file of mixins: the name of an included mixin',
+					{
+						'__assets/_libs/component/c-b.pug': 'mixin c-b\n\tp b\n',
+						'__assets/_libs/component/c-a.pug': `include /component/c-b.pug
+mixin c-a
+	div
+		mixin c-b
+			p own
+		+c-b
+`,
+						...page('/component/c-a.pug'),
+					},
+					'__assets/_libs/component/c-a.pug: the mixin c-b is defined in the file, and a file it includes has one of the same name: write it by hand',
+				],
+				[
+					'file of mixins: a name twice',
+					{
+						'__assets/_libs/component/c-a.pug': `mixin c-a
+	div
+		mixin item
+			p inner
+		+item
+mixin item
+	p top
+`,
+						...page('/component/c-a.pug'),
+					},
+					'__assets/_libs/component/c-a.pug: the mixin item is defined twice in the file: write it by hand',
+				],
+				[
+					'page that extends a layout: a write outside',
+					{
+						...layout,
+						'__assets/htdocs/index.pug': `extends /layouts/base.pug
+block content
+	- var n = 0
+	mixin inner
+		- n++
+		p= n
+	+inner
+`,
+					},
+					'__assets/htdocs/index.pug: the mixin inner assigns to n, which it does not declare (Pug writes it outside of the mixin): write it by hand',
+				],
+				[
+					'page that extends a layout: the name of an included mixin',
+					{
+						...layout,
+						'__assets/_libs/component/c-b.pug': 'mixin c-b\n\tp b\n',
+						'__assets/htdocs/index.pug': `extends /layouts/base.pug
+block content
+	include /component/c-b.pug
+	mixin c-b
+		p own
+	+c-b
+`,
+					},
+					'__assets/htdocs/index.pug: the mixin c-b is defined in the file, and a file it includes has one of the same name: write it by hand',
+				],
+			])(
+				'fails the run (%s)',
+				(name, files, message) => {
+					const { status, said } = failedRun(
+						`nested-mixin-stop-${name.replaceAll(/\W+/g, '-')}`,
+						files,
+					);
+					expect(status).toBe(1);
+					expect(said).toContain(`not converted: ${message}`);
+				},
+				60_000,
+			);
+
+			test('leaves out the mixins that nothing calls, also one that only another left out calls', () => {
+				const { output } = convertProject('nested-mixin-uncalled-chain', {
+					...layout,
+					'__assets/_libs/component/c-a.pug': `mixin c-a
+	div
+		mixin x
+			p x
+		mixin y
+			+x
+		mixin z
+			p z
+		+z
+`,
+					'__assets/htdocs/index.pug': `extends /layouts/base.pug
+block content
+	include /component/c-a.pug
+	mixin u
+		p u
+	mixin w
+		+u
+	+c-a
+`,
+				});
+				const mixins = readFileSync(
+					path.join(output, '__assets/_libs/component/c-a.tsx'),
+					'utf8',
+				);
+				expect(mixins).toContain('function Z(');
+				expect(mixins).not.toMatch(/function [XY]\(/);
+				const index = readFileSync(
+					path.join(output, '__assets/htdocs/index.tsx'),
+					'utf8',
+				);
+				expect(index).not.toMatch(/function [UW]\(/);
+				expect(typeErrorsOf(output)).toBe('');
+			}, 120_000);
+
+			test('writes a mixin defined inside a tag that a pre calls in a file of mixins, and in a file that a pre includes', () => {
+				const { output, said } = convertProject('nested-mixin-pre', {
+					'__assets/_libs/component/c-a.pug': `mixin c-a
+	div
+		mixin inner
+			span i
+		pre
+			+inner
+`,
+					'__assets/_libs/component/c-text.pug': `div
+	mixin t
+		span t
+	+t
+`,
+					'__assets/htdocs/index.pug': `include /component/c-a.pug
+html
+	body
+		+c-a
+		pre
+			include /component/c-text.pug
+`,
+				});
+				expect(said).not.toContain('not converted');
+				const mixins = readFileSync(
+					path.join(output, '__assets/_libs/component/c-a.tsx'),
+					'utf8',
+				);
+				expect(mixins).toContain('<InnerPre {...props}');
+				const text = readFileSync(
+					path.join(output, '__assets/_libs/component/c-text.tsx'),
+					'utf8',
+				);
+				expect(text).toContain('function TPre(');
+				expect(text).toContain('<TPre {...props}');
+				expect(typeErrorsOf(output)).toBe('');
+			}, 120_000);
+		});
+
+		test('keeps and warns of a declaration whose code may do something, of each kind', () => {
+			const { said } = convertProject('declarations-effects', {
+				'__assets/htdocs/index.pug': `- const made = new Date()
+- let c
+- const set = (c = 1)
+- const { d = f() } = page
+- const gone = delete page.x
+- const fn = () => track()
+html
+	body
+		p= c
+`,
+			});
+			for (const name of ['made', 'set', 'd', 'gone']) {
+				expect(said).toContain(
+					`warning: __assets/htdocs/index.pug: nothing reads ${name}, and its code may do something, so it is written: write it by hand`,
+				);
+			}
+			// A function written in the code is not run where it is written: it can go.
+			expect(said).not.toContain('nothing reads fn');
+		}, 60_000);
+
+		test('takes from the props of a mixin only what is still read when a declaration goes', () => {
+			const { output } = convertProject('declarations-mixin-props', {
+				'__assets/_libs/component/c-a.pug': `mixin c-a(label = "a")
+	- const t = title
+	p= label
+`,
+				'__assets/htdocs/index.pug':
+					'include /component/c-a.pug\nhtml\n\tbody\n\t\t+c-a\n',
+			});
+			const mixins = readFileSync(
+				path.join(output, '__assets/_libs/component/c-a.tsx'),
+				'utf8',
+			);
+			expect(mixins).not.toContain('const t ');
+			expect(mixins).not.toMatch(/\btitle\b/);
+			expect(typeErrorsOf(output)).toBe('');
 		}, 120_000);
 
 		describe('the layout of a sidecar and of a front matter', () => {

@@ -111,6 +111,43 @@ test('build renders TSX pages in workers, wraps them in the layout and writes th
 	assert.equal(read(config, 'many/p29.html'), '<i>n29</i>');
 });
 
+test('an @include that a TSX page writes with html() is read from its file at each build', async () => {
+	// The form the Pug converter writes with `--include-comment` (MIGRATION §3.4).
+	const site = mkdtempSync(path.join(tmpdir(), 'kd-pipeline-include-'));
+	mkdirSync(path.join(site, 'src', '_parts'), { recursive: true });
+	// The page imports `kamado/jsx`, as the converted pages of a project do.
+	mkdirSync(path.join(site, 'node_modules'));
+	symlinkSync(path.dirname(dist), path.join(site, 'node_modules', 'kamado'));
+	const config = path.join(site, 'kamado.config.jsonc');
+	writeFileSync(
+		config,
+		JSON.stringify({
+			dir: { input: 'src', output: 'out' },
+			build: { cacheDir: '.cache' },
+			pages: { ignore: ['_parts/**'] },
+			html: {
+				doctype: false,
+				format: false,
+				minify: false,
+				includes: [{ preset: 'includeComment', root: 'src/_parts' }],
+			},
+		}),
+	);
+	writeFileSync(path.join(site, 'src', '_parts', 'head.html'), '<p>first</p>');
+	writeFileSync(
+		path.join(site, 'src', 'index.tsx'),
+		"import { html } from 'kamado/jsx';\n" +
+			"export default () => <div>{html('<!-- @include(/head.html) -->')}</div>;\n",
+	);
+
+	await build(config, {});
+	assert.equal(read(config, 'index.html'), '<div><p>first</p></div>');
+
+	writeFileSync(path.join(site, 'src', '_parts', 'head.html'), '<p>second</p>');
+	await build(config, {});
+	assert.equal(read(config, 'index.html'), '<div><p>second</p></div>');
+});
+
 test('a second incremental build finds everything unchanged and a changed page alone is built', async () => {
 	const config = makeSite();
 	await build(config, { incremental: true });
