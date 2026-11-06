@@ -70,8 +70,8 @@
 		"prettier-v2": "npm:prettier@3.9.6",
 		"pug-lexer": "5.0.1",
 		"pug-parser": "6.0.0",
-		"react": "19.3.0",
-		"react-dom": "19.3.0",
+		"react": "19.3.1",
+		"react-dom": "19.3.1",
 		"typescript": "6.0.3",
 		"vitest": "4.1.12"
 	},
