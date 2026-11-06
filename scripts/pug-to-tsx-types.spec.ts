@@ -19,12 +19,58 @@ import {
 	omittedBranchesToUndefined,
 	orderImports,
 	pruneUnusedImports,
+	readNames,
 	typedExpression,
 	typedProgram,
 } from './pug-to-tsx-types.mjs';
 import { REACT_PROP_NAMES } from './react-prop-names.mjs';
 
 const program = (code: string) => acorn.parse(code, { ecmaVersion: 'latest' });
+
+describe('readNames', () => {
+	test('reads the names that code reads as variables, in TSX', () => {
+		const names = readNames(
+			[
+				'const a: Record<string, any> = b.c + d;',
+				'const { e = f, g: h } = props as any;',
+				'(<meta property="og:url" content={site.host + page.url} />);',
+				'(<Item {...props} text={"x"} id={"?id=" + id + "&x=1"} />);',
+			].join('\n'),
+		);
+		expect([...(names ?? [])].toSorted()).toEqual(
+			['Item', 'b', 'd', 'f', 'id', 'page', 'props', 'site'].toSorted(),
+		);
+	});
+
+	test('does not count the text of a string, a property name or a declared name as a read', () => {
+		const names = readNames('const url = "url"; (<p title="url">{x.url}</p>);');
+		expect(names?.has('url')).toBe(false);
+		expect(names?.has('x')).toBe(true);
+	});
+
+	test('counts a shorthand property and a component tag, and not an element, a key or a parameter', () => {
+		const names = readNames(
+			[
+				'const o = { a, b: c, ["k"]: d };',
+				'const f = (x: any) => 1;',
+				'(<p><Card {...props} /><use xlinkHref="#a" /></p>);',
+				'(<svg xlink:href="#b" />);',
+			].join('\n'),
+		);
+		expect(names?.has('a')).toBe(true);
+		expect(names?.has('c')).toBe(true);
+		expect(names?.has('d')).toBe(true);
+		expect(names?.has('Card')).toBe(true);
+		for (const name of ['b', 'x', 'p', 'use', 'svg', 'xlink', 'href', 'xlinkHref']) {
+			expect(names?.has(name), name).toBe(false);
+		}
+	});
+
+	test('gives undefined for code that does not parse, which keeps every declaration', () => {
+		expect(readNames('const a = ;')).toBeUndefined();
+		expect(readNames('(<p>)')).toBeUndefined();
+	});
+});
 
 describe('blockText', () => {
 	test('joins the nodes of a `script.` block as they are, without a line break of its own', () => {

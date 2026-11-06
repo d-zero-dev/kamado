@@ -9,6 +9,11 @@
 
 import { builtinModules } from 'node:module';
 
+// The parser of TSX is the TypeScript of the clone that runs the converter (a
+// devDependency of the repository), not one of the project: the code it reads is the
+// output of the converter, which a project does not need to be able to read.
+import ts from 'typescript';
+
 /**
  * @typedef {{
  * 	parse: (input: string, options: { ecmaVersion: 'latest' }) => any;
@@ -31,6 +36,83 @@ import { builtinModules } from 'node:module';
 export function isIdentifierUsed(code, name) {
 	const escaped = name.replaceAll('$', String.raw`\$`);
 	return new RegExp(`(?<![\\w$])(?<![\\w$)\\]]\\.)${escaped}(?![\\w$])`).test(code);
+}
+
+/**
+ * Whether an identifier is a read of a variable: not a name it declares, the name of a
+ * property or an attribute, a type, or a label.
+ * @param {ts.Identifier} node
+ * @returns {boolean}
+ */
+function isRead(node) {
+	const p = node.parent;
+	if (ts.isPropertyAccessExpression(p)) return p.expression === node;
+	// `<meta>` is an element; `<Item>` reads the component.
+	if (
+		(ts.isJsxOpeningElement(p) ||
+			ts.isJsxSelfClosingElement(p) ||
+			ts.isJsxClosingElement(p)) &&
+		p.tagName === node
+	) {
+		return /^[A-Z_$]/.test(node.text);
+	}
+	// A type, and the parts of a name like `xlink:href`.
+	if (ts.isQualifiedName(p) || ts.isTypeReferenceNode(p) || ts.isJsxNamespacedName(p)) {
+		return false;
+	}
+	if (ts.isBindingElement(p)) return p.initializer === node;
+	if (
+		(ts.isPropertyAssignment(p) ||
+			ts.isJsxAttribute(p) ||
+			ts.isMethodDeclaration(p) ||
+			ts.isPropertySignature(p) ||
+			ts.isVariableDeclaration(p) ||
+			ts.isParameter(p) ||
+			ts.isFunctionDeclaration(p) ||
+			ts.isFunctionExpression(p) ||
+			ts.isClassDeclaration(p)) &&
+		p.name === node
+	) {
+		return false;
+	}
+	return !ts.isLabeledStatement(p) && !ts.isBreakOrContinueStatement(p);
+}
+
+/**
+ * The names that TSX code reads as variables, or undefined when it does not parse (the
+ * caller then keeps everything). The text of a string or an attribute, the name of a
+ * property, and a name the code declares are not reads. Scopes are not looked at: the
+ * parameter `x` that a function reads is a read of `x`, which only keeps a declaration
+ * of another `x` that could go.
+ * @param {string} code - TSX statements
+ * @returns {Set<string> | undefined}
+ * @example
+ * readNames('const a = b.c; (<meta property="og:url" content={d} />);'); // Set { 'b', 'd' }
+ * readNames('const a = ;'); // undefined
+ */
+export function readNames(code) {
+	const { diagnostics } = ts.transpileModule(code, {
+		fileName: 'c.tsx',
+		reportDiagnostics: true,
+		compilerOptions: { jsx: ts.JsxEmit.Preserve, target: ts.ScriptTarget.Latest },
+	});
+	if (diagnostics === undefined || diagnostics.length > 0) return;
+	const file = ts.createSourceFile(
+		'c.tsx',
+		code,
+		ts.ScriptTarget.Latest,
+		true,
+		ts.ScriptKind.TSX,
+	);
+	/** @type {Set<string>} */
+	const names = new Set();
+	/** @param {ts.Node} node */
+	const visit = (node) => {
+		if (ts.isIdentifier(node) && isRead(node)) names.add(node.text);
+		ts.forEachChild(node, visit);
+	};
+	visit(file);
+	return names;
 }
 
 /**
