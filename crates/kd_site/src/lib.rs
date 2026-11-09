@@ -328,6 +328,61 @@ pub fn path_to_local_path(pathname: &str, extension: &str) -> String {
 	pathname.to_string()
 }
 
+/// How deep a page is in the tree of the site, and the URL of the directory it hangs from
+/// (`None` for the root).
+///
+/// The rule is the one of the tree of the navigation (`pathListToTree`), so that the page map
+/// and `nav()` count alike: the depth is the number of directories above the page, plus one
+/// for a page that is not the index of its directory. A last segment that is empty (the URL
+/// ends with `/`) or whose name, without its extension, is `index` in any case, is the
+/// index. The index of a directory is the directory itself, so it hangs from the directory
+/// above; any other page hangs from the directory it is in. The parent is written as the URL
+/// is (not percent-encoded again); whether a page exists at that URL is for the reader to
+/// look up (a directory may have no index page, and an index written with a capital
+/// extension, `index.HTML`, keeps its name in its URL).
+///
+/// The tree reads a URL as a URL, so a file name with `?`, `#` or `\` is counted differently
+/// there (the tree drops what follows `?` and `#`, and reads `\` as `/`). This counts the
+/// segments of the string, which is where the file is.
+///
+/// # Example
+///
+/// ```
+/// assert_eq!(kd_site::url_depth_and_parent("/"), (0, None));
+/// assert_eq!(kd_site::url_depth_and_parent("/a.html"), (1, Some("/".to_string())));
+/// assert_eq!(kd_site::url_depth_and_parent("/a/"), (1, Some("/".to_string())));
+/// assert_eq!(kd_site::url_depth_and_parent("/a/INDEX.html"), (1, Some("/".to_string())));
+/// assert_eq!(
+///     kd_site::url_depth_and_parent("/about/history.html"),
+///     (2, Some("/about/".to_string()))
+/// );
+/// ```
+#[must_use]
+pub fn url_depth_and_parent(url: &str) -> (usize, Option<String>) {
+	let rest = url.strip_prefix('/').unwrap_or(url);
+	let mut segments: Vec<&str> = rest.split('/').collect();
+	let name = segments.pop().unwrap_or("");
+	// `//` is one separator, as the tree reads a path.
+	let dirs: Vec<&str> = segments.into_iter().filter(|s| !s.is_empty()).collect();
+	let stem = &name[..name.len() - path::extname(name).len()];
+	let is_index = name.is_empty() || stem.to_lowercase() == "index";
+	let depth = dirs.len() + usize::from(!is_index);
+	let above = if is_index {
+		match dirs.split_last() {
+			Some((_, above)) => above,
+			None => return (depth, None),
+		}
+	} else {
+		&dirs[..]
+	};
+	let parent = if above.is_empty() {
+		"/".to_string()
+	} else {
+		format!("/{}/", above.join("/"))
+	};
+	(depth, Some(parent))
+}
+
 /// What to do when two inputs produce the same output path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictPolicy {
@@ -1037,5 +1092,90 @@ mod tests {
 		fs::set_permissions(tmp.join("sealed"), fs::Permissions::from_mode(0o755)).unwrap();
 		assert!(strict.is_err());
 		let _ = fs::remove_dir_all(&tmp);
+	}
+
+	fn check_depth_and_parent(url: &str, depth: usize, parent: Option<&str>) {
+		assert_eq!(
+			url_depth_and_parent(url),
+			(depth, parent.map(str::to_string)),
+			"{url}"
+		);
+	}
+
+	#[test]
+	fn the_root_is_at_depth_zero_and_has_no_parent() {
+		check_depth_and_parent("/", 0, None);
+		check_depth_and_parent("/index.html", 0, None);
+		check_depth_and_parent("/index", 0, None);
+	}
+
+	#[test]
+	fn a_directory_and_a_file_of_the_root_are_at_depth_one() {
+		check_depth_and_parent("/a/", 1, Some("/"));
+		check_depth_and_parent("/a.html", 1, Some("/"));
+		check_depth_and_parent("/a", 1, Some("/"));
+	}
+
+	#[test]
+	fn a_page_hangs_from_the_directory_it_is_in() {
+		check_depth_and_parent("/about/history.html", 2, Some("/about/"));
+		check_depth_and_parent("/a/b/c/d.html", 4, Some("/a/b/c/"));
+	}
+
+	#[test]
+	fn a_directory_hangs_from_the_directory_above_it() {
+		check_depth_and_parent("/about/history/", 2, Some("/about/"));
+		check_depth_and_parent("/a/b/c/", 3, Some("/a/b/"));
+	}
+
+	#[test]
+	fn an_index_in_any_spelling_counts_as_its_directory() {
+		for url in [
+			"/a/index.html",
+			"/a/index.htm",
+			"/a/INDEX.html",
+			"/a/Index.HTML",
+			"/a/index.php",
+			"/a/index",
+		] {
+			check_depth_and_parent(url, 1, Some("/"));
+		}
+		check_depth_and_parent("/a/b/index.html", 2, Some("/a/"));
+	}
+
+	#[test]
+	fn a_name_that_only_starts_with_index_is_a_page_of_its_own() {
+		check_depth_and_parent("/a/index.old.html", 2, Some("/a/"));
+		check_depth_and_parent("/a/index-old/", 2, Some("/a/"));
+		check_depth_and_parent("/a/index-old.html", 2, Some("/a/"));
+	}
+
+	#[test]
+	fn a_name_is_cut_at_its_last_dot_whatever_it_is_made_of() {
+		// A dot file has no extension; `index.` has the extension `.`; multibyte names are cut
+		// at a character boundary because the dot is.
+		check_depth_and_parent("/a/.html", 2, Some("/a/"));
+		check_depth_and_parent("/a/index.", 1, Some("/"));
+		check_depth_and_parent("/a/日本語.html", 2, Some("/a/"));
+		check_depth_and_parent("/日本語/index.html", 1, Some("/"));
+		check_depth_and_parent("/日本語/", 1, Some("/"));
+		check_depth_and_parent("/a/日本語.", 2, Some("/a/"));
+	}
+
+	#[test]
+	fn a_file_name_with_a_query_a_fragment_or_a_backslash_is_counted_as_written() {
+		// The navigation tree reads the URL as a URL and drops what follows `?` and `#` and
+		// reads `\` as `/`; the list counts the segments of the string, which is where the
+		// file is.
+		check_depth_and_parent("/a?b/c.html", 2, Some("/a?b/"));
+		check_depth_and_parent("/news#2/a.html", 2, Some("/news#2/"));
+		check_depth_and_parent("/a\\b.html", 1, Some("/"));
+		check_depth_and_parent("/a/index?x.html", 2, Some("/a/"));
+	}
+
+	#[test]
+	fn the_parent_is_written_as_the_url_is() {
+		check_depth_and_parent("/a%20b/c%20d.html", 2, Some("/a%20b/"));
+		check_depth_and_parent("/x y/page.html", 2, Some("/x y/"));
 	}
 }

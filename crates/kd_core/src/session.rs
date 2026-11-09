@@ -585,6 +585,68 @@ pub(crate) fn site_json(config: &kd_config::Config) -> Value {
 	])
 }
 
+/// What planning the pages gives, with the settings that were decided on the way.
+pub(crate) struct Planned {
+	pub plan: Plan,
+	/// The thread count: `options.jobs`, else `build.jobs`.
+	pub jobs: usize,
+	pub cache_dir: String,
+	/// `options.incremental` or `build.incremental`.
+	pub incremental: bool,
+}
+
+/// Plans the pages: finds them (or takes `found`, the paths a walk of the input directory
+/// already found), reads what their files say, and applies `pages.overrides`. An
+/// incremental plan reads the plan cache (a forced one reads everything) and saves what it
+/// learned, so that the next one reads only what changed; a cache that cannot be written is
+/// a warning of the plan, not an error.
+///
+/// # Errors
+///
+/// A message for any problem with the plan: an invalid glob, an unreadable page or
+/// `pages.overrides`, invalid front matter, a sidecar or `meta`.
+pub(crate) fn plan_pages(
+	loaded: &Loaded,
+	options: &BuildOptions,
+	found: Option<Vec<String>>,
+) -> Result<Planned, String> {
+	let config = &loaded.config;
+	let jobs = options.jobs.unwrap_or(match config.build.jobs {
+		kd_config::Jobs::Auto => std::thread::available_parallelism()
+			.map(|n| n.get())
+			.unwrap_or(1),
+		kd_config::Jobs::Count(n) => n,
+	});
+	let cache_dir = kd_build::cache_dir(
+		&config.root_dir,
+		options
+			.cache_dir
+			.as_deref()
+			.or(config.build.cache_dir.as_deref()),
+	);
+	let incremental = options.incremental || config.build.incremental;
+	// What the last build learned about the page files: a page whose files
+	// are as it recorded is not read again. A forced build reads everything.
+	let cached_plan = if incremental && !options.force {
+		crate::plan_cache::load(&cache_dir)
+	} else {
+		None
+	};
+	let (mut plan, learned) = crate::plan_cached(config, jobs, cached_plan.as_ref(), found)?;
+	if incremental
+		&& learned.changed
+		&& let Err(e) = crate::plan_cache::save(&cache_dir, &learned.cache)
+	{
+		plan.warnings.push(format!("plan cache: {e}"));
+	}
+	Ok(Planned {
+		plan,
+		jobs,
+		cache_dir,
+		incremental,
+	})
+}
+
 /// Plans the build and prepares what JavaScript has to render.
 ///
 /// `runtime` is the file URL of the JSX runtime that compiled modules import
@@ -598,41 +660,17 @@ pub(crate) fn site_json(config: &kd_config::Config) -> Value {
 pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result<Prepared, String> {
 	let started = Instant::now();
 	let config = &loaded.config;
-	let jobs = options.jobs.unwrap_or(match config.build.jobs {
-		kd_config::Jobs::Auto => std::thread::available_parallelism()
-			.map(|n| n.get())
-			.unwrap_or(1),
-		kd_config::Jobs::Count(n) => n,
-	});
-
-	let cache_dir = kd_build::cache_dir(
-		&config.root_dir,
-		options
-			.cache_dir
-			.as_deref()
-			.or(config.build.cache_dir.as_deref()),
-	);
-	let manifest_path = kd_build::manifest_path(&cache_dir);
-	let incremental = options.incremental || config.build.incremental;
 	let mut lap_at = Instant::now();
-	// What the last build learned about the page files: a page whose files
-	// are as it recorded is not read again. A forced build reads everything.
-	let cached_plan = if incremental && !options.force {
-		crate::plan_cache::load(&cache_dir)
-	} else {
-		None
-	};
 	// One walk of the input directory finds the pages, the styles and the
 	// scripts.
 	let scan = crate::scan(config)?;
-	let (mut plan, learned) =
-		crate::plan_cached(config, jobs, cached_plan.as_ref(), Some(scan.pages))?;
-	if incremental
-		&& learned.changed
-		&& let Err(e) = crate::plan_cache::save(&cache_dir, &learned.cache)
-	{
-		plan.warnings.push(format!("plan cache: {e}"));
-	}
+	let Planned {
+		mut plan,
+		jobs,
+		cache_dir,
+		incremental,
+	} = plan_pages(loaded, options, Some(scan.pages))?;
+	let manifest_path = kd_build::manifest_path(&cache_dir);
 	lap(&mut lap_at, "plan");
 	// Without the executable the code inside pages is left as it is. That is not an
 	// error, but a site built that way is larger than the one a developer sees.

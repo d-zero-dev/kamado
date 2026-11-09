@@ -6,6 +6,7 @@ import { parseArgs, styleText } from 'node:util';
 
 import { buildFrom } from './build-from.js';
 import { parseJobs } from './jobs.js';
+import { checkPagesArguments, pagesCommand } from './pages-command.js';
 import { start } from './server/start.js';
 import { summarize } from './summary.js';
 
@@ -13,8 +14,11 @@ const USAGE = `Usage:
   kamado build [globs...] [--incremental] [--force] [--skip-unchanged]
                            [--jobs <n|auto>] [--cache-dir <dir>] [--config <file>] [--verbose]
   kamado server           [--config <file>] [--cache-dir <dir>] [--verbose]
+  kamado pages            [--out <file>] [--incremental] [--cache-dir <dir>] [--config <file>]
 
-The config file defaults to ./kamado.config.jsonc.`;
+The config file defaults to ./kamado.config.jsonc.
+\`pages\` lists every page of the plan as JSON, without building: to the standard output, or
+to --out.`;
 
 /**
  * A progress line on the terminal's error stream, rewritten in place (and
@@ -79,6 +83,7 @@ async function main(argv: readonly string[]): Promise<number> {
 			force: { type: 'boolean', default: false },
 			'skip-unchanged': { type: 'boolean', default: false },
 			jobs: { type: 'string' },
+			out: { type: 'string' },
 			'cache-dir': { type: 'string' },
 			help: { type: 'boolean', short: 'h', default: false },
 		},
@@ -87,6 +92,11 @@ async function main(argv: readonly string[]): Promise<number> {
 	if (values.help || !command) {
 		console.log(USAGE);
 		return values.help ? 0 : 1;
+	}
+	// `--out` is a flag of `pages` alone; before `pages` took it, `parseArgs` refused it
+	// for every command, and it must not become a flag that is silently ignored.
+	if ((command === 'build' || command === 'server') && values.out !== undefined) {
+		throw new Error(`${command} does not take --out (only pages writes a file)`);
 	}
 	switch (command) {
 		case 'build': {
@@ -129,6 +139,18 @@ async function main(argv: readonly string[]): Promise<number> {
 			});
 			// The server keeps the process alive; the exit code is decided by the
 			// signal handlers it installed.
+			return 0;
+		}
+		case 'pages': {
+			checkPagesArguments(rest, values);
+			pagesCommand(resolveConfig(values.config), {
+				out: values.out,
+				incremental: values.incremental,
+				cacheDir:
+					values['cache-dir'] === undefined
+						? undefined
+						: path.resolve(process.cwd(), values['cache-dir']),
+			});
 			return 0;
 		}
 		default: {

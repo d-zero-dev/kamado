@@ -17,6 +17,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	symlinkSync,
 	writeFileSync,
 } from 'node:fs';
@@ -37,6 +38,7 @@ const dist = path.resolve(
 	'dist',
 );
 const { build } = await import(pathToFileURL(path.join(dist, 'build.js')).href);
+const { pages } = await import(pathToFileURL(path.join(dist, 'pages.js')).href);
 
 /**
  * A small site: a TSX page that uses a layout, a TSX page without one, an HTML page, and a
@@ -448,4 +450,119 @@ test('kamado build takes its globs from the cwd, also with the config file named
 		`${none.stdout}${none.stderr}`,
 		/src\/none\/\*\*" matched no page, stylesheet or script/,
 	);
+});
+
+test('pages lists the pages of the plan with their place in the tree, and renders and writes nothing', async () => {
+	// `many` pages, and the three of the site itself (index, plain and static).
+	const many = 30;
+	const config = makeSite(many);
+	const site = path.dirname(config);
+
+	const map = await pages(config);
+
+	assert.equal(map.version, 1);
+	assert.equal(map.pages.length, many + 3);
+	assert.deepEqual(map.warnings, []);
+	const at = (url) => map.pages.find((p) => p.url === url);
+	assert.deepEqual(at('/'), {
+		url: '/',
+		inputPath: path.join(site, 'src', 'index.tsx'),
+		outputPath: path.join(site, 'out', 'index.html'),
+		fileSlug: 'src',
+		filePathStem: '/index',
+		extension: '.tsx',
+		depth: 0,
+		parent: null,
+		virtual: false,
+		meta: { title: 'Home', layout: 'default' },
+	});
+	assert.deepEqual(at('/static.html')?.meta, { title: 'Static', layout: 'default' });
+	assert.equal(at('/static.html')?.extension, '.html');
+	assert.equal(at('/static.html')?.depth, 1);
+	assert.equal(at('/many/p29.html')?.depth, 2);
+	assert.equal(at('/many/p29.html')?.parent, '/many/');
+	// Planned, not built: no output, and no cache of a plan that was not asked to be kept.
+	assert.equal(existsSync(path.join(site, 'out')), false);
+	assert.equal(existsSync(path.join(site, '.cache')), false);
+
+	await pages(config, { incremental: true });
+	assert.equal(existsSync(path.join(site, '.cache', 'plan-cache.bin')), true);
+	assert.equal(existsSync(path.join(site, 'out')), false);
+});
+
+test('kamado pages writes the map to the standard output or to --out and tells the progress on the standard error', async () => {
+	const many = 30;
+	const count = many + 3;
+	const config = makeSite(many);
+	const site = path.dirname(config);
+	const cli = path.join(dist, 'cli.js');
+	const run = (...args) =>
+		spawnSync(process.execPath, [cli, 'pages', ...args], { cwd: site, encoding: 'utf8' });
+	// The CLI names the config by its real path (RFC §13), so the paths of the map are real ones.
+	const expected = await pages(realpathSync(config));
+
+	const toStdout = run('--config', config);
+	assert.equal(toStdout.status, 0, toStdout.stderr);
+	assert.deepEqual(JSON.parse(toStdout.stdout), expected);
+	assert.match(
+		toStdout.stderr,
+		new RegExp(`^Reading pages\\.\\.\\.\\nListed ${count} pages in \\d+\\.\\ds\\n$`),
+	);
+
+	// A relative --out is relative to where the command was typed.
+	const toFile = run('--config', config, '--out', 'maps/map.json');
+	assert.equal(toFile.status, 0, toFile.stderr);
+	assert.equal(toFile.stdout, '');
+	assert.deepEqual(
+		JSON.parse(readFileSync(path.join(site, 'maps', 'map.json'), 'utf8')),
+		expected,
+	);
+	assert.match(
+		toFile.stderr,
+		new RegExp(
+			`^Reading pages\\.\\.\\.\\nWrote maps/map\\.json \\(${count} pages\\) in \\d+\\.\\ds\\n$`,
+		),
+	);
+	assert.equal(existsSync(path.join(site, 'out')), false);
+
+	// A glob would be the targets of `build`: it is refused, not ignored.
+	const extra = run('--config', config, 'src/**');
+	assert.equal(extra.status, 1);
+	assert.match(extra.stderr, /pages takes no arguments/);
+
+	// So is a flag that it does not read: `--force` would not force anything.
+	const forced = run('--config', config, '--force');
+	assert.equal(forced.status, 1);
+	assert.match(forced.stderr, /pages does not take --force/);
+	assert.equal(forced.stdout, '');
+
+	// A file name that cannot be written is said, with the name that was typed.
+	const toDirectory = run('--config', config, '--out', 'maps');
+	assert.equal(toDirectory.status, 1);
+	assert.match(toDirectory.stderr, /cannot write maps: .*EISDIR/);
+	assert.equal(run('--config', config, '--out', '').status, 1);
+
+	// `--cache-dir` is relative to where the command was typed, and `--incremental` keeps the plan.
+	const kept = run('--config', config, '--incremental', '--cache-dir', 'plan-cache');
+	assert.equal(kept.status, 0, kept.stderr);
+	assert.equal(existsSync(path.join(site, 'plan-cache', 'plan-cache.bin')), true);
+
+	// `--out` is for `pages` alone: the other commands refuse it rather than ignore it.
+	for (const command of ['build', 'server']) {
+		const refused = spawnSync(
+			process.execPath,
+			[cli, command, '--config', config, '--out', 'x.json'],
+			{
+				cwd: site,
+				encoding: 'utf8',
+			},
+		);
+		assert.equal(refused.status, 1, command);
+		assert.match(refused.stderr, new RegExp(`${command} does not take --out`));
+	}
+	assert.equal(existsSync(path.join(site, 'out')), false);
+
+	const help = run('--help');
+	assert.equal(help.status, 0);
+	assert.match(help.stdout, /kamado pages {12}\[--out <file>\]/);
 });

@@ -301,6 +301,26 @@ unsafe fn build(env: napi_env, info: napi_callback_info) -> napi_value {
 	}
 }
 
+/// `pages(configPath, optionsJson)` -> the JSON list of the pages of the plan (RFC §14.1).
+/// Nothing is rendered. Throws on any configuration or plan error.
+unsafe fn pages(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<2>(
+			env,
+			info,
+			c"pages: expected (configPath, optionsJson) strings",
+			|[config, options]| {
+				build_options_from_json(&options)
+					.and_then(|options| {
+						kd_core::load(&config).and_then(|loaded| kd_core::pages(&loaded, &options))
+					})
+					.map_err(Thrown::from)
+			},
+		)
+	}
+}
+
 /// Reads the `N` string arguments of the call; `None` if one is missing or
 /// not a string.
 unsafe fn string_args<const N: usize>(
@@ -724,6 +744,7 @@ unsafe fn register(env: napi_env, exports: napi_value) -> napi_value {
 		export_guarded!(api, env, exports, c"counter", counter);
 		export_guarded!(api, env, exports, c"sha256Hex", sha256_hex);
 		export_guarded!(api, env, exports, c"build", build);
+		export_guarded!(api, env, exports, c"pages", pages);
 		export_guarded!(api, env, exports, c"prepare", prepare);
 		export_guarded!(api, env, exports, c"feed", feed);
 		export_guarded!(api, env, exports, c"finish", finish);
