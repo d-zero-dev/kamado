@@ -160,7 +160,18 @@ impl Overrides {
 /// segment. A page URL is the path of its output file as it is, so none of
 /// these could be matched to a page; they are refused rather than read as
 /// another URL.
-fn not_a_page_path(url: &str) -> Option<&'static str> {
+///
+/// # Example
+///
+/// ```
+/// assert_eq!(kd_site::meta::not_a_page_path("/a/b/"), None);
+/// assert_eq!(
+///     kd_site::meta::not_a_page_path("/a?x"),
+///     Some("must not have a query or a fragment ('?' or '#')")
+/// );
+/// ```
+#[must_use]
+pub fn not_a_page_path(url: &str) -> Option<&'static str> {
 	if url.contains(['?', '#']) {
 		return Some("must not have a query or a fragment ('?' or '#')");
 	}
@@ -196,6 +207,34 @@ mod tests {
 			Value::Object(merged).to_json(),
 			r#"{"title":"O","og":{"title":"S"},"layout":"sub","extra":1}"#
 		);
+	}
+
+	#[test]
+	fn not_a_page_path_names_the_reason_for_each_kind() {
+		assert_eq!(not_a_page_path("/a/b/"), None);
+		assert_eq!(not_a_page_path("/"), None);
+		assert_eq!(
+			not_a_page_path("/a?x"),
+			Some("must not have a query or a fragment ('?' or '#')")
+		);
+		assert_eq!(
+			not_a_page_path("/a//b/"),
+			Some("must not have an empty segment ('//')")
+		);
+		assert_eq!(
+			not_a_page_path("/a/../b/"),
+			Some("must not have a '.' or '..' segment")
+		);
+		assert_eq!(
+			not_a_page_path("/a/./b/"),
+			Some("must not have a '.' or '..' segment")
+		);
+		assert_eq!(
+			not_a_page_path("/a/.."),
+			Some("must not have a '.' or '..' segment")
+		);
+		// a name that only starts with dots is a name
+		assert_eq!(not_a_page_path("/..a/.b/c..d"), None);
 	}
 
 	#[test]
