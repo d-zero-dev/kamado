@@ -211,6 +211,12 @@ node benchmarks/v3/compare-outputs.ts <baselineDir> <candidateDir> --json=report
 
 `v2`ブランチにあった`yarn bench`（このブランチには無い）は、10 万ページ級では生成器がファイルを一斉に開いて`EMFILE`になる（macOS の上限は約 6 万）。v2 の基準値は 5 万ページまでで取る。10 万ページの基準は、`benchmarks/v3/generate-jsx-fixtures.ts`の fixture を、上の`benchmarks/v2-baseline/run.ts`で処理して取る。
 
+開発サーバーの応答時間は`benchmarks/v3/serve-latency.ts`で測る（ビルド済みの`dist`と release のアドオンが要る）。fixture を作って`start()`で起動し、ヒット・ページ風の miss・`/favicon.ico`を各 N 回要求して p50 と p99 を出し、計画を作り直す要求（`pages.overrides`の変更、ページファイルの追加と削除）の時間も 1 回ずつ出す。`KAMADO_NATIVE_ADDON=<path>`で変更前のアドオンを指すと、同じ手順で比べられる。`KD_TIMING=1`を付けると、作り直しのたびに`replan (walk)`か`replan (assemble)`の行が出るので、行を数えれば作り直した回数が分かる。
+
+```sh
+node benchmarks/v3/serve-latency.ts --pages=1000 --requests=200
+```
+
 ## JSX コンパイラの検証
 
 `kd_js`が出力する JS を、esbuild と React 19 の`renderToStaticMarkup`（v2 の jsx-compiler がやっていたこと）と比べる。ビルドはページを「チャンクの関数」としてコンパイルするので、その形（`KD_JS_FUNCTION=1`）でも同じ比較をする。
