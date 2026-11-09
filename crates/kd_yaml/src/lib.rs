@@ -22,6 +22,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
+pub mod edit;
+
 pub use kd_jsonc::Value;
 
 /// A parse error with a 1-based line and column.
@@ -50,13 +52,108 @@ impl std::error::Error for Error {}
 /// ```
 pub fn parse(input: &str) -> Result<Value, Error> {
 	let input = input.strip_prefix('\u{FEFF}').unwrap_or(input);
-	let mut p = Parser {
-		chars: input.chars().collect(),
-		pos: 0,
-		anchors: HashMap::new(),
-		depth: 0,
-	};
+	let mut p = Parser::new(input);
 	p.parse_document()
+}
+
+/// Where one top-level entry of a YAML mapping sits in the text, as byte
+/// offsets: `start..end` is the whole entry (its key, its value, however many
+/// lines the value takes, and the line break after the last of them; the blank
+/// lines and the comments at the first column after it belong to what follows),
+/// and `key_end` is the end of the key as written.
+///
+/// # Example
+///
+/// ```
+/// let yaml = "title: A\n# about list\nlist: [1, 2]\n";
+/// let found = kd_yaml::top_level_entries(yaml).unwrap().unwrap();
+/// let list = &found.entries[1];
+/// assert_eq!(&yaml[list.start..list.key_end], "list");
+/// assert_eq!(&yaml[list.start..list.end], "list: [1, 2]\n");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntrySpan {
+	/// The key, as read (quotes removed).
+	pub key: String,
+	/// The first byte of the key.
+	pub start: usize,
+	/// The end of the key as written.
+	pub key_end: usize,
+	/// The first byte after the entry.
+	pub end: usize,
+}
+
+/// The top-level entries of a YAML mapping and whether the text is one the
+/// editor can rewrite entry by entry (see [`top_level_entries`]).
+///
+/// # Example
+///
+/// ```
+/// let found = kd_yaml::top_level_entries("a: &x 1\nb: *x\n").unwrap().unwrap();
+/// assert!(found.uses_anchors);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entries {
+	/// In the order of the text.
+	pub entries: Vec<EntrySpan>,
+	/// An anchor (`&a`), an alias (`*a`) or a merge key (`<<`) appears
+	/// anywhere. The parser expands them while reading and does not keep where a
+	/// value came from, so replacing one entry could change the meaning of
+	/// another.
+	pub uses_anchors: bool,
+}
+
+/// Finds the top-level entries of the mapping in `yaml` (text without a BOM).
+/// Returns `None` if the document is not a block mapping at column 0 (an
+/// empty document, a sequence, a scalar, an indented mapping).
+///
+/// # Example
+///
+/// ```
+/// let yaml = "title: A\nlist:\n  - 1\n  - 2\nlast: z\n";
+/// let found = kd_yaml::top_level_entries(yaml).unwrap().unwrap();
+/// let keys: Vec<&str> = found.entries.iter().map(|e| e.key.as_str()).collect();
+/// assert_eq!(keys, ["title", "list", "last"]);
+/// assert_eq!(&yaml[found.entries[1].start..found.entries[1].end], "list:\n  - 1\n  - 2\n");
+/// assert!(!found.uses_anchors);
+/// ```
+pub fn top_level_entries(yaml: &str) -> Result<Option<Entries>, Error> {
+	let mut p = Parser::new(yaml);
+	p.record = Some(Vec::new());
+	p.parse_document()?;
+	let raw = p.record.take().unwrap_or_default();
+	if raw.is_empty() {
+		return Ok(None);
+	}
+	// char index → byte offset
+	let mut offsets: Vec<usize> = Vec::with_capacity(p.chars.len() + 1);
+	let mut at = 0;
+	for c in &p.chars {
+		offsets.push(at);
+		at += c.len_utf8();
+	}
+	offsets.push(at);
+	let entries = raw
+		.into_iter()
+		.map(|r| EntrySpan {
+			key: r.key,
+			start: offsets[r.start],
+			key_end: offsets[r.key_end],
+			end: offsets[r.end],
+		})
+		.collect();
+	Ok(Some(Entries {
+		entries,
+		uses_anchors: p.special,
+	}))
+}
+
+/// One entry as the parser saw it, in character indices.
+struct RawEntry {
+	key: String,
+	start: usize,
+	key_end: usize,
+	end: usize,
 }
 
 /// Splits gray-matter style front matter from a document.
@@ -130,11 +227,31 @@ struct Parser {
 	pos: usize,
 	anchors: HashMap<String, Value>,
 	depth: usize,
+	/// The top-level entries, when [`top_level_entries`] asked for them.
+	record: Option<Vec<RawEntry>>,
+	/// An anchor, an alias or a merge key was met.
+	special: bool,
 }
 
 type PResult<T> = Result<T, Error>;
 
 impl Parser {
+	fn new(input: &str) -> Parser {
+		Parser {
+			chars: input.chars().collect(),
+			pos: 0,
+			anchors: HashMap::new(),
+			depth: 0,
+			record: None,
+			special: false,
+		}
+	}
+
+	fn define_anchor(&mut self, name: String, value: &Value) {
+		self.special = true;
+		self.anchors.insert(name, value.clone());
+	}
+
 	// ----- errors and positions -------------------------------------------------
 
 	fn error_at(&self, at: usize, message: impl Into<String>) -> Error {
@@ -413,7 +530,7 @@ impl Parser {
 					let col = self.column();
 					self.parse_node_at(col, parent_indent)?
 				};
-				self.anchors.insert(name, value.clone());
+				self.define_anchor(name, &value);
 				Ok(value)
 			}
 			_ => {
@@ -505,6 +622,7 @@ impl Parser {
 		loop {
 			let key_pos = self.pos;
 			let key = self.parse_mapping_key()?;
+			let key_end = self.pos;
 			self.skip_inline_space();
 			if self.peek() != Some(':') {
 				return Err(self.error("expected ':' after mapping key"));
@@ -537,10 +655,22 @@ impl Parser {
 			};
 
 			if key == "<<" {
+				self.special = true;
 				merges.push(value);
 			} else {
 				if pairs.iter().any(|(k, _)| *k == key) {
 					return Err(self.error_at(key_pos, format!("duplicate key \"{key}\"")));
+				}
+				if self.record.is_some() && self.depth == 1 && indent == 0 {
+					let end = self.trim_trailing_trivia(self.line_boundary_from(self.pos), key_pos);
+					if let Some(record) = self.record.as_mut() {
+						record.push(RawEntry {
+							key: key.clone(),
+							start: key_pos,
+							key_end,
+							end,
+						});
+					}
 				}
 				pairs.push((key, value));
 			}
@@ -572,6 +702,52 @@ impl Parser {
 		}
 		apply_merges(&mut pairs, merges)?;
 		Ok(Value::Object(pairs))
+	}
+
+	/// Moves `end` (the start of a line) back over the blank lines and the comment lines at
+	/// the first column that end the entry that starts at `start`: they belong to what
+	/// follows, a block scalar having read the blank ones as its own. An indented `#` line is
+	/// not a comment inside a block scalar, so it is kept. The first line of the entry stays.
+	fn trim_trailing_trivia(&self, mut end: usize, start: usize) -> usize {
+		while end > start {
+			let last = if self.chars.get(end - 1) == Some(&'\n') {
+				end - 1
+			} else {
+				end
+			};
+			let mut first = last;
+			while first > 0 && self.chars[first - 1] != '\n' {
+				first -= 1;
+			}
+			if first <= start {
+				break;
+			}
+			let line = &self.chars[first..last];
+			let blank = line.iter().all(|c| matches!(c, ' ' | '\t' | '\r'));
+			if blank || line.first() == Some(&'#') {
+				end = first;
+			} else {
+				break;
+			}
+		}
+		end
+	}
+
+	/// The start of the next line at or after `from`: `from` itself if it is
+	/// already at the start of a line, the end of the text if there is no
+	/// next line.
+	fn line_boundary_from(&self, from: usize) -> usize {
+		if from > 0 && self.chars.get(from - 1) == Some(&'\n') {
+			return from;
+		}
+		let mut end = from;
+		while end < self.chars.len() && self.chars[end] != '\n' {
+			end += 1;
+		}
+		if end < self.chars.len() {
+			end += 1;
+		}
+		end
 	}
 
 	/// After `skip_to_content` moved onto a less-indented line that belongs
@@ -634,7 +810,7 @@ impl Parser {
 				} else {
 					self.parse_inline_value_after_key(indent)?
 				};
-				self.anchors.insert(name, value.clone());
+				self.define_anchor(name, &value);
 				Ok(value)
 			}
 			Some('|') | Some('>') => self.parse_block_scalar(indent as isize),
@@ -669,7 +845,7 @@ impl Parser {
 							let c = self.column();
 							self.parse_node_at(c, Some(indent as isize))?
 						};
-						self.anchors.insert(name, value.clone());
+						self.define_anchor(name, &value);
 						value
 					}
 					_ => self.parse_node_at(col, Some(indent as isize))?,
@@ -736,6 +912,7 @@ impl Parser {
 
 	fn parse_alias(&mut self) -> PResult<Value> {
 		debug_assert_eq!(self.peek(), Some('*'));
+		self.special = true;
 		let start = self.pos;
 		self.pos += 1;
 		let name_start = self.pos;
@@ -1206,6 +1383,7 @@ impl Parser {
 				Value::Null
 			};
 			if key == "<<" {
+				self.special = true;
 				merges.push(value);
 			} else {
 				if pairs.iter().any(|(k, _)| *k == key) {
@@ -1324,7 +1502,7 @@ impl Parser {
 				let name = self.parse_anchor_name()?;
 				self.skip_inline_space();
 				let v = self.parse_flow_value()?;
-				self.anchors.insert(name, v.clone());
+				self.define_anchor(name, &v);
 				Ok(v)
 			}
 			Some('!') => Err(self.error("tags ('!tag') are not supported")),
