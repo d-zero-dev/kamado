@@ -1269,6 +1269,9 @@ impl<'s> Parser<'s> {
 		if self.tok.kind != Kind::Str {
 			return self.unexpected("a module specifier");
 		}
+		self.info
+			.erased_imports
+			.push((self.tok.start, self.tok.end));
 		self.advance()
 	}
 

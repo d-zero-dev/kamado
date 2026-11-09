@@ -86,9 +86,47 @@ pub fn quote(text: &str) -> String {
 	out
 }
 
+/// A JavaScript string literal for `text` written with `quote` (`'` or `"`).
+///
+/// # Example
+///
+/// ```
+/// assert_eq!(kd_js::strings::quote_with("it's", '\''), r"'it\'s'");
+/// assert_eq!(kd_js::strings::quote_with("say \"hi\"", '"'), r#""say \"hi\"""#);
+/// ```
+#[must_use]
+pub fn quote_with(text: &str, quote: char) -> String {
+	if quote != '\'' {
+		return self::quote(text);
+	}
+	let mut out = String::with_capacity(text.len() + 2);
+	out.push('\'');
+	for c in text.chars() {
+		match c {
+			'\'' => out.push_str("\\'"),
+			'\\' => out.push_str("\\\\"),
+			'\n' => out.push_str("\\n"),
+			'\r' => out.push_str("\\r"),
+			'\u{2028}' => out.push_str("\\u2028"),
+			'\u{2029}' => out.push_str("\\u2029"),
+			c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+			c => out.push(c),
+		}
+	}
+	out.push('\'');
+	out
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn single_quoting_round_trips_through_decode() {
+		let s = "a'b\"c\\d\ne\u{2028}f\u{1}g日本";
+		assert_eq!(decode(&quote_with(s, '\'')), s);
+		assert_eq!(decode(&quote_with(s, '"')), s);
+	}
 
 	#[test]
 	fn escapes_are_decoded() {
