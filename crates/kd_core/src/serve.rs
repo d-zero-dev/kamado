@@ -1,6 +1,6 @@
 //! The dev server's engine: what a request for a URL turns into.
 //!
-//! Nothing is watched and nothing is written. The site is planned once; a
+//! Nothing is watched and nothing is written. The site is planned when the server opens; a
 //! request checks the fingerprints of the files its answer was built from
 //! (stat first, so an unchanged file costs one `stat`), and builds the answer
 //! again only when one of them changed. The answers are kept in memory.
@@ -10,12 +10,23 @@
 //! back to [`Serve::finish_render`]. The same goes for scripts, which esbuild
 //! builds on the JavaScript side.
 //!
-//! What a request does not notice, by design: a new or removed page file, a
-//! change to the `outputPathField` of a page, to `pages.overrides` and to the
-//! config (they take a restart), and a change to the metadata of *another*
-//! page (a page notices it when its own files change or when it is asked for
-//! after a page with new metadata was; the navigation in a page rendered
-//! before that stays as it was until the page itself is rebuilt).
+//! The plan (the list of pages) is made again by a request, and only in these cases:
+//! `pages.overrides` has another size or modification time when a page is asked for (the
+//! files of the pages are read again by their stat, with no walk of the input directory); the
+//! file of the page that is asked for is gone (a walk) or its `outputPathField` says another
+//! path now (the stat of the files); and a URL that could be a page is not in the plan while a
+//! directory that would hold its file has changed since the last walk, or the config has an
+//! `outputPathField` (a walk: `Serve::plan_for_miss` says which URLs, and how often). A miss
+//! that is no page (a `/favicon.ico`) is a 404 and nothing is looked at. A plan that is asked
+//! for soon after another waits out `REPLAN_THROTTLE`. What the new plan does to what the
+//! server kept is in `Serve::replan`. A request whose plan cannot be made is a 500 with the
+//! reason, and the plan stays as it was.
+//!
+//! What a request does not notice, by design: a change to the config, to `html.*`, and a style
+//! or script file that is new or removed (they take a restart), and a change to the metadata
+//! of *another* page (a page notices it when its own files change or when it is asked for
+//! after a page with new metadata was; the navigation in a page rendered before that stays as
+//! it was until the page itself is rebuilt).
 //!
 //! Why modules are recompiled lazily: `Modules::refresh` forgets the modules of
 //! the requested page whose source changed and the closure is compiled again.
@@ -26,6 +37,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use kd_jsonc::Value;
 use kd_site::meta::Overrides;
@@ -35,6 +47,7 @@ use crate::banner::{self, LocalTime};
 use crate::html;
 use crate::jsx::Modules;
 use crate::minifiers::Minifiers;
+use crate::plan_cache::PlanCache;
 use crate::session::{
 	RenderJob, ScriptOutput, layout_module, needs_js, now_iso, page_env, page_json, site_json,
 };
@@ -117,9 +130,115 @@ enum Pending {
 	},
 }
 
+/// The least time between a plan and the next one a miss asks for: a build tool that writes
+/// into the input directory all the time must not make every missed URL a walk of it. A
+/// miss that comes sooner waits out the rest (this long at most) and then plans: answering
+/// 404 instead would lose a page that was created a moment ago.
+const REPLAN_THROTTLE: Duration = Duration::from_millis(200);
+
+/// How long a URL that a plan made for it did not find is remembered, where the URLs are
+/// those of a path field of the metadata (the directories do not tell a change there, so
+/// every such miss walks the input directory): a broken link asked for again and again must
+/// not stop a big site each time.
+const FIELD_MISS_MEMORY: Duration = Duration::from_secs(2);
+
+/// `(size, mtime_sec, mtime_nsec)` of a file, as `kd_build::file_stat` gives it.
+type Stamp = (u64, i64, u32);
+
+/// Directories with their modification times, `(seconds, nanoseconds)`.
+type DirTimes = Vec<(String, (i64, u32))>;
+
+/// What a miss that may be a page asks for (`Serve::plan_for_miss`).
+struct MissPlan {
+	scope: Scope,
+	/// The directories the miss looked at, with the times it saw them with.
+	looked: DirTimes,
+	/// The output path to remember as not found, where the URLs are set by a path field.
+	field_url: Option<String>,
+}
+
+/// The time since the epoch.
+fn since_epoch() -> Duration {
+	SystemTime::now()
+		.duration_since(UNIX_EPOCH)
+		.unwrap_or_default()
+}
+
+/// The directories whose time is not within the grain of the modification times before `now`:
+/// another change to a directory within it would carry the time the directory has, so a time
+/// that new is not remembered (the next look takes the directory as changed).
+fn settled(looked: DirTimes, now: Duration) -> DirTimes {
+	let floor = crate::racy_floor(now);
+	looked
+		.into_iter()
+		.filter(|(_, mtime)| *mtime < floor)
+		.collect()
+}
+
+/// Whether `dir` is `root` or below it (`/site/src2` is not below `/site/src`).
+fn is_within(dir: &str, root: &str) -> bool {
+	dir == root
+		|| dir
+			.strip_prefix(root.trim_end_matches('/'))
+			.is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// How much of the plan is made again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Scope {
+	/// The pages found by the last walk are read again (the files that changed, by their
+	/// stat) and put together with `pages.overrides`: the input directory is not walked.
+	Assemble,
+	/// The input directory is walked first.
+	Walk,
+}
+
+/// What `Serve::page` makes of a request.
+enum Outcome {
+	Served(Served),
+	/// The plan is not what the page's files say: it has to be made again, and the request
+	/// looked at again.
+	Replan(Scope),
+}
+
+/// What reading a page's files again found.
+enum Reload {
+	/// The page is up to date, or was read again.
+	Done,
+	/// The input file is gone: the plan has to be walked again.
+	Gone,
+	/// The `outputPathField` of the page says another output path than the plan has: the page
+	/// is somewhere else, and two pages may now want the same path, so every page is put
+	/// together again.
+	Moved,
+}
+
 struct State {
 	plan: crate::Plan,
 	overrides: Option<Overrides>,
+	/// `pages.overrides` as it was when the plan was made; the file is another plan when it
+	/// differs.
+	overrides_stamp: Option<Stamp>,
+	/// The file was not written within the grain of the modification times before the plan
+	/// began: a rewrite of the same size right after would carry the same time and go
+	/// unseen, so a file that is not settled is another plan at the next request.
+	overrides_settled: bool,
+	/// The output paths a plan made for them did not find, and when (see
+	/// `FIELD_MISS_MEMORY`).
+	field_missed: HashMap<String, Instant>,
+	/// What the last walk of the input directory found (page files, relative to it).
+	found: Vec<String>,
+	/// When the last walk began, as time since the epoch.
+	walked_at: Duration,
+	/// What the pages' files said when the plan was made: a plan made again reads only the
+	/// files that are not as it recorded. It is kept in memory and never written (nothing
+	/// is).
+	plan_cache: PlanCache,
+	/// The modification time of the directories a miss looked at, as they were when the plan
+	/// held what they had (a walk, or a look that saw nothing changed).
+	seen_dirs: HashMap<String, (i64, u32)>,
+	/// When a plan was last made (or tried); `None` before any miss asked.
+	last_replan: Option<Instant>,
 	by_output: HashMap<String, usize>,
 	assets: Vec<Asset>,
 	asset_by_output: HashMap<String, usize>,
@@ -151,8 +270,69 @@ pub struct Serve {
 	minifiers: Minifiers,
 	modules: Modules,
 	env: String,
+	/// The threads a plan reads the page files with.
+	jobs: usize,
+	/// How many plans one request may make: `pages.overrides` and then a page that is gone or
+	/// moved. A test lowers it to reach the error of a page that keeps changing, which cannot
+	/// be made to happen by editing files.
+	plans_per_request: usize,
 	next_token: AtomicU64,
+	/// How many plans were tried after the first, failed ones too (a test counts them; the
+	/// field is there in every build so that the struct is the one that is tested).
+	#[cfg_attr(not(test), allow(dead_code))]
+	replans: AtomicU64,
 	state: Mutex<State>,
+}
+
+/// The stat of the `pages.overrides` file, if the config names one and it exists.
+fn overrides_stamp(config: &kd_config::Config) -> Option<Stamp> {
+	config
+		.pages
+		.overrides
+		.as_deref()
+		.and_then(kd_build::file_stat)
+}
+
+/// Whether a file with this stamp was last written before the grain of the modification
+/// times ran out at `taken_at` (time since the epoch): later, a rewrite of the same size
+/// could carry the same time. A file that is not there (`None`) has nothing to be unsettled.
+fn stamp_settled(stamp: Option<Stamp>, taken_at: Duration) -> bool {
+	stamp.is_none_or(|(_, sec, nsec)| (sec, nsec) < crate::racy_floor(taken_at))
+}
+
+/// The index of every page that has an output file, by output path.
+fn by_output_of(plan: &crate::Plan) -> HashMap<String, usize> {
+	plan.pages
+		.iter()
+		.enumerate()
+		.filter(|(_, p)| !p.is_virtual)
+		.map(|(i, p)| (p.file.output_path.clone(), i))
+		.collect()
+}
+
+/// What names a page that is rendered across plans, since the index in the list does not: its
+/// input file. (A page without one has no output file and is never asked for.)
+fn page_key(page: &Page) -> &str {
+	&page.file.input_path
+}
+
+/// The value of `field` in a page's metadata as the path of an output file (what a plan reads
+/// it as), or `None`.
+fn output_path_value<'a>(meta: &'a kd_site::meta::Meta, field: &str) -> Option<&'a str> {
+	meta.iter()
+		.find(|(k, _)| k == field)
+		.and_then(|(_, v)| v.as_str())
+		.filter(|p| !p.is_empty())
+}
+
+/// The modification time of a directory, as `(seconds, nanoseconds)`.
+fn dir_mtime(path: &str) -> Option<(i64, u32)> {
+	let meta = fs::metadata(path).ok()?;
+	if !meta.is_dir() {
+		return None;
+	}
+	let d = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+	Some((d.as_secs() as i64, d.subsec_nanos()))
 }
 
 /// The URL a static file has for `html.inject` and `html.overrides` (the
@@ -194,20 +374,25 @@ impl Serve {
 	/// Any error of the plan, the HTML options, or the data directory.
 	pub fn open(loaded: Loaded, options: BuildOptions, runtime: &str) -> Result<Serve, String> {
 		let config = &loaded.config;
-		let plan = crate::plan(config)?;
+		let jobs = std::thread::available_parallelism().map_or(1, |n| n.get());
+		let walked_at = since_epoch();
+		let overrides_stamp = overrides_stamp(config);
+		let overrides_settled = stamp_settled(overrides_stamp, walked_at);
 		let overrides = crate::read_overrides(config)?;
+		let found = crate::discover_pages(config)?;
+		let (plan, learned) = crate::plan_with_overrides(
+			config,
+			jobs,
+			None,
+			Some(found.clone()),
+			overrides.as_ref(),
+		)?;
 		let assets = {
 			let mut assets = assets::discover(config, AssetKind::Style)?;
 			assets.extend(assets::discover(config, AssetKind::Script)?);
 			assets
 		};
-		let by_output = plan
-			.pages
-			.iter()
-			.enumerate()
-			.filter(|(_, p)| !p.is_virtual)
-			.map(|(i, p)| (p.file.output_path.clone(), i))
-			.collect();
+		let by_output = by_output_of(&plan);
 		let asset_by_output = assets
 			.iter()
 			.enumerate()
@@ -235,10 +420,21 @@ impl Serve {
 				&config.pages.define,
 			),
 			env,
+			jobs,
+			plans_per_request: 2,
 			next_token: AtomicU64::new(1),
+			replans: AtomicU64::new(0),
 			state: Mutex::new(State {
 				plan,
 				overrides,
+				overrides_stamp,
+				overrides_settled,
+				field_missed: HashMap::new(),
+				found,
+				walked_at,
+				plan_cache: learned.cache,
+				seen_dirs: HashMap::new(),
+				last_replan: None,
 				by_output,
 				assets,
 				asset_by_output,
@@ -267,6 +463,12 @@ impl Serve {
 		&self.loaded.config
 	}
 
+	/// How many plans were tried after the first.
+	#[cfg(test)]
+	fn replans(&self) -> u64 {
+		self.replans.load(Ordering::Relaxed)
+	}
+
 	fn lock(&self) -> std::sync::MutexGuard<'_, State> {
 		self.state.lock().unwrap_or_else(|e| e.into_inner())
 	}
@@ -292,9 +494,14 @@ impl Serve {
 	/// except that a static `.html`/`.htm` gets the `html.inject` entries of
 	/// `mode` `serve` and `both` that match it written in.
 	///
+	/// A request may make the plan of the site again first (see the module's documentation), which
+	/// takes as long as a plan of the site takes, and holds the other requests meanwhile.
+	///
 	/// # Errors
 	///
-	/// The message to send with a 500: a page or style that cannot be built.
+	/// The message to send with a 500: a page or style that cannot be built, a plan that cannot
+	/// be made again (`pages.overrides` that cannot be read, a page file with invalid front
+	/// matter), or a page that kept changing while the plan was made again.
 	///
 	/// # Example
 	///
@@ -345,16 +552,67 @@ impl Serve {
 		if !renderer_started {
 			st.context_full = true;
 		}
-		if let Some(&index) = st.by_output.get(&path) {
-			// Data is read for pages that JavaScript renders; a data file that
-			// does not parse must not turn every image and stylesheet into a 500.
-			if needs_js(&st.plan.pages[index]) {
-				self.refresh_data(&mut st)?;
+		// What a plan made again changes is looked at again. Two are all a request can need
+		// (`pages.overrides`, then a page that is gone or moved), so a site that changes under
+		// the request as fast as it plans does not hold it for ever: it is an error to ask again.
+		let mut plans = 0;
+		loop {
+			if let Some(&index) = st.by_output.get(&path) {
+				// `pages.overrides` is the business of pages only: a half-written file must not turn
+				// every image and stylesheet into a 500.
+				if plans == 0 && self.overrides_changed(&st) {
+					self.replan(&mut st, Scope::Assemble)?;
+					plans += 1;
+					continue;
+				}
+				// Data is read for pages that JavaScript renders; a data file that
+				// does not parse must not turn every image and stylesheet into a 500.
+				if needs_js(&st.plan.pages[index]) {
+					self.refresh_data(&mut st)?;
+				}
+				match self.page(&mut st, index)? {
+					Outcome::Served(served) => return Ok(served),
+					Outcome::Replan(_) if plans >= self.plans_per_request => {
+						return Err(format!(
+							"{path}: the page kept changing while the plan was made again; ask again"
+						));
+					}
+					Outcome::Replan(scope) => {
+						self.replan(&mut st, scope)?;
+						plans += 1;
+						continue;
+					}
+				}
 			}
-			return self.page(&mut st, index);
-		}
-		if let Some(&index) = st.asset_by_output.get(&path) {
-			return self.asset(&mut st, index);
+			if let Some(&index) = st.asset_by_output.get(&path) {
+				return self.asset(&mut st, index);
+			}
+			// Not after a plan made for this request: it read every page file again (and a walk
+			// saw every directory), so a miss that is still a miss is a miss.
+			if plans == 0
+				&& let Some(miss) = self.plan_for_miss(&mut st, &local, &path)
+			{
+				// The rest of the throttle is waited out without the state (at most a fifth of a
+				// second): what changes meanwhile is what the plan reads.
+				let wait = st.last_replan.map_or(Duration::ZERO, |at| {
+					REPLAN_THROTTLE.saturating_sub(at.elapsed())
+				});
+				if !wait.is_zero() {
+					drop(st);
+					std::thread::sleep(wait);
+					st = self.lock();
+				}
+				self.replan(&mut st, miss.scope)?;
+				// Only once the plan is made: a plan that failed must be tried again by the next
+				// request, not remembered as one that found nothing.
+				st.seen_dirs.extend(settled(miss.looked, since_epoch()));
+				if let Some(url) = miss.field_url {
+					st.field_missed.insert(url, Instant::now());
+				}
+				plans += 1;
+				continue;
+			}
+			break;
 		}
 		drop(st);
 		if !fs::metadata(&path).is_ok_and(|m| m.is_file()) {
@@ -406,7 +664,7 @@ impl Serve {
 
 	// ----- pages -----
 
-	fn page(&self, st: &mut State, index: usize) -> Result<Served, String> {
+	fn page(&self, st: &mut State, index: usize) -> Result<Outcome, String> {
 		let js = needs_js(&st.plan.pages[index]);
 		let env = if js {
 			self.env_js(st)
@@ -423,23 +681,27 @@ impl Serve {
 				if let kd_build::Verdict::UpToDate(refreshed) = verdict {
 					cached.entry = refreshed;
 				}
-				return Ok(Served::Text {
+				return Ok(Outcome::Served(Served::Text {
 					content_type: "text/html",
 					body: cached.body.clone(),
-				});
+				}));
 			}
 		}
 
-		self.reload(st, index)?;
+		match self.reload(st, index)? {
+			Reload::Done => {}
+			Reload::Gone => return Ok(Outcome::Replan(Scope::Walk)),
+			Reload::Moved => return Ok(Outcome::Replan(Scope::Assemble)),
+		}
 		// The reload may have changed the environment (the epoch) or whether
 		// the page names a layout.
 		let page = &st.plan.pages[index];
 		if !needs_js(page) {
 			let body = self.process(st, index, None, &BTreeMap::new(), None)?;
-			return Ok(Served::Text {
+			return Ok(Outcome::Served(Served::Text {
 				content_type: "text/html",
 				body,
-			});
+			}));
 		}
 
 		let config = &self.loaded.config;
@@ -497,13 +759,13 @@ impl Serve {
 		let token = self.token();
 		let env = self.env_js(st);
 		st.pending.insert(token, Pending::Page { index, deps, env });
-		Ok(Served::Render(Render {
+		Ok(Outcome::Served(Served::Render(Render {
 			token,
 			job,
 			restart,
 			context,
 			update,
-		}))
+		})))
 	}
 
 	/// Forgets the changed modules of the layout a page names.
@@ -571,7 +833,10 @@ impl Serve {
 
 	/// Reads the page's files again when they changed since it was last read
 	/// (the fingerprints of `Page::deps` tell).
-	fn reload(&self, st: &mut State, index: usize) -> Result<(), String> {
+	///
+	/// A page whose input file is gone, or whose `outputPathField` says another path than the
+	/// plan has, is not reloaded: the plan is what has to change (see [`Reload`]).
+	fn reload(&self, st: &mut State, index: usize) -> Result<Reload, String> {
 		let fingerprinter = kd_build::Fingerprinter::new();
 		let page = &st.plan.pages[index];
 		if page
@@ -579,13 +844,28 @@ impl Serve {
 			.iter()
 			.all(|(path, dep)| fingerprinter.unchanged(path, dep))
 		{
-			return Ok(());
+			// A page of a plan made from what was known has not read its body yet.
+			if page.body_pending {
+				crate::load_bodies(&mut st.plan, &[index], 1)?;
+			}
+			return Ok(Reload::Done);
+		}
+		if !page.is_virtual
+			&& matches!(fs::metadata(&page.file.input_path), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+		{
+			return Ok(Reload::Gone);
 		}
 		let reloaded = crate::reload_page(page, st.overrides.as_ref())?;
+		if let Some(field) = self.loaded.config.pages.output_path_field.as_deref()
+			&& output_path_value(&page.meta, field) != output_path_value(&reloaded.meta, field)
+		{
+			return Ok(Reload::Moved);
+		}
 		let page = &mut st.plan.pages[index];
 		let meta_changed = page.meta != reloaded.meta;
 		page.meta = reloaded.meta;
 		page.body = reloaded.body;
+		page.body_pending = false;
 		page.deps = reloaded.deps;
 		if meta_changed {
 			st.epoch += 1;
@@ -593,6 +873,256 @@ impl Serve {
 			// Pages that read the page list are stale: their environment
 			// changed with the epoch.
 		}
+		Ok(Reload::Done)
+	}
+
+	// ----- the plan -----
+
+	/// Whether `pages.overrides` is not the file the plan was made from (a stat).
+	fn overrides_changed(&self, st: &State) -> bool {
+		let config = &self.loaded.config;
+		config.pages.overrides.is_some()
+			&& (!st.overrides_settled || overrides_stamp(config) != st.overrides_stamp)
+	}
+
+	/// Whether a request for a URL that no page has is for a page that a plan made again may
+	/// find, and what to do about it. A URL may be a page when its output path ends in the
+	/// output extension (a `/dir/` and an extensionless `/about` do: they are the files
+	/// `dir/index.html` and `about.html`) and no file of the output directory is at that path.
+	/// Anything else (`/favicon.ico`) is not looked at.
+	///
+	/// A page file is created, renamed or removed in a directory, which changes that
+	/// directory's modification time (not a change to the file's content; a directory renamed
+	/// changes its parent's, not its own, which is why the directories above the page's file,
+	/// up to the input directory, all count). A directory with a time it did not have when the
+	/// last walk saw it, or when this last looked at it, may hold a page: that is a walk.
+	///
+	/// Where the config has a path field (`outputPathField`), the URL of a page is not where its
+	/// file is, so the directories of the URL tell nothing: such a miss is a walk too, once for
+	/// each URL in `FIELD_MISS_MEMORY`.
+	///
+	/// What this returns is for the caller to remember once the plan is made (not before: a
+	/// plan that failed found nothing). `local` is the URL as a path of the output directory,
+	/// `path` that path from the root.
+	fn plan_for_miss(&self, st: &mut State, local: &str, path: &str) -> Option<MissPlan> {
+		let config = &self.loaded.config;
+		let extension = &config.pages.output_extension;
+		let name = local.rsplit('/').next().unwrap_or(local);
+		let page_like = if extension.is_empty() {
+			!name.contains('.')
+		} else {
+			name.ends_with(extension.as_str())
+		};
+		if !page_like || fs::metadata(path).is_ok_and(|m| m.is_file()) {
+			return None;
+		}
+		let field = config.pages.output_path_field.is_some();
+		let field_url = field.then(|| path.to_owned());
+		let root = kd_site::path::normalize(&config.dir.input);
+		let mut dir = kd_site::path::dirname(&kd_site::path::join(&root, local));
+		let floor = crate::racy_floor(st.walked_at);
+		let mut changed = false;
+		let mut looked = Vec::new();
+		// A directory that is not there ends it: nothing is under it, and nothing above it
+		// changed for a page that is not there.
+		while is_within(&dir, &root) {
+			let Some(mtime) = dir_mtime(&dir) else {
+				break;
+			};
+			if st
+				.seen_dirs
+				.get(&dir)
+				.map_or(mtime >= floor, |&known| known != mtime)
+			{
+				changed = true;
+			}
+			looked.push((dir.clone(), mtime));
+			if dir == root {
+				break;
+			}
+			dir = kd_site::path::dirname(&dir);
+		}
+		if changed {
+			return Some(MissPlan {
+				scope: Scope::Walk,
+				looked,
+				field_url,
+			});
+		}
+		// What did not change is remembered now (what is known of a directory is that nothing
+		// changed since the plan).
+		st.seen_dirs.extend(
+			settled(looked, since_epoch())
+				.into_iter()
+				.filter(|(dir, _)| !st.seen_dirs.contains_key(dir))
+				.collect::<Vec<_>>(),
+		);
+		if !field {
+			return None;
+		}
+		st.field_missed
+			.retain(|_, at| at.elapsed() < FIELD_MISS_MEMORY);
+		if st.field_missed.contains_key(path) {
+			return None;
+		}
+		Some(MissPlan {
+			scope: Scope::Walk,
+			looked: Vec::new(),
+			field_url,
+		})
+	}
+
+	/// Makes the plan again, from the files as they are now, and swaps it for the old one;
+	/// if that cannot be done, nothing changes and the request that asked gets the error.
+	///
+	/// What the new plan does to what was kept: the pages are numbered again, so every
+	/// answer in `cache` is dropped (the numbers key it), the epoch moves (pages that read
+	/// the page list are stale), and the renderer is given the whole context with the next
+	/// render. The renders under way keep their token: each is moved to its page's new number
+	/// by the page's input file (a page without one by its URL), and one whose page is gone
+	/// is forgotten, so `finish_render` for it is an error. Styles, scripts, the data and the
+	/// compiled modules are not part of the plan and stay as they were.
+	///
+	/// The files are read by their stat against `plan_cache`: the ones that changed are read,
+	/// the others are taken from it. A page file that vanished makes an assembling plan
+	/// fail (it was found by an earlier walk), so that one is made again as a walk.
+	///
+	/// A plan is synchronous and holds the state: the other requests wait for it.
+	///
+	/// # Errors
+	///
+	/// The message of what could not be read: `pages.overrides`, an unreadable or invalid page
+	/// file, an invalid glob, a path that is no output path. The old plan stays.
+	fn replan(&self, st: &mut State, scope: Scope) -> Result<(), String> {
+		self.replans.fetch_add(1, Ordering::Relaxed);
+		let made = self.make_plan(st, scope);
+		// From the end, success or not: a plan of a big site takes longer than the throttle,
+		// which would then never hold anything back.
+		st.last_replan = Some(Instant::now());
+		made
+	}
+
+	/// Whether a page file that a walk found is not a file any more: gone, or replaced by a
+	/// directory (the first one ends the search).
+	fn found_vanished(&self, found: &[String]) -> bool {
+		let input = self.loaded.config.dir.input.trim_end_matches('/');
+		found
+			.iter()
+			.any(|rel| match fs::metadata(format!("{input}/{rel}")) {
+				Ok(meta) => !meta.is_file(),
+				Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+			})
+	}
+
+	fn make_plan(&self, st: &mut State, scope: Scope) -> Result<(), String> {
+		let started = Instant::now();
+		let config = &self.loaded.config;
+		// Before the read: a change between the two is another plan at the next request.
+		let taken_at = since_epoch();
+		let stamp = overrides_stamp(config);
+		let settled = stamp_settled(stamp, taken_at);
+		let overrides = crate::read_overrides(config)?;
+		let known = (!st.plan_cache.pages.is_empty()).then_some(&st.plan_cache);
+		let assembled = match scope {
+			Scope::Assemble => {
+				match crate::plan_with_overrides(
+					config,
+					self.jobs,
+					known,
+					Some(st.found.clone()),
+					overrides.as_ref(),
+				) {
+					Ok(planned) => Some((planned, None)),
+					// A page file that an earlier walk found and that is gone is what a walk
+					// mends; any other failure is the same for a walk, which is not run for it.
+					Err(_) if self.found_vanished(&st.found) => None,
+					Err(e) => return Err(e),
+				}
+			}
+			Scope::Walk => None,
+		};
+		let (planned, walk) = match assembled {
+			Some(planned) => planned,
+			None => {
+				let walked_at = since_epoch();
+				let found = crate::discover_pages(config)?;
+				let planned = crate::plan_with_overrides(
+					config,
+					self.jobs,
+					known,
+					Some(found.clone()),
+					overrides.as_ref(),
+				)?;
+				(planned, Some((found, walked_at)))
+			}
+		};
+		let (plan, learned) = planned;
+		if std::env::var_os("KD_TIMING").is_some() {
+			eprintln!(
+				"    replan ({}): {} pages in {}ms",
+				if walk.is_some() { "walk" } else { "assemble" },
+				plan.pages.len(),
+				started.elapsed().as_millis()
+			);
+		}
+
+		// What was waiting for a render, by the page's name, before the numbers change.
+		let waiting: Vec<(u64, String)> = st
+			.pending
+			.iter()
+			.filter_map(|(token, p)| match p {
+				Pending::Page { index, .. } => {
+					Some((*token, page_key(&st.plan.pages[*index]).to_owned()))
+				}
+				Pending::Script { .. } => None,
+			})
+			.collect();
+		let by_key: HashMap<String, usize> = if waiting.is_empty() {
+			HashMap::new()
+		} else {
+			plan.pages
+				.iter()
+				.enumerate()
+				.map(|(i, p)| (page_key(p).to_owned(), i))
+				.collect()
+		};
+		for (token, key) in waiting {
+			match by_key.get(&key) {
+				Some(&now) => {
+					if let Some(Pending::Page { index, .. }) = st.pending.get_mut(&token) {
+						*index = now;
+					}
+				}
+				None => {
+					st.pending.remove(&token);
+				}
+			}
+		}
+
+		// What the plan learned replaces what was kept, and it holds every page file that is
+		// there (so the entries of pages that are gone go). It is empty in two cases: the plan
+		// took every page from the cache it was given, which has nothing new to keep, or no
+		// page file is left, which leaves nothing to keep either.
+		let no_page_file_left = plan.pages.iter().all(|p| p.is_virtual);
+		if !learned.cache.pages.is_empty() || no_page_file_left {
+			st.plan_cache = learned.cache;
+		}
+		if let Some((found, walked_at)) = walk {
+			st.found = found;
+			st.walked_at = walked_at;
+			// The walk saw every directory as it is: what was remembered of them is no use, and
+			// a directory that was looked at once and never again is not kept for ever.
+			st.seen_dirs.clear();
+		}
+		st.by_output = by_output_of(&plan);
+		st.plan = plan;
+		st.overrides = overrides;
+		st.overrides_stamp = stamp;
+		st.overrides_settled = settled;
+		st.cache.clear();
+		st.epoch += 1;
+		st.context_full = true;
+		st.dirty_pages.clear();
 		Ok(())
 	}
 
@@ -1514,5 +2044,563 @@ mod tests {
 			text(serve.request("/a.html").unwrap()).1,
 			"<!DOCTYPE html>\r\n<html>\r\n<head>\r\n<title>©</title>\r\n<link href=\"/css/dev.css\" rel=\"stylesheet\">\n</head>\r\n<body>\r\n<!-- @include(/part.html) -->\r\n<img src='/img/a.svg'>  <p class=\"a  b\" hidden=\"\">  x  </p>\r\n</body>\r\n</html>\r\n"
 		);
+	}
+
+	/// What the test wrote has to be older than the grain of the modification times: a directory
+	/// changed within it is taken as changed after the plan was made.
+	fn aged() {
+		std::thread::sleep(crate::MTIME_GRAIN * 3);
+	}
+
+	fn move_dir(site: &Site, from: &str, to: &str) {
+		fs::rename(
+			format!("{}/{from}", site.root),
+			format!("{}/{to}", site.root),
+		)
+		.unwrap();
+	}
+
+	#[test]
+	fn a_page_that_moved_is_gone_at_its_old_url_and_found_at_the_new_one() {
+		let site = Site::new("moved");
+		site.write("src/index.html", "<p>top</p>");
+		site.write("src/a/index.html", "<p>a</p>");
+		aged();
+		let serve = site.serve("");
+		assert_eq!(text(serve.request("/a/").unwrap()).1, "<p>a</p>\n");
+
+		move_dir(&site, "src/a", "src/b");
+
+		assert_eq!(serve.request("/a/").unwrap(), Served::NotFound);
+		assert_eq!(text(serve.request("/b/").unwrap()).1, "<p>a</p>\n");
+		assert_eq!(serve.replans(), 1);
+		// What is gone costs nothing more.
+		assert_eq!(serve.request("/a/").unwrap(), Served::NotFound);
+		assert_eq!(serve.replans(), 1);
+	}
+
+	#[test]
+	fn a_page_asked_for_at_its_new_url_first_is_found_because_a_directory_above_it_changed() {
+		let site = Site::new("moved-new-first");
+		site.write("src/index.html", "<p>top</p>");
+		site.write("src/a/index.html", "<p>a</p>");
+		aged();
+		let serve = site.serve("");
+		assert_eq!(text(serve.request("/a/").unwrap()).1, "<p>a</p>\n");
+
+		// The directory itself is not touched by its renaming; its parent is.
+		move_dir(&site, "src/a", "src/b");
+
+		assert_eq!(text(serve.request("/b/").unwrap()).1, "<p>a</p>\n");
+		assert_eq!(serve.replans(), 1);
+		assert_eq!(serve.request("/a/").unwrap(), Served::NotFound);
+		assert_eq!(serve.replans(), 1);
+	}
+
+	#[test]
+	fn a_page_whose_file_was_removed_is_not_found() {
+		let site = Site::new("removed");
+		site.write("src/index.html", "<p>top</p>");
+		site.write("src/a/index.html", "<p>a</p>");
+		aged();
+		let serve = site.serve("");
+		assert_eq!(text(serve.request("/a/").unwrap()).1, "<p>a</p>\n");
+
+		fs::remove_file(format!("{}/src/a/index.html", site.root)).unwrap();
+
+		assert_eq!(serve.request("/a/").unwrap(), Served::NotFound);
+		assert_eq!(text(serve.request("/").unwrap()).1, "<p>top</p>\n");
+	}
+
+	#[test]
+	fn a_page_created_after_a_miss_is_found_when_asked_for_again() {
+		let site = Site::new("created");
+		site.write("src/index.html", "<p>top</p>");
+		aged();
+		let serve = site.serve("");
+
+		assert_eq!(serve.request("/new.html").unwrap(), Served::NotFound);
+		assert_eq!(serve.replans(), 0, "nothing changed since the plan");
+
+		site.write("src/new.html", "<p>new</p>");
+		assert_eq!(text(serve.request("/new.html").unwrap()).1, "<p>new</p>\n");
+		assert_eq!(serve.replans(), 1);
+	}
+
+	#[test]
+	fn a_miss_that_is_no_page_never_plans_again_however_the_input_changes() {
+		let site = Site::new("favicon");
+		site.write("src/index.html", "<p>top</p>");
+		aged();
+		let serve = site.serve("");
+		site.write("src/other.html", "<p>other</p>");
+
+		for path in [
+			"/favicon.ico",
+			"/img/logo.png",
+			"/css/none.css",
+			"/js/none.js",
+			"/robots.txt",
+		] {
+			for _ in 0..20 {
+				assert_eq!(serve.request(path).unwrap(), Served::NotFound, "{path}");
+			}
+		}
+		assert_eq!(serve.replans(), 0);
+	}
+
+	#[test]
+	fn a_page_like_miss_plans_again_once_for_a_change_and_not_for_each_request() {
+		let site = Site::new("miss-once");
+		site.write("src/index.html", "<p>top</p>");
+		aged();
+		let serve = site.serve("");
+		site.write("src/other.html", "<p>other</p>");
+		// (What changed a moment ago is not remembered, see `settled`: let it age.)
+		aged();
+
+		for _ in 0..20 {
+			assert_eq!(serve.request("/missing.html").unwrap(), Served::NotFound);
+		}
+		assert_eq!(serve.replans(), 1);
+
+		// Another change: the next miss looks again.
+		site.write("src/third.html", "<p>third</p>");
+		assert_eq!(
+			text(serve.request("/third.html").unwrap()).1,
+			"<p>third</p>\n"
+		);
+		assert_eq!(serve.replans(), 2);
+	}
+
+	#[test]
+	fn a_miss_right_after_a_plan_waits_out_the_throttle_and_finds_the_page() {
+		let site = Site::new("throttle");
+		site.write("src/index.html", "<p>top</p>");
+		aged();
+		let serve = site.serve("");
+
+		site.write("src/x1.html", "<p>1</p>");
+		assert_eq!(text(serve.request("/x1.html").unwrap()).1, "<p>1</p>\n");
+		assert_eq!(serve.replans(), 1);
+
+		// Asked for a moment after the plan: not a 404, the plan is only held back.
+		site.write("src/x2.html", "<p>2</p>");
+		let asked = Instant::now();
+		assert_eq!(text(serve.request("/x2.html").unwrap()).1, "<p>2</p>\n");
+		assert_eq!(serve.replans(), 2);
+		assert!(
+			asked.elapsed() >= REPLAN_THROTTLE.mul_f32(0.5),
+			"it waited: {:?}",
+			asked.elapsed()
+		);
+	}
+
+	#[test]
+	fn a_url_the_path_field_plan_did_not_find_is_not_asked_for_again_for_a_while() {
+		let site = Site::new("field-memory");
+		site.write("src/x.html", "---\npath: /one.html\n---\n<p>x</p>");
+		aged();
+		let serve = site.serve(r#", "pages": { "outputPathField": "path" }"#);
+
+		for _ in 0..20 {
+			assert_eq!(
+				serve.request("/broken-link.html").unwrap(),
+				Served::NotFound
+			);
+		}
+		assert_eq!(serve.replans(), 1);
+		// Another URL is another question.
+		assert_eq!(serve.request("/another.html").unwrap(), Served::NotFound);
+		assert_eq!(serve.replans(), 2);
+	}
+
+	#[test]
+	fn a_pages_overrides_file_written_a_moment_before_the_plan_is_read_again_until_it_is_settled() {
+		let site = Site::new("overrides-racy");
+		site.write("src/index.html", "<p>top</p>");
+		site.write(
+			"pages.overrides.json",
+			OVERRIDES_ONE.replace("/other.html", "/").as_str(),
+		);
+		// No ageing: the file was written within the grain of the modification times.
+		let serve = site.serve(r#", "pages": { "overrides": "pages.overrides.json" }"#);
+		aged();
+
+		assert_eq!(text(serve.request("/").unwrap()).1, "<p>top</p>\n");
+		assert_eq!(
+			serve.replans(),
+			1,
+			"a rewrite of the same size could have gone unseen"
+		);
+		assert_eq!(text(serve.request("/").unwrap()).1, "<p>top</p>\n");
+		assert_eq!(serve.replans(), 1, "now it is settled");
+	}
+
+	#[test]
+	fn a_plan_that_fails_for_a_page_that_is_there_answers_with_the_error_of_that_page() {
+		let site = Site::new("assemble-fails");
+		site.write("src/index.html", "<p>top</p>");
+		site.write("src/a.html", "<p>a</p>");
+		site.write(
+			"pages.overrides.json",
+			OVERRIDES_ONE.replace("/other.html", "/").as_str(),
+		);
+		aged();
+		let serve = site.serve(r#", "pages": { "overrides": "pages.overrides.json" }"#);
+
+		site.write("src/a.html", "---\n: broken: [\n---\n<p>a</p>");
+		site.write(
+			"pages.overrides.json",
+			OVERRIDES_TWO.replace("/other.html", "/").as_str(),
+		);
+		let error = serve.request("/").unwrap_err();
+		assert!(error.contains("a.html"), "{error}");
+	}
+
+	const OVERRIDES_ONE: &str =
+		r#"{ "version": 1, "pages": [ { "url": "/other.html", "meta": { "title": "One" } } ] }"#;
+	const OVERRIDES_TWO: &str = r#"{ "version": 1, "pages": [ { "url": "/other.html", "meta": { "title": "Two" } }, { "url": "/extra/", "virtual": true, "meta": { "title": "Extra" } } ] }"#;
+
+	fn overrides_site(name: &str) -> (Site, Serve) {
+		let site = Site::new(name);
+		site.write(
+			"src/index.tsx",
+			"export const meta = { title: 'Home' };\nexport default () => <p>home</p>;\n",
+		);
+		site.write("src/other.html", "<p>other</p>");
+		site.write("out/logo.svg", "<svg/>");
+		site.write("pages.overrides.json", OVERRIDES_ONE);
+		aged();
+		let serve = site.serve(r#", "pages": { "overrides": "pages.overrides.json" }"#);
+		(site, serve)
+	}
+
+	fn page_of<'a>(pages: &'a [Value], url: &str) -> &'a Value {
+		pages
+			.iter()
+			.find(|p| p.get("url").and_then(|u| u.as_str()) == Some(url))
+			.unwrap_or_else(|| panic!("no page {url}"))
+	}
+
+	#[test]
+	fn a_change_of_pages_overrides_reaches_the_renderer_as_the_whole_context() {
+		let (site, serve) = overrides_site("overrides");
+		let first = render(serve.request("/").unwrap());
+		assert_eq!(first.job.page, 1, "the pages of the file come first");
+		serve.finish_render(first.token, "<p>home</p>").unwrap();
+
+		site.write("pages.overrides.json", OVERRIDES_TWO);
+		let again = render(serve.request("/").unwrap());
+
+		assert!(!again.restart);
+		assert_eq!(again.job.page, 2, "the page is where the new order puts it");
+		let context =
+			kd_jsonc::parse(again.context.as_deref().expect("the whole context")).unwrap();
+		let pages = context.get("pages").and_then(|p| p.as_array()).unwrap();
+		assert_eq!(pages.len(), 3);
+		let title = |url| {
+			page_of(pages, url)
+				.get("meta")
+				.and_then(|m| m.get("title"))
+				.and_then(|t| t.as_str())
+		};
+		assert_eq!(title("/other.html"), Some("Two"));
+		assert_eq!(title("/extra/"), Some("Extra"));
+		assert_eq!(title("/"), Some("Home"));
+		assert_eq!(serve.replans(), 1);
+		serve.finish_render(again.token, "<p>home</p>").unwrap();
+		// The file was written a moment before that plan: it is read once more when it is
+		// settled, and then not again while it does not change.
+		aged();
+		for _ in 0..3 {
+			assert!(matches!(
+				serve.request("/other.html").unwrap(),
+				Served::Text { .. }
+			));
+		}
+		assert_eq!(serve.replans(), 2);
+	}
+
+	#[test]
+	fn a_pages_overrides_file_that_cannot_be_read_fails_the_pages_and_keeps_the_plan() {
+		let (site, serve) = overrides_site("overrides-broken");
+		let first = render(serve.request("/").unwrap());
+		serve.finish_render(first.token, "<p>home</p>").unwrap();
+
+		site.write("pages.overrides.json", "{ not json");
+		let error = serve.request("/other.html").unwrap_err();
+		assert!(error.contains("pages.overrides"), "{error}");
+		// A file that is no page is not the overrides' business.
+		assert!(matches!(
+			serve.request("/logo.svg").unwrap(),
+			Served::File { .. }
+		));
+
+		// Mended: the plan is made from it.
+		site.write("pages.overrides.json", OVERRIDES_TWO);
+		let again = render(serve.request("/").unwrap());
+		assert_eq!(again.job.page, 2);
+	}
+
+	#[test]
+	fn pages_overrides_changed_while_a_page_file_vanished_unnoticed_plans_by_walking() {
+		let site = Site::new("overrides-vanished");
+		site.write("src/index.html", "<p>top</p>");
+		site.write("src/a/index.html", "<p>a</p>");
+		site.write(
+			"pages.overrides.json",
+			&OVERRIDES_ONE.replace("/other.html", "/"),
+		);
+		aged();
+		let serve = site.serve(r#", "pages": { "overrides": "pages.overrides.json" }"#);
+		fs::remove_file(format!("{}/src/a/index.html", site.root)).unwrap();
+		aged();
+
+		site.write(
+			"pages.overrides.json",
+			&OVERRIDES_TWO.replace("/other.html", "/"),
+		);
+
+		assert_eq!(text(serve.request("/").unwrap()).1, "<p>top</p>\n");
+		assert_eq!(serve.request("/a/").unwrap(), Served::NotFound);
+		assert_eq!(serve.replans(), 1);
+	}
+
+	#[test]
+	fn a_page_file_replaced_by_a_directory_is_gone_for_the_plan_too() {
+		let site = Site::new("replaced-by-directory");
+		site.write("src/index.html", "<p>top</p>");
+		site.write("src/a.html", "<p>a</p>");
+		site.write(
+			"pages.overrides.json",
+			&OVERRIDES_ONE.replace("/other.html", "/"),
+		);
+		aged();
+		let serve = site.serve(r#", "pages": { "overrides": "pages.overrides.json" }"#);
+		fs::remove_file(format!("{}/src/a.html", site.root)).unwrap();
+		fs::create_dir(format!("{}/src/a.html", site.root)).unwrap();
+		aged();
+
+		site.write(
+			"pages.overrides.json",
+			&OVERRIDES_TWO.replace("/other.html", "/"),
+		);
+
+		assert_eq!(text(serve.request("/").unwrap()).1, "<p>top</p>\n");
+		assert_eq!(serve.request("/a.html").unwrap(), Served::NotFound);
+	}
+
+	#[test]
+	fn a_changed_output_path_field_moves_the_page_whichever_url_is_asked_for_first() {
+		let source = |path: &str| format!("---\npath: {path}\n---\n<p>x</p>");
+		let field = r#", "pages": { "outputPathField": "path" }"#;
+
+		let site = Site::new("field-old-first");
+		site.write("src/x.html", &source("/one.html"));
+		aged();
+		let serve = site.serve(field);
+		assert_eq!(text(serve.request("/one.html").unwrap()).1, "<p>x</p>\n");
+		site.write("src/x.html", &source("/two.html"));
+		assert_eq!(serve.request("/one.html").unwrap(), Served::NotFound);
+		assert_eq!(text(serve.request("/two.html").unwrap()).1, "<p>x</p>\n");
+
+		let site = Site::new("field-new-first");
+		site.write("src/x.html", &source("/one.html"));
+		aged();
+		let serve = site.serve(field);
+		assert_eq!(text(serve.request("/one.html").unwrap()).1, "<p>x</p>\n");
+		site.write("src/x.html", &source("/two.html"));
+		assert_eq!(text(serve.request("/two.html").unwrap()).1, "<p>x</p>\n");
+		assert_eq!(serve.request("/one.html").unwrap(), Served::NotFound);
+	}
+
+	#[test]
+	fn a_render_under_way_finishes_for_its_page_where_the_plan_now_puts_it() {
+		let (site, serve) = jsx_site("replan-inflight");
+		let first = render(serve.request("/").unwrap());
+		assert_eq!(first.job.page, 0);
+
+		// A page that sorts before it: its index moves.
+		site.write("src/aaa.html", "<p>aaa</p>");
+		assert_eq!(text(serve.request("/aaa.html").unwrap()).1, "<p>aaa</p>\n");
+		assert_eq!(serve.replans(), 1);
+
+		let served = serve.finish_render(first.token, "<div>home</div>").unwrap();
+		assert_eq!(text(served).1, "<div>home</div>\n");
+
+		// It was rendered with the context from before: the page is rendered again, with the
+		// whole new one.
+		let again = render(serve.request("/").unwrap());
+		assert_eq!(again.job.page, 1);
+		assert!(again.context.is_some());
+	}
+
+	#[test]
+	fn a_render_under_way_for_a_page_that_is_gone_is_forgotten() {
+		let site = Site::new("replan-gone");
+		site.write("src/a.tsx", "export default () => <p>a</p>;\n");
+		site.write("src/b.tsx", "export default () => <p>b</p>;\n");
+		aged();
+		let serve = site.serve("");
+		let waiting = render(serve.request("/a.html").unwrap());
+
+		fs::remove_file(format!("{}/src/a.tsx", site.root)).unwrap();
+		assert_eq!(serve.request("/a.html").unwrap(), Served::NotFound);
+
+		assert!(serve.finish_render(waiting.token, "<p>a</p>").is_err());
+		// The other page is rendered with the whole context the new plan makes.
+		let b = render(serve.request("/b.html").unwrap());
+		assert_eq!(b.job.page, 0);
+		assert!(b.context.is_some());
+	}
+
+	const FIELD: &str = r#", "pages": { "outputPathField": "path" }"#;
+
+	#[test]
+	fn a_page_file_added_where_its_url_is_not_is_found_where_a_path_field_sends_it() {
+		let site = Site::new("field-added");
+		site.write("src/index.html", "<p>top</p>");
+		site.write("src/blog/old.html", "---\npath: /old.html\n---\n<p>old</p>");
+		aged();
+		let serve = site.serve(FIELD);
+
+		// The directory of the file is not the directory of the URL: only a walk finds it.
+		site.write(
+			"src/blog/foo.html",
+			"---\npath: /news/foo.html\n---\n<p>foo</p>",
+		);
+		assert_eq!(
+			text(serve.request("/news/foo.html").unwrap()).1,
+			"<p>foo</p>\n"
+		);
+		assert_eq!(serve.replans(), 1);
+	}
+
+	#[test]
+	fn a_plan_that_failed_for_a_missed_url_is_tried_again_by_the_next_request() {
+		let site = Site::new("field-failed");
+		site.write("src/index.html", "<p>top</p>");
+		aged();
+		let serve = site.serve(FIELD);
+
+		site.write("src/bad.html", "---\n: broken: [\n---\n<p>bad</p>");
+		let error = serve.request("/bad.html").unwrap_err();
+		assert!(error.contains("bad.html"), "{error}");
+
+		site.write("src/bad.html", "---\npath: /bad.html\n---\n<p>mended</p>");
+		assert_eq!(
+			text(serve.request("/bad.html").unwrap()).1,
+			"<p>mended</p>\n"
+		);
+	}
+
+	#[test]
+	fn a_page_that_still_does_not_match_the_plan_after_the_plans_a_request_may_make_is_an_error() {
+		let site = Site::new("kept-changing");
+		site.write("src/x.html", "---\npath: /one.html\n---\n<p>x</p>");
+		aged();
+		let mut serve = site.serve(FIELD);
+		serve.plans_per_request = 0;
+		assert_eq!(text(serve.request("/one.html").unwrap()).1, "<p>x</p>\n");
+
+		site.write("src/x.html", "---\npath: /two.html\n---\n<p>x</p>");
+		let error = serve.request("/one.html").unwrap_err();
+		assert!(error.contains("kept changing"), "{error}");
+		assert!(error.contains("/one.html"), "{error}");
+	}
+
+	#[test]
+	fn a_url_remembered_as_not_found_is_asked_for_again_when_the_memory_has_run_out() {
+		let site = Site::new("field-memory-out");
+		site.write("src/x.html", "---\npath: /one.html\n---\n<p>x</p>");
+		aged();
+		let serve = site.serve(FIELD);
+		assert_eq!(serve.request("/later.html").unwrap(), Served::NotFound);
+		assert_eq!(serve.replans(), 1);
+
+		// A page is given that URL by what its file says (the directory does not change), but the
+		// miss is remembered: not asked for again yet.
+		site.write("src/x.html", "---\npath: /later.html\n---\n<p>y</p>");
+		assert_eq!(serve.request("/later.html").unwrap(), Served::NotFound);
+		assert_eq!(serve.replans(), 1);
+
+		// The memory has run out.
+		let url = serve.lock().field_missed.keys().next().cloned().unwrap();
+		serve.lock().field_missed.insert(
+			url,
+			Instant::now() - FIELD_MISS_MEMORY - Duration::from_secs(1),
+		);
+		assert_eq!(text(serve.request("/later.html").unwrap()).1, "<p>y</p>\n");
+		assert_eq!(serve.replans(), 2);
+	}
+
+	#[test]
+	fn a_url_a_walk_did_not_find_is_not_walked_for_again_by_the_next_miss_of_a_path_field_site() {
+		let site = Site::new("field-walked");
+		site.write("src/index.html", "<p>top</p>");
+		aged();
+		let serve = site.serve(FIELD);
+
+		// A change in the directory makes the first miss a walk; the second asks for the same URL.
+		site.write("src/other.html", "<p>other</p>");
+		aged();
+		assert_eq!(serve.request("/nothing.html").unwrap(), Served::NotFound);
+		assert_eq!(serve.request("/nothing.html").unwrap(), Served::NotFound);
+		assert_eq!(serve.replans(), 1);
+	}
+
+	#[test]
+	fn a_static_page_of_the_output_directory_plans_nothing_even_where_a_path_field_is_set() {
+		let site = Site::new("field-static");
+		site.write("src/index.html", "<p>top</p>");
+		site.write("out/static.html", "<p>static</p>");
+		aged();
+		let serve = site.serve(FIELD);
+
+		for _ in 0..3 {
+			assert!(matches!(
+				serve.request("/static.html").unwrap(),
+				Served::File { .. }
+			));
+		}
+		assert_eq!(serve.replans(), 0);
+	}
+
+	#[test]
+	fn pages_written_without_an_extension_are_found_by_a_miss_too() {
+		let site = Site::new("no-extension");
+		site.write("src/index.html", "<p>top</p>");
+		aged();
+		let serve = site.serve(r#", "pages": { "outputExtension": "" }"#);
+
+		assert_eq!(serve.request("/about").unwrap(), Served::NotFound);
+		assert_eq!(serve.replans(), 0);
+		site.write("src/about.html", "<p>about</p>");
+		assert_eq!(text(serve.request("/about").unwrap()).1, "<p>about</p>\n");
+		assert_eq!(serve.replans(), 1);
+		// A file with an extension is no page of such a site.
+		assert_eq!(serve.request("/logo.png").unwrap(), Served::NotFound);
+		assert_eq!(serve.replans(), 1);
+	}
+
+	#[test]
+	fn a_directory_changed_a_moment_ago_is_not_remembered_and_a_sibling_directory_is_no_root() {
+		let looked: DirTimes = vec![
+			("/site/src/a".to_owned(), (100, 0)),
+			("/site/src".to_owned(), (200, 0)),
+		];
+		// A time is settled when it is older than the grain before `now`: the first is far
+		// older, the second is only half a grain old.
+		let now = Duration::from_secs(200) + crate::MTIME_GRAIN / 2;
+		assert_eq!(
+			settled(looked, now),
+			vec![("/site/src/a".to_owned(), (100, 0))]
+		);
+
+		assert!(is_within("/site/src", "/site/src"));
+		assert!(is_within("/site/src/a", "/site/src"));
+		assert!(!is_within("/site/src2", "/site/src"));
+		assert!(!is_within("/site", "/site/src"));
 	}
 }
