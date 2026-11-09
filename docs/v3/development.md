@@ -32,7 +32,7 @@ node scripts/check-rust-no-external-crates.mjs
 | `kd_css`    | CSS のトークナイザ・パーサ・圧縮（cssnano 相当）・`@custom-media`の解決（圧縮しないときも）                                              | なし                           |
 | `kd_js`     | TS / TSX / JSX のパーサ、型の除去、JSX → 文字列連結へのコンパイル、静的な meta の抽出                                                    | なし                           |
 | `kd_html`   | HTML のパーサ、DOM、セレクタ、宣言的ルール、取り込み、挿入（DOM と、静的な HTML への文字列）、画像寸法の付与、整形と圧縮（融合した印字） | `kd_image`                     |
-| `kd_site`   | 出力パス・URL の写像、`outputPathField`、衝突、探索、メタデータのマージ、overrides                                                       | `kd_glob` `kd_jsonc`           |
+| `kd_site`   | 出力パス・URL の写像、URL の階層（`depth`と親）、`outputPathField`、衝突、探索、メタデータのマージ、overrides                            | `kd_glob` `kd_jsonc`           |
 | `kd_build`  | 差分ビルドの manifest（バイナリ形式、stat 先行の指紋）                                                                                   | `kd_hash` `kd_jsonc`           |
 | `kd_config` | `kamado.config.jsonc`の型・既定値・検証                                                                                                  | `kd_glob` `kd_jsonc` `kd_site` |
 | `kd_core`   | ビルドの組み立て（設定 → 探索 → メタ → 差分判定 → HTML・CSS・JS → 書き出し）と開発サーバーの核                                           | 上のすべて                     |
@@ -62,7 +62,7 @@ panic は、途中まで更新した状態を残しうる。開発サーバー�
 
 ## Node 側のパッケージ（`packages/kamado`）
 
-v3 の本体パッケージ（`packages/kamado`、npm 名`kamado`）。v2 は`v2`ブランチで保守している。中身は CLI、`build()`/`start()`、JSX の描画ワーカー、開発サーバー（hono）、esbuild の呼び出し、アドオンの読み込みで、ランタイム依存は`esbuild`と`hono`/`@hono/node-server`だけ。使い方は`packages/kamado/README.md`、設定の補完用に`schema.json`を同梱している（キーは`kd_config`のテストが双方向に照合する）。
+v3 の本体パッケージ（`packages/kamado`、npm 名`kamado`）。v2 は`v2`ブランチで保守している。中身は CLI、`build()`/`start()`/`pages()`、JSX の描画ワーカー、開発サーバー（hono）、esbuild の呼び出し、アドオンの読み込みで、ランタイム依存は`esbuild`と`hono`/`@hono/node-server`だけ。使い方は`packages/kamado/README.md`、設定の補完用に`schema.json`を同梱している（キーは`kd_config`のテストが双方向に照合する）。
 
 ```sh
 cargo build --release -p kd_napi   # アドオンを先に作る
@@ -92,6 +92,7 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 | Node を上げた（Shift_JIS のデコーダ）                                                                                                                  | `scripts/gen-cp932-table.mjs`           | `crates/kd_html/src/cp932_table.rs`                                               |
 | HTML の golden のケースを足した、または`kamado-v2`を上げた（v2 の DOM の直列化が oracle）                                                              | `scripts/generate-html-golden.mjs`      | `crates/kd_html/tests/golden/`                                                    |
 | 属性・クラスの golden のケースを足した、または`kamado-v2`を上げた（`html.rules`の属性・クラスの操作と`html.imageSizes`の v2 の DOM での結果が oracle） | `scripts/generate-html-attr-golden.mjs` | `crates/kd_html/tests/attr_golden/`                                               |
+| `path-list-to-tree.ts`か`random.test-util.ts`を変えた（`kamado pages`の`depth`と`parent`を`nav()`の木に合わせる。oracle は`pathListToTree`）           | `scripts/generate-page-map-golden.mjs`  | `crates/kd_site/tests/page_map_golden.tsv`                                        |
 
 生成したファイルをコミットする前に、`git diff`で変化が oracle の更新によるものか確かめる。生成したあとに`cargo test --locked --offline --workspace`を通す（`scripts/react-prop-names.mjs`は Rust が読まないので、`yarn test`の`scripts/pug-to-tsx-types.spec.ts`が、生成物が入れた react-dom と合っているかを確かめる）。`scripts/generate-jsx-tables.mjs`は実行時の出力（ランタイムと Rust のコンパイラ）が読む表`PROPS`などを作り、`attr-table.ts`だけに、変換器が読む別表`ELEMENT_BOOLEAN_PROPS`（`option`の`selected`と`input`の`checked`。React は`pushAttribute`ではなく、その要素のコードで書く）も作る。`scripts/generate-react-prop-names.mjs`は変換器だけが読む表を作る。`generate-jsx-tables.mjs`のあとは、Rust の表を整形するために`cargo fmt --all`を実行し、変換器が`dist`の`attr-table.js`を読むので`yarn build`で作り直す。
 

@@ -25,7 +25,7 @@ This is **v3**: the core is written in Rust (standard library only), with a thin
 | Path              | Description                                                                             |
 | ----------------- | --------------------------------------------------------------------------------------- |
 | `crates/`         | Rust workspace (`kd_*`). No external crates                                             |
-| `packages/kamado` | The Node layer: the `kamado` package (CLI, `build()` / `start()`, `kamado/jsx`)         |
+| `packages/kamado` | The Node layer: the `kamado` package (CLI, `build()`/`start()`/`pages()`, `kamado/jsx`) |
 | `docs/v3`         | RFC, migration guide, development guide                                                 |
 | `benchmarks/`     | Output comparison harness and fixture generator (`v3`), the v2 baseline (`v2-baseline`) |
 | `scripts/`        | Generators for tables and golden files, differential tests                              |

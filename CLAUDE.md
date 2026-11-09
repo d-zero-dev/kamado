@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 概要
 
-kamado — オンデマンド静的サイトジェネレータ（v3）。コアは Rust（標準ライブラリのみ）で書き、Node 側は薄い層（CLI、`build()`/`start()`、JSX の描画ワーカー、開発サーバー、esbuild の呼び出し、ネイティブアドオンの読み込み）だけを持つ。npm パッケージは`kamado`の 1 つ（Lerna は版の管理と publish のために残している）。v2（`@kamado-io/*-compiler`を含む）は`v2`ブランチで保守していて、このブランチには無い。
+kamado — オンデマンド静的サイトジェネレータ（v3）。コアは Rust（標準ライブラリのみ）で書き、Node 側は薄い層（CLI、`build()`/`start()`/`pages()`、JSX の描画ワーカー、開発サーバー、esbuild の呼び出し、ネイティブアドオンの読み込み）だけを持つ。npm パッケージは`kamado`の 1 つ（Lerna は版の管理と publish のために残している）。v2（`@kamado-io/*-compiler`を含む）は`v2`ブランチで保守していて、このブランチには無い。
 
 ## プロジェクト構成
 
