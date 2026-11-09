@@ -7834,6 +7834,7 @@ __metadata:
     esbuild-v2: "npm:esbuild@0.28.1"
     html-minifier-terser: "npm:7.2.0"
     husky: "npm:9.1.7"
+    jsonc-parser: "npm:3.3.1"
     kamado-v2: "npm:kamado@2.0.0-alpha.17"
     lerna: "npm:10.1.1"
     mdn-data: "npm:2.37.2"
