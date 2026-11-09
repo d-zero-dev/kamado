@@ -44,11 +44,13 @@ Rust のコアを持つ、オンデマンドの静的サイトジェネレータ
 kamado build [globs...] [--incremental] [--force] [--skip-unchanged]
                          [--jobs <n|auto>] [--cache-dir <dir>] [-c, --config <file>] [--verbose]
 kamado server           [--cache-dir <dir>] [-c, --config <file>] [--verbose]
+kamado pages            [--out <file>] [--incremental] [--cache-dir <dir>] [-c, --config <file>]
 kamado --help           (-h)
 ```
 
-- `--config`/`-c`を省略すると、カレントディレクトリの`kamado.config.jsonc`を使う。`--cache-dir`は差分ビルドの manifest などの置き場を変える（`build`と`server`の両方）。
+- `--config`/`-c`を省略すると、カレントディレクトリの`kamado.config.jsonc`を使う。`--cache-dir`は差分ビルドの manifest や plan cache の置き場を変える（`build`・`server`・`pages`）。
 - `build`は設定の対象を全部出力する。`globs`を渡すとその入力だけ（相対パスは打った場所からのパス。ディレクトリはその中のすべて。無いファイルと、先頭が`!`の否定はエラー。何も選ばなかったものは警告）。`--incremental`は前回から変わっていないものを飛ばす（`--force`で無視）。`--jobs`は並列度（JSX の描画のワーカーと Rust のスレッドの数）で、`auto`（既定）は使える CPU の数から決める。
+- `pages`は、ビルドせずに全ページの一覧を JSON で書き出す（標準出力か`--out`。相対パスは打った場所からのパス）。1 ページが 1 要素で、URL・入出力のパス・`fileSlug`・`filePathStem`・`extension`・階層（`depth`と、親のディレクトリの`parent`）・仮想ページかどうか・マージ後の`meta`を持つ。ディレクトリマップをスプレッドシートに写すためのもの（形は`docs/v3/RFC.md` §14.1）。入力ファイルのない仮想ページ（`pages.overrides`）は`inputPath`と`extension`が`null`で、`outputPath`は書き出されないがあるはずの場所。`globs`と、読まないフラグ（`--force`・`--jobs`・`--skip-unchanged`・`--verbose`）は、渡すとエラー。`--incremental`は plan cache を読んで更新する。端末には、読み始めと終わり（と、計画の警告があれば`warning: ...`）を標準エラーに出す。
 - `server`はリクエストごとに依存ファイルを stat し、変わっていなければ前回の結果を返す。ファイルは書き出さない。ライブリロードはない。変更したコンポーネントはワーカーを作り直して反映する。応えるのは`localhost`・IP アドレス・`devServer.host`・`devServer.allowedHosts`宛ての要求だけで、別のサイトからの要求は`403`（`docs/v3/RFC.md` §12）。`devServer.host`が`localhost`（既定）なら`127.0.0.1`と`::1`の両方で待ち受ける。
 
 ## プログラムから
@@ -56,20 +58,24 @@ kamado --help           (-h)
 ```ts
 import path from 'node:path';
 
-import { build, start } from 'kamado';
+import { build, pages, start } from 'kamado';
 
-// Both take the absolute path of the config file, not an object.
+// All take the absolute path of the config file, not an object.
 const config = path.resolve('kamado.config.jsonc');
 
 const report = await build(config, { incremental: true });
 console.log(report.pages.length);
+
+// The pages of the plan, without building: URL, paths, depth, parent and meta of each.
+const map = await pages(config, { incremental: true });
+console.log(map.pages.filter((page) => page.depth <= 2).map((page) => page.url));
 
 const server = await start(config);
 console.log(server.location);
 await server.close();
 ```
 
-`build()`と`start()`の第 1 引数は、設定ファイルの**絶対パス**（相対パスの基準になるディレクトリが設定ファイルの場所のため）。`build()`のオプションは CLI のフラグと同じ（`incremental`/`force`/`skipUnchanged`/`targets`/`jobs`/`cacheDir`）。`targets`の相対パスは、設定ファイルのディレクトリからのパス（glob とパスの扱いは CLI と同じ。無いファイルは例外、何も選ばなかったものは`report.warnings`）。`report`は各ページの URL・入出力のパス・状態（`built`/`cached`/…）・メタデータを持つ。
+`build()`・`start()`・`pages()`の第 1 引数は、設定ファイルの**絶対パス**（相対パスの基準になるディレクトリが設定ファイルの場所のため）。`pages()`のオプションは`incremental`と`cacheDir`で、`PageMap`（`docs/v3/RFC.md` §14.1）を返す。ファイルには書かない（書くなら`JSON.stringify`して自分で書く）。`build()`のオプションは CLI のフラグと同じ（`incremental`/`force`/`skipUnchanged`/`targets`/`jobs`/`cacheDir`）。`targets`の相対パスは、設定ファイルのディレクトリからのパス（glob とパスの扱いは CLI と同じ。無いファイルは例外、何も選ばなかったものは`report.warnings`）。`report`は各ページの URL・入出力のパス・状態（`built`/`cached`/…）・メタデータを持つ。
 
 ## 対応プラットフォーム
 

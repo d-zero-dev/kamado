@@ -20,6 +20,12 @@ export interface Native {
 	/** Runs a build; `optionsJson` is a `BuildOptions` object, the result is a report. */
 	build(configPath: string, optionsJson: string): string;
 	/**
+	 * Plans the pages without rendering them; the result is the JSON list of
+	 * the pages (see `PageMap` in `pages.ts`). `optionsJson` takes
+	 * `incremental` and `cacheDir`.
+	 */
+	pages(configPath: string, optionsJson: string): string;
+	/**
 	 * Plans a build and compiles the JSX modules. The result is JSON:
 	 * `{ handle, jobs, context, scripts }` (see `Prepared` in `build.ts`).
 	 */
