@@ -19,6 +19,7 @@ mod data;
 mod html;
 mod jsx;
 mod minifiers;
+mod page_map;
 pub mod parallel;
 mod plan_cache;
 pub mod serve;
@@ -28,6 +29,7 @@ pub mod sourcemap;
 pub mod style;
 pub mod style_import;
 
+pub use page_map::pages;
 pub use session::{Prepared, RenderJob, ScriptOutput, build, prepare, write_report};
 
 use kd_config::Config;
@@ -1848,6 +1850,58 @@ mod tests {
 			home.get("meta").unwrap().to_json(),
 			r#"{"title":"Home","layout":"main"}"#
 		);
+	}
+
+	#[test]
+	fn the_list_of_pages_is_what_the_pages_of_the_jsx_context_hold() {
+		// The list says it is what a JSX page sees: the same pages, in the same order
+		// (`pages.overrides` first, in its order), with the same merged `meta`.
+		let (site, _) = jsx_site("page_list");
+		site.write(
+			"pages.json",
+			r#"{ "version": 1, "pages": [
+				{ "url": "/about.html", "meta": { "title": "About (sheet)" } },
+				{ "url": "/ext/", "virtual": true, "meta": { "title": "External" } }
+			] }"#,
+		);
+		let loaded = site.config_raw(
+			r#"{ "dir": { "input": "src", "output": "out" }, "pages": { "ignore": ["_lib/**"], "layouts": { "dir": "layouts" }, "overrides": "pages.json" }, "data": { "dir": "data", "values": { "v": 2 } }, "build": { "cacheDir": ".cache", "incremental": true } }"#,
+		);
+		let prepared = prepare_incremental(&loaded);
+		let context = kd_jsonc::parse(prepared.context_json().unwrap()).unwrap();
+		let seen = context.get("pages").and_then(Value::as_array).unwrap();
+
+		let json = crate::pages(
+			&loaded,
+			&BuildOptions {
+				incremental: true,
+				..Default::default()
+			},
+		)
+		.unwrap();
+		let map = kd_jsonc::parse(&json).unwrap();
+		let listed = map.get("pages").and_then(Value::as_array).unwrap();
+
+		let urls = |pages: &[Value]| -> Vec<String> {
+			pages
+				.iter()
+				.map(|p| p.get("url").and_then(Value::as_str).unwrap().to_owned())
+				.collect()
+		};
+		assert_eq!(urls(listed), urls(seen));
+		assert_eq!(urls(listed), ["/about.html", "/ext/", "/", "/plain.html"]);
+		for (entry, page) in listed.iter().zip(seen) {
+			let url = page.get("url").and_then(Value::as_str).unwrap();
+			let is_virtual = entry.get("virtual").and_then(Value::as_bool).unwrap();
+			assert_eq!(is_virtual, url == "/ext/", "{url}");
+			let mut keys = vec!["url", "outputPath", "fileSlug", "filePathStem", "meta"];
+			if !is_virtual {
+				keys.extend(["inputPath", "extension"]);
+			}
+			for key in keys {
+				assert_eq!(entry.get(key), page.get(key), "{key} of {url}");
+			}
+		}
 	}
 
 	#[test]
