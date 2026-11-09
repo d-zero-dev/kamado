@@ -595,6 +595,37 @@ pub(crate) struct Planned {
 	pub incremental: bool,
 }
 
+/// What a plan is made with, decided from the config and the options.
+pub(crate) struct PlanSettings {
+	/// The thread count: `options.jobs`, else `build.jobs`.
+	pub jobs: usize,
+	pub cache_dir: String,
+	/// `options.incremental` or `build.incremental`.
+	pub incremental: bool,
+}
+
+/// Decides the settings of a plan; every way of planning (a build, the list of pages, the
+/// editor of pages) decides them the same way.
+pub(crate) fn plan_settings(loaded: &Loaded, options: &BuildOptions) -> PlanSettings {
+	let config = &loaded.config;
+	PlanSettings {
+		jobs: options.jobs.unwrap_or(match config.build.jobs {
+			kd_config::Jobs::Auto => std::thread::available_parallelism()
+				.map(|n| n.get())
+				.unwrap_or(1),
+			kd_config::Jobs::Count(n) => n,
+		}),
+		cache_dir: kd_build::cache_dir(
+			&config.root_dir,
+			options
+				.cache_dir
+				.as_deref()
+				.or(config.build.cache_dir.as_deref()),
+		),
+		incremental: options.incremental || config.build.incremental,
+	}
+}
+
 /// Plans the pages: finds them (or takes `found`, the paths a walk of the input directory
 /// already found), reads what their files say, and applies `pages.overrides`. An
 /// incremental plan reads the plan cache (a forced one reads everything) and saves what it
@@ -611,20 +642,11 @@ pub(crate) fn plan_pages(
 	found: Option<Vec<String>>,
 ) -> Result<Planned, String> {
 	let config = &loaded.config;
-	let jobs = options.jobs.unwrap_or(match config.build.jobs {
-		kd_config::Jobs::Auto => std::thread::available_parallelism()
-			.map(|n| n.get())
-			.unwrap_or(1),
-		kd_config::Jobs::Count(n) => n,
-	});
-	let cache_dir = kd_build::cache_dir(
-		&config.root_dir,
-		options
-			.cache_dir
-			.as_deref()
-			.or(config.build.cache_dir.as_deref()),
-	);
-	let incremental = options.incremental || config.build.incremental;
+	let PlanSettings {
+		jobs,
+		cache_dir,
+		incremental,
+	} = plan_settings(loaded, options);
 	// What the last build learned about the page files: a page whose files
 	// are as it recorded is not read again. A forced build reads everything.
 	let cached_plan = if incremental && !options.force {
