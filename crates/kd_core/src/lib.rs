@@ -28,9 +28,11 @@ mod sitemap;
 pub mod sourcemap;
 pub mod style;
 pub mod style_import;
+mod ui;
 
 pub use page_map::pages;
 pub use session::{Prepared, RenderJob, ScriptOutput, build, prepare, write_report};
+pub use ui::Ui;
 
 use kd_config::Config;
 use kd_jsonc::Value;
@@ -178,6 +180,17 @@ fn read_page(
 	let (bytes, dep) = kd_build::read_with_fingerprint(input_path)
 		.map_err(|e| format!("cannot read {input_path}: {e}"))?;
 	let text = utf8(input_path, bytes)?;
+	let (meta, body) = parse_page_text(input_path, kind, text)?;
+	Ok((meta, body, dep))
+}
+
+/// The in-file metadata and the text a page keeps for its build, read from the text of the
+/// page (what `read_page` does after reading the file).
+pub(crate) fn parse_page_text(
+	input_path: &str,
+	kind: PageKind,
+	text: String,
+) -> Result<(Meta, Option<String>), String> {
 	match kind {
 		PageKind::Html => {
 			let (meta, body) =
@@ -186,7 +199,7 @@ fn read_page(
 				Some(v) => kd_site::meta::as_meta(&v, input_path)?,
 				None => Vec::new(),
 			};
-			Ok((meta, Some(body.to_string()), dep))
+			Ok((meta, Some(body.to_string())))
 		}
 		PageKind::Tsx => {
 			let is_ts = !input_path.ends_with(".jsx");
@@ -205,7 +218,7 @@ fn read_page(
 			// The source is kept for the compiler, which would read the file a
 			// second time (an open is the slowest thing a page costs on some
 			// file systems); `prepare` hands it over and drops it.
-			Ok((meta, Some(text), dep))
+			Ok((meta, Some(text)))
 		}
 	}
 }

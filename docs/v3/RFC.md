@@ -36,7 +36,7 @@
 | 20  | `.yaml`のデータは無視                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `.yaml`も読む                                                                                                                                                                                                                                                                                               | —                                                                                                                                                                                                                         |
 | 21  | 本文中の`<?php ... ?>`が linkedom により**削除**される                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | 処理命令のトークンとして**保持**する                                                                                                                                                                                                                                                                        | v2 のデータ損失を再現しない                                                                                                                                                                                               |
 | 22  | `@kamado-io/*`の 6 パッケージ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `kamado` 1 つ（ネイティブのコアは全プラットフォーム分を同梱する。§18）                                                                                                                                                                                                                                      | import の指定を変える                                                                                                                                                                                                     |
-| 23  | `kamado/compiler` `kamado/data` `kamado/files` `kamado/path` `kamado/utils/dom`等の内部 export                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 廃止。プログラム API は`build()` / `start()` / `pages()`のみ                                                                                                                                                                                                                                                | —                                                                                                                                                                                                                         |
+| 23  | `kamado/compiler` `kamado/data` `kamado/files` `kamado/path` `kamado/utils/dom`等の内部 export                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 廃止。プログラム API は`build()` / `start()` / `pages()` / `ui()`のみ                                                                                                                                                                                                                                       | —                                                                                                                                                                                                                         |
 | 24  | Windows ネイティブ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | 非対応（WSL2 は対応）                                                                                                                                                                                                                                                                                       | —                                                                                                                                                                                                                         |
 | 25  | リクエストごとの再コンパイル（開発サーバー）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 依存の stat による再利用                                                                                                                                                                                                                                                                                    | 挙動は同じ（結果は新しい）                                                                                                                                                                                                |
 | 26  | `enum` / `namespace`等を含む TS                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `.tsx`ページでは非対応（erasable な構文のみ）                                                                                                                                                                                                                                                               | `const`オブジェクトに置き換える                                                                                                                                                                                           |
@@ -191,7 +191,7 @@ YAML のサブセット: ブロック/フローのマップとシーケンス、
 
 ## 6. `pages.overrides`
 
-`pages.overrides`は JSON ファイルへのパス。prebuild が外部のデータ（スプレッドシート等）から書き出す。
+`pages.overrides`は JSON ファイルへのパス。仮想ページ・並び順・メタの上書きを書く、サイト構成のソース。手で書いても、prebuild が外部のデータ（スプレッドシート等）から作っても、`kamado ui`（§14.2）が書いてもよい。prebuild が作り直す運用では、元のデータが正で、ほかが書いた分は次の prebuild で消える。
 
 ```jsonc
 {
@@ -426,7 +426,7 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 
 ## 13. CLI
 
-`kamado build [globs...]`、`kamado server`、`kamado pages`。共通: `--config/-c`、`--cache-dir <dir>`、`--help/-h`。`--verbose`は`build`と`server`。build: `--incremental`、`--force`、`--skip-unchanged`、`--jobs <n|auto>`（`auto`は設定の`build.jobs`と同じく既定の数）。pages: `--out <file>`、`--incremental`（`--force`、`--jobs`、`--skip-unchanged`、`--verbose`は読まず、渡すとエラー）。設定エラーは赤字で表示して exit 1。進捗表示（スピナー、done/total、`Build completed in Xs`）と色分けは v2 に準じる。
+`kamado build [globs...]`、`kamado server`、`kamado pages`、`kamado ui`。共通: `--config/-c`、`--cache-dir <dir>`、`--help/-h`。`--verbose`は`build`と`server`。build: `--incremental`、`--force`、`--skip-unchanged`、`--jobs <n|auto>`（`auto`は設定の`build.jobs`と同じく既定の数）。pages: `--out <file>`、`--incremental`（`--force`、`--jobs`、`--skip-unchanged`、`--verbose`は読まず、渡すとエラー）。ui: `--port <n>`（既定は`devServer.port + 1`）、`--open`/`--no-open`（既定は`devServer.open`）。`--out`、`--force`、`--jobs`、`--skip-unchanged`、`--incremental`、`--verbose`、位置引数は、`ui`に渡すとエラー。`--port`と`--open`は`ui`だけのフラグで、ほかのコマンドに渡すとエラー。設定エラーは赤字で表示して exit 1。進捗表示（スピナー、done/total、`Build completed in Xs`）と色分けは v2 に準じる。
 
 `globs`（複数可）は、ビルドするページ・スタイル・スクリプトを、入力ファイルで絞る。相対パスは **cwd 基準**（打った場所からのパス。v2 と同じ）、絶対パスは基準を付けずに使う。`*` `?` `[` `]` `{` `}`を含むものは glob。含まないものはファイルのパスで、そのファイルが無ければエラー（exit 1）。ディレクトリのパスは、その中のすべてのファイル（`dir/**`）。ページ・スタイル・スクリプトを 1 つも選ばなかったもの（当たらない glob、ページでない画像のパスなど）は警告して、ビルドを続ける。先頭が`!`の否定はエラー。基準のディレクトリの名前にある、glob が読む文字（`(`や`|`を含む）はエスケープして照らす。コアは入力ファイルを、設定ファイルのディレクトリ・`dir.input`・たどったパスで名付け、途中のシンボリックリンクを解かない。`globs`も同じく書かれた形のまま照らす。cwd はシンボリックリンクを解いた実体のパスなので、CLI は設定ファイルのパスも実体にそろえる。glob の中の`\`はエスケープなので、Windows でも glob は`/`で区切って書く。
 
@@ -434,7 +434,9 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 
 コマンド名は`kamado`（`packages/kamado/package.json`の`bin`）。
 
-プログラム API: `build(configPath, options?)`、`start(configPath, options?)`、`pages(configPath, options?)`。第 1 引数は**設定ファイル（JSONC）の絶対パス**の文字列で、オブジェクトは受け取らない（相対パスの基準になるディレクトリが設定ファイルの場所だから）。`options`は CLI のフラグに対応する（`build`は`incremental`/`force`/`skipUnchanged`/`targets`/`jobs`/`cacheDir`/`onProgress`、`start`は`verbose`/`cacheDir`/`write`、`pages`は`incremental`/`cacheDir`）。`pages()`は §14.1 の一覧を`PageMap`として返し、ファイルには書かない（`--out`は CLI のもの。書くなら`JSON.stringify`して自分で書く）。Promise を返すが、計画は同期呼び出しなので、その間はイベントループを止める（`build()`の Promise と同じ形にしてあるだけで、ループが空くことの約束ではない）。`targets`の相対パスは**設定ファイルのディレクトリ基準**（設定と一緒に渡すものなので、設定の中のパスと同じ。CLI の`globs`だけが cwd 基準）。glob とファイルのパスの扱いは CLI と同じ（当たらない glob は`build.report`の`warnings`、無いファイルは例外）。
+`kamado ui`は、§14.2 の書き戻しを使って、ページの URL とメタをブラウザで編集する（開発サーバーとは別のポートで動く）。
+
+プログラム API: `build(configPath, options?)`、`start(configPath, options?)`、`pages(configPath, options?)`、`ui(configPath, options?)`。第 1 引数は**設定ファイル（JSONC）の絶対パス**の文字列で、オブジェクトは受け取らない（相対パスの基準になるディレクトリが設定ファイルの場所だから）。`options`は CLI のフラグに対応する（`build`は`incremental`/`force`/`skipUnchanged`/`targets`/`jobs`/`cacheDir`/`onProgress`、`start`は`verbose`/`cacheDir`/`write`、`pages`は`incremental`/`cacheDir`、`ui`は`port`/`open`/`cacheDir`）。`ui()`は起動した UI の`{ url, close() }`を返す。`pages()`は §14.1 の一覧を`PageMap`として返し、ファイルには書かない（`--out`は CLI のもの。書くなら`JSON.stringify`して自分で書く）。Promise を返すが、計画は同期呼び出しなので、その間はイベントループを止める（`build()`の Promise と同じ形にしてあるだけで、ループが空くことの約束ではない）。`targets`の相対パスは**設定ファイルのディレクトリ基準**（設定と一緒に渡すものなので、設定の中のパスと同じ。CLI の`globs`だけが cwd 基準）。glob とファイルのパスの扱いは CLI と同じ（当たらない glob は`build.report`の`warnings`、無いファイルは例外）。
 
 ## 14. ビルドの出力: `build.report`とページの一覧
 
@@ -489,6 +491,104 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 - 並びは計画の順で、`pages`と`nav()`と同じ（`pages.overrides`に書いたページが書いた順で先、残りは辞書順。§6）。`targets`は受けず、sitemap（§15）と同じく計画の全ページを書く
 - `warnings`は計画の警告（`outputPathConflict`、書き込めなかった plan cache）
 - 出力は`build.report`と同じ compact な JSON（読むのはプログラムなので、整形しない）。`kamado pages`は末尾に改行を 1 つ付ける
+
+### 14.2 ページの編集: `kamado ui`
+
+`kamado ui`と`ui()`（§13）は、§14.1 の一覧をブラウザの表で編集し、ソースへ書き戻す。編集するのは URL とメタ（§4）で、ページの本文やコンポーネントは編集しない。ビルドも描画もしない。この節は、ソースへの書き戻しとコアの API の仕様。
+
+**書く場所（出所）**
+
+- メタのキーは、§4 でその値を決めたソース（出所）に書く: `pages.overrides`（`overrides`）、sidecar `.json`（`sidecar`）、ページファイル内（`inFile`。`.html`は front matter、`.tsx`/`.jsx`は`export const meta`）。新しいキーは`inFile`に書く。仮想ページはファイルが無いので`overrides`にだけ書く（仮想ページは、`pages.overrides`の項目があるから在る）。実在のページに`pages.overrides`の項目を足すことはしない（新しいキーはそのページのファイルに書くので、その必要が無い）。キーを消すと、出所のソースから消え、下のソースに同じキーがあればその値が現れる（キーが空になるのではない）
+- 一覧のメタの値は、`{ "value": …, "origin": "inFile" | "sidecar" | "overrides", "editable": true | false, "reason": "…" }`の形で、出所と、編集できるか（できないときは理由）を返す
+- `outputPathField`のキー（§5）は、一覧の`meta`には`editable: false`と理由つきで残し、`columns`には入れない。メタのキーとして書こう（set・delete）とすると`notEditable`で拒否し、URL の変更として扱う（URL の検査を通さずに出力先を変えさせないため）。URL がこのキーで決まるかどうかは、計画（§5）と同じく、ページファイルと sidecar だけを見て決める（`pages.overrides`にだけあるキーは、URL を決めない）
+- `pages.overrides`は、手で書いても、prebuild が作っても、`kamado ui`が書いてもよい。prebuild が作り直す運用では、元のデータが正で、`kamado ui`が書いた分は次の prebuild で消える
+
+**編集できないもの**（一覧では`editable: false`と`reason`。書こうとすると`notEditable`）
+
+- YAML の front matter のキーのすべて: アンカー・エイリアス・`<<`を含むとき（パーサはこれらを読み込み時に展開して出どころを捨てるので、1 つを書き換えると、同じアンカーを参照するほかのキーの意味が変わる）、マッピングでないとき、ブロックのマッピングでないとき（`{a: 1}`のような flow、1 列目から始まらないもの）。キー`<<`を新しく書くこと（パーサは引用符つきでもマージキーとして読む）
+- `export const meta`のキーのすべて: オブジェクトリテラルでないとき（`null`、配列）
+- `export const meta`が同じキーを 2 回書いているときの、そのキー。後ろの値が使われるので、どれを書き換えるかが決まらない
+- `export const meta`にキー`__proto__`を新しく書くこと。オブジェクトリテラルの`__proto__: v`は、引用符つきでも、プロパティではなくプロトタイプを設定する。キーとして読み戻せても、モジュールを動かすとキーにならない
+- `outputPathField`のキー（上）
+
+**書き戻し**: 触らない部分のバイト（コメント・引用符・空白・改行コード・BOM・キーの順）は変えない。編集したキーの値だけを置き換え、追加・削除したエントリの行だけを足し引きする。ファイルは UTF-8 のまま、その場で書く（`fs::write`。シンボリックリンクの先とパーミッションを保つ）。同じ値を set したときは、ファイルのバイトを変えず、書き込みもしない。
+
+- **書く前の確認**: 書く結果を、計画が読むのと同じ読み方で読み直し、意図した値になることを確かめる。意図した値とは、そのキーだけが変わり、ほかのキーとほかのエントリは変わらないこと（HTML のページは本文も変わらないこと）。`pages.overrides`は、全体を読み直さずに、編集したエントリを読み直し、エントリの前と後ろのバイトが元のままであることを確かめる。10 万ページの`pages.overrides`で、全体を読み直す時間が編集の時間の大半になるため。確かめて合わなければ、何も書かずに`invalid`で拒否する。書き戻しの誤りが、ファイルを壊したまま残らないため
+- **全部か、1 つも書かないか**: URL の移動のように複数のファイルに及ぶ変更が途中で失敗したら、すべて取り消して`io`で答える。移したファイルは元の名前に戻し、書いたファイルは元の内容に戻す（元が無かったファイルは消す）。移動で空になった元のディレクトリと、移し先のために作ったディレクトリは、そのまま残る
+- **YAML の front matter**: 対象は一番上の階層のキーだけ。値は丸ごと置き換える。配列とオブジェクトは JSON と同じ書き方の 1 行の flow（`{"a":1}`）で書く。編集したキー自身の元の書き方は保たない。文字列は、plain で書いて同じ文字列に読み戻せるときは plain で書く。そうでなければ double-quoted で書く。double-quoted にするのは次のとおり: 空の文字列。plain で読むと別の型（数値・真偽値・`null`）になるもの。先頭が`- ? : , [ ] { } # & * ! | > ' " % @`かバッククォートのもの。`: `か` #`を含むもの。`:`で終わるもの。前後に空白のあるもの。制御文字（改行とタブを含む）を含むもの。数値は JSON の書き方で、`NaN`と無限大は`null`。新しいキーは、英字か`_`で始まり、英数字・`_`・`-`・`.`だけでできていて、plain で読むと文字列になる名前ならそのまま書く。そうでなければ double-quoted で書く。追加は一番上の階層の末尾に、削除はそのキーの行（複数行の値を含む）だけにする。エントリの範囲は、その値の最後の行まで。あとに続く空行と 1 列目のコメント行は、次のエントリのものとして残す（ブロックスカラーの中のインデントした`#`の行は値）。編集したエントリ自身の行の末尾のコメントは消える。最後のキーを消して残りが空白だけになったら、front matter の fence ごと消す（閉じ fence のあとの改行 1 つも。コメントが残るなら fence を残す）。front matter の無いファイルへの追加は、BOM のすぐ後ろに`---`で囲んだ front matter を作る。改行コードは、既存の front matter の最初の改行に合わせる（front matter の無いファイルは、ファイルの最初の改行に合わせる。無ければ`\n`）
+- **JSON（sidecar と`pages.overrides`）**: メンバーの値だけを置き換える。値は compact な JSON で書く。追加は最後のメンバーの後ろに、インデント（タブか空白）と末尾のカンマの有無を、そのオブジェクトの既存のメンバーに合わせて書く。空のオブジェクトへの追加は、1 行なら`{ "k": v }`、複数行ならその行のインデントに 1 段足して書く。追加する行の改行コードは、そのファイルの最初の改行に、1 段のインデントは、最初のインデントした行に合わせる（無ければタブ）。削除は`"key": value`と、その後ろのカンマ（最後のメンバーなら前のメンバーのカンマ）と、同じ行の末尾の`//`コメントを消す。前のメンバーとのあいだのコメントは残す。sidecar が`{}`になっても、ファイルは消さない
+- **`export const meta`**: オブジェクトリテラルのメンバーの値だけを書き換える。値の外側の括弧と符号は値の一部で、置き換えると消える。`meta`全体を囲む括弧と、`as const`/`satisfies`は残る。文字列を置き換えるときは、元の値の引用符を保つ。新しい文字列の引用符は、そのオブジェクトの文字列（キーと、入れ子の中も）が多く使うほう（同数か、文字列が無ければ`"`）。新しいキーは、ASCII の識別子として書ける名前ならそのまま、そうでなければ引用符つきで書く。配列は`[a, b]`、オブジェクトは`{ k: v }`（どちらも 1 行。オブジェクトのキーも同じ規則）、数値は、整数はそのまま、`1e15`以上と、`1e-6`より小さい 0 でない数は指数形式、有限でない数は`null`で書く。追加する行の改行コードとインデントは、JSON と同じく、そのファイルのものに合わせる。テンプレートリテラルの値は、置き換えると引用符つきの文字列になる。`export const meta`が無いモジュールは、最後の`import`文（import 属性と`;`を含む）の直後、無ければ先頭の directive（`'use strict'`）の直後、無ければ最初のトークンの前（先頭のコメントの下。pragma を最初に保つため）に、`export const meta = { … };`を足す。その行に別の文やブロックコメントが続くときは、文の直後に入れる。足す行の改行コードは、そのファイルの最初の改行に合わせる。型の注釈（`meta: Meta`）が付いているとき、足したキーが型検査を通るかは、`kamado`が見ない
+
+**衝突の検出**: 一覧は、ページごとに`input`と`sidecar`、全体で`overrides`の、ファイルの内容の SHA-256（16 進）を返す。編集の要求は、その編集が触るファイルの SHA-256 を、`expect`に添える（キーの編集は、そのキーの出所のファイル。URL の移動は、移すファイルと、あれば sidecar、キーを書き換えるファイル、`pages.overrides`に項目があれば`overrides`）。必要な項目が無い要求は`invalid`で拒否する。コアは書く直前に、そのファイルをディスクから読み直して照合し、1 つでも違えば`conflict`で拒否して、何も書かない。`null`は、そのファイルが無いことを表す。plan cache の指紋（§11）は使わない（同じサイズの書き換えは指紋に現れないため）。書いたあとは、そのページを読み直して一覧と plan cache を更新し、新しい SHA-256 を返す。`pages.overrides`は全ページで 1 つのファイルなので、1 つのページの編集で、`overrides`の SHA-256 は変わる。`conflict`の答えの`current`は、計画を読み直して作るので、今のファイルの SHA-256 を持ち、そのまま次の要求の`expect`に使える
+
+**URL の変更**: 出所に合わせる。
+
+- URL が`outputPathField`の値で決まっているページは、その値を書き換える（出所に書く）
+- ファイルの位置で決まっているページは、入力ファイルと、あれば sidecar を移す。移し先は、新しい URL から`pages.outputExtension`で逆算した入力パスに、ページ自身の拡張子を付けたもの。`/a/`を`/b/`にすると、`a/index.*`と sidecar だけが移り、`/a/`の下のページの URL と`parent`は変わらない。`.tsx`/`.jsx`のページは、自分の相対パスの`import`・`export ... from`・`import()`（型だけのもの、`import type`も）を、移し先から、移す前と同じファイルを指すように書き換える（引用符とクエリ・フラグメントはそのまま。パッケージ名などの相対でないものは触らない）。書き換えたページのメタが変わらないことを、書く前に確かめる
+- 仮想ページは、`pages.overrides`の`url`を書き換える。`pages.overrides`にそのページの項目があれば、どの場合も`url`を新しいものにする（項目のキーが`url`だから）
+- 次のときは、何も書かずに拒否する（`invalid`か`collision`）:
+  - 新しい URL が §6 の書き方でない（`?`・`#`・`//`・`.`/`..`のセグメント、`/a/index.html`のような別の URL として読める書き方。読んだ場合の URL をメッセージに添える）
+  - 新しい URL が、すでにあるページの URL と重なる（仮想ページと実在のページのあいだは、どちらの向きでも）
+  - 出力先が、ほかのページ（仮想を含む）と重なる（`outputPathConflict`の設定に関わらない）
+  - ファイルの位置からは作れない URL（最後のセグメントの拡張子が`pages.outputExtension`でもなく、ディレクトリでもない）。`outputPathField`が設定されていれば、メッセージで、そのキーが任意の URL を決められることを案内する
+  - 移し先に別のファイルがある。入力ファイルでも sidecar でもよい。ページに sidecar が無くても、移し先に同じ名前の`.json`があれば拒否する。移したページがそれを自分の sidecar として読んでしまうため
+  - 移し先が`pages.files`に当たらない、または`pages.ignore`に当たる（計画から消えるため）
+  - 移し先が`dir.input`の外（入力ディレクトリの中のシンボリックリンクが指す先を含む）か、出力ディレクトリの中
+  - 新しい出力パスが、いずれかの入力ファイルと同じ
+- 大文字小文字を区別しないファイルシステムでは、名前の大文字小文字だけを変える移動は拒否しない。移し先の名前が、移すファイル自身を指すため
+- `html.*`の`pages`の glob、`sitemap.exclude`、ほかのページの本文のリンク、移したページを`import`しているほかのモジュールは、更新しない
+
+**コアの API**（ネイティブ。`packages/kamado`の`ui()`が使う）
+
+```
+uiOpen(configPath, optionsJson)    → handle         optionsJson: { cacheDir?, incremental? }
+uiPages(handle, queryJson)         → JSON           queryJson:   { offset, limit, q? }
+uiRefresh(handle)                  → { version }
+uiEdit(handle, editJson)           → JSON
+uiClose(handle)                    → { warning }
+```
+
+- `uiOpen`は設定を読んで計画し、`Plan`・`pages.overrides`の内容・各ファイルの SHA-256 をハンドルがメモリに持つ。`incremental`（または`build.incremental`）のときは、前回の plan cache（§11）を読んで計画する。plan cache はハンドルがメモリに持ち続け、`uiClose`で、変わっていれば書く（編集のたびには書かない: 編集は何度も行われ、大きなサイトの cache は数十 MB になる。書かなかった分は、編集したファイルの更新時刻が変わっているので、次に読む側がそのファイルを読み直す）。`uiClose`の`warning`は、cache を書けなかったときの理由で、そうでなければ`null`
+- `uiPages`は計画し直さない。窓の各行は、編集できるキーを判断するために、そのページのファイルを（変わるまで 1 回）読む。`q`を渡すと、全ページの URL とメタの文字列値を見て回る。`uiRefresh`は、メモリの plan cache（§11）で計画し直す（ファイルは stat だけ。読めなかったときは、ハンドルは変わらない）
+- `uiPages`の`queryJson`は、`offset`と`limit`（どちらも 0 以上の整数。`limit`に上限は無い）で切り出す。`q`があれば、URL かメタの文字列値（一番上の階層）に`q`を含む（大文字小文字は区別しない）ページだけに絞る。返す JSON は次の形。`total`は絞り込み後の件数。`columns`は、メタのキーの和集合（全ページ。`outputPathField`のキーを除く。キー名のバイト順で、大文字が小文字より前）。`version`は、`uiOpen`で 1 になる。計画を読み直すたびに増える（`uiRefresh`、URL の移動、`conflict`を答えるための読み直し）。キーの編集 1 回ごとにも 1 増える。編集 1 回は、どう計画を読み直しても 1 である。拒否された編集は、`conflict`の読み直しのほかには、増やさない
+
+```jsonc
+{
+	"version": 3,
+	"total": 1234,
+	"columns": ["layout", "title"],
+	"overridesHash": "…", // pages.overrides が無ければ null
+	"pages": [
+		{
+			"url": "/about/",
+			"inputPath": "…", // 仮想ページは null
+			"outputPath": "…",
+			"virtual": false,
+			"depth": 1,
+			"parent": "/",
+			"hashes": { "input": "…", "sidecar": null }, // 無いファイルは null
+			"meta": {
+				"title": { "value": "…", "origin": "inFile", "editable": true },
+			},
+		},
+	],
+	"warnings": [],
+}
+```
+
+- `uiEdit`の`editJson`は次の形。ページは`url`で指す。要求にファイルのパスは載せない（書く先は、コアが`dir.input`の中と、設定の`pages.overrides`のファイルから決める）。`delete`は、そのページに無いキーなら`invalid`
+
+```jsonc
+{
+	"url": "/about/",
+	"expect": { "input": "…", "sidecar": null, "overrides": "…" }, // 触るファイルだけ
+	"change": { "op": "set", "key": "title", "value": "…" },
+	// または { "op": "delete", "key": "title" }、{ "op": "moveUrl", "url": "/company/" }
+}
+```
+
+- 結果は`{ "ok": true, "version": …, "overridesHash": …, "page": <pages の 1 要素> }`か、`{ "ok": false, "code": …, "message": "…", "current": <pages の 1 要素> }`。`code`は次のいずれか。`conflict`はファイルが読んだあとに変わったとき。`invalid`は値や URL が受け付けられないとき（§6 の書き方でない、キーが無い、`expect`が足りない、書いた結果が意図どおりに読めない）。`collision`は URL・出力先・移し先がほかと重なるとき。`notEditable`は編集できないもの。`notFound`はその URL のページが無いとき（`current`は付かない）。`io`はファイルの読み書きに失敗したとき（書いたものは取り消してある）。編集の失敗は例外にせず、結果で返す。例外は次のときだけ。設定を読めないとき。計画できないとき。ハンドルが閉じているとき。要求が要求の形でないとき（`url`・`change`が無い、`change.op`が不明、`offset`・`limit`が整数でない、など）
+- 計画できないページが 1 つでもあれば（§4 のリテラルでない`export const meta`、不正な front matter）、`uiOpen`はビルドと同じエラーで失敗する
 
 ## 15. sitemap
 

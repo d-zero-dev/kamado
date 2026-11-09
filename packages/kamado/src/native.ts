@@ -60,6 +60,25 @@ export interface Native {
 	serveCancel(handle: string, token: string): string;
 	/** Forgets a dev server. */
 	serveClose(handle: string): void;
+	/**
+	 * Plans the site and keeps the editor of its pages (RFC §14.2); the result is its
+	 * handle. `optionsJson` takes `incremental` and `cacheDir`.
+	 */
+	uiOpen(configPath: string, optionsJson: string): string;
+	/**
+	 * A page of rows: `queryJson` is `{ offset, limit, q? }`; the result is JSON (`version`,
+	 * `total`, `columns`, `overridesHash`, `pages`, `warnings`).
+	 */
+	uiPages(handle: string, queryJson: string): string;
+	/** Plans the site again; the result is `{ version }`. */
+	uiRefresh(handle: string): string;
+	/**
+	 * Makes one edit (`{ url, expect, change }`); the result is JSON, `{ ok: true, ... }` or
+	 * `{ ok: false, code, message, current? }`. A request that is not one throws.
+	 */
+	uiEdit(handle: string, editJson: string): string;
+	/** Forgets an editor; the result is `{ warning }`. */
+	uiClose(handle: string): string;
 }
 
 const LIBRARY_NAME = process.platform === 'darwin' ? 'libkd_napi.dylib' : 'libkd_napi.so';

@@ -55,7 +55,7 @@ pub fn extract_meta(src: &str, jsx: bool, ts: bool) -> Result<Option<Const>, Syn
 	let mut lex = Lexer::new(src);
 	lex.pos = start;
 	let tok = lex.next()?;
-	let mut eval = Eval { lex, tok, end };
+	let mut eval = Eval::new(lex, tok, end);
 	let value = eval.value()?;
 	// `as const` / `satisfies T` may follow: types are not evaluated.
 	if !eval.at_end()
@@ -66,7 +66,211 @@ pub fn extract_meta(src: &str, jsx: bool, ts: bool) -> Result<Option<Const>, Syn
 	Ok(Some(value))
 }
 
+/// One property of the `meta` object literal, as byte offsets into the
+/// source (see [`locate_meta`]).
+///
+/// # Example
+///
+/// ```
+/// use kd_js::MetaPlace;
+/// let src = "export const meta = { a: 1, 'b-c': (2) };";
+/// let MetaPlace::Object(layout) = kd_js::locate_meta(src, false, true).unwrap() else { panic!() };
+/// let member = &layout.members[1];
+/// assert_eq!(member.key, "b-c");
+/// assert_eq!(&src[member.value_start..member.value_end], "(2)");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Member {
+	/// The name of the property (a string key is decoded).
+	pub key: String,
+	pub key_start: usize,
+	pub key_end: usize,
+	/// The value, a parenthesis or a sign in front of it included.
+	pub value_start: usize,
+	pub value_end: usize,
+	/// The `,` after the property, if any.
+	pub comma: Option<usize>,
+}
+
+/// The `{ ... }` of `export const meta = { ... }` and where each of its properties is
+/// (see [`locate_meta`]).
+///
+/// # Example
+///
+/// ```
+/// use kd_js::MetaPlace;
+/// let src = "export const meta = { a: 1 };";
+/// let MetaPlace::Object(layout) = kd_js::locate_meta(src, false, true).unwrap() else { panic!() };
+/// assert_eq!(&src[layout.open..=layout.open], "{");
+/// assert_eq!(&src[layout.close..=layout.close], "}");
+/// assert_eq!(layout.members.len(), 1);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectLayout {
+	/// The `{`.
+	pub open: usize,
+	/// The `}`.
+	pub close: usize,
+	pub members: Vec<Member>,
+	/// Strings in the object are written more often with `'` than with `"`.
+	pub prefers_single_quotes: bool,
+}
+
+/// Where the metadata of a module is (see [`locate_meta`]).
+///
+/// # Example
+///
+/// ```
+/// use kd_js::MetaPlace;
+/// let place = kd_js::locate_meta("import a from 'a';\nexport default a;\n", false, true).unwrap();
+/// assert!(matches!(place, MetaPlace::Missing { after_import: true, .. }));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MetaPlace {
+	/// The module does not export `meta`. `insert_at` is where a declaration goes: after
+	/// the last `import` statement, else after the directives (`'use strict'`) the module
+	/// starts with, else before the first token, below a comment at the top, which may
+	/// carry a pragma (`after_import` is true for the first two: something comes before
+	/// the declaration, and a blank line separates them).
+	Missing {
+		insert_at: usize,
+		after_import: bool,
+	},
+	/// `meta` is an object literal.
+	Object(ObjectLayout),
+	/// `meta` is a literal that is not an object (`null`, an array).
+	NotAnObject,
+}
+
+/// The end of the `import` statement whose module specifier ends at `spec_end`: after its
+/// import attributes (`with { type: "json" }`) and its `;`, if it has them.
+fn import_end(src: &str, spec_end: usize) -> Result<usize, SyntaxError> {
+	let mut lex = Lexer::new(src);
+	lex.pos = spec_end;
+	let mut tok = lex.next()?;
+	let is = |t: Token, p: &str| t.kind == Kind::Punct && t.punct == p;
+	if tok.kind == Kind::Ident && matches!(lex.text(tok), "with" | "assert") && !tok.nl_before {
+		while tok.kind != Kind::Eof && !is(tok, "}") {
+			tok = lex.next()?;
+		}
+		let mut end = tok.end;
+		let after = lex.next()?;
+		if is(after, ";") {
+			end = after.end;
+		}
+		return Ok(end);
+	}
+	Ok(if is(tok, ";") { tok.end } else { spec_end })
+}
+
+/// The end of the directives (`'use strict';`) a module starts with, if it has any.
+fn directives_end(src: &str) -> Result<Option<usize>, SyntaxError> {
+	let mut lex = Lexer::new(src);
+	let mut tok = lex.next()?;
+	let mut end = None;
+	while tok.kind == Kind::Str {
+		let string = tok;
+		let next = lex.next()?;
+		let semicolon = next.kind == Kind::Punct && next.punct == ";";
+		let statement_ends =
+			semicolon || next.kind == Kind::Eof || (next.nl_before && next.kind != Kind::Punct);
+		if !statement_ends {
+			break;
+		}
+		end = Some(if semicolon { next.end } else { string.end });
+		tok = if semicolon { lex.next()? } else { next };
+	}
+	Ok(end)
+}
+
+/// Where a declaration goes after the statement that ends at `end`: the start of the next
+/// line if nothing but blanks or a `//` comment follows on the line, else right after the
+/// statement (code or a block comment follows it on the line).
+fn after_statement(src: &str, end: usize) -> usize {
+	let line_end = src[end..].find('\n').map_or(src.len(), |i| end + i);
+	let rest = src[end..line_end].trim_start_matches([' ', '\t']);
+	if rest.is_empty() || rest == "\r" || rest.starts_with("//") {
+		if line_end < src.len() {
+			line_end + 1
+		} else {
+			line_end
+		}
+	} else {
+		end
+	}
+}
+
+/// Finds the metadata of a module in the source.
+///
+/// # Errors
+///
+/// A [`SyntaxError`] as for [`extract_meta`].
+///
+/// # Example
+///
+/// ```
+/// use kd_js::MetaPlace;
+/// let src = "export const meta = { title: 'T', n: 1 };\n";
+/// let MetaPlace::Object(layout) = kd_js::locate_meta(src, false, true).unwrap() else { panic!() };
+/// let m = &layout.members[1];
+/// assert_eq!(&src[m.value_start..m.value_end], "1");
+/// ```
+pub fn locate_meta(src: &str, jsx: bool, ts: bool) -> Result<MetaPlace, SyntaxError> {
+	let parsed = Parser::parse(src, jsx, ts)?;
+	let Some((start, end)) = parsed.info.meta else {
+		let last_import = parsed
+			.imports
+			.iter()
+			.filter(|i| i.kind == crate::ast::ImportKind::Static)
+			.map(|i| i.end)
+			// the imports of types are no imports of the module, and are statements of the
+			// head of it as much
+			.chain(parsed.info.erased_imports.iter().map(|&(_, end)| end))
+			.max();
+		if let Some(at) = last_import {
+			return Ok(MetaPlace::Missing {
+				insert_at: after_statement(src, import_end(src, at)?),
+				after_import: true,
+			});
+		}
+		if let Some(at) = directives_end(src)? {
+			return Ok(MetaPlace::Missing {
+				insert_at: after_statement(src, at),
+				after_import: true,
+			});
+		}
+		let first = Lexer::new(src).next()?;
+		let insert_at = if first.kind == Kind::Eof {
+			src.len()
+		} else {
+			first.start
+		};
+		return Ok(MetaPlace::Missing {
+			insert_at,
+			after_import: false,
+		});
+	};
+	let mut lex = Lexer::new(src);
+	lex.pos = start;
+	let tok = lex.next()?;
+	let mut eval = Eval::new(lex, tok, end);
+	while eval.is_p("(") {
+		eval.advance()?;
+	}
+	if !eval.is_p("{") {
+		// Anything else is checked (and its error reported) by the same rules
+		// as extraction.
+		eval.value()?;
+		return Ok(MetaPlace::NotAnObject);
+	}
+	let layout = eval.object_layout()?;
+	Ok(MetaPlace::Object(layout))
+}
+
 struct Eval<'s> {
+	prev_end: usize,
+	singles: usize,
+	doubles: usize,
 	lex: Lexer<'s>,
 	tok: Token,
 	end: usize,
@@ -74,7 +278,28 @@ struct Eval<'s> {
 
 type R<T> = Result<T, SyntaxError>;
 
-impl Eval<'_> {
+impl<'s> Eval<'s> {
+	fn new(lex: Lexer<'s>, tok: Token, end: usize) -> Eval<'s> {
+		Eval {
+			prev_end: 0,
+			singles: 0,
+			doubles: 0,
+			lex,
+			tok,
+			end,
+		}
+	}
+
+	/// Counts the quote a string token is written with, to follow the file's
+	/// style when a string is added.
+	fn count_quote(&mut self) {
+		match self.lex.text(self.tok).as_bytes().first() {
+			Some(b'\'') => self.singles += 1,
+			Some(b'"') => self.doubles += 1,
+			_ => {}
+		}
+	}
+
 	fn text(&self) -> &str {
 		self.lex.text(self.tok)
 	}
@@ -91,6 +316,7 @@ impl Eval<'_> {
 	}
 
 	fn advance(&mut self) -> R<()> {
+		self.prev_end = self.tok.end;
 		self.tok = self.lex.next()?;
 		Ok(())
 	}
@@ -105,6 +331,7 @@ impl Eval<'_> {
 		}
 		match self.tok.kind {
 			Kind::Str => {
+				self.count_quote();
 				let s = strings::decode(self.text());
 				self.advance()?;
 				Ok(Const::Str(s))
@@ -186,6 +413,9 @@ impl Eval<'_> {
 		let raw = &self.lex.src[from..end];
 		let cooked = strings::decode(&format!("`{raw}`")).replace("\r\n", "\n");
 		self.advance()?;
+		// `advance` recorded the end of the opening backtick; the literal ends
+		// after the closing one.
+		self.prev_end = end + 1;
 		Ok(Const::Str(cooked))
 	}
 
@@ -256,6 +486,72 @@ impl Eval<'_> {
 		}
 		self.advance()?;
 		Ok(Const::Object(members))
+	}
+
+	/// The same walk as [`Eval::object`], keeping where each property is. It is a second
+	/// walk and not a flag of the first: extraction runs for every page of every build
+	/// and must not pay for what only the editor needs, and the two have to be kept
+	/// the same when the literals `meta` accepts change.
+	fn object_layout(&mut self) -> R<ObjectLayout> {
+		let open = self.tok.start;
+		self.advance()?;
+		let mut members: Vec<Member> = Vec::new();
+		while !self.is_p("}") {
+			if self.is_p("...") {
+				return self.fail("spread is not allowed");
+			}
+			if self.is_p("[") {
+				return self.fail("a computed key is not allowed");
+			}
+			let key_start = self.tok.start;
+			let key = match self.tok.kind {
+				Kind::Ident => {
+					let k = self.text().to_owned();
+					self.advance()?;
+					k
+				}
+				Kind::Str => {
+					self.count_quote();
+					let k = strings::decode(self.text());
+					self.advance()?;
+					k
+				}
+				Kind::Num => self.number_key()?,
+				_ => return self.fail("expected a property name"),
+			};
+			let key_end = self.prev_end;
+			if !self.is_p(":") {
+				return self
+					.fail("expected `:` (shorthand properties and methods are not allowed)");
+			}
+			self.advance()?;
+			let value_start = self.tok.start;
+			self.value()?;
+			let value_end = self.prev_end;
+			let mut comma = None;
+			if !self.is_p("}") {
+				if !self.is_p(",") {
+					return self.fail("expected `,` or `}`");
+				}
+				comma = Some(self.tok.start);
+				self.advance()?;
+			}
+			members.push(Member {
+				key,
+				key_start,
+				key_end,
+				value_start,
+				value_end,
+				comma,
+			});
+		}
+		let close = self.tok.start;
+		Ok(ObjectLayout {
+			open,
+			close,
+			members,
+			prefers_single_quotes: self.singles > self.doubles,
+		})
 	}
 
 	/// A numeric key (`{ 1: "a" }`) is the number's string form; the token

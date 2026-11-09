@@ -106,3 +106,8 @@ jobs:
       # The Node package finds the addon in target/release.
       - name: Run the whole pipeline through the CLI
         run: node --test crates/kd_napi/check/pipeline.check.mjs
+
+      # The JSON that crosses the addon is the one RFC §14.2 says, and an edit changes the
+      # files on disk and nothing else.
+      - name: Edit the pages through the addon
+        run: node --test crates/kd_napi/check/ui.check.mjs

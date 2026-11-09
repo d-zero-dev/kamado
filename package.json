@@ -59,6 +59,7 @@
 		"esbuild-v2": "npm:esbuild@0.28.1",
 		"html-minifier-terser": "7.2.0",
 		"husky": "9.1.7",
+		"jsonc-parser": "3.3.1",
 		"kamado-v2": "npm:kamado@2.0.0-alpha.17",
 		"lerna": "10.1.1",
 		"mdn-data": "2.37.2",

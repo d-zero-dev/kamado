@@ -90,6 +90,11 @@
 			"matchPackageNames": ["mdn-data"]
 		},
 		{
+			"description": "The oracle of crates/kd_jsonc/tests/edit_golden.json, which v2 does not decide: the golden is regenerated in the same PR (docs/v3/development.md)",
+			"groupName": "jsonc-parser",
+			"matchPackageNames": ["jsonc-parser"]
+		},
+		{
 			"description": "prettier-v2, esbuild-v2, character-entities and html-minifier-terser are the versions the published v2 page-compiler and jsx-compiler pin, the oracles of the HTML and JSX tables and differential checks; they do not move on their own (docs/v3/development.md). character-entities is also the table of named references that the --semantic mode of benchmarks/v3/compare-outputs.ts reads. The root prettier (yarn lint) and esbuild (the runtime) are not oracles and move as usual",
 			"matchDepNames": [
 				"prettier-v2",

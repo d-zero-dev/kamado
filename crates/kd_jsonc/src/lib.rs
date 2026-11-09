@@ -16,6 +16,8 @@
 use std::collections::HashSet;
 use std::fmt;
 
+pub mod edit;
+
 /// Objects with fewer keys than this are checked for a duplicate key by a scan of the
 /// keys so far, which needs no set for the few keys of a config; from this many on the
 /// keys go into a set, so that an object of N keys costs N, not N squared (`data.dir`

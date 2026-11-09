@@ -16,6 +16,7 @@
 mod alloc;
 mod serve;
 mod session;
+mod ui;
 
 /// Every allocation of the addon (the core included) goes through the pools.
 #[global_allocator]
@@ -564,6 +565,72 @@ unsafe fn serve_close(env: napi_env, info: napi_callback_info) -> napi_value {
 	std::ptr::null_mut()
 }
 
+/// `uiOpen(configPath, optionsJson)` -> the handle of the editor of the pages (RFC §14.2).
+/// Throws on any configuration or plan error.
+unsafe fn ui_open(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<2>(
+			env,
+			info,
+			c"uiOpen: expected (configPath, optionsJson) strings",
+			|[config, options]| ui::open(&config, &options).map_err(Thrown::from),
+		)
+	}
+}
+
+/// `uiPages(handle, queryJson)` -> the JSON of a page of rows.
+unsafe fn ui_pages(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<2>(
+			env,
+			info,
+			c"uiPages: expected (handle, queryJson) strings",
+			|[handle, query]| ui::pages(&handle, &query).map_err(Thrown::from),
+		)
+	}
+}
+
+/// `uiRefresh(handle)` -> `{ "version" }`, after planning the site again.
+unsafe fn ui_refresh(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<1>(
+			env,
+			info,
+			c"uiRefresh: expected (handle) string",
+			|[handle]| ui::refresh(&handle).map_err(Thrown::from),
+		)
+	}
+}
+
+/// `uiEdit(handle, editJson)` -> the JSON result of the edit.
+unsafe fn ui_edit(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<2>(
+			env,
+			info,
+			c"uiEdit: expected (handle, editJson) strings",
+			|[handle, edit]| ui::edit(&handle, &edit).map_err(Thrown::from),
+		)
+	}
+}
+
+/// `uiClose(handle)` -> `{ "warning" }`; forgets the editor.
+unsafe fn ui_close(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<1>(
+			env,
+			info,
+			c"uiClose: expected (handle) string",
+			|[handle]| ui::close(&handle).map_err(Thrown::from),
+		)
+	}
+}
+
 /// Throws a JS `Error` and returns the NULL value a callback must return after throwing.
 unsafe fn throw(api: &Api, env: napi_env, message: &CStr) -> napi_value {
 	// SAFETY: `message` is NUL-terminated; a NULL code means "no code property".
@@ -755,6 +822,11 @@ unsafe fn register(env: napi_env, exports: napi_value) -> napi_value {
 		export_guarded!(api, env, exports, c"serveFinishScript", serve_finish_script);
 		export_guarded!(api, env, exports, c"serveCancel", serve_cancel);
 		export_guarded!(api, env, exports, c"serveClose", serve_close);
+		export_guarded!(api, env, exports, c"uiOpen", ui_open);
+		export_guarded!(api, env, exports, c"uiPages", ui_pages);
+		export_guarded!(api, env, exports, c"uiRefresh", ui_refresh);
+		export_guarded!(api, env, exports, c"uiEdit", ui_edit);
+		export_guarded!(api, env, exports, c"uiClose", ui_close);
 		#[cfg(feature = "panic-check")]
 		export_guarded!(api, env, exports, c"panicCheck", panic_check);
 	}

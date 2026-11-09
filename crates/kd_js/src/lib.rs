@@ -19,6 +19,7 @@ mod jsx;
 mod jsx_entities;
 pub mod lexer;
 mod meta;
+pub mod meta_edit;
 pub mod parser;
 // The generated table also lists the unitless style properties, which a
 // compile-time fold of static `style` objects will use.
@@ -31,7 +32,7 @@ use std::collections::HashSet;
 
 use ast::{Edit, EditKind};
 pub use lexer::SyntaxError;
-pub use meta::{Const, extract_meta};
+pub use meta::{Const, Member, MetaPlace, ObjectLayout, extract_meta, locate_meta};
 
 /// How to compile one file.
 pub struct Options<'a> {

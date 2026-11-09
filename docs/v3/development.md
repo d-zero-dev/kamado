@@ -24,18 +24,18 @@ node scripts/check-rust-no-external-crates.mjs
 | クレート    | 担当                                                                                                                                     | 依存するクレート               |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
 | `kd_hash`   | SHA-256                                                                                                                                  | なし                           |
-| `kd_jsonc`  | JSONC のパーサと決定的な JSON 出力（`Value`型）                                                                                          | なし                           |
+| `kd_jsonc`  | JSONC のパーサと決定的な JSON 出力（`Value`型）、書式を保つ書き換え（`edit`）                                                            | なし                           |
 | `kd_glob`   | glob のマッチと、探索を枝刈りするための判定                                                                                              | なし                           |
-| `kd_yaml`   | YAML のサブセットと front matter の分割                                                                                                  | `kd_jsonc`                     |
+| `kd_yaml`   | YAML のサブセットと front matter の分割、書式を保つ書き換え（`edit`）                                                                    | `kd_jsonc`                     |
 | `kd_pool`   | スレッドプール                                                                                                                           | なし                           |
 | `kd_image`  | 画像（png / jpeg / webp / avif / svg）の寸法の読み取り                                                                                   | なし                           |
 | `kd_css`    | CSS のトークナイザ・パーサ・圧縮（cssnano 相当）・`@custom-media`の解決（圧縮しないときも）                                              | なし                           |
-| `kd_js`     | TS / TSX / JSX のパーサ、型の除去、JSX → 文字列連結へのコンパイル、静的な meta の抽出                                                    | なし                           |
+| `kd_js`     | TS / TSX / JSX のパーサ、型の除去、JSX → 文字列連結へのコンパイル、静的な meta の抽出と書式を保つ書き換え（`meta_edit`）                 | なし                           |
 | `kd_html`   | HTML のパーサ、DOM、セレクタ、宣言的ルール、取り込み、挿入（DOM と、静的な HTML への文字列）、画像寸法の付与、整形と圧縮（融合した印字） | `kd_image`                     |
 | `kd_site`   | 出力パス・URL の写像、URL の階層（`depth`と親）、`outputPathField`、衝突、探索、メタデータのマージ、overrides                            | `kd_glob` `kd_jsonc`           |
 | `kd_build`  | 差分ビルドの manifest（バイナリ形式、stat 先行の指紋）                                                                                   | `kd_hash` `kd_jsonc`           |
 | `kd_config` | `kamado.config.jsonc`の型・既定値・検証                                                                                                  | `kd_glob` `kd_jsonc` `kd_site` |
-| `kd_core`   | ビルドの組み立て（設定 → 探索 → メタ → 差分判定 → HTML・CSS・JS → 書き出し）と開発サーバーの核                                           | 上のすべて                     |
+| `kd_core`   | ビルドの組み立て（設定 → 探索 → メタ → 差分判定 → HTML・CSS・JS → 書き出し）、開発サーバーの核、ページの編集（`ui`）                     | 上のすべて                     |
 | `kd_napi`   | Node-API の接続層とアロケータ。`unsafe`はここだけ                                                                                        | `kd_core` `kd_hash` `kd_jsonc` |
 
 依存の向きは上から下の一方向で、`kd_napi`が一番上位にある。パース系のクレート（`kd_jsonc` `kd_glob` `kd_yaml`）は、ユーザーが書くファイルを読むので、入れ子の深さや計算量を制限している。
@@ -48,6 +48,8 @@ node --test crates/kd_napi/check/load.check.mjs
 ```
 
 `*.check.mjs`は、ネイティブのビルドが必要なので vitest の対象にしていない（`yarn test`では動かない）。
+
+ページの編集（`ui*`。RFC §14.2）は、`yarn build`のあとに`node --test crates/kd_napi/check/ui.check.mjs`で、実物のアドオンを通す。コアの単体テスト（`crates/kd_core/src/ui/tests.rs`）が同じ処理をアドオンなしで確かめ、こちらは JSON がアドオンを越えても RFC の形であることと、編集がディスクのファイルだけを変えることを確かめる。ファイルを書き戻す 3 つの実装（`kd_yaml::edit`の front matter、`kd_jsonc::edit`の JSONC、`kd_js::meta_edit`の`export const meta`）に oracle は無く、YAML と TS は手書きのテストだけで確かめる（書き戻しの規則は「触らない部分のバイトを変えない」で、同じ書式にそろえる oracle が無い）。JSONC は下の表の`jsonc-parser`の golden で、結果の値だけ照合する。
 
 panic の確認（`panic.check.mjs`）だけは、わざと panic する`panicCheck()`を足した別のビルドを使う。出荷するアドオンには、この関数は入れない（Cargo の feature `panic-check`）。
 
@@ -74,29 +76,32 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 
 ## 何を更新したら、何を作り直すか
 
-テーブルと golden ファイルは、v2 が使っていたライブラリ（oracle）の出力から作ってコミットしている。実行時はその依存を持たない。oracle の版は v2 に合わせて固定するのが方針で（「v2 の oracle」。v2 から版が決まらない`mdn-data`だけは Renovate が上げる。下の段落）、動かしたときは、次のスクリプトを実行して差分を確かめる（スクリプトの先頭のコメントに詳細がある）。oracle の置き場（ルートの`devDependencies`）は「v2 の oracle」を参照。
+テーブルと golden ファイルは、v2 が使っていたライブラリ（oracle）の出力から作ってコミットしている。実行時はその依存を持たない。oracle の版は v2 に合わせて固定するのが方針で（「v2 の oracle」。v2 から版が決まらない`mdn-data`と`jsonc-parser`だけは Renovate が上げる。下の段落）、動かしたときは、次のスクリプトを実行して差分を確かめる（スクリプトの先頭のコメントに詳細がある）。oracle の置き場（ルートの`devDependencies`）は「v2 の oracle」を参照。
 
-| 契機                                                                                                                                                   | 実行するスクリプト                      | 書き出すもの                                                                      |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | --------------------------------------------------------------------------------- |
-| `character-entities`を動かした（「v2 の oracle」の 4）                                                                                                 | `scripts/generate-entities.mjs`         | `crates/kd_html/src/entities_table.rs`                                            |
-| `prettier-v2`を動かした（同上。生成のあとに`cargo fmt --all`）                                                                                         | `scripts/generate-prettier-tables.mjs`  | `crates/kd_html/src/print/tables.rs`（構造が変わると失敗する）、`entity_names.rs` |
-| `html-minifier-terser`を動かした（同上）                                                                                                               | `scripts/generate-minifier-tables.mjs`  | `crates/kd_html/src/minify/tables.rs`                                             |
-| 同上                                                                                                                                                   | `scripts/generate-minify-golden.mjs`    | `crates/kd_html/tests/minify_golden/`                                             |
-| `cssnano`を動かした（「v2 の oracle」の 3。設定は v2 の style-compiler と同じ）                                                                        | `scripts/generate-css-golden.mjs`       | `crates/kd_css/tests/golden/`                                                     |
-| 同上                                                                                                                                                   | `scripts/generate-css-rule-tests.mjs`   | `crates/kd_css/tests/rules.rs`                                                    |
-| 同上、または`mdn-data`を上げた（プロパティ名の元データ）                                                                                               | `scripts/generate-css-tables.mjs`       | `crates/kd_css/src/color_table.rs`、`property_table.rs`                           |
-| `esbuild-v2`を動かした（「v2 の oracle」の 4）                                                                                                         | `scripts/generate-jsx-entities.mjs`     | `crates/kd_js/src/jsx_entities.rs`                                                |
-| `react` / `react-dom`を上げた                                                                                                                          | `scripts/generate-jsx-tables.mjs`       | `packages/kamado/src/jsx/attr-table.ts`、`crates/kd_js/src/react_attrs.rs`        |
-| `react-dom`を上げた（Pug から TSX への変換器が使う、小文字の属性名から React の綴りへの対応表）                                                        | `scripts/generate-react-prop-names.mjs` | `scripts/react-prop-names.mjs`（構造が変わると失敗する）                          |
-| Node を上げた（型の除去の挙動が変わりうる）                                                                                                            | `scripts/generate-kd-js-golden.mjs`     | `crates/kd_js/tests/ts_golden/`                                                   |
-| Node を上げた（Shift_JIS のデコーダ）                                                                                                                  | `scripts/gen-cp932-table.mjs`           | `crates/kd_html/src/cp932_table.rs`                                               |
-| HTML の golden のケースを足した、または`kamado-v2`を上げた（v2 の DOM の直列化が oracle）                                                              | `scripts/generate-html-golden.mjs`      | `crates/kd_html/tests/golden/`                                                    |
-| 属性・クラスの golden のケースを足した、または`kamado-v2`を上げた（`html.rules`の属性・クラスの操作と`html.imageSizes`の v2 の DOM での結果が oracle） | `scripts/generate-html-attr-golden.mjs` | `crates/kd_html/tests/attr_golden/`                                               |
-| `path-list-to-tree.ts`か`random.test-util.ts`を変えた（`kamado pages`の`depth`と`parent`を`nav()`の木に合わせる。oracle は`pathListToTree`）           | `scripts/generate-page-map-golden.mjs`  | `crates/kd_site/tests/page_map_golden.tsv`                                        |
+| 契機                                                                                                                                                         | 実行するスクリプト                       | 書き出すもの                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------- | --------------------------------------------------------------------------------- |
+| `character-entities`を動かした（「v2 の oracle」の 4）                                                                                                       | `scripts/generate-entities.mjs`          | `crates/kd_html/src/entities_table.rs`                                            |
+| `prettier-v2`を動かした（同上。生成のあとに`cargo fmt --all`）                                                                                               | `scripts/generate-prettier-tables.mjs`   | `crates/kd_html/src/print/tables.rs`（構造が変わると失敗する）、`entity_names.rs` |
+| `html-minifier-terser`を動かした（同上）                                                                                                                     | `scripts/generate-minifier-tables.mjs`   | `crates/kd_html/src/minify/tables.rs`                                             |
+| 同上                                                                                                                                                         | `scripts/generate-minify-golden.mjs`     | `crates/kd_html/tests/minify_golden/`                                             |
+| `cssnano`を動かした（「v2 の oracle」の 3。設定は v2 の style-compiler と同じ）                                                                              | `scripts/generate-css-golden.mjs`        | `crates/kd_css/tests/golden/`                                                     |
+| 同上                                                                                                                                                         | `scripts/generate-css-rule-tests.mjs`    | `crates/kd_css/tests/rules.rs`                                                    |
+| 同上、または`mdn-data`を上げた（プロパティ名の元データ）                                                                                                     | `scripts/generate-css-tables.mjs`        | `crates/kd_css/src/color_table.rs`、`property_table.rs`                           |
+| `esbuild-v2`を動かした（「v2 の oracle」の 4）                                                                                                               | `scripts/generate-jsx-entities.mjs`      | `crates/kd_js/src/jsx_entities.rs`                                                |
+| `react` / `react-dom`を上げた                                                                                                                                | `scripts/generate-jsx-tables.mjs`        | `packages/kamado/src/jsx/attr-table.ts`、`crates/kd_js/src/react_attrs.rs`        |
+| `react-dom`を上げた（Pug から TSX への変換器が使う、小文字の属性名から React の綴りへの対応表）                                                              | `scripts/generate-react-prop-names.mjs`  | `scripts/react-prop-names.mjs`（構造が変わると失敗する）                          |
+| Node を上げた（型の除去の挙動が変わりうる）                                                                                                                  | `scripts/generate-kd-js-golden.mjs`      | `crates/kd_js/tests/ts_golden/`                                                   |
+| Node を上げた（Shift_JIS のデコーダ）                                                                                                                        | `scripts/gen-cp932-table.mjs`            | `crates/kd_html/src/cp932_table.rs`                                               |
+| HTML の golden のケースを足した、または`kamado-v2`を上げた（v2 の DOM の直列化が oracle）                                                                    | `scripts/generate-html-golden.mjs`       | `crates/kd_html/tests/golden/`                                                    |
+| 属性・クラスの golden のケースを足した、または`kamado-v2`を上げた（`html.rules`の属性・クラスの操作と`html.imageSizes`の v2 の DOM での結果が oracle）       | `scripts/generate-html-attr-golden.mjs`  | `crates/kd_html/tests/attr_golden/`                                               |
+| `path-list-to-tree.ts`か`random.test-util.ts`を変えた（`kamado pages`の`depth`と`parent`を`nav()`の木に合わせる。oracle は`pathListToTree`）                 | `scripts/generate-page-map-golden.mjs`   | `crates/kd_site/tests/page_map_golden.tsv`                                        |
+| `jsonc-parser`を上げた、または JSONC の編集のケースを足した（`kd_jsonc::edit`の結果を、oracle の`modify`が出す値に合わせる。比べるのは値で、バイトではない） | `scripts/generate-jsonc-edit-golden.mjs` | `crates/kd_jsonc/tests/edit_golden.json`                                          |
 
 生成したファイルをコミットする前に、`git diff`で変化が oracle の更新によるものか確かめる。生成したあとに`cargo test --locked --offline --workspace`を通す（`scripts/react-prop-names.mjs`は Rust が読まないので、`yarn test`の`scripts/pug-to-tsx-types.spec.ts`が、生成物が入れた react-dom と合っているかを確かめる）。`scripts/generate-jsx-tables.mjs`は実行時の出力（ランタイムと Rust のコンパイラ）が読む表`PROPS`などを作り、`attr-table.ts`だけに、変換器が読む別表`ELEMENT_BOOLEAN_PROPS`（`option`の`selected`と`input`の`checked`。React は`pushAttribute`ではなく、その要素のコードで書く）も作る。`scripts/generate-react-prop-names.mjs`は変換器だけが読む表を作る。`generate-jsx-tables.mjs`のあとは、Rust の表を整形するために`cargo fmt --all`を実行し、変換器が`dist`の`attr-table.js`を読むので`yarn build`で作り直す。
 
 `property_table.rs`は、kd_css が値を書き換えるプロパティの一覧で、ここに無いプロパティの値は空白を詰めるだけになる（RFC §10）。元データの`mdn-data`は、ルートの`devDependencies`に固定し、Renovate が上げる（`.github/renovate.json`の`mdn-data`のグループ）。cssnano はすべてのプロパティの値を書き換え、プロパティの一覧を読まないので、一覧の版は v2 から決まらず、このリポジトリが宣言する。一覧が大きいほど cssnano に近い。新しい版が外したプロパティは、`generate-css-tables.mjs`の`extras`に足して一覧に残す（外すと、cssnano が書き換える値を kd_css が書き換えなくなる）。`color_table.rs`の元データの`@colordx/core`は、cssnano の colormin が引く版のまま（「v2 の oracle」の 3）。`yarn test`の`scripts/generate-css-tables.spec.ts`は、コミットした 2 つの表とインストールされている依存から生成器が作るものが同じか、`mdn-data`が宣言した版かを確かめる。作り直さずに版だけ上げた PR は、これで落ちる。作り直したら、`cargo test --locked --offline -p kd_css`と、ランダム入力の差分テスト（`fuzz-css.mjs` → `generate-css-oracle.mjs` → `check-css.mjs`）を通す。
+
+`jsonc-parser`（VS Code が JSONC を編集するライブラリ）は、`kd_jsonc::edit`の結果の値を照合する oracle で、v2 は使っていない。ルートの`devDependencies`に固定し、Renovate が上げる（`.github/renovate.json`の`jsonc-parser`のグループ）。版を上げたら、同じ PR で`scripts/generate-jsonc-edit-golden.mjs`を実行して golden を作り直し、`cargo test --locked --offline -p kd_jsonc`を通す。
 
 ランダム入力の差分テスト（`scripts/fuzz-*.mjs`）は、コーパスをコミットしない（シードで決まる）。上のテーブルを作り直したとき、または`kd_html`/`kd_css`/`kd_js`の挙動を変えたときに、その分野のものを回す。各スクリプトの先頭に、対応する`--ignored`のテストと環境変数がある。`fuzz-html-pipeline.mjs`と`fuzz-html-chain.mjs`は、コード（`<script>` `<style>`、`style`属性、イベントハンドラ）を含むページをコーパスから除く（v3 はコードを整形しない。RFC §2）。そのコードは、圧縮の差分テスト（`fuzz-html-minify.mjs`、`check-kd-js-*.mjs`）で見る。
 

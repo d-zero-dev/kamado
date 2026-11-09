@@ -163,4 +163,9 @@ pub struct ModuleInfo {
 	pub reexports: bool,
 	/// `import.meta` is used.
 	pub import_meta: bool,
+	/// The module specifiers (the string literals, quotes included) of the statements that are
+	/// erased with their types (`import type { A } from "./a"`). They are no imports of the
+	/// compiled module, so [`ImportRecord`] does not list them; whoever has to rewrite the
+	/// paths of a module that is moved needs them. A range can appear twice.
+	pub erased_imports: Vec<(usize, usize)>,
 }
