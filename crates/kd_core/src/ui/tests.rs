@@ -408,6 +408,161 @@ fn a_sort_that_is_not_one_is_an_error() {
 	assert_eq!(urls_of(&mut ui, none), ["/a.html"]);
 }
 
+fn values_of(ui: &mut Ui, query: &str) -> Value {
+	json(&ui.values(query).unwrap())
+}
+
+/// The `(value, count)` of the answer of `values`, as JSON text and a number.
+fn counted(answer: &Value) -> Vec<(String, usize)> {
+	let Some(Value::Array(values)) = answer.get("values") else {
+		panic!("values in {answer:?}")
+	};
+	values
+		.iter()
+		.map(|v| {
+			let count = match v.get("count") {
+				Some(Value::Number(n)) => *n as usize,
+				other => panic!("count in {other:?}"),
+			};
+			(v.get("value").unwrap().to_json(), count)
+		})
+		.collect()
+}
+
+#[test]
+fn the_values_of_a_key_are_counted_over_every_page_and_an_array_gives_its_items() {
+	let site = Site::new("values");
+	site.write(
+		"src/a.html",
+		"---\nlayout: wide\ntags: [x, y]\nn: 1\nflag: true\n---\n",
+	);
+	site.write(
+		"src/b.html",
+		"---\nlayout: wide\ntags: [y]\nn: \"1\"\n---\n",
+	);
+	site.write(
+		"src/c.html",
+		"---\nlayout: narrow\ntags: []\nn: 1\nflag: false\n---\n",
+	);
+	site.write("src/d.html", "---\nlayout: null\ntags: {a: 1}\n---\n");
+	let mut ui = site.open("");
+	let layout = values_of(&mut ui, r#"{"key":"meta:layout","limit":10}"#);
+	// Most often first; `null` is no value.
+	assert_eq!(
+		counted(&layout),
+		[(r#""wide""#.to_string(), 2), (r#""narrow""#.to_string(), 1)]
+	);
+	assert_eq!(layout.get("total"), Some(&Value::Number(2.0)));
+	assert_eq!(layout.get("key"), Some(&s("meta:layout")));
+	assert_eq!(
+		layout.get("version"),
+		Some(&Value::Number(ui.version as f64))
+	);
+	// The items of an array, and not the array; an object is not counted; `y` is in two arrays.
+	let tags = values_of(&mut ui, r#"{"key":"meta:tags","limit":10}"#);
+	assert_eq!(
+		counted(&tags),
+		[(r#""y""#.to_string(), 2), (r#""x""#.to_string(), 1)]
+	);
+	// The number 1 and the text "1" are two values; they came in the order of the plan.
+	let n = values_of(&mut ui, r#"{"key":"meta:n","limit":10}"#);
+	assert_eq!(
+		counted(&n),
+		[("1".to_string(), 2), (r#""1""#.to_string(), 1)]
+	);
+	let flag = values_of(&mut ui, r#"{"key":"meta:flag","limit":10}"#);
+	assert_eq!(
+		counted(&flag),
+		[("true".to_string(), 1), ("false".to_string(), 1)]
+	);
+	// No page has the key: nothing, not an error.
+	let none = values_of(&mut ui, r#"{"key":"meta:nothing","limit":10}"#);
+	assert!(counted(&none).is_empty());
+	assert_eq!(none.get("total"), Some(&Value::Number(0.0)));
+}
+
+#[test]
+fn what_is_not_a_value_inside_an_array_is_not_counted() {
+	let site = Site::new("values_items");
+	site.write("src/a.html", "---\ntags: [[1], {a: 1}, null, 2, x]\n---\n");
+	site.write("src/b.html", "---\ntitle: T\n---\n");
+	site.write("src/b.json", "{\"tags\": [\"x\"]}\n");
+	let mut ui = site.open("");
+	let tags = values_of(&mut ui, r#"{"key":"meta:tags","limit":10}"#);
+	// Only the number 2 and the text x of the array; `x` is held by the sidecar of the other page
+	// too, which makes it the most often held.
+	assert_eq!(
+		counted(&tags),
+		[(r#""x""#.to_string(), 2), ("2".to_string(), 1)]
+	);
+	assert_eq!(tags.get("total"), Some(&Value::Number(2.0)));
+}
+
+#[test]
+fn a_limit_cuts_the_values_and_total_still_counts_all_of_them() {
+	let site = Site::new("values_limit");
+	for (name, layout) in [("a", "one"), ("b", "two"), ("c", "two"), ("d", "three")] {
+		site.write(
+			&format!("src/{name}.html"),
+			&format!("---\nlayout: {layout}\n---\n"),
+		);
+	}
+	let mut ui = site.open("");
+	let cut = values_of(&mut ui, r#"{"key":"meta:layout","limit":2}"#);
+	assert_eq!(
+		counted(&cut),
+		[(r#""two""#.to_string(), 2), (r#""one""#.to_string(), 1)]
+	);
+	assert_eq!(cut.get("total"), Some(&Value::Number(3.0)));
+	let zero = values_of(&mut ui, r#"{"key":"meta:layout","limit":0}"#);
+	assert!(counted(&zero).is_empty());
+	assert_eq!(zero.get("total"), Some(&Value::Number(3.0)));
+}
+
+#[test]
+fn the_values_follow_an_edit() {
+	let site = Site::new("values_edit");
+	site.write("src/a.html", "---\nlayout: one\n---\n");
+	site.write("src/b.html", "---\nlayout: one\n---\n");
+	let mut ui = site.open("");
+	let rows = all(&mut ui);
+	let row = page(&rows, "/a.html");
+	let done = edit(
+		&mut ui,
+		"/a.html",
+		&expect(&rows, &row),
+		&set("layout", r#""two""#),
+	);
+	assert!(ok(&done), "{done:?}");
+	let layout = values_of(&mut ui, r#"{"key":"meta:layout","limit":10}"#);
+	// Held once each: the one met first in the order of the plan (`/a.html`) is first.
+	assert_eq!(
+		counted(&layout),
+		[(r#""two""#.to_string(), 1), (r#""one""#.to_string(), 1)]
+	);
+}
+
+#[test]
+fn a_values_request_that_is_not_one_is_an_error() {
+	let site = Site::new("values_bad");
+	site.write("src/a.html", "---\ntitle: T\n---\n");
+	let ui = site.open("");
+	for query in [
+		"{",
+		r#"{"limit":1}"#,
+		r#"{"key":"title","limit":1}"#,
+		r#"{"key":"meta:","limit":1}"#,
+		r#"{"key":"url","limit":1}"#,
+		r#"{"key":1,"limit":1}"#,
+		r#"{"key":"meta:title"}"#,
+		r#"{"key":"meta:title","limit":-1}"#,
+		r#"{"key":"meta:title","limit":1.5}"#,
+		r#"{"key":"meta:title","limit":"1"}"#,
+	] {
+		assert!(ui.values(query).is_err(), "{query}");
+	}
+}
+
 #[test]
 fn keys_that_cannot_be_edited_say_why() {
 	let site = Site::new("not_editable");

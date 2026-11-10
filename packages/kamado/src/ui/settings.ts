@@ -21,7 +21,7 @@
  * Why a field added to an entry does not raise `version`: a kamado that finds a higher version
  * does not use the file at all, so one new field would make every setting unusable by an older
  * kamado. The price is that an older kamado drops the field it does not know at its next save
- * (`sort`, `columns`); the settings are a convenience, and that is the smaller loss.
+ * (`sort`, `columns`, `kinds`); the settings are a convenience, and that is the smaller loss.
  *
  * Nothing here puts a path in a message that can reach the browser: the file is told by its
  * name, the way the rest of the screen's text is told without the directories of the machine.
@@ -110,6 +110,71 @@ export interface ColumnSettings {
 	readonly widths?: Readonly<Record<string, number>>;
 }
 
+/**
+ * The most options a column that is an enum has: far more than a person chooses from, and a
+ * bound that keeps the list a dialog can show. The screen writes the same limits for itself, as
+ * it cannot import this module; `settings-kinds.spec.ts` compares the two.
+ * @example
+ * ```ts
+ * parsePatch({ project: { kinds: { 'meta:a': { type: 'enum', options: ['x'] } } } }); // within it
+ * ```
+ */
+export const MAX_ENUM_OPTIONS = 200;
+
+/**
+ * The longest an option that is text may be, in UTF-16 code units (what `String#length` counts).
+ * @example
+ * ```ts
+ * 'x'.repeat(MAX_ENUM_OPTION_LENGTH).length; // the longest option
+ * ```
+ */
+export const MAX_ENUM_OPTION_LENGTH = 200;
+
+/**
+ * The most bytes the kinds of the columns of a project are, written as JSON in UTF-8. A change
+ * of the settings is 64 KiB at most (`MAX_SETTINGS_BODY` of `app.ts`), and the layout of the
+ * columns takes up to 48 KiB of it (`MAX_COLUMNS_BYTES` of the screen); this is what is left,
+ * with room for the rest of the change.
+ * @example
+ * ```ts
+ * Buffer.byteLength(JSON.stringify(kinds)) <= MAX_KINDS_BYTES; // what `parsePatch` accepts
+ * ```
+ */
+export const MAX_KINDS_BYTES = 12 * 1024;
+
+/**
+ * An option of an enum: text, a finite number, or a boolean.
+ * @example
+ * ```ts
+ * const options: EnumOption[] = ['wide', 2, true];
+ * ```
+ */
+export type EnumOption = string | number | boolean;
+
+/**
+ * What a column may hold when the screen is told so: an enum, whose value (an option, or a list
+ * of them) is edited by choosing among the options.
+ * @example
+ * ```ts
+ * const kind: EnumKind = { type: 'enum', options: ['wide', 'narrow'] };
+ * ```
+ */
+export interface EnumKind {
+	readonly type: 'enum';
+	readonly options: readonly EnumOption[];
+}
+
+/**
+ * The kinds of the columns that are not the kind of their value (an enum), by the identifier of
+ * the column: only the columns of metadata (`meta:<key>`, at most {@link MAX_SORT_KEY}
+ * characters) have one.
+ * @example
+ * ```ts
+ * const kinds: KindsSettings = { 'meta:layout': { type: 'enum', options: ['wide'] } };
+ * ```
+ */
+export type KindsSettings = Readonly<Record<string, EnumKind>>;
+
 /** What is kept for one project. */
 export interface ProjectSettings {
 	/** When it was last saved (ISO 8601), or an empty string if the file did not say. */
@@ -120,6 +185,8 @@ export interface ProjectSettings {
 	readonly sort?: SortSettings;
 	/** The layout of the columns; left out when the screen has not changed it. */
 	readonly columns?: ColumnSettings;
+	/** The columns that are an enum; left out when there is none. */
+	readonly kinds?: KindsSettings;
 }
 
 /** The content of the file. */
@@ -146,6 +213,8 @@ export interface SettingsPatch {
 		readonly sort?: SortSettings | null;
 		/** Replaces the layout of the columns as a whole; `null` puts the default back. */
 		readonly columns?: ColumnSettings | null;
+		/** Replaces the kinds of the columns as a whole; `null` takes them all away. */
+		readonly kinds?: KindsSettings | null;
 	};
 }
 
@@ -326,6 +395,99 @@ function readColumns(value: unknown): ColumnSettings | undefined {
 }
 
 /**
+ * Whether a value may be an option of an enum.
+ * @param value - Any value
+ */
+function isEnumOption(value: unknown): value is EnumOption {
+	return typeof value === 'string'
+		? value.length <= MAX_ENUM_OPTION_LENGTH
+		: typeof value === 'number'
+			? Number.isFinite(value)
+			: typeof value === 'boolean';
+}
+
+/**
+ * Checks the kinds of the columns and splits them into what is allowed and whether all of it
+ * was. One rule serves the file and the change of the screen: the file keeps what is allowed (a
+ * file somebody edited), and the change is refused whole when anything is not (the screen never
+ * sends it). A column that is not a column of metadata, a kind that is not an enum, an option
+ * that is not text, a finite number or a boolean, an option that repeats (the number `1` and
+ * the text `"1"` are two), and options beyond the limits are what is not allowed; so is a column
+ * with no option left. The columns are taken in order until the bytes of what is kept (as JSON)
+ * would pass {@link MAX_KINDS_BYTES}, and the rest are not looked at. Why not skip the column that
+ * does not fit and go on: which columns a file keeps would then depend on the sizes of the ones
+ * after it, and a file that is too large would be read through to the end every time.
+ * @param value - `kinds` of an entry or of a change
+ * @returns The kinds that are allowed, and whether anything was left out
+ */
+function checkKinds(value: unknown): { kinds: Record<string, EnumKind>; whole: boolean } {
+	const kinds: Record<string, EnumKind> = {};
+	if (!isRecord(value)) {
+		return { kinds, whole: false };
+	}
+	let whole = true;
+	// The bytes of `{}`, and one more for each comma and each entry.
+	let bytes = 2;
+	for (const [key, kind] of Object.entries(value)) {
+		if (
+			!isSortKey(key) ||
+			!key.startsWith('meta:') ||
+			!isRecord(kind) ||
+			kind.type !== 'enum' ||
+			!Array.isArray(kind.options)
+		) {
+			whole = false;
+			continue;
+		}
+		const seen = new Set<string>();
+		const options: EnumOption[] = [];
+		for (const option of kind.options as unknown[]) {
+			if (options.length >= MAX_ENUM_OPTIONS) {
+				// The rest are over the limit whatever they are: they are not looked at.
+				whole = false;
+				break;
+			}
+			if (!isEnumOption(option)) {
+				whole = false;
+				continue;
+			}
+			const written = JSON.stringify(option);
+			if (seen.has(written)) {
+				whole = false;
+				continue;
+			}
+			seen.add(written);
+			options.push(option);
+		}
+		if (options.length === 0) {
+			whole = false;
+			continue;
+		}
+		const kept: EnumKind = { type: 'enum', options };
+		const size =
+			Buffer.byteLength(JSON.stringify(key)) +
+			1 +
+			Buffer.byteLength(JSON.stringify(kept)) +
+			(Object.keys(kinds).length > 0 ? 1 : 0);
+		if (bytes + size > MAX_KINDS_BYTES) {
+			return { kinds, whole: false };
+		}
+		bytes += size;
+		setOwn(kinds, key, kept);
+	}
+	return { kinds, whole };
+}
+
+/**
+ * The kinds of a parsed value, for the file: what is allowed is kept.
+ * @param value - `kinds` of an entry
+ */
+function readKinds(value: unknown): KindsSettings | undefined {
+	const { kinds } = checkKinds(value);
+	return Object.keys(kinds).length === 0 ? undefined : kinds;
+}
+
+/**
  * The settings of one project from a parsed value.
  * @param value - An entry of `projects`
  */
@@ -333,11 +495,13 @@ function sanitizeProject(value: Record<string, unknown>): ProjectSettings {
 	const size = PAGE_SIZES.find((n) => n === value.pageSize);
 	const sort = readSort(value.sort);
 	const columns = readColumns(value.columns);
+	const kinds = readKinds(value.kinds);
 	return {
 		updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : '',
 		pageSize: size ?? DEFAULT_PAGE_SIZE,
 		...(sort === undefined ? {} : { sort }),
 		...(columns === undefined ? {} : { columns }),
+		...(kinds === undefined ? {} : { kinds }),
 	};
 }
 
@@ -476,6 +640,27 @@ function parseColumns(value: unknown): ColumnSettings | null {
 }
 
 /**
+ * The kinds of a change, checked with the rule of {@link checkKinds}: anything that is not
+ * allowed refuses the whole change.
+ * @param value - `kinds` of the change
+ * @throws {Error} naming what is not allowed
+ */
+function parseKinds(value: unknown): KindsSettings | null {
+	if (value === null) {
+		return null;
+	}
+	const { kinds, whole } = isRecord(value)
+		? checkKinds(value)
+		: { kinds: {}, whole: false };
+	if (!whole) {
+		throw new Error(
+			`"kinds" is null or maps columns of metadata (meta:<key>) to { type: "enum", options }: 1 to ${MAX_ENUM_OPTIONS} different texts (of at most ${MAX_ENUM_OPTION_LENGTH} characters), finite numbers or booleans, in at most ${MAX_KINDS_BYTES} bytes as JSON`,
+		);
+	}
+	return kinds;
+}
+
+/**
  * The change the screen sent, checked. What is not known is dropped; a value that is of a
  * known field and not allowed is refused (the screen never sends one).
  * @param value - The parsed body
@@ -496,6 +681,7 @@ export function parsePatch(value: unknown): SettingsPatch {
 			pageSize?: number;
 			sort?: SortSettings | null;
 			columns?: ColumnSettings | null;
+			kinds?: KindsSettings | null;
 		};
 	} = {};
 	if (value.global !== undefined) {
@@ -515,11 +701,12 @@ export function parsePatch(value: unknown): SettingsPatch {
 		if (!isRecord(value.project)) {
 			throw new Error('"project" is not an object');
 		}
-		const { pageSize, sort, columns } = value.project;
+		const { pageSize, sort, columns, kinds } = value.project;
 		const project: {
 			pageSize?: number;
 			sort?: SortSettings | null;
 			columns?: ColumnSettings | null;
+			kinds?: KindsSettings | null;
 		} = {};
 		if (pageSize !== undefined) {
 			const known = PAGE_SIZES.find((n) => n === pageSize);
@@ -542,6 +729,9 @@ export function parsePatch(value: unknown): SettingsPatch {
 		}
 		if (columns !== undefined) {
 			project.columns = parseColumns(columns);
+		}
+		if (kinds !== undefined) {
+			project.kinds = parseKinds(kinds);
 		}
 		if (Object.keys(project).length > 0) {
 			patch.project = project;
@@ -826,11 +1016,16 @@ export function createSettingsStore(file: string, key: string): SettingsStore {
 						patch.project.columns === undefined
 							? entry.columns
 							: (readColumns(patch.project.columns) ?? undefined);
+					const kinds =
+						patch.project.kinds === undefined
+							? entry.kinds
+							: (readKinds(patch.project.kinds) ?? undefined);
 					setOwn(projects, key, {
 						updatedAt: new Date().toISOString(),
 						pageSize: patch.project.pageSize ?? entry.pageSize,
 						...(sort === undefined ? {} : { sort }),
 						...(columns === undefined ? {} : { columns }),
+						...(kinds === undefined ? {} : { kinds }),
 					});
 				}
 				return {

@@ -2,7 +2,8 @@
 //! project lives in a process-wide table, keyed by a handle, so that the JavaScript side can
 //! keep it across requests.
 //!
-//! Every answer is JSON: the rows (`uiPages`), `{ "version" }` (`uiRefresh`), the result of an
+//! Every answer is JSON: the rows (`uiPages`), the values of a key (`uiValues`), `{ "version" }`
+//! (`uiRefresh`), the result of an
 //! edit (`uiEdit`; an edit that is refused is a result with `"ok": false`, not an error) and
 //! `{ "warning" }` (`uiClose`). A request that is not one, a site that cannot be planned and
 //! a handle that is not open are errors.
@@ -61,6 +62,11 @@ pub(crate) fn open(config_path: &str, options_json: &str) -> Result<String, Stri
 /// A page of rows (`queryJson`: `{ "offset", "limit", "q"? }`).
 pub(crate) fn pages(handle: &str, query_json: &str) -> Result<String, String> {
 	with(handle, |ui| ui.pages(query_json))
+}
+
+/// The values of a metadata key over every page (`queryJson`: `{ "key", "limit" }`).
+pub(crate) fn values(handle: &str, query_json: &str) -> Result<String, String> {
+	with(handle, |ui| ui.values(query_json))
 }
 
 /// Plans the site again.

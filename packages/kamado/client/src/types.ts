@@ -5,6 +5,7 @@
  * again here; `crates/kd_napi/check/ui.check.mjs` reads the real answer through the server and
  * checks it has exactly these fields.
  */
+import type { KindsSettings } from './logic/kinds.js';
 import type { ColumnSettings } from './logic/layout.js';
 
 /** Where a value is written: the file of the page, its sidecar, or `pages.overrides`. */
@@ -57,6 +58,8 @@ export interface SettingsView {
 		readonly sort?: { readonly key: string; readonly desc: boolean };
 		/** The layout of the columns; absent when it has not been changed. */
 		readonly columns?: ColumnSettings;
+		/** The columns that are an enum, with their options; absent when there is none. */
+		readonly kinds?: KindsSettings;
 	} | null;
 	/** Why the settings file is not used as it is, or `null`. */
 	readonly warning: string | null;
@@ -71,7 +74,20 @@ export interface SettingsPatch {
 		readonly sort?: { readonly key: string; readonly desc: boolean } | null;
 		/** Replaces the layout as a whole; `null` puts the default back. */
 		readonly columns?: ColumnSettings | null;
+		/** Replaces the kinds as a whole; `null` takes them all away. */
+		readonly kinds?: KindsSettings | null;
 	};
+}
+
+/** What `GET /api/values` answers: the values a key has over every page. */
+export interface Values {
+	readonly version: number;
+	/** The column asked about (`meta:<key>`). */
+	readonly key: string;
+	/** How many different values there are, whatever the limit of the request was. */
+	readonly total: number;
+	/** The most often held first. */
+	readonly values: readonly { readonly value: unknown; readonly count: number }[];
 }
 
 /** What `POST /api/edit` answers when the edit was made. */

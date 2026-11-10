@@ -1,11 +1,15 @@
 import type { Translate } from './i18n/translate.js';
+import type { EnumOption, KindsSettings } from './logic/kinds.js';
 import type { FieldKind } from './logic/value.js';
 import type { Row as PageRow } from './types.js';
 
 import { memo, useRef, useState } from 'react';
 
+import { EnumEditor } from './enum-editor.js';
 import { useI18n } from './i18n/context.js';
-import { cellOf } from './logic/columns.js';
+import { ListEditor } from './list-editor.js';
+import { editKindOf } from './logic/columns.js';
+import { enumKindOf } from './logic/kinds.js';
 import { columnName } from './logic/layout.js';
 import { parseDraft, toText } from './logic/value.js';
 
@@ -19,6 +23,12 @@ export interface Editing {
 	readonly draft: string;
 	/** The name the input has for people who cannot see the column. */
 	readonly label: string;
+	/** For an enum: what the cell offers (the options of the column, and the values it holds). */
+	readonly choices?: readonly EnumOption[];
+	/** For an enum: what is chosen now. */
+	readonly selected?: readonly EnumOption[];
+	/** For an enum: whether several can be chosen (the value is a list). */
+	readonly multiple?: boolean;
 }
 
 interface EditorProps {
@@ -31,7 +41,8 @@ interface EditorProps {
 /**
  * The input of the cell being edited. Enter (Ctrl+Enter in the JSON text area, where Enter is
  * a new line) and leaving the cell write the value; Escape drops it. JSON that does not parse
- * yet is not written: the input stays, and says why.
+ * yet is not written: the input stays, and says why. A list and an enum have editors of their
+ * own (`ListEditor`, `EnumEditor`), which write through the same rules.
  * @param root0 - The props
  * @param root0.editing - The cell being edited
  * @param root0.onCommit - Called with the text, once, when it is to be written
@@ -90,6 +101,29 @@ function Editor({ editing, onCommit, onCancel, onInvalid }: EditorProps) {
 		onCommit(text);
 	};
 
+	if (editing.kind === 'list') {
+		return (
+			<ListEditor
+				label={editing.label}
+				draft={editing.draft}
+				commit={commit}
+				cancel={cancel}
+				invalid={onInvalid}
+			/>
+		);
+	}
+	if (editing.kind === 'enum') {
+		return (
+			<EnumEditor
+				label={editing.label}
+				choices={editing.choices ?? []}
+				selected={editing.selected ?? []}
+				multiple={editing.multiple === true}
+				commit={commit}
+				cancel={cancel}
+			/>
+		);
+	}
 	if (editing.kind === 'json') {
 		return (
 			<textarea
@@ -166,7 +200,10 @@ interface RowProps {
 	readonly columns: readonly string[];
 	/** How many of the first columns are pinned to the left edge. */
 	readonly pinnedCount: number;
+	/** The kinds of keys added on the screen, and of keys whose values are booleans, for a page that has none. */
 	readonly addedKinds: ReadonlyMap<string, FieldKind>;
+	/** The columns that are an enum. */
+	readonly kinds: KindsSettings | undefined;
 	/** The column that has the focus in this row, or -1 when the focus is in another row. */
 	readonly activeCol: number;
 	/** The cell being edited, when it is in this row. */
@@ -181,15 +218,24 @@ interface RowProps {
  * it cannot be edited.
  * @param row - The row
  * @param column - The identifier of the column
- * @param addedKinds - The kinds of keys added on the screen
+ * @param addedKinds - The kinds of keys added on the screen, and of keys of booleans
+ * @param kinds - The columns that are an enum
  * @param t - Says the words of the cell in the language of the screen
  */
 function describe(
 	row: PageRow,
 	column: string,
 	addedKinds: ReadonlyMap<string, FieldKind>,
+	kinds: KindsSettings | undefined,
 	t: Translate,
-): { text: string; readOnly: boolean; note: string | undefined; origin?: string } {
+): {
+	text: string;
+	readOnly: boolean;
+	note: string | undefined;
+	origin?: string;
+	/** For a boolean: whether it is checked (a page without the key is not). */
+	checked?: boolean;
+} {
 	if (column === 'url') {
 		return { text: row.url, readOnly: false, note: undefined };
 	}
@@ -200,9 +246,16 @@ function describe(
 		return { text: row.inputPath ?? '', readOnly: true, note: undefined };
 	}
 	const key = columnName(column);
-	const { cell } = cellOf(row, key, addedKinds);
+	const { cell, kind } = editKindOf(row, key, addedKinds, enumKindOf(kinds, column));
+	// A boolean is drawn as a check box, and an enum column of booleans is a choice (text).
+	const checked = kind === 'boolean' ? cell?.value === true : undefined;
 	if (cell === undefined) {
-		return { text: '', readOnly: false, note: undefined };
+		return {
+			text: '',
+			readOnly: false,
+			note: undefined,
+			...(checked === undefined ? {} : { checked }),
+		};
 	}
 	return {
 		text: toText(cell.value),
@@ -211,6 +264,7 @@ function describe(
 			? t('row.from', { origin: t(`origin.${cell.origin}` as const) })
 			: cell.reason,
 		origin: cell.origin,
+		...(checked === undefined ? {} : { checked }),
 	};
 }
 
@@ -226,6 +280,7 @@ export const GridRow = memo(function GridRow({
 	columns,
 	pinnedCount,
 	addedKinds,
+	kinds,
 	activeCol,
 	editing,
 	onCommit,
@@ -235,7 +290,13 @@ export const GridRow = memo(function GridRow({
 	const { t } = useI18n();
 	const cells = [];
 	for (const [col, column] of columns.entries()) {
-		const { text, readOnly, note, origin } = describe(row, column, addedKinds, t);
+		const { text, readOnly, note, origin, checked } = describe(
+			row,
+			column,
+			addedKinds,
+			kinds,
+			t,
+		);
 		const isEditing = editing !== null && editing.column === column;
 		const pinned = col < pinnedCount;
 		cells.push(
@@ -260,8 +321,20 @@ export const GridRow = memo(function GridRow({
 						onCancel={onCancel}
 						onInvalid={onInvalid}
 					/>
-				) : (
+				) : checked === undefined ? (
 					text
+				) : (
+					<>
+						{/* The box is for the eye and the pointer (a click on it makes the edit, see `data-toggle`);
+						    the cell says `true` or `false` to a screen reader (a gridcell has no checked state to use). */}
+						<span
+							aria-hidden="true"
+							className="check"
+							data-toggle=""
+							data-checked={checked}
+						/>
+						<span className="sr-only">{String(checked)}</span>
+					</>
 				)}
 			</div>,
 		);

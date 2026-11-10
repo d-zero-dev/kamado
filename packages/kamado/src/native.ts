@@ -70,6 +70,12 @@ export interface Native {
 	 * `total`, `columns`, `overridesHash`, `pages`, `warnings`).
 	 */
 	uiPages(handle: string, queryJson: string): string;
+	/**
+	 * The values a metadata key has over every page: `queryJson` is `{ key: 'meta:<key>', limit }`;
+	 * the result is JSON (`version`, `key`, `total`, `values: [{ value, count }]`, most often
+	 * first). A request that is not one throws.
+	 */
+	uiValues(handle: string, queryJson: string): string;
 	/** Plans the site again; the result is `{ version }`. */
 	uiRefresh(handle: string): string;
 	/**
