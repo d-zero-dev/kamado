@@ -7,5 +7,12 @@
 		"declarationMap": true
 	},
 	"include": ["**/*.ts"],
-	"exclude": ["node_modules", "dist", "oracle", "**/*.spec.ts", "**/*.test-util.ts"]
+	"exclude": [
+		"node_modules",
+		"dist",
+		"oracle",
+		"client",
+		"**/*.spec.ts",
+		"**/*.test-util.ts"
+	]
 }
