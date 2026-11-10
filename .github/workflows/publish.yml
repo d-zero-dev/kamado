@@ -232,6 +232,9 @@ jobs:
       - name: Load the bundled addon
         run: node scripts/check-package-addon.mjs "$RUNNER_TEMP/unpacked/package"
 
+      - name: Check the screen of kamado ui
+        run: node scripts/check-package-ui.mjs "$RUNNER_TEMP/unpacked/package"
+
   publish:
     if: github.ref_type == 'tag'
     needs: [check, smoke]
