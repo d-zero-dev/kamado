@@ -51,6 +51,10 @@ node --test crates/kd_napi/check/load.check.mjs
 
 ページの編集（`ui*`。RFC §14.2）は、`yarn build`のあとに`node --test crates/kd_napi/check/ui.check.mjs`で、実物のアドオンを通す。コアの単体テスト（`crates/kd_core/src/ui/tests.rs`）が同じ処理をアドオンなしで確かめ、こちらは JSON がアドオンを越えても RFC の形であることと、編集がディスクのファイルだけを変えることを確かめる。ファイルを書き戻す 3 つの実装（`kd_yaml::edit`の front matter、`kd_jsonc::edit`の JSONC、`kd_js::meta_edit`の`export const meta`）に oracle は無く、YAML と TS は手書きのテストだけで確かめる（書き戻しの規則は「触らない部分のバイトを変えない」で、同じ書式にそろえる oracle が無い）。JSONC は下の表の`jsonc-parser`の golden で、結果の値だけ照合する。
 
+`kamado ui`の画面は`packages/kamado/client`（React）で、`yarn build`が型を検査して、`scripts/build-ui.mjs`が esbuild で`packages/kamado/dist/ui`にまとめる（`yarn dev`は画面を作り直さない）。React は`packages/kamado`の devDependencies で、bundle に入るので、パッケージの実行時の依存は増えない。画面の論理は DOM の無い関数（`client/src/logic/`）に分けて Vitest で、サーバー（`src/ui/`）は`app.request`で確かめる。サーバーが実物のコアの答えを正しく中継し、絶対パスを出さないことは、`ui.check.mjs`が実物のアドオンで確かめる（画面が読む JSON の項目もそこで固定する）。配布物に画面が入っていることは、`node scripts/check-package-ui.mjs packages/kamado`（ローカルでは`yarn build`のあと。publish のワークフローは展開したパッケージに対して）が確かめる。
+
+画面の描画と操作は、ブラウザで確かめる（コンポーネントのテストは無い）。手順: `benchmarks/v3/generate-jsx-fixtures.ts`か、front matter を持つ HTML を数千ページ置いたサイトを作り、`kamado ui --no-open --port <n>`を起動して chrome-devtools で開く。1 画面を 5,000 行にして、初回の表示（目安は 1 秒未満。500 行で約 130 ms）、矢印キーでの移動、セルの編集から表示までを測る。キーボードだけで編集でき、スクリーンリーダーに grid として伝わること（`take_snapshot`）、保存の失敗（ファイルを外で書き換えて`conflict`を起こす）から回復できることも見る。
+
 panic の確認（`panic.check.mjs`）だけは、わざと panic する`panicCheck()`を足した別のビルドを使う。出荷するアドオンには、この関数は入れない（Cargo の feature `panic-check`）。
 
 ```sh
