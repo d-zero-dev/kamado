@@ -13,6 +13,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
+use std::sync::Arc;
 
 use kd_jsonc::Value;
 use kd_jsonc::edit::Seg;
@@ -22,6 +23,8 @@ use kd_site::{Dirs, PageFile};
 use crate::plan_cache::{CachedPage, PlanCache};
 use crate::session::PlanSettings;
 use crate::{BuildOptions, Loaded, Page, PageKind, Plan};
+
+mod natural;
 
 /// What the editor shows for a key whose value comes from the URL.
 const URL_KEY_REASON: &str = "this key sets the URL of the page; change the URL instead";
@@ -146,6 +149,10 @@ pub struct Ui {
 	by_url: HashMap<String, usize>,
 	columns: BTreeSet<String>,
 	file_info: HashMap<String, FileInfo>,
+	/// The order of every page for the last sort asked for, with the version of the plan it was
+	/// made on. Making it takes a key per page and a merge sort, which a page turn, a search or
+	/// a refocus of the screen must not pay again; an edit or a new plan changes the version.
+	sort_cache: Option<(u64, Sort, Arc<Vec<usize>>)>,
 }
 
 fn hash_hex(bytes: &[u8]) -> String {
@@ -653,11 +660,71 @@ impl Txn {
 	}
 }
 
+/// A query that keeps this fraction of the pages or less (one in this many) sorts only those,
+/// when the order of every page is not at hand: sorting a hundred thousand pages to show a
+/// handful of rows is what a search after a sort would otherwise cost, once for each version.
+const SMALL_QUERY_DIVISOR: usize = 8;
+
+/// The column `sort` orders by (the identifiers of RFC §14.2).
+#[derive(Clone, PartialEq, Eq)]
+enum SortColumn {
+	Url,
+	InputPath,
+	Virtual,
+	Meta(String),
+}
+
+/// The order a query asks for.
+#[derive(Clone, PartialEq, Eq)]
+struct Sort {
+	column: SortColumn,
+	/// Largest first. The pages that have no value in the column are last either way.
+	desc: bool,
+}
+
 /// What `uiPages` was asked for.
 struct Query {
 	offset: usize,
 	limit: usize,
 	q: Option<String>,
+	sort: Option<Sort>,
+}
+
+/// The `sort` of a query: `None` when there is none (absent or `null`), an error naming the
+/// field when `key` is not one of the four identifiers or `desc` is not a boolean. The length
+/// of a `meta:` key is not limited here; the server of `kamado ui` limits it.
+fn parse_sort(v: &Value) -> Result<Option<Sort>, String> {
+	let spec = match v.get("sort") {
+		None | Some(Value::Null) => return Ok(None),
+		Some(s @ Value::Object(_)) => s,
+		Some(_) => return Err("query: `sort` must be an object".to_string()),
+	};
+	let column = match spec.get("key") {
+		Some(Value::String(k)) if k == "url" => SortColumn::Url,
+		Some(Value::String(k)) if k == "inputPath" => SortColumn::InputPath,
+		Some(Value::String(k)) if k == "virtual" => SortColumn::Virtual,
+		Some(Value::String(k)) => match k.strip_prefix("meta:") {
+			Some(name) if !name.is_empty() => SortColumn::Meta(name.to_string()),
+			_ => {
+				return Err(
+					"query: `sort.key` must be `url`, `inputPath`, `virtual` or `meta:<key>`"
+						.to_string(),
+				);
+			}
+		},
+		_ => {
+			return Err(
+				"query: `sort.key` must be `url`, `inputPath`, `virtual` or `meta:<key>`"
+					.to_string(),
+			);
+		}
+	};
+	let desc = match spec.get("desc") {
+		None | Some(Value::Null) => false,
+		Some(Value::Bool(b)) => *b,
+		Some(_) => return Err("query: `sort.desc` must be a boolean".to_string()),
+	};
+	Ok(Some(Sort { column, desc }))
 }
 
 fn parse_query(json: &str) -> Result<Query, String> {
@@ -678,6 +745,7 @@ fn parse_query(json: &str) -> Result<Query, String> {
 		offset: number("offset")?,
 		limit: number("limit")?,
 		q,
+		sort: parse_sort(&v)?,
 	})
 }
 
@@ -776,6 +844,7 @@ impl Ui {
 			by_url: HashMap::new(),
 			columns: BTreeSet::new(),
 			file_info: HashMap::new(),
+			sort_cache: None,
 		};
 		ui.plan_again(on_disk)?;
 		Ok(ui)
@@ -1094,7 +1163,121 @@ impl Ui {
 			.map_or(Value::Null, |o| Value::String(o.hash.clone()))
 	}
 
-	/// A page of rows, as the JSON of RFC §14.2. `query_json` is `{ "offset", "limit", "q"? }`.
+	/// The order of every page for `sort` when it was made on the plan as it is now.
+	fn cached_order(&self, sort: &Sort) -> Option<Arc<Vec<usize>>> {
+		match &self.sort_cache {
+			Some((version, cached, order)) if *version == self.version && cached == sort => {
+				Some(Arc::clone(order))
+			}
+			_ => None,
+		}
+	}
+
+	/// Every page in the order `sort` asks for, from the cache while the plan is the one it was
+	/// made on.
+	fn sorted_all(&mut self, sort: &Sort) -> Arc<Vec<usize>> {
+		if let Some(order) = self.cached_order(sort) {
+			return order;
+		}
+		let all: Vec<usize> = (0..self.plan.pages.len()).collect();
+		let order = Arc::new(self.sorted(sort, &all));
+		self.sort_cache = Some((self.version, sort.clone(), Arc::clone(&order)));
+		order
+	}
+
+	/// Puts the pages `indices` names (in the order of the plan) in the order `sort` asks for. A
+	/// page that has no value in the column (no such key, `null`, a virtual page's `inputPath`)
+	/// goes last whichever way the column runs; pages that compare equal keep the order of the
+	/// plan.
+	fn sorted(&self, sort: &Sort, indices: &[usize]) -> Vec<usize> {
+		let pages: Vec<&Page> = indices.iter().map(|&i| &self.plan.pages[i]).collect();
+		let input_dir = self
+			.loaded
+			.config
+			.dir
+			.input
+			.trim_end_matches('/')
+			.to_owned();
+		let mut present: Vec<usize> = Vec::new();
+		let mut missing: Vec<usize> = Vec::new();
+		let order = |o: std::cmp::Ordering| if sort.desc { o.reverse() } else { o };
+		// Each page's key is made once, so that a comparison of a pair makes (almost) no string.
+		fn arrange<K>(
+			indices: &[usize],
+			keys: Vec<Option<K>>,
+			present: &mut Vec<usize>,
+			missing: &mut Vec<usize>,
+			cmp: impl Fn(&K, &K) -> std::cmp::Ordering,
+		) {
+			let mut at: Vec<usize> = Vec::new();
+			for (n, key) in keys.iter().enumerate() {
+				if key.is_some() {
+					at.push(n);
+				} else {
+					missing.push(indices[n]);
+				}
+			}
+			natural::sort_stable(&mut at, |&a, &b| match (&keys[a], &keys[b]) {
+				(Some(x), Some(y)) => cmp(x, y),
+				_ => std::cmp::Ordering::Equal,
+			});
+			present.extend(at.into_iter().map(|n| indices[n]));
+		}
+		match &sort.column {
+			SortColumn::Url => {
+				let keys: Vec<Option<natural::Path>> = pages
+					.iter()
+					.map(|p| Some(natural::Path::new(&p.file.url)))
+					.collect();
+				arrange(indices, keys, &mut present, &mut missing, |a, b| {
+					order(natural::path(a, b))
+				});
+			}
+			SortColumn::InputPath => {
+				let keys: Vec<Option<natural::Path>> = pages
+					.iter()
+					.map(|p| {
+						(!p.is_virtual).then(|| {
+							let rel = kd_site::path::relative(&input_dir, &p.file.input_path);
+							natural::Path::new(&format!("/{rel}"))
+						})
+					})
+					.collect();
+				arrange(indices, keys, &mut present, &mut missing, |a, b| {
+					order(natural::path(a, b))
+				});
+			}
+			SortColumn::Virtual => {
+				let keys: Vec<Option<bool>> = pages.iter().map(|p| Some(p.is_virtual)).collect();
+				arrange(indices, keys, &mut present, &mut missing, |a, b| {
+					order(a.cmp(b))
+				});
+			}
+			SortColumn::Meta(key) => {
+				let keys: Vec<Option<natural::Key>> = pages
+					.iter()
+					.map(|p| {
+						let (_, value) = p.meta.iter().find(|(k, _)| k == key)?;
+						match value {
+							Value::Null => None,
+							Value::String(s) => Some(natural::Key::new(s)),
+							other => Some(natural::Key::new(&other.to_json())),
+						}
+					})
+					.collect();
+				arrange(indices, keys, &mut present, &mut missing, |a, b| {
+					order(natural::numerical(a, b))
+				});
+			}
+		}
+		present.extend(missing);
+		present
+	}
+
+	/// A page of rows, as the JSON of RFC §14.2. `query_json` is
+	/// `{ "offset", "limit", "q"?, "sort"?: { "key", "desc"? } }`; `key` is `url`, `inputPath`,
+	/// `virtual` or `meta:<key>`, and the order is the natural one of `@d-zero/shared` over every
+	/// page that matches, not only the window.
 	/// The plan is not made again; each row of the window reads its page file once (until it
 	/// changes) to tell which keys can be edited, and a query `q` looks through the URL and the
 	/// text values of every page.
@@ -1113,29 +1296,59 @@ impl Ui {
 	/// ```
 	pub fn pages(&mut self, query_json: &str) -> Result<String, String> {
 		let query = parse_query(query_json)?;
-		let matches: Vec<usize> = match &query.q {
-			None => (0..self.plan.pages.len()).collect(),
-			Some(q) => self
-				.plan
-				.pages
-				.iter()
-				.enumerate()
-				.filter(|(_, p)| {
-					p.file.url.to_lowercase().contains(q.as_str())
-						|| p.meta.iter().any(
-							|(_, v)| matches!(v, Value::String(s) if s.to_lowercase().contains(q.as_str())),
-						)
-				})
-				.map(|(i, _)| i)
-				.collect(),
+		let n = self.plan.pages.len();
+		let cut = |total: usize| {
+			let start = query.offset.min(total);
+			(start, start.saturating_add(query.limit).min(total))
 		};
-		let total = matches.len();
-		let start = query.offset.min(total);
-		let end = start.saturating_add(query.limit).min(total);
-		let rows: Vec<Value> = matches[start..end]
-			.iter()
-			.map(|&i| self.page_json(i))
-			.collect();
+		// The pages of the window, and how many pages match. Every page is sorted once for the
+		// plan, and the pages a query keeps are taken in that order, not sorted again for each
+		// query; but when the plan has no such order yet and the query keeps a small part of the
+		// pages, only those are sorted. Where the comparison has a cycle (see `natural`) the two
+		// can differ; no order is promised there.
+		let (total, ids): (usize, Vec<usize>) = match (&query.q, &query.sort) {
+			(None, None) => {
+				let (start, end) = cut(n);
+				(n, (start..end).collect())
+			}
+			(None, Some(sort)) => {
+				let order = self.sorted_all(sort);
+				let (start, end) = cut(n);
+				(n, order[start..end].to_vec())
+			}
+			(Some(q), sort) => {
+				let kept: Vec<usize> = self
+					.plan
+					.pages
+					.iter()
+					.enumerate()
+					.filter(|(_, p)| {
+						p.file.url.to_lowercase().contains(q.as_str())
+							|| p.meta.iter().any(
+								|(_, v)| matches!(v, Value::String(s) if s.to_lowercase().contains(q.as_str())),
+							)
+					})
+					.map(|(i, _)| i)
+					.collect();
+				let kept = match sort {
+					None => kept,
+					Some(sort) => match self.cached_order(sort) {
+						None if kept.len() * SMALL_QUERY_DIVISOR <= n => self.sorted(sort, &kept),
+						cached => {
+							let order = cached.unwrap_or_else(|| self.sorted_all(sort));
+							let mut keep = vec![false; n];
+							for &i in &kept {
+								keep[i] = true;
+							}
+							order.iter().copied().filter(|&i| keep[i]).collect()
+						}
+					},
+				};
+				let (start, end) = cut(kept.len());
+				(kept.len(), kept[start..end].to_vec())
+			}
+		};
+		let rows: Vec<Value> = ids.iter().map(|&i| self.page_json(i)).collect();
 		Ok(Value::Object(vec![
 			("version".to_owned(), Value::Number(self.version as f64)),
 			("total".to_owned(), Value::Number(total as f64)),

@@ -50,12 +50,43 @@ export interface GlobalSettings {
 	readonly locale: Locale;
 }
 
+/** The longest key of a column a sort may name (a name of a metadata key is far shorter). */
+export const MAX_SORT_KEY = 256;
+
+/**
+ * Whether `key` names a column of the screen: `url`, `inputPath`, `virtual` or
+ * `meta:<key>` (RFC section 14.2).
+ * @param key - A column's identifier
+ * @example
+ * ```ts
+ * isSortKey('meta:title'); // true
+ * isSortKey('title'); // false
+ * ```
+ */
+export function isSortKey(key: string): boolean {
+	return (
+		key === 'url' ||
+		key === 'inputPath' ||
+		key === 'virtual' ||
+		(key.startsWith('meta:') && key.length > 'meta:'.length && key.length <= MAX_SORT_KEY)
+	);
+}
+
+/** The column the rows are ordered by, and which way. */
+export interface SortSettings {
+	/** The identifier of the column (see {@link isSortKey}). */
+	readonly key: string;
+	readonly desc: boolean;
+}
+
 /** What is kept for one project. */
 export interface ProjectSettings {
 	/** When it was last saved (ISO 8601), or an empty string if the file did not say. */
 	readonly updatedAt: string;
 	/** Rows of a page of the screen: one of {@link PAGE_SIZES}. */
 	readonly pageSize: number;
+	/** The order of the rows; left out when the rows are in the order of the plan. */
+	readonly sort?: SortSettings;
 }
 
 /** The content of the file. */
@@ -76,7 +107,11 @@ export interface SettingsView {
 /** A change to the settings, as the screen sends it. */
 export interface SettingsPatch {
 	readonly global?: { readonly locale?: Locale };
-	readonly project?: { readonly pageSize?: number };
+	readonly project?: {
+		readonly pageSize?: number;
+		/** `null` puts the rows back in the order of the plan. */
+		readonly sort?: SortSettings | null;
+	};
 }
 
 /**
@@ -193,14 +228,27 @@ function reasonOf(error: unknown): string {
 }
 
 /**
+ * A sort from a parsed value: `undefined` when it is not one.
+ * @param value - A `sort` of an entry or of a patch
+ */
+function readSort(value: unknown): SortSettings | undefined {
+	if (!isRecord(value) || typeof value.key !== 'string' || !isSortKey(value.key)) {
+		return undefined;
+	}
+	return { key: value.key, desc: value.desc === true };
+}
+
+/**
  * The settings of one project from a parsed value.
  * @param value - An entry of `projects`
  */
 function sanitizeProject(value: Record<string, unknown>): ProjectSettings {
 	const size = PAGE_SIZES.find((n) => n === value.pageSize);
+	const sort = readSort(value.sort);
 	return {
 		updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : '',
 		pageSize: size ?? DEFAULT_PAGE_SIZE,
+		...(sort === undefined ? {} : { sort }),
 	};
 }
 
@@ -296,7 +344,10 @@ export function parsePatch(value: unknown): SettingsPatch {
 	if (!isRecord(value)) {
 		throw new Error('the body is not an object');
 	}
-	const patch: { global?: { locale: Locale }; project?: { pageSize: number } } = {};
+	const patch: {
+		global?: { locale: Locale };
+		project?: { pageSize?: number; sort?: SortSettings | null };
+	} = {};
 	if (value.global !== undefined) {
 		if (!isRecord(value.global)) {
 			throw new Error('"global" is not an object');
@@ -314,13 +365,29 @@ export function parsePatch(value: unknown): SettingsPatch {
 		if (!isRecord(value.project)) {
 			throw new Error('"project" is not an object');
 		}
-		const { pageSize } = value.project;
+		const { pageSize, sort } = value.project;
+		const project: { pageSize?: number; sort?: SortSettings | null } = {};
 		if (pageSize !== undefined) {
 			const known = PAGE_SIZES.find((n) => n === pageSize);
 			if (known === undefined) {
 				throw new Error(`"pageSize" is one of ${PAGE_SIZES.join(', ')}`);
 			}
-			patch.project = { pageSize: known };
+			project.pageSize = known;
+		}
+		if (sort !== undefined) {
+			const known = sort === null ? null : readSort(sort);
+			if (known === undefined) {
+				throw new Error(
+					'"sort" is null or { key, desc } of a column: url, inputPath, virtual or meta:<key>',
+				);
+			}
+			if (isRecord(sort) && sort.desc !== undefined && typeof sort.desc !== 'boolean') {
+				throw new Error('"sort.desc" is a boolean');
+			}
+			project.sort = known;
+		}
+		if (Object.keys(project).length > 0) {
+			patch.project = project;
 		}
 	}
 	return patch;
@@ -594,9 +661,14 @@ export function createSettingsStore(file: string, key: string): SettingsStore {
 				};
 				const projects: Record<string, ProjectSettings> = { ...current.projects };
 				if (patch.project !== undefined) {
+					const sort =
+						patch.project.sort === undefined
+							? entry.sort
+							: (patch.project.sort ?? undefined);
 					setOwn(projects, key, {
 						updatedAt: new Date().toISOString(),
 						pageSize: patch.project.pageSize ?? entry.pageSize,
+						...(sort === undefined ? {} : { sort }),
 					});
 				}
 				return {
