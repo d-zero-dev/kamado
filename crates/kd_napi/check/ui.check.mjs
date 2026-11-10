@@ -343,6 +343,165 @@ test('a call that is not one throws', () => {
 	}
 });
 
+test('the editor tells the port and the directories of the config', () => {
+	const site = makeSite();
+	const handle = native().uiOpen(site.config, '{}');
+	try {
+		assert.deepEqual(JSON.parse(native().uiServer(handle)), {
+			port: 3000,
+			open: false,
+			inputDir: path.join(site.root, 'src'),
+			outputDir: path.join(site.root, 'out'),
+		});
+	} finally {
+		native().uiClose(handle);
+	}
+	assert.throws(() => native().uiServer(handle), /no editor/);
+});
+
+test('the editor tells the devServer of the config and the directories as absolute paths', () => {
+	const site = makeSite();
+	writeFileSync(
+		site.config,
+		JSON.stringify({
+			dir: { input: './src/', output: 'out/../out' },
+			build: { cacheDir: '.cache' },
+			devServer: { port: 4321, open: true },
+		}),
+	);
+	const handle = native().uiOpen(site.config, '{}');
+	try {
+		const settings = JSON.parse(native().uiServer(handle));
+		assert.equal(settings.port, 4321);
+		assert.equal(settings.open, true);
+		assert.ok(path.isAbsolute(settings.inputDir), settings.inputDir);
+		assert.ok(path.isAbsolute(settings.outputDir), settings.outputDir);
+		assert.equal(path.resolve(settings.inputDir), path.join(site.root, 'src'));
+		assert.equal(path.resolve(settings.outputDir), path.join(site.root, 'out'));
+	} finally {
+		native().uiClose(handle);
+	}
+});
+
+test('the server of kamado ui answers with what the core says, told without the directories of the machine', async () => {
+	const { createUiApp } = await import(
+		pathToFileURL(path.join(dist, 'ui', 'app.js')).href
+	);
+	const site = makeSite();
+	const handle = native().uiOpen(site.config, '{}');
+	const settings = JSON.parse(native().uiServer(handle));
+	const token = 'a-token-for-the-check';
+	const app = createUiApp(
+		{
+			handle,
+			uiPages: (h, q) => native().uiPages(h, q),
+			uiRefresh: (h) => native().uiRefresh(h),
+			uiEdit: (h, e) => native().uiEdit(h, e),
+		},
+		{
+			uiDir: path.join(site.root, 'no-screen'),
+			token,
+			roots: {
+				rootDir: site.root,
+				inputDir: settings.inputDir,
+				outputDir: settings.outputDir,
+			},
+		},
+	);
+	const get = (url) => app.request(`http://localhost${url}`);
+	const post = (url, body, headers = {}) =>
+		app.request(`http://localhost${url}`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'X-Kamado-Token': token,
+				...headers,
+			},
+			body: JSON.stringify(body),
+		});
+	try {
+		const listed = await get('/api/pages?limit=100');
+		const text = await listed.text();
+		assert.equal(listed.status, 200);
+		assert.ok(!text.includes(site.root), 'an absolute path went to the screen');
+		const rows = JSON.parse(text);
+		// The fields the screen reads (client/src/types.ts) are the fields of the answer.
+		assert.deepEqual(Object.keys(rows).toSorted(), [
+			'columns',
+			'overridesHash',
+			'pages',
+			'total',
+			'version',
+			'warnings',
+		]);
+		const about = rows.pages.find((p) => p.url === '/about/history.html');
+		assert.deepEqual(Object.keys(about).toSorted(), [
+			'depth',
+			'hashes',
+			'inputPath',
+			'meta',
+			'outputPath',
+			'parent',
+			'url',
+			'virtual',
+		]);
+		assert.equal(about.inputPath, 'about/history.html');
+		assert.equal(about.outputPath, 'about/history.html');
+		assert.deepEqual(Object.keys(about.meta.title).toSorted(), [
+			'editable',
+			'origin',
+			'value',
+		]);
+		const virtual = rows.pages.find((p) => p.virtual);
+		assert.equal(virtual.inputPath, null);
+
+		const expect = {
+			input: about.hashes.input,
+			sidecar: about.hashes.sidecar,
+			overrides: rows.overridesHash,
+		};
+		const edited = await post('/api/edit', {
+			url: about.url,
+			expect,
+			change: { op: 'set', key: 'title', value: 'Changed' },
+		});
+		assert.equal(edited.status, 200, await edited.clone().text());
+		assert.match(site.read('src/about/history.html'), /title: Changed/);
+
+		// The same hashes again: the file is not the one they were taken from.
+		const stale = await post('/api/edit', {
+			url: about.url,
+			expect,
+			change: { op: 'set', key: 'title', value: 'Again' },
+		});
+		const conflict = await stale.text();
+		assert.equal(stale.status, 409);
+		assert.ok(!conflict.includes(site.root));
+		const body = JSON.parse(conflict);
+		assert.equal(body.error, 'conflict');
+		assert.equal(body.current.inputPath, 'about/history.html');
+		assert.match(site.read('src/about/history.html'), /title: Changed/);
+
+		const taken = await post('/api/edit', {
+			url: about.url,
+			expect: { ...expect, input: body.current.hashes.input },
+			change: { op: 'moveUrl', url: '/' },
+		});
+		assert.equal(taken.status, 409);
+		const collision = await taken.json();
+		assert.equal(collision.error, 'collision');
+
+		const noToken = await app.request('http://localhost/api/edit', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: '{}',
+		});
+		assert.equal(noToken.status, 403);
+	} finally {
+		native().uiClose(handle);
+	}
+});
+
 test('the dev server finds a page the editor moved, and no longer finds it at its old URL', () => {
 	const site = makeSite();
 	const editor = native().uiOpen(site.config, '{}');

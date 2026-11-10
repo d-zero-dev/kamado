@@ -618,6 +618,19 @@ unsafe fn ui_edit(env: napi_env, info: napi_callback_info) -> napi_value {
 	}
 }
 
+/// `uiServer(handle)` -> `{ "port", "open", "inputDir", "outputDir" }`.
+unsafe fn ui_server(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<1>(
+			env,
+			info,
+			c"uiServer: expected (handle) string",
+			|[handle]| ui::server(&handle).map_err(Thrown::from),
+		)
+	}
+}
+
 /// `uiClose(handle)` -> `{ "warning" }`; forgets the editor.
 unsafe fn ui_close(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
@@ -826,6 +839,7 @@ unsafe fn register(env: napi_env, exports: napi_value) -> napi_value {
 		export_guarded!(api, env, exports, c"uiPages", ui_pages);
 		export_guarded!(api, env, exports, c"uiRefresh", ui_refresh);
 		export_guarded!(api, env, exports, c"uiEdit", ui_edit);
+		export_guarded!(api, env, exports, c"uiServer", ui_server);
 		export_guarded!(api, env, exports, c"uiClose", ui_close);
 		#[cfg(feature = "panic-check")]
 		export_guarded!(api, env, exports, c"panicCheck", panic_check);

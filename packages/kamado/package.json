@@ -16,7 +16,7 @@
 		"node": ">=24.11.0"
 	},
 	"scripts": {
-		"build": "tsc --project tsconfig.build.json",
+		"build": "tsc --project tsconfig.build.json && tsc --project client/tsconfig.json && node ../../scripts/build-ui.mjs",
 		"dev": "tsc --watch --project tsconfig.build.json"
 	},
 	"files": [
@@ -30,6 +30,10 @@
 		"hono": "4.13.16"
 	},
 	"devDependencies": {
-		"@types/node": "26.6.6"
+		"@types/node": "26.6.6",
+		"@types/react": "19.3.0",
+		"@types/react-dom": "19.3.0",
+		"react": "19.3.0",
+		"react-dom": "19.3.0"
 	}
 }

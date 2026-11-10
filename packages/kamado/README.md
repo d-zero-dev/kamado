@@ -45,6 +45,7 @@ kamado build [globs...] [--incremental] [--force] [--skip-unchanged]
                          [--jobs <n|auto>] [--cache-dir <dir>] [-c, --config <file>] [--verbose]
 kamado server           [--cache-dir <dir>] [-c, --config <file>] [--verbose]
 kamado pages            [--out <file>] [--incremental] [--cache-dir <dir>] [-c, --config <file>]
+kamado ui               [--port <n>] [--open | --no-open] [--cache-dir <dir>] [-c, --config <file>]
 kamado --help           (-h)
 ```
 
@@ -52,13 +53,31 @@ kamado --help           (-h)
 - `build`は設定の対象を全部出力する。`globs`を渡すとその入力だけ（相対パスは打った場所からのパス。ディレクトリはその中のすべて。無いファイルと、先頭が`!`の否定はエラー。何も選ばなかったものは警告）。`--incremental`は前回から変わっていないものを飛ばす（`--force`で無視）。`--jobs`は並列度（JSX の描画のワーカーと Rust のスレッドの数）で、`auto`（既定）は使える CPU の数から決める。
 - `pages`は、ビルドせずに全ページの一覧を JSON で書き出す（標準出力か`--out`。相対パスは打った場所からのパス）。1 ページが 1 要素で、URL・入出力のパス・`fileSlug`・`filePathStem`・`extension`・階層（`depth`と、親のディレクトリの`parent`）・仮想ページかどうか・マージ後の`meta`を持つ。ディレクトリマップをスプレッドシートに写すためのもの（形は`docs/v3/RFC.md` §14.1）。入力ファイルのない仮想ページ（`pages.overrides`）は`inputPath`と`extension`が`null`で、`outputPath`は書き出されないがあるはずの場所。`globs`と、読まないフラグ（`--force`・`--jobs`・`--skip-unchanged`・`--verbose`）は、渡すとエラー。`--incremental`は plan cache を読んで更新する。端末には、読み始めと終わり（と、計画の警告があれば`warning: ...`）を標準エラーに出す。
 - `server`はリクエストごとに依存ファイルを stat し、変わっていなければ前回の結果を返す。ファイルは書き出さない。ライブリロードはない。変更したコンポーネントはワーカーを作り直して反映する。応えるのは`localhost`・IP アドレス・`devServer.host`・`devServer.allowedHosts`宛ての要求だけで、別のサイトからの要求は`403`（`docs/v3/RFC.md` §12）。`devServer.host`が`localhost`（既定）なら`127.0.0.1`と`::1`の両方で待ち受ける。
+- `ui`は、ページの URL とメタ（front matter など）をブラウザの表で編集し、元のファイルへ書き戻す。ページを表示するものではなく、ビルドも描画もしない（詳しくは下の「`kamado ui`」）。`globs`と、読まないフラグ（`--out`・`--force`・`--jobs`・`--skip-unchanged`・`--incremental`・`--verbose`）は、渡すとエラー。`--port`と`--open`/`--no-open`は`ui`だけのフラグで、ほかのコマンドに渡すとエラー。
+
+## `kamado ui`
+
+```sh
+kamado ui            # http://localhost:<devServer.port + 1>/ を開く
+kamado ui --port 4000 --no-open
+```
+
+- 待ち受けるのは`localhost`（`127.0.0.1`と`::1`）だけで、ほかのホストや別のサイトからの要求は`403`。LAN に公開する指定は無い。ポートの既定は`devServer.port`に 1 を足したもの、`--open`の既定は`devServer.open`。開発サーバー（`kamado server`）とは別のプロセスで、同時に動かせる。
+- ファイルを書き換える要求（`POST`）は、起動のたびに作る秘密の値（トークン。画面の HTML に入っている）を持つものだけを受ける。画面と、画面が使う API の外からは書けない。
+- 画面は 1 ページ 1 行の表で、1 画面に最大 5,000 行（100・500・1,000・5,000 から選ぶ。ページ送りあり）。検索欄は URL とメタの文字列値に部分一致で絞る。列は固定の`url`・`virtual`・`inputPath`と、メタのキーすべて（キー名の順）。`inputPath`は`dir.input`からの相対パスで見せる。マシンの絶対パスは、画面にも、エラーメッセージにも出さない（設定ファイルの場所、`dir.input`、`dir.output`は`<root>`・`<input>`・`<output>`に置き換える。ほかの場所のパスは置き換えない）。画面の表記は英語で、`<dialog>`・`content-visibility`・ARIA の grid が使える現行のブラウザが要る。
+- キーボードで操作できる（ARIA の grid）。矢印で移動、`Home`/`End`（`Ctrl`で表の端）、`PageUp`/`PageDown`。編集は`Enter`・`F2`・ダブルクリックで始める。保存は`Enter`かセルを出たとき、取り消しは`Escape`。JSON の欄だけは`Ctrl`/`⌘` + `Enter`で保存する。真偽値は`Enter`で反転する。`Delete`はそのキーを消す。
+- 値の編集は BurgerEditor v4 に合わせてある。入力の型は値から決める（真偽値はチェックボックス、数値は数値、`2026-01-02`や`2026-01-02T03:04:05Z`のように全体が日付の文字列は日付（書かれた日にそろえる。時刻は保存すると消える）、配列とオブジェクトは JSON の欄、それ以外と`null`は文字列。`+09:00`の付いた文字列や空白の入った文字列は日付にしない）。開いて何も変えずに閉じたセルは書かない。`null`は空に見え、編集すると文字列になる。数値の欄を空にすると`null`。JSON の欄は、JSON として正しくなるまで保存しない（`5`と書けば数値になる）。`Enter`では、正しくないあいだは編集欄が開いたまま理由を知らせる。正しくないまま（数値の欄で数値でない文字が入ったままも同じ）セルを出ると、保存せずに編集を捨てて、理由を知らせる。日本語入力の変換を確定する`Enter`は、保存にならない。「キーの追加」は名前と型を選ぶ。すでにある名前は無視する。追加した列のセルを編集すると、そのページにキーができる（文字列のキーは、空のままではできない。値を入れる）。
+- URL の欄を編集すると、ページのファイル（と sidecar）を新しい URL の場所へ移す。`outputPathField`で URL が決まるページは、そのキーの値を書き換える。`/a/`を`/b/`にしても、`/a/`の下のページは動かない。編集できないセルは読み取り専用で、理由が付く。規則と一覧は`docs/v3/RFC.md` §14.2。
+- 値は、そのキーを決めているソース（front matter・sidecar `.json`・`pages.overrides`）に書く。キーを消すと、下のソースの値が現れる。`pages.overrides`は、prebuild が毎回作り直す運用では元のデータが正で、`kamado ui`が書いた分は次の prebuild で消える。YAML のアンカー・エイリアス・`<<`を使った front matter は、そのファイルのキーをすべて編集できない。
+- 読み込みは、画面を開いたとき、別のタブから戻ったとき、「Read again」のボタン、URL を変えたあと。ファイルを監視はしない。読んだあとでファイルが変わっていたら、書かずに「別の場所で変更された」と知らせて読み直す。書いた内容は、`kamado server`を再読み込みすれば反映される（開発サーバーは要求のときに一覧を作り直す）。
+- 画面の部品（`packages/kamado/client`）は、パッケージのビルド（`yarn build`）で`dist/ui`にまとまる。`yarn dev`（`tsc --watch`）は画面を作り直さない。
 
 ## プログラムから
 
 ```ts
 import path from 'node:path';
 
-import { build, pages, start } from 'kamado';
+import { build, pages, start, ui } from 'kamado';
 
 // All take the absolute path of the config file, not an object.
 const config = path.resolve('kamado.config.jsonc');
@@ -73,9 +92,16 @@ console.log(map.pages.filter((page) => page.depth <= 2).map((page) => page.url))
 const server = await start(config);
 console.log(server.location);
 await server.close();
+
+// The editor of the pages (what `kamado ui` runs): it listens until it is closed.
+const editor = await ui(config, { open: false });
+console.log(editor.url);
+await editor.close();
 ```
 
-`build()`・`start()`・`pages()`の第 1 引数は、設定ファイルの**絶対パス**（相対パスの基準になるディレクトリが設定ファイルの場所のため）。`pages()`のオプションは`incremental`と`cacheDir`で、`PageMap`（`docs/v3/RFC.md` §14.1）を返す。ファイルには書かない（書くなら`JSON.stringify`して自分で書く）。`build()`のオプションは CLI のフラグと同じ（`incremental`/`force`/`skipUnchanged`/`targets`/`jobs`/`cacheDir`）。`targets`の相対パスは、設定ファイルのディレクトリからのパス（glob とパスの扱いは CLI と同じ。無いファイルは例外、何も選ばなかったものは`report.warnings`）。`report`は各ページの URL・入出力のパス・状態（`built`/`cached`/…）・メタデータを持つ。
+`ui()`のオプションは`port`・`open`・`cacheDir`・`write`（ログの行の出し先）で、`{ url, close() }`を返す。`close()`は待ち受けをやめる（`build.incremental`のときは、plan cache も書く）。
+
+`build()`・`start()`・`pages()`・`ui()`の第 1 引数は、設定ファイルの**絶対パス**（相対パスの基準になるディレクトリが設定ファイルの場所のため）。`pages()`のオプションは`incremental`と`cacheDir`で、`PageMap`（`docs/v3/RFC.md` §14.1）を返す。ファイルには書かない（書くなら`JSON.stringify`して自分で書く）。`build()`のオプションは CLI のフラグと同じ（`incremental`/`force`/`skipUnchanged`/`targets`/`jobs`/`cacheDir`）。`targets`の相対パスは、設定ファイルのディレクトリからのパス（glob とパスの扱いは CLI と同じ。無いファイルは例外、何も選ばなかったものは`report.warnings`）。`report`は各ページの URL・入出力のパス・状態（`built`/`cached`/…）・メタデータを持つ。
 
 ## 対応プラットフォーム
 

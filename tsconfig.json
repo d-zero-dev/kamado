@@ -6,5 +6,12 @@
 		// `await using` emit natively (no downlevel helpers) on Node >=24.11.
 		"target": "ESNext"
 	},
-	"exclude": ["node_modules", "**/*.js", "**/*.mjs", "**/*.cjs", "**/*.d.ts"]
+	"exclude": [
+		"node_modules",
+		"**/*.js",
+		"**/*.mjs",
+		"**/*.cjs",
+		"**/*.d.ts",
+		"packages/kamado/client"
+	]
 }

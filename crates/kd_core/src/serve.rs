@@ -2223,9 +2223,21 @@ mod tests {
 			"pages.overrides.json",
 			OVERRIDES_ONE.replace("/other.html", "/").as_str(),
 		);
-		// No ageing: the file was written within the grain of the modification times.
+		// No ageing: the file was written within the grain of the modification times. Opening
+		// a site takes longer than that grain on a loaded machine (a macOS runner), so the
+		// modification time is put ahead of the plan, by more than opening takes, rather than
+		// left to be "a moment ago": the plan sees a file that has not settled either way.
+		let ahead = Duration::from_millis(600);
+		fs::File::options()
+			.write(true)
+			.open(format!("{}/pages.overrides.json", site.root))
+			.unwrap()
+			.set_modified(std::time::SystemTime::now() + ahead)
+			.unwrap();
 		let serve = site.serve(r#", "pages": { "overrides": "pages.overrides.json" }"#);
-		aged();
+		// Until the grain after that time has passed, so that the read the request makes finds
+		// the file settled.
+		std::thread::sleep(ahead + crate::MTIME_GRAIN * 3);
 
 		assert_eq!(text(serve.request("/").unwrap()).1, "<p>top</p>\n");
 		assert_eq!(
@@ -2291,6 +2303,16 @@ mod tests {
 		serve.finish_render(first.token, "<p>home</p>").unwrap();
 
 		site.write("pages.overrides.json", OVERRIDES_TWO);
+		// Not "a moment ago": a loaded machine can take longer than the grain of the
+		// modification times to get to the plan, and the file would have settled by then. Put
+		// ahead of it, the file has not settled whenever the plan is made.
+		let ahead = Duration::from_millis(600);
+		fs::File::options()
+			.write(true)
+			.open(format!("{}/pages.overrides.json", site.root))
+			.unwrap()
+			.set_modified(std::time::SystemTime::now() + ahead)
+			.unwrap();
 		let again = render(serve.request("/").unwrap());
 
 		assert!(!again.restart);
@@ -2312,7 +2334,7 @@ mod tests {
 		serve.finish_render(again.token, "<p>home</p>").unwrap();
 		// The file was written a moment before that plan: it is read once more when it is
 		// settled, and then not again while it does not change.
-		aged();
+		std::thread::sleep(ahead + crate::MTIME_GRAIN * 3);
 		for _ in 0..3 {
 			assert!(matches!(
 				serve.request("/other.html").unwrap(),

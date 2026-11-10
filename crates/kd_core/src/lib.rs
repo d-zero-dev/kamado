@@ -32,7 +32,7 @@ mod ui;
 
 pub use page_map::pages;
 pub use session::{Prepared, RenderJob, ScriptOutput, build, prepare, write_report};
-pub use ui::Ui;
+pub use ui::{ServerSettings, Ui};
 
 use kd_config::Config;
 use kd_jsonc::Value;

@@ -1,0 +1,217 @@
+:root {
+	color-scheme: light dark;
+	--bg: #fff;
+	--fg: #1b1f24;
+	--muted: #57606a;
+	--line: #d0d7de;
+	--head: #f3f5f7;
+	--accent: #0b57d0;
+	--active-bg: #dbe8ff;
+	--readonly-bg: #f8f9fa;
+	--error: #b3261e;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #14181d;
+		--fg: #e6e9ec;
+		--muted: #9aa4af;
+		--line: #353c44;
+		--head: #1d232a;
+		--accent: #8ab4f8;
+		--active-bg: #26395c;
+		--readonly-bg: #191e24;
+		--error: #f2b8b5;
+	}
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--fg);
+	font:
+		14px/1.4 system-ui,
+		sans-serif;
+}
+
+.app {
+	display: flex;
+	flex-direction: column;
+	height: 100dvh;
+	padding: 0.5rem 1rem;
+}
+
+.bar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 1rem;
+	align-items: end;
+}
+
+.bar h1 {
+	margin: 0;
+	font-size: 1.1rem;
+}
+
+.bar label {
+	display: grid;
+	gap: 0.15rem;
+	font-size: 0.8rem;
+	color: var(--muted);
+}
+
+.pager {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+button,
+input,
+select,
+textarea {
+	font: inherit;
+	color: inherit;
+	background: var(--bg);
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	padding: 0.25rem 0.5rem;
+}
+
+button {
+	cursor: pointer;
+}
+
+button:disabled {
+	cursor: default;
+	opacity: 0.5;
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+.status,
+.problem {
+	margin: 0.25rem 0;
+	min-height: 1.4em;
+}
+
+.status {
+	color: var(--muted);
+}
+
+.problem {
+	color: var(--error);
+}
+
+.warnings {
+	margin-bottom: 0.25rem;
+}
+
+.grid {
+	flex: 1;
+	overflow: auto;
+	border: 1px solid var(--line);
+	position: relative;
+}
+
+.grid:focus-visible {
+	outline-offset: -2px;
+}
+
+.row {
+	display: grid;
+	grid-template-columns: var(--cols);
+	width: max-content;
+	min-width: 100%;
+	border-bottom: 1px solid var(--line);
+	content-visibility: auto;
+	contain-intrinsic-block-size: auto 2.25rem;
+}
+
+.row.head {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: var(--head);
+	content-visibility: visible;
+	font-weight: 600;
+}
+
+.cell {
+	min-height: 2.25rem;
+	padding: 0.45rem 0.5rem;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	border-right: 1px solid var(--line);
+	scroll-margin-top: 2.5rem;
+}
+
+.cell.readonly {
+	background: var(--readonly-bg);
+	color: var(--muted);
+}
+
+.cell.origin-sidecar {
+	border-left: 3px solid var(--accent);
+}
+
+.cell.origin-overrides {
+	border-left: 3px dashed var(--accent);
+}
+
+.cell.active {
+	background: var(--active-bg);
+	outline: 2px solid var(--accent);
+	outline-offset: -2px;
+}
+
+.cell .editor {
+	width: 100%;
+	min-height: 1.6rem;
+	margin: -0.25rem 0;
+	padding: 0.1rem 0.25rem;
+}
+
+.cell textarea.editor {
+	font-family: ui-monospace, monospace;
+	white-space: pre;
+	position: relative;
+	z-index: 2;
+}
+
+.dialog {
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--bg);
+	color: var(--fg);
+}
+
+.dialog form {
+	display: grid;
+	gap: 0.75rem;
+	min-width: 18rem;
+}
+
+.dialog h2 {
+	margin: 0;
+	font-size: 1rem;
+}
+
+.dialog label {
+	display: grid;
+	gap: 0.2rem;
+}
+
+.dialog .actions {
+	display: flex;
+	gap: 0.5rem;
+	justify-content: end;
+}

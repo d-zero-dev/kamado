@@ -37,7 +37,7 @@ export interface RunningServer {
  * failure to open is not a failure of the server.
  * @param location - The URL
  */
-function openBrowser(location: string): void {
+export function openBrowser(location: string): void {
 	const [command, args]: [string, string[]] =
 		process.platform === 'darwin'
 			? ['open', [location]]

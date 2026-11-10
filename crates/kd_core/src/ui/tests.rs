@@ -1459,3 +1459,23 @@ fn the_warnings_of_the_plan_are_in_the_rows() {
 	assert!(!warnings.is_empty(), "{rows:?}");
 	assert!(warnings[0].as_str().unwrap().contains("same.html"));
 }
+
+#[test]
+fn the_server_settings_are_the_devserver_and_the_directories_of_the_config() {
+	let site = Site::new("server_settings");
+	let ui = site.open(r#", "devServer": { "port": 4321, "open": true }"#);
+	let settings = ui.server();
+	assert_eq!(settings.port, 4321);
+	assert!(settings.open);
+	assert_eq!(settings.input_dir, format!("{}/src", site.root));
+	assert_eq!(settings.output_dir, format!("{}/out", site.root));
+}
+
+#[test]
+fn the_server_settings_have_the_defaults_of_the_config() {
+	let site = Site::new("server_defaults");
+	let ui = site.open("");
+	let settings = ui.server();
+	assert_eq!(settings.port, 3000);
+	assert!(!settings.open);
+}

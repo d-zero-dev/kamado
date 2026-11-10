@@ -554,9 +554,11 @@ uiOpen(configPath, optionsJson)    → handle         optionsJson: { cacheDir?, 
 uiPages(handle, queryJson)         → JSON           queryJson:   { offset, limit, q? }
 uiRefresh(handle)                  → { version }
 uiEdit(handle, editJson)           → JSON
+uiServer(handle)                   → { port, open, inputDir, outputDir }
 uiClose(handle)                    → { warning }
 ```
 
+- `uiServer`は、`kamado ui`が待ち受けと表示に使う設定の値を返す。`port`と`open`は`devServer.port`と`devServer.open`（`kamado ui`のポートの既定は`port + 1`）、`inputDir`と`outputDir`は`dir.input`と`dir.output`（絶対パス）
 - `uiOpen`は設定を読んで計画し、`Plan`・`pages.overrides`の内容・各ファイルの SHA-256 をハンドルがメモリに持つ。`incremental`（または`build.incremental`）のときは、前回の plan cache（§11）を読んで計画する。plan cache はハンドルがメモリに持ち続け、`uiClose`で、変わっていれば書く（編集のたびには書かない: 編集は何度も行われ、大きなサイトの cache は数十 MB になる。書かなかった分は、編集したファイルの更新時刻が変わっているので、次に読む側がそのファイルを読み直す）。`uiClose`の`warning`は、cache を書けなかったときの理由で、そうでなければ`null`
 - `uiPages`は計画し直さない。窓の各行は、編集できるキーを判断するために、そのページのファイルを（変わるまで 1 回）読む。`q`を渡すと、全ページの URL とメタの文字列値を見て回る。`uiRefresh`は、メモリの plan cache（§11）で計画し直す（ファイルは stat だけ。読めなかったときは、ハンドルは変わらない）
 - `uiPages`の`queryJson`は、`offset`と`limit`（どちらも 0 以上の整数。`limit`に上限は無い）で切り出す。`q`があれば、URL かメタの文字列値（一番上の階層）に`q`を含む（大文字小文字は区別しない）ページだけに絞る。返す JSON は次の形。`total`は絞り込み後の件数。`columns`は、メタのキーの和集合（全ページ。`outputPathField`のキーを除く。キー名のバイト順で、大文字が小文字より前）。`version`は、`uiOpen`で 1 になる。計画を読み直すたびに増える（`uiRefresh`、URL の移動、`conflict`を答えるための読み直し）。キーの編集 1 回ごとにも 1 増える。編集 1 回は、どう計画を読み直しても 1 である。拒否された編集は、`conflict`の読み直しのほかには、増やさない
@@ -598,6 +600,14 @@ uiClose(handle)                    → { warning }
 
 - 結果は`{ "ok": true, "version": …, "overridesHash": …, "page": <pages の 1 要素> }`か、`{ "ok": false, "code": …, "message": "…", "current": <pages の 1 要素> }`。`code`は次のいずれか。`conflict`はファイルが読んだあとに変わったとき。`invalid`は値や URL が受け付けられないとき（§6 の書き方でない、キーが無い、`expect`が足りない、書いた結果が意図どおりに読めない）。`collision`は URL・出力先・移し先がほかと重なるとき。`notEditable`は編集できないもの。`notFound`はその URL のページが無いとき（`current`は付かない）。`io`はファイルの読み書きに失敗したとき（書いたものは取り消してある）。編集の失敗は例外にせず、結果で返す。例外は次のときだけ。設定を読めないとき。計画できないとき。ハンドルが閉じているとき。要求が要求の形でないとき（`url`・`change`が無い、`change.op`が不明、`offset`・`limit`が整数でない、など）
 - 計画できないページが 1 つでもあれば（§4 のリテラルでない`export const meta`、不正な front matter）、`uiOpen`はビルドと同じエラーで失敗する
+
+**画面とサーバー**（`packages/kamado`の`ui()`。コアの API ではなく、Node 側の仕様）
+
+- 待ち受けは`localhost`の 2 つのループバックアドレス（§12 と同じ）だけで、ホストを選ぶフラグは無い。要求を受けるのは`localhost`と IP アドレス宛てだけで、別のサイトからと印の付いた要求は`403`（§12 のガードと同じ規則。サイトの`devServer.allowedHosts`は引き継がない）。`GET /`（画面）、`GET /assets/<name>`、`GET /api/pages?offset&limit&q`（`limit`は 1〜5,000）、`POST /api/refresh`、`POST /api/edit`
+- `GET`と`HEAD`以外の要求は、起動のたびに作る 128 bit 以上の乱数のトークンを`X-Kamado-Token`に持たなければならない（`403`）。`POST`は加えて`Content-Type: application/json`（`charset`付きでもよい。`415`）で、`/api/edit`の本文は 1 MiB 以下（`413`）。トークンは画面の HTML の`<meta name="kamado-token">`にある。すべての答えに`Referrer-Policy: no-referrer`・`X-Content-Type-Options: nosniff`・`Cross-Origin-Resource-Policy: same-origin`と、`Cache-Control: no-store`を付ける。ただし`/assets/`の答えは、プロジェクトのデータを持たず名前が内容で変わらないので、`no-cache`と`ETag`にして、変わっていなければ`304`にする。`GET /`は`default-src 'self'`の CSP も付ける。存在しないルートは`{ "error": "not-found" }`の`404`、コアが例外を投げたときは`{ "error": "failed", "message" }`の`500`
+- 編集の答えは、コアの`code`を HTTP の状態にして返す: `conflict`と`collision`は`409`、`invalid`と`notEditable`は`400`、`notFound`は`404`、`io`は`500`。本文は`{ "error": <code>, "message", "current"? }`
+- ブラウザに絶対パスを渡さない。`inputPath`は`dir.input`から、`outputPath`は`dir.output`からの相対パス（`/`区切り）にし、メッセージと警告の中の設定ファイルのディレクトリ・`dir.input`・`dir.output`は`<root>`・`<input>`・`<output>`に置き換える（ディレクトリの名前が、より長い名前の先頭のときは置き換えない）。`dir.input`の外にあるファイルは、名前だけにする。メタの`reason`も同じ置き換えを通す。この 3 つのディレクトリの外のパスは置き換えない（コアの文面に出ない）。ホームディレクトリやプロジェクトのフォルダ名を、画面に持たせないため
+- 画面は`packages/kamado/client`の React で、パッケージのビルドが`dist/ui`にまとめる（実行時の依存は増えない）。表は ARIA の grid で、1 画面に最大 5,000 行を DOM に置き、画面の外の行は`content-visibility: auto`で描画を省く
 
 ## 15. sitemap
 

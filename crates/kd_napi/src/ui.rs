@@ -76,6 +76,27 @@ pub(crate) fn edit(handle: &str, edit_json: &str) -> Result<String, String> {
 	with(handle, |ui| ui.edit(edit_json))
 }
 
+/// The port and the browser setting of `devServer`, and the input and output directories:
+/// `{ "port", "open", "inputDir", "outputDir" }`.
+pub(crate) fn server(handle: &str) -> Result<String, String> {
+	with(handle, |ui| {
+		let settings = ui.server();
+		Ok(Value::Object(vec![
+			("port".to_owned(), Value::Number(f64::from(settings.port))),
+			("open".to_owned(), Value::Bool(settings.open)),
+			(
+				"inputDir".to_owned(),
+				Value::String(settings.input_dir.to_owned()),
+			),
+			(
+				"outputDir".to_owned(),
+				Value::String(settings.output_dir.to_owned()),
+			),
+		])
+		.to_json())
+	})
+}
+
 /// Forgets the editor, writing the plan cache if it has to be.
 pub(crate) fn close(handle: &str) -> Result<String, String> {
 	let editor = get(handle)?;

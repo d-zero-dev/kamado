@@ -9,16 +9,22 @@ import { parseJobs } from './jobs.js';
 import { checkPagesArguments, pagesCommand } from './pages-command.js';
 import { start } from './server/start.js';
 import { summarize } from './summary.js';
+import { checkUiOnlyFlags } from './ui/arguments.js';
+import { uiCommand } from './ui/command.js';
 
 const USAGE = `Usage:
   kamado build [globs...] [--incremental] [--force] [--skip-unchanged]
                            [--jobs <n|auto>] [--cache-dir <dir>] [--config <file>] [--verbose]
   kamado server           [--config <file>] [--cache-dir <dir>] [--verbose]
   kamado pages            [--out <file>] [--incremental] [--cache-dir <dir>] [--config <file>]
+  kamado ui               [--port <n>] [--open | --no-open] [--cache-dir <dir>] [--config <file>]
 
 The config file defaults to ./kamado.config.jsonc.
 \`pages\` lists every page of the plan as JSON, without building: to the standard output, or
-to --out.`;
+to --out.
+\`ui\` opens a screen in the browser to edit the URLs and the metadata of the pages, and
+writes them back to the source files. It listens on localhost, on the port of devServer plus
+one unless --port says otherwise.`;
 
 /**
  * A progress line on the terminal's error stream, rewritten in place (and
@@ -85,6 +91,9 @@ async function main(argv: readonly string[]): Promise<number> {
 			jobs: { type: 'string' },
 			out: { type: 'string' },
 			'cache-dir': { type: 'string' },
+			port: { type: 'string' },
+			open: { type: 'boolean', default: false },
+			'no-open': { type: 'boolean', default: false },
 			help: { type: 'boolean', short: 'h', default: false },
 		},
 	});
@@ -97,6 +106,12 @@ async function main(argv: readonly string[]): Promise<number> {
 	// for every command, and it must not become a flag that is silently ignored.
 	if ((command === 'build' || command === 'server') && values.out !== undefined) {
 		throw new Error(`${command} does not take --out (only pages writes a file)`);
+	}
+	// `--port` and `--open` are flags of `ui` alone: `parseArgs` takes them for every
+	// command, and `build --port 3000` would otherwise be run with the flag silently ignored.
+	// A command that does not exist is said so by the `default` of the switch, not by a flag.
+	if (command !== 'ui' && ['build', 'server', 'pages'].includes(command)) {
+		checkUiOnlyFlags(command, values);
 	}
 	switch (command) {
 		case 'build': {
@@ -151,6 +166,14 @@ async function main(argv: readonly string[]): Promise<number> {
 						? undefined
 						: path.resolve(process.cwd(), values['cache-dir']),
 			});
+			return 0;
+		}
+		case 'ui': {
+			await uiCommand(rest, values, {
+				cwd: process.cwd(),
+				resolveConfig: () => resolveConfig(values.config),
+			});
+			// The server keeps the process alive, as `server` does.
 			return 0;
 		}
 		default: {
