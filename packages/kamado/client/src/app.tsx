@@ -31,6 +31,15 @@ import {
 	shouldWrite,
 } from './logic/session.js';
 import { createSaver } from './logic/settings-save.js';
+import {
+	ariaSortOf,
+	canSort,
+	columnKey,
+	nextSort,
+	sameSort,
+	sortAfterFailure,
+	type SortState,
+} from './logic/sort.js';
 import { FIELD_KINDS, defaultOf, draftOf, parseDraft } from './logic/value.js';
 
 /**
@@ -130,6 +139,13 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	const [rows, setRows] = useState<Rows | null>(null);
 	const rowsRef = useRef<Rows | null>(null);
 	const [pageSize, setPageSize] = useState<number>(settings.project?.pageSize ?? 500);
+	const [sort, setSort] = useState<SortState | null>(settings.project?.sort ?? null);
+	// The sort the settings file holds. It is saved when the list was read in that order and not
+	// when the header is clicked: a sort the server refuses would be kept, and asked for again
+	// at every start.
+	const savedSort = useRef<SortState | null>(settings.project?.sort ?? null);
+	// The column whose header button is the stop of Tab of the row of headers.
+	const [headerStop, setHeaderStop] = useState(0);
 	const [settingsNote, setSettingsNote] = useState<SettingsNote | null>(() => {
 		if (settingsUnreadable) {
 			return { kind: 'unreadable' };
@@ -138,6 +154,18 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			? null
 			: { kind: 'warning', message: settings.warning };
 	});
+	/**
+	 * Keeps a setting for the next run. A failure is said and does not stop anything: the screen
+	 * works the same, and keeps what was chosen until it is closed. A change that failed is sent
+	 * again with the next one, so the note goes only when what failed is saved.
+	 */
+	const [saver] = useState(() =>
+		createSaver(saveSettings, (failure) =>
+			setSettingsNote(
+				failure === null ? null : { kind: 'notSaved', message: messageOf(failure) },
+			),
+		),
+	);
 	const [page, setPage] = useState(0);
 	const [typed, setTyped] = useState('');
 	const [q, setQ] = useState('');
@@ -210,7 +238,13 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					needRefresh.current = false;
 					await refreshSite();
 				}
-				const result = await fetchRows(page * pageSize, pageSize, q, controller.signal);
+				const result = await fetchRows(
+					page * pageSize,
+					pageSize,
+					q,
+					sort,
+					controller.signal,
+				);
 				if (controller.signal.aborted) {
 					return;
 				}
@@ -228,6 +262,11 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				reading.current = 'ok';
 				loadedAt.current = Date.now();
 				setProblem('');
+				if (!sameSort(sort, savedSort.current)) {
+					// The server took this sort (see `savedSort`).
+					savedSort.current = sort;
+					void saver({ project: { sort } });
+				}
 				const wanted = pendingFocus.current;
 				pendingFocus.current = null;
 				const urls = result.pages.map((p) => p.url);
@@ -243,6 +282,13 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				if (!controller.signal.aborted) {
 					reading.current = 'failed';
 					setProblem(tRef.current('app.listNotRead', { message: messageOf(error) }));
+					if (error instanceof ApiError) {
+						// A sort the server refuses is let go, and the list is read again.
+						const kept = sortAfterFailure(sort, error.code);
+						if (kept !== sort) {
+							setSort(kept);
+						}
+					}
 				}
 			} finally {
 				if (!controller.signal.aborted) {
@@ -251,7 +297,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			}
 		})();
 		return () => controller.abort();
-	}, [page, pageSize, q, tick, commitRows]);
+	}, [page, pageSize, q, sort, tick, commitRows, saver]);
 
 	// The rest of the rows go into the page a chunk at a time, so that typing and scrolling
 	// are not held up by the drawing of five thousand rows.
@@ -352,18 +398,6 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 
 	const focusGrid = () => gridRef.current?.focus();
 
-	/**
-	 * Keeps a setting for the next run. A failure is said and does not stop anything: the screen
-	 * works the same, and keeps what was chosen until it is closed. A change that failed is sent
-	 * again with the next one, so the note goes only when what failed is saved.
-	 */
-	const [saver] = useState(() =>
-		createSaver(saveSettings, (failure) =>
-			setSettingsNote(
-				failure === null ? null : { kind: 'notSaved', message: messageOf(failure) },
-			),
-		),
-	);
 	const remember = (patch: SettingsPatch) => {
 		void saver(patch);
 	};
@@ -536,6 +570,47 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		setEditing(null);
 	};
 
+	/**
+	 * A click on a header: the column goes ascending, then descending, then the rows are in the
+	 * order of the plan again. The first page is shown, as after a search: the place the person
+	 * was at is not in the same rows any more.
+	 * @param key - The identifier of the clicked column
+	 */
+	const changeSort = (key: string) => {
+		const next = nextSort(sort, key);
+		setSort(next);
+		go(0);
+	};
+
+	/**
+	 * The arrow keys, Home and End move the focus among the header buttons: the row of headers is
+	 * a single stop of Tab (the one that had the focus last), however many columns there are.
+	 * @param event - The key pressed in the row of headers
+	 */
+	const moveAmongHeaders = (event: React.KeyboardEvent<HTMLDivElement>) => {
+		if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+			return;
+		}
+		const buttons = [
+			...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+				'button.sort:not(:disabled)',
+			),
+		];
+		const at = buttons.indexOf(event.target as HTMLButtonElement);
+		let next: HTMLButtonElement | undefined;
+		if (event.key === 'Home') {
+			next = buttons[0];
+		} else if (event.key === 'End') {
+			next = buttons.at(-1);
+		} else {
+			next = buttons[at + (event.key === 'ArrowRight' ? 1 : -1)];
+		}
+		if (at >= 0 && next !== undefined) {
+			event.preventDefault();
+			next.focus();
+		}
+	};
+
 	const pages = rows === null ? 1 : pageCount(rows.total, pageSize);
 	const gridTemplate = useMemo(
 		() => `28rem 6rem 24rem ${columns.map(() => '14rem').join(' ')}`.trim(),
@@ -655,12 +730,43 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				onKeyDown={onKeyDown}
 				onClick={onClick}
 				onDoubleClick={onDoubleClick}>
-				<div role="row" aria-rowindex={1} className="row head">
-					{[...FIXED_COLUMNS, ...columns].map((name, col) => (
-						<div key={name} role="columnheader" aria-colindex={col + 1} className="cell">
-							{name}
-						</div>
-					))}
+				<div
+					role="row"
+					aria-rowindex={1}
+					className="row head"
+					onKeyDown={moveAmongHeaders}>
+					{[...FIXED_COLUMNS, ...columns].map((name, col) => {
+						const key = columnKey(name, col < FIXED_COLUMNS.length);
+						const direction = ariaSortOf(sort, key);
+						return (
+							<div
+								key={name}
+								role="columnheader"
+								aria-colindex={col + 1}
+								aria-sort={direction}
+								className="cell">
+								<button
+									type="button"
+									className="sort"
+									// One stop of Tab for the whole row of headers: the one that had the focus
+									// last (the first if that column is gone).
+									tabIndex={col === (headerStop < colCount ? headerStop : 0) ? 0 : -1}
+									onFocus={() => setHeaderStop(col)}
+									disabled={!canSort(key)}
+									title={t('app.sortBy', { name })}
+									onClick={() => changeSort(key)}>
+									{name}
+									<span aria-hidden="true" className="sort-mark">
+										{direction === 'ascending'
+											? '▲'
+											: direction === 'descending'
+												? '▼'
+												: ''}
+									</span>
+								</button>
+							</div>
+						);
+					})}
 				</div>
 				{rows?.pages.slice(0, visible).map((row, index) => (
 					<GridRow

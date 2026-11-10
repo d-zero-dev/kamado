@@ -1,4 +1,7 @@
+import type { SortState } from './logic/sort.js';
 import type { Change, Edited, Row, Rows, SettingsPatch, SettingsView } from './types.js';
+
+import { sortParams } from './logic/sort.js';
 
 /** An answer that was not a success. */
 export class ApiError extends Error {
@@ -70,15 +73,21 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
  * @param offset - The first row
  * @param limit - How many rows
  * @param q - The search, if any
+ * @param sort - The order of the rows, or `null` for the order of the plan
  * @param signal - To drop an answer that is not wanted any more
  */
 export function fetchRows(
 	offset: number,
 	limit: number,
 	q: string,
+	sort: SortState | null,
 	signal?: AbortSignal,
 ): Promise<Rows> {
-	const query = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+	const query = new URLSearchParams({
+		offset: String(offset),
+		limit: String(limit),
+		...sortParams(sort),
+	});
 	if (q !== '') {
 		query.set('q', q);
 	}

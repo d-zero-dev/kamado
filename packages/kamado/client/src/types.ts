@@ -49,7 +49,12 @@ export type Change =
 export interface SettingsView {
 	readonly global: { readonly locale: 'auto' | 'en' | 'ja' };
 	/** This project's settings; `null` before anything was saved. */
-	readonly project: { readonly pageSize: number; readonly updatedAt: string } | null;
+	readonly project: {
+		readonly pageSize: number;
+		readonly updatedAt: string;
+		/** The order of the rows; absent when the rows are in the order of the plan. */
+		readonly sort?: { readonly key: string; readonly desc: boolean };
+	} | null;
 	/** Why the settings file is not used as it is, or `null`. */
 	readonly warning: string | null;
 }
@@ -57,7 +62,11 @@ export interface SettingsView {
 /** What `PUT /api/settings` takes. */
 export interface SettingsPatch {
 	readonly global?: { readonly locale?: 'auto' | 'en' | 'ja' };
-	readonly project?: { readonly pageSize?: number };
+	readonly project?: {
+		readonly pageSize?: number;
+		/** `null` puts the rows back in the order of the plan. */
+		readonly sort?: { readonly key: string; readonly desc: boolean } | null;
+	};
 }
 
 /** What `POST /api/edit` answers when the edit was made. */

@@ -154,6 +154,27 @@ button:disabled {
 	scroll-margin-top: 2.5rem;
 }
 
+/* The header of a column is a button: a click, Enter or Space sorts by the column. It looks like
+   the text of the header, not like a button of the bar. */
+.cell .sort {
+	display: block;
+	width: 100%;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	cursor: pointer;
+}
+
+.cell .sort-mark {
+	margin-left: 0.35rem;
+}
+
 .cell.readonly {
 	background: var(--readonly-bg);
 	color: var(--muted);

@@ -30,7 +30,7 @@ import { setGuard } from '../server/guard.js';
 import { contentTypeOf } from '../server/mime.js';
 
 import { scrub, showPaths } from './paths.js';
-import { parsePatch, SettingsError, type SettingsStore } from './settings.js';
+import { isSortKey, parsePatch, SettingsError, type SettingsStore } from './settings.js';
 
 /** The header the token goes in. */
 export const TOKEN_HEADER = 'X-Kamado-Token';
@@ -125,6 +125,36 @@ function integerOf(value: string | undefined, fallback: number): number | null {
 		return fallback;
 	}
 	return /^\d{1,9}$/.test(value) ? Number(value) : null;
+}
+
+/**
+ * Reads the sort of a request. The column is named by its identifier: `url`, `inputPath`,
+ * `virtual`, or `meta:<key>` (RFC section 14.2). The core takes the same four and says no to
+ * anything else; this says it at the door with a `400` and keeps a long key out of the call.
+ * @param key - The `sort` parameter
+ * @param desc - The `desc` parameter (`true` or `false`)
+ * @returns `undefined` when there is no sort (neither parameter is given, or `sort` is empty
+ * and `desc` is not given), `null` when the parameters are not a sort (a column that is not
+ * one, a `desc` that is not `true` or `false`, or a `desc` with no column)
+ * @example
+ * ```ts
+ * sortFromQuery('meta:title', 'true'); // { key: 'meta:title', desc: true }
+ * sortFromQuery(undefined, undefined); // undefined
+ * sortFromQuery('title', undefined); // null
+ * ```
+ */
+function sortFromQuery(
+	key: string | undefined,
+	desc: string | undefined,
+): { key: string; desc: boolean } | null | undefined {
+	if (desc !== undefined && desc !== 'true' && desc !== 'false') {
+		return null;
+	}
+	if (key === undefined || key === '') {
+		// A direction without a column is not a sort.
+		return desc === undefined ? undefined : null;
+	}
+	return isSortKey(key) ? { key, desc: desc === 'true' } : null;
 }
 
 /**
@@ -243,6 +273,19 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 			);
 		}
 		const q = ctx.req.query('q');
+		const sort = sortFromQuery(ctx.req.query('sort'), ctx.req.query('desc'));
+		if (sort === null) {
+			return ctx.json(
+				{
+					// Told apart from `invalid` (a bad offset or limit): the screen lets go of a
+					// sort that is refused, and must not do so for any other refusal.
+					error: 'invalidSort',
+					message:
+						'sort is url, inputPath, virtual or meta:<key>, and desc is true or false',
+				},
+				400,
+			);
+		}
 		return answer(
 			ctx,
 			() => {
@@ -253,6 +296,7 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 							offset,
 							limit,
 							...(q === undefined || q === '' ? {} : { q }),
+							...(sort === undefined ? {} : { sort }),
 						}),
 					),
 				) as { pages: Page[]; warnings: string[] };
