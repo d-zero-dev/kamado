@@ -14,15 +14,24 @@ import type { Translate } from '../i18n/translate.js';
 
 import { english } from '../i18n/translate.js';
 
-/** The kinds of input a value can be edited with. */
-export type FieldKind = 'text' | 'number' | 'boolean' | 'date' | 'json';
+/**
+ * The kinds of input a value can be edited with. `list` is an array of text, numbers and
+ * booleans, edited item by item; `enum` is a choice among the options that were set for the
+ * column (a value that is not an option can still be shown, and is not changed unless another
+ * is chosen). Both keep their draft as JSON text, as `json` does.
+ */
+export type FieldKind = 'text' | 'number' | 'boolean' | 'date' | 'list' | 'enum' | 'json';
 
-/** The kinds a key can be added as (the same list, in the order of the dialog). */
+/**
+ * The kinds a key can be added as, in the order of the dialog. An enum is not one of them: it is
+ * the kind a column is given (with its options), and a key added as one would have none.
+ */
 export const FIELD_KINDS: readonly FieldKind[] = [
 	'text',
 	'number',
 	'boolean',
 	'date',
+	'list',
 	'json',
 ];
 
@@ -31,13 +40,16 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)?$/;
 
 /**
  * Which input edits a value. A boolean is a checkbox, a number a number input, a string that
- * is a date (`2026-01-02`, `2026-01-02T03:04:05Z`) a date input, an array or an object a JSON
- * text area; anything else, `null` too, is text.
+ * is a date (`2026-01-02`, `2026-01-02T03:04:05Z`) a date input, an array of text, numbers and
+ * booleans (an empty one too) a list, any other array and an object a JSON text area; anything
+ * else, `null` too, is text. An enum is never the kind of a value: a column is given it.
  * @param value - The value of a key
  * @example
  * ```ts
  * kindOf(true); // 'boolean'
  * kindOf('2026-01-02'); // 'date'
+ * kindOf(['a', 1]); // 'list'
+ * kindOf([{ a: 1 }]); // 'json'
  * kindOf(null); // 'text'
  * ```
  */
@@ -54,6 +66,15 @@ export function kindOf(value: unknown): FieldKind {
 		!Number.isNaN(Date.parse(value))
 	) {
 		return 'date';
+	}
+	if (
+		Array.isArray(value) &&
+		value.every(
+			(item) =>
+				typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean',
+		)
+	) {
+		return 'list';
 	}
 	if (typeof value === 'object' && value !== null) {
 		return 'json';
@@ -86,14 +107,16 @@ export function toText(value: unknown): string {
 
 /**
  * The text an input starts with: as {@link toText}, except that a date input takes the date
- * in UTC (what a date input shows is a day, and a time of day is dropped), and a JSON text
- * area takes indented JSON.
+ * in UTC (what a date input shows is a day, and a time of day is dropped), a JSON text area
+ * takes indented JSON, and a list and an enum take JSON in one line (an enum value as JSON
+ * keeps the number 1 and the text "1" apart; a value that is not there is nothing).
  * @param value - The value of a key
  * @param kind - The kind of the input
  * @example
  * ```ts
  * draftOf('2026-01-02T23:00:00Z', 'date'); // '2026-01-02'
  * draftOf({ a: 1 }, 'json'); // '{\n  "a": 1\n}'
+ * draftOf(['a', 1], 'list'); // '["a",1]'
  * ```
  */
 export function draftOf(value: unknown, kind: FieldKind): string {
@@ -106,6 +129,12 @@ export function draftOf(value: unknown, kind: FieldKind): string {
 	if (kind === 'json') {
 		return JSON.stringify(value ?? [], null, 2);
 	}
+	if (kind === 'list') {
+		return JSON.stringify(value ?? []);
+	}
+	if (kind === 'enum') {
+		return value === null || value === undefined ? '' : JSON.stringify(value);
+	}
 	return toText(value);
 }
 
@@ -117,7 +146,9 @@ export type Parsed =
 /**
  * The value a draft is, for the kind of its input. An empty number is `null`; JSON is
  * parsed, and a text that is not JSON is not a value (the input stays open until it is, as
- * in BurgerEditor); a JSON text that is a number or a string makes the value that type.
+ * in BurgerEditor); a JSON text that is a number or a string makes the value that type. A list
+ * and an enum are JSON too, and any JSON is a value for them: the editor of a list can be
+ * turned into the JSON of the value, which may be an array of objects.
  * @param kind - The kind of the input
  * @param draft - The text of the input
  * @param t - Says why a text is not a value, in the language of the screen (English by default)
@@ -142,7 +173,9 @@ export function parseDraft(
 				? { ok: true, value }
 				: { ok: false, reason: t('value.notNumber', { draft }) };
 		}
-		case 'json': {
+		case 'json':
+		case 'list':
+		case 'enum': {
 			try {
 				return { ok: true, value: JSON.parse(draft) as unknown };
 			} catch (error) {
@@ -198,7 +231,8 @@ export function defaultOf(kind: FieldKind, now: Date = new Date()): unknown {
 		case 'date': {
 			return now.toISOString().slice(0, 10);
 		}
-		case 'json': {
+		case 'json':
+		case 'list': {
 			return [];
 		}
 		default: {

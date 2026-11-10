@@ -20,8 +20,23 @@ import { ColumnMenu, type MenuItem } from './column-menu.js';
 import { GridRow } from './grid-row.js';
 import { I18nContext, useI18n } from './i18n/context.js';
 import { resolveLanguage, translator } from './i18n/translate.js';
-import { cellOf, expectOf } from './logic/columns.js';
+import {
+	cellOf,
+	columnHoldsArrays,
+	editKindOf,
+	expectOf,
+	inferredKinds,
+	sameKinds,
+} from './logic/columns.js';
 import { nextCell, pageCount, rangeLabel } from './logic/grid.js';
+import {
+	choicesOf,
+	enumKindOf,
+	kindsPatch,
+	selectedOf,
+	withKind,
+	type KindsSettings,
+} from './logic/kinds.js';
 import {
 	MAX_COLUMN_WIDTH,
 	MIN_COLUMN_WIDTH,
@@ -59,6 +74,7 @@ import {
 	type SortState,
 } from './logic/sort.js';
 import { FIELD_KINDS, defaultOf, draftOf, parseDraft } from './logic/value.js';
+import { OptionsDialog } from './options-dialog.js';
 
 /**
  * Rows put in the page at a time: the first paint is not held up by the rest. 500 rows drew
@@ -219,6 +235,10 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	const [active, setActive] = useState<Position>({ row: 0, col: 0 });
 	const [editing, setEditing] = useState<Editing | null>(null);
 	const [added, setAdded] = useState<ReadonlyMap<string, FieldKind>>(new Map());
+	// The columns that are a choice among options (an enum), and the column whose options are
+	// being edited in the dialog.
+	const [kinds, setKinds] = useState<KindsSettings>(() => settings.project?.kinds ?? {});
+	const [optionsFor, setOptionsFor] = useState<string | null>(null);
 	const [visible, setVisible] = useState(CHUNK);
 	const [status, setStatus] = useState('');
 	const [problem, setProblem] = useState('');
@@ -386,6 +406,20 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		() => columnIds([...(rows?.columns ?? []), ...added.keys()]),
 		[rows?.columns, added],
 	);
+	// The kind of a key for a page that has no value to say it: the kind a key was added as, and
+	// boolean for a key whose values on the screen are booleans (the page then shows an empty box,
+	// and checking it writes `true`).
+	const inferred = useMemo(
+		() => inferredKinds(rows?.pages ?? [], rows?.columns ?? [], added),
+		[rows, added],
+	);
+	// The same map while its content is the same: the rows are memoised on it, and a read that
+	// changes nothing about the kinds must not draw them all again.
+	const hintsRef = useRef(inferred);
+	const hints = sameKinds(hintsRef.current, inferred) ? hintsRef.current : inferred;
+	useLayoutEffect(() => {
+		hintsRef.current = hints;
+	}, [hints]);
 	// Which columns are shown, in what order, and how many are pinned. Not a function of the
 	// widths: the rows are drawn again only when this changes, not while a column is dragged.
 	const { order, pinned } = columnState;
@@ -492,7 +526,8 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			return;
 		}
 		const key = columnName(column);
-		const { cell, kind } = cellOf(row, key, added);
+		const enumKind = enumKindOf(kinds, column);
+		const { cell, kind } = editKindOf(row, key, hints, enumKind);
 		if (cell !== undefined && !cell.editable) {
 			setProblem(t('app.cannotEdit', { key, reason: cell.reason ?? t('app.readOnly') }));
 			return;
@@ -503,13 +538,60 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			return;
 		}
 		setProblem('');
+		const label = t('app.keyLabel', { key, url: row.url });
+		if (kind === 'enum') {
+			const value = cell?.value;
+			setEditing({
+				url: row.url,
+				column,
+				kind,
+				draft: draftOf(value, kind),
+				label,
+				choices: choicesOf(enumKind?.options ?? [], value),
+				selected: selectedOf(value),
+				// Several can be chosen when the value is a list. A page with no value takes the way of
+				// its column: several when some page on this screen holds a list under the key.
+				multiple:
+					Array.isArray(value) ||
+					((value === null || value === undefined) &&
+						columnHoldsArrays(rows?.pages ?? [], key)),
+			});
+			return;
+		}
 		setEditing({
 			url: row.url,
 			column,
 			kind,
 			draft: draftOf(cell === undefined ? defaultOf(kind) : cell.value, kind),
-			label: t('app.keyLabel', { key, url: row.url }),
+			label,
 		});
+	};
+
+	/**
+	 * Puts the kinds of the columns in a new state: the cells are drawn from it, and it is kept for
+	 * the next run (all the kinds, whole).
+	 * @param next - The new kinds
+	 * @param said - What is said of the change, for screen readers
+	 */
+	const changeKinds = (next: KindsSettings, said: string) => {
+		setEditing(null);
+		setKinds(next);
+		remember({ project: { kinds: kindsPatch(next) } });
+		setStatus(said);
+	};
+
+	/**
+	 * The kind of input that edits the cell at a place, or `undefined` when it is not a cell of
+	 * metadata.
+	 * @param at - The cell, by its place in what is shown
+	 */
+	const kindAt = (at: Position): FieldKind | undefined => {
+		const row = rows?.pages[at.row];
+		const column = columns[at.col];
+		if (row === undefined || column === undefined || !column.startsWith('meta:')) {
+			return undefined;
+		}
+		return editKindOf(row, columnName(column), hints, enumKindOf(kinds, column)).kind;
 	};
 
 	const onCommit = (draft: string) => {
@@ -578,6 +660,18 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			}
 			return;
 		}
+		// Space turns a box of booleans over, as clicking on it does; on any other cell it is not ours.
+		if (
+			event.key === ' ' &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.altKey &&
+			kindAt(active) === 'boolean'
+		) {
+			event.preventDefault();
+			startEdit(active);
+			return;
+		}
 		if (event.key === 'Delete') {
 			const row = rows.pages[active.row];
 			const id = columns[active.col];
@@ -625,12 +719,22 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		if (at !== null && editing === null) {
 			setActive(at);
 			focusGrid();
+			// A click on the box of a boolean turns it over (the box is the only part of the cell
+			// that does: a click on the rest of it only gives the cell the focus).
+			if ((event.target as HTMLElement).closest('[data-toggle]') !== null) {
+				startEdit(at);
+			}
 		}
 	};
 
 	const onDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
 		const at = cellAt(event.target);
-		if (at !== null && editing === null) {
+		// The two clicks of a double click on the box have turned it over twice already.
+		if (
+			at !== null &&
+			editing === null &&
+			(event.target as HTMLElement).closest('[data-toggle]') === null
+		) {
 			setActive(at);
 			startEdit(at);
 		}
@@ -779,6 +883,16 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				label: t('column.resetWidth'),
 				disabled: !Object.hasOwn(columnState.widths, id),
 			},
+			// Only a column of metadata has values to choose among.
+			// (and one whose name the settings can keep: the same limit as a sort's column).
+			...(id.startsWith('meta:') && canSort(id)
+				? enumKindOf(kinds, id) === undefined
+					? [{ id: 'kindEnum', label: t('column.kindChoose') }]
+					: [
+							{ id: 'kindEdit', label: t('column.kindEdit') },
+							{ id: 'kindAuto', label: t('column.kindAuto') },
+						]
+				: []),
 		];
 	};
 
@@ -828,6 +942,15 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			}
 			case 'resetWidth': {
 				changeLayout(resetWidth(columnState, id), t('column.widthReset', { name }));
+				break;
+			}
+			case 'kindEnum':
+			case 'kindEdit': {
+				setOptionsFor(id);
+				break;
+			}
+			case 'kindAuto': {
+				changeKinds(withKind(kinds, id, null), t('column.kindCleared', { name }));
 				break;
 			}
 			default: {
@@ -1148,7 +1271,8 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 						ariaIndex={page * pageSize + index + 2}
 						columns={columns}
 						pinnedCount={pinnedCount}
-						addedKinds={added}
+						addedKinds={hints}
+						kinds={kinds}
 						activeCol={active.row === index ? active.col : -1}
 						editing={editing !== null && editing.url === row.url ? editing : null}
 						onCommit={commitStable}
@@ -1170,6 +1294,24 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 						queueMicrotask(focusBack);
 					}}
 					onClose={closeMenu}
+				/>
+			)}
+			{optionsFor !== null && (
+				<OptionsDialog
+					key={optionsFor}
+					column={optionsFor}
+					initial={enumKindOf(kinds, optionsFor)?.options ?? null}
+					kinds={kinds}
+					onSave={(options) =>
+						changeKinds(
+							withKind(kinds, optionsFor, options),
+							t('column.kindSet', {
+								name: columnName(optionsFor),
+								count: options.length,
+							}),
+						)
+					}
+					onClose={() => setOptionsFor(null)}
 				/>
 			)}
 			<AddKeyDialog

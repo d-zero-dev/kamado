@@ -19,7 +19,9 @@ describe('kindOf', () => {
 		['not a date', 'text'],
 		['', 'text'],
 		[null, 'text'],
-		[['a'], 'json'],
+		// Behavior change: an array of text, numbers and booleans is edited as a list, not as JSON
+		[['a'], 'list'],
+		// [['a'], 'json'], // previous
 		[{ a: 1 }, 'json'],
 	] as const)('%j is edited as %s', (value, kind) => {
 		expect(kindOf(value)).toBe(kind);

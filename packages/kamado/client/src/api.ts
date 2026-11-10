@@ -1,5 +1,13 @@
 import type { SortState } from './logic/sort.js';
-import type { Change, Edited, Row, Rows, SettingsPatch, SettingsView } from './types.js';
+import type {
+	Change,
+	Edited,
+	Row,
+	Rows,
+	SettingsPatch,
+	SettingsView,
+	Values,
+} from './types.js';
 
 import { sortParams } from './logic/sort.js';
 
@@ -92,6 +100,21 @@ export function fetchRows(
 		query.set('q', q);
 	}
 	return call<Rows>(`/api/pages?${query.toString()}`, { signal });
+}
+
+/**
+ * The values a metadata key has over every page, most often held first.
+ * @param column - The column (`meta:<key>`)
+ * @param limit - The most values to answer with
+ * @param signal - To drop an answer that is not wanted any more
+ */
+export function fetchValues(
+	column: string,
+	limit: number,
+	signal?: AbortSignal,
+): Promise<Values> {
+	const query = new URLSearchParams({ key: column, limit: String(limit) });
+	return call<Values>(`/api/values?${query.toString()}`, { signal });
 }
 
 /**
