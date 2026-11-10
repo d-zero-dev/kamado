@@ -116,6 +116,8 @@ button:disabled {
 
 .grid {
 	flex: 1;
+	/* A cell moved into view stops after the pinned columns, not under them. */
+	scroll-padding-left: var(--pin-total, 0px);
 	overflow: auto;
 	border: 1px solid var(--line);
 	position: relative;
@@ -154,23 +156,6 @@ button:disabled {
 	scroll-margin-top: 2.5rem;
 }
 
-/* The header of a column is a button: a click, Enter or Space sorts by the column. It looks like
-   the text of the header, not like a button of the bar. */
-.cell .sort {
-	display: block;
-	width: 100%;
-	margin: 0;
-	padding: 0;
-	border: 0;
-	background: none;
-	color: inherit;
-	font: inherit;
-	text-align: left;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	cursor: pointer;
-}
-
 .cell .sort-mark {
 	margin-left: 0.35rem;
 }
@@ -178,6 +163,113 @@ button:disabled {
 .cell.readonly {
 	background: var(--readonly-bg);
 	color: var(--muted);
+}
+
+/* A pinned column sticks to the left edge while the rest scrolls under it (the place it sticks
+   at is `--pin-<place>`, set on the grid). It needs a background of its own, or the cells that
+   scroll under it show through. */
+.cell.pinned {
+	position: sticky;
+	z-index: 2;
+	background: var(--bg);
+}
+
+.cell.pinned.readonly {
+	background: var(--readonly-bg);
+}
+
+.cell.pinned.active {
+	background: var(--active-bg);
+}
+
+.cell.pin-end {
+	border-right: 2px solid var(--muted);
+}
+
+/* The row of headers: a column's name, its menu, and the edge that is dragged to resize it. */
+.row.head .cell {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.row.head .cell.pinned {
+	position: sticky;
+	z-index: 3;
+	background: var(--head);
+}
+
+/* The name of a column: text, which is also what is held to drag the column. */
+.row.head .cell .name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	cursor: grab;
+}
+
+.row.head .cell.drop-target {
+	box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* A column dragged to the right goes after the one it is over. */
+.row.head .cell.drop-target.drop-after {
+	box-shadow: inset -3px 0 0 var(--accent);
+}
+
+.menu-button {
+	flex: none;
+	margin: 0;
+	padding: 0 0.3rem;
+	border: 0;
+	background: none;
+	line-height: 1.2;
+	opacity: 0.75;
+}
+
+.menu-button:hover,
+.menu-button[aria-expanded='true'] {
+	opacity: 1;
+}
+
+.resize-handle {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	width: 6px;
+	cursor: col-resize;
+	touch-action: none;
+}
+
+.resize-handle:hover {
+	background: var(--accent);
+	opacity: 0.4;
+}
+
+.column-menu {
+	position: fixed;
+	z-index: 10;
+	display: grid;
+	min-width: 12rem;
+	padding: 0.25rem;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	background: var(--bg);
+	box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+}
+
+.column-menu button {
+	border: 0;
+	border-radius: 4px;
+	text-align: left;
+	background: none;
+}
+
+.column-menu button:focus-visible,
+.column-menu button:hover:not(:disabled) {
+	background: var(--active-bg);
 }
 
 .cell.origin-sidecar {
