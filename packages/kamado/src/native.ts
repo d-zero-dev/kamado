@@ -77,6 +77,11 @@ export interface Native {
 	 * `{ ok: false, code, message, current? }`. A request that is not one throws.
 	 */
 	uiEdit(handle: string, editJson: string): string;
+	/**
+	 * What the config says that the command serving the editor needs: the result is
+	 * `{ port, open, inputDir, outputDir }` (`devServer.port`, `devServer.open`, `dir.*`).
+	 */
+	uiServer(handle: string): string;
 	/** Forgets an editor; the result is `{ warning }`. */
 	uiClose(handle: string): string;
 }

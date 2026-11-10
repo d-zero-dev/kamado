@@ -1,0 +1,374 @@
+/**
+ * The HTTP side of `kamado ui` (RFC section 14.2). The core edits the files; this module is
+ * the door the browser comes in by: the page of the screen (`GET /`), its files
+ * (`GET /assets/<name>`), and three calls (`GET /api/pages`, `POST /api/refresh`,
+ * `POST /api/edit`) that pass JSON to the editor of the core and its answer back.
+ *
+ * Why a token for every call that is not a GET: the screen writes the source files of the
+ * project, and a page of another site can make a browser send a request to `localhost`. The
+ * guard of the dev server refuses requests the browser marks as cross-site, but it is not
+ * the only line: a request that arrives without those marks (a tool, a `fetch` with `no-cors`
+ * from an old browser) must still not write. The token is made at each start, placed in the
+ * page of the screen (a page of another site cannot read it) and sent back in a header.
+ *
+ * Why only the loopback: there is no `--host`. What is edited is the source of the site.
+ */
+import type { Roots } from './paths.js';
+import type { native } from '../native.js';
+import type { Hono as HonoApp } from 'hono';
+
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
+import path from 'node:path';
+
+import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { etag } from 'hono/etag';
+
+import { setGuard } from '../server/guard.js';
+import { contentTypeOf } from '../server/mime.js';
+
+import { scrub, showPaths } from './paths.js';
+
+/** The header the token goes in. */
+export const TOKEN_HEADER = 'X-Kamado-Token';
+
+/** The most rows a request may ask for (RFC section 14.2: the screen shows 5,000 at most). */
+export const MAX_ROWS = 5000;
+
+/** The largest body of an edit, in bytes. A value of a page's metadata is far smaller. */
+const MAX_BODY = 1024 * 1024;
+
+/** Where the page of the screen has the token (replaced when the page is served). */
+export const TOKEN_PLACEHOLDER = '__KAMADO_TOKEN__';
+
+/** Options of {@link createUiApp}. */
+export interface UiAppOptions {
+	/** The directory of the built screen (`index.html` and `assets/`). */
+	readonly uiDir: string;
+	/** The token the writes must carry. */
+	readonly token: string;
+	/** The directories the paths shown are told from; no absolute path goes to the screen. */
+	readonly roots: Roots;
+}
+
+/** A row, as far as this module reads it. */
+type Page = { readonly inputPath: string | null; readonly outputPath: string };
+
+/**
+ * What the app needs of the editor of the core (see `Native`).
+ */
+export type Editor = Pick<
+	ReturnType<typeof native>,
+	'uiPages' | 'uiRefresh' | 'uiEdit'
+> & {
+	/** The handle of the editor. */
+	readonly handle: string;
+};
+
+/**
+ * The status of the answer to an edit the core refused, by its code.
+ * @param code - `code` of the answer
+ */
+function statusOf(code: string): 400 | 404 | 409 | 500 {
+	switch (code) {
+		case 'conflict':
+		case 'collision': {
+			return 409;
+		}
+		case 'notFound': {
+			return 404;
+		}
+		case 'io': {
+			return 500;
+		}
+		default: {
+			return 400;
+		}
+	}
+}
+
+/**
+ * Whether two strings are equal, in a time that does not depend on where they differ.
+ * @param given - What the request carried
+ * @param expected - The token
+ */
+function sameToken(given: string | undefined, expected: string): boolean {
+	if (given === undefined) {
+		return false;
+	}
+	// Hashed first: `timingSafeEqual` needs equal lengths, and the length of the token is
+	// not a secret worth a branch.
+	const a = createHash('sha256').update(given).digest();
+	const b = createHash('sha256').update(expected).digest();
+	return timingSafeEqual(a, b);
+}
+
+/**
+ * Reads a non-negative integer from a query parameter.
+ * @param value - The parameter, or `undefined`
+ * @param fallback - What an absent parameter is
+ * @returns The integer, or `null` when it is not one
+ */
+function integerOf(value: string | undefined, fallback: number): number | null {
+	if (value === undefined) {
+		return fallback;
+	}
+	return /^\d{1,9}$/.test(value) ? Number(value) : null;
+}
+
+/**
+ * Makes the app of `kamado ui`.
+ * @param editor - The editor of the core
+ * @param options - The directory of the screen, the token, and the directories the paths
+ * are told from
+ * @returns The Hono app
+ * @example
+ * ```ts
+ * const app = createUiApp(
+ * 	{ handle: 'h1', ...native() },
+ * 	{
+ * 		uiDir: '/pkg/dist/ui',
+ * 		token: 'a-long-random-string',
+ * 		roots: { rootDir: '/site', inputDir: '/site/src', outputDir: '/site/htdocs' },
+ * 	},
+ * );
+ * const response = await app.request('/api/pages?limit=100', {
+ * 	headers: { Host: 'localhost' },
+ * });
+ * ```
+ */
+export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
+	const app = new Hono();
+	const { roots } = options;
+	// The site's `allowedHosts` are not carried over: the editor answers on the loopback
+	// names only, whatever the dev server of the site is told to serve.
+	setGuard(app, { host: 'localhost', allowedHosts: [], proxy: {} });
+
+	app.use('*', async (ctx, next) => {
+		await next();
+		// Every answer: what is shown is the source of the project.
+		// The page and the answers hold the source of the project: kept out of every cache. The
+		// bundle and the style sheet hold nothing of it, but their names do not change with
+		// their content, so they are kept and asked about each time (`ETag`, below): a build of
+		// the screen is shown at the next load, and the bundle is not downloaded again.
+		ctx.header(
+			'Cache-Control',
+			ctx.req.path.startsWith('/assets/') ? 'no-cache' : 'no-store',
+		);
+		ctx.header('Referrer-Policy', 'no-referrer');
+		ctx.header('X-Content-Type-Options', 'nosniff');
+		ctx.header('Cross-Origin-Resource-Policy', 'same-origin');
+	});
+
+	app.use('*', async (ctx, next) => {
+		if (ctx.req.method === 'GET' || ctx.req.method === 'HEAD') {
+			return next();
+		}
+		if (!sameToken(ctx.req.header(TOKEN_HEADER), options.token)) {
+			return ctx.json(
+				{ error: 'forbidden', message: 'the token is missing or wrong' },
+				403,
+			);
+		}
+		if (
+			ctx.req.method === 'POST' &&
+			ctx.req.header('content-type')?.split(';')[0]?.trim() !== 'application/json'
+		) {
+			return ctx.json(
+				{ error: 'unsupported', message: 'the body must be application/json' },
+				415,
+			);
+		}
+		return next();
+	});
+
+	app.get('/', async (ctx) => {
+		let html: string;
+		try {
+			html = await readFile(path.join(options.uiDir, 'index.html'), 'utf8');
+		} catch {
+			return ctx.text('The screen of kamado ui is not built (yarn build).', 500);
+		}
+		ctx.header(
+			'Content-Security-Policy',
+			"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+		);
+		return ctx.html(html.replaceAll(TOKEN_PLACEHOLDER, options.token));
+	});
+
+	app.use('/assets/*', etag());
+
+	app.get('/assets/:name', async (ctx) => {
+		const name = ctx.req.param('name');
+		// One file name: no separator, no way up.
+		if (name !== path.basename(name) || name.startsWith('.')) {
+			return ctx.text('Not Found', 404);
+		}
+		const file = path.join(options.uiDir, 'assets', name);
+		try {
+			const info = await stat(file);
+			if (!info.isFile()) {
+				return ctx.text('Not Found', 404);
+			}
+			const body = await readFile(file);
+			return new Response(new Uint8Array(body), {
+				headers: { 'Content-Type': contentTypeOf(file) },
+			});
+		} catch {
+			return ctx.text('Not Found', 404);
+		}
+	});
+
+	app.get('/api/pages', (ctx) => {
+		const offset = integerOf(ctx.req.query('offset'), 0);
+		const limit = integerOf(ctx.req.query('limit'), 100);
+		if (offset === null || limit === null || limit < 1 || limit > MAX_ROWS) {
+			return ctx.json(
+				{
+					error: 'invalid',
+					message: `offset is a number, and limit is a number from 1 to ${MAX_ROWS}`,
+				},
+				400,
+			);
+		}
+		const q = ctx.req.query('q');
+		return answer(
+			ctx,
+			() => {
+				const rows = JSON.parse(
+					editor.uiPages(
+						editor.handle,
+						JSON.stringify({
+							offset,
+							limit,
+							...(q === undefined || q === '' ? {} : { q }),
+						}),
+					),
+				) as { pages: Page[]; warnings: string[] };
+				return {
+					...rows,
+					pages: rows.pages.map((page) => showPaths(page, roots)),
+					warnings: rows.warnings.map((warning) => scrub(warning, roots)),
+				};
+			},
+			roots,
+		);
+	});
+
+	app.post('/api/refresh', (ctx) =>
+		answer(ctx, () => JSON.parse(editor.uiRefresh(editor.handle)) as unknown, roots),
+	);
+
+	app.post(
+		'/api/edit',
+		bodyLimit({
+			maxSize: MAX_BODY,
+			onError: (ctx) =>
+				ctx.json({ error: 'invalid', message: 'the body is too large' }, 413),
+		}),
+		async (ctx) => {
+			let request: unknown;
+			try {
+				request = await ctx.req.json();
+			} catch {
+				return ctx.json({ error: 'invalid', message: 'the body is not JSON' }, 400);
+			}
+			if (!isEditRequest(request)) {
+				return ctx.json(
+					{ error: 'invalid', message: 'the body is not { url, expect, change }' },
+					400,
+				);
+			}
+			let result: {
+				ok: boolean;
+				code?: string;
+				message?: string;
+				page?: Page;
+				current?: Page;
+			};
+			try {
+				result = JSON.parse(
+					editor.uiEdit(editor.handle, JSON.stringify(request)),
+				) as typeof result;
+			} catch (error) {
+				return ctx.json(
+					{
+						error: 'failed',
+						message: scrub(error instanceof Error ? error.message : String(error), roots),
+					},
+					500,
+				);
+			}
+			if (result.ok) {
+				return ctx.json({
+					...result,
+					...(result.page === undefined ? {} : { page: showPaths(result.page, roots) }),
+				});
+			}
+			const code = result.code ?? 'failed';
+			return ctx.json(
+				{
+					error: code,
+					message: scrub(result.message ?? '', roots),
+					...(result.current === undefined
+						? {}
+						: { current: showPaths(result.current, roots) }),
+				},
+				statusOf(code),
+			);
+		},
+	);
+
+	app.notFound((ctx) => ctx.json({ error: 'not-found', message: 'no such route' }, 404));
+	return app;
+}
+
+/**
+ * Whether a parsed body has the parts of an edit request: the shape of the three, not what
+ * is in them (the core checks that, and says why).
+ * @param value - The parsed body
+ */
+function isEditRequest(value: unknown): boolean {
+	if (typeof value !== 'object' || value === null) {
+		return false;
+	}
+	const { url, expect, change } = value as Record<string, unknown>;
+	return (
+		typeof url === 'string' &&
+		typeof expect === 'object' &&
+		expect !== null &&
+		!Array.isArray(expect) &&
+		typeof change === 'object' &&
+		change !== null &&
+		!Array.isArray(change)
+	);
+}
+
+/**
+ * Sends what `run` made as JSON; an error of the core is a 500 with its message (told
+ * without the directories of the machine).
+ * @param ctx - The context
+ * @param ctx.json - Makes the JSON response (the 500 of an error)
+ * @param run - Calls the core
+ * @param roots - The directories the paths are told from
+ */
+function answer(
+	ctx: {
+		json: (data: unknown, status?: 500) => Response;
+	},
+	run: () => unknown,
+	roots: Roots,
+): Response {
+	try {
+		return ctx.json(run());
+	} catch (error) {
+		return ctx.json(
+			{
+				error: 'failed',
+				message: scrub(error instanceof Error ? error.message : String(error), roots),
+			},
+			500,
+		);
+	}
+}
