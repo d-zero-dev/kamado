@@ -209,6 +209,205 @@ fn rows_are_cut_by_offset_and_limit_and_filtered_by_a_query() {
 	assert!(ui.pages("{").is_err());
 }
 
+/// The URLs of the rows of a query, in the order the rows come.
+fn urls_of(ui: &mut Ui, query: &str) -> Vec<String> {
+	let rows = rows(ui, query);
+	let Some(Value::Array(pages)) = rows.get("pages") else {
+		panic!("pages")
+	};
+	pages
+		.iter()
+		.map(|p| p.get("url").and_then(Value::as_str).unwrap().to_owned())
+		.collect()
+}
+
+#[test]
+fn rows_are_sorted_by_the_natural_order_over_every_page_and_not_only_the_window() {
+	let site = Site::new("sort_url");
+	for name in ["page10", "page2", "page1", "Page3", "a/index", "a/b"] {
+		site.write(&format!("src/{name}.html"), "---\ntitle: T\n---\n");
+	}
+	let mut ui = site.open("");
+	let asc = r#"{"offset":0,"limit":100,"sort":{"key":"url"}}"#;
+	assert_eq!(
+		urls_of(&mut ui, asc),
+		[
+			"/a/",
+			"/a/b.html",
+			"/page1.html",
+			"/page2.html",
+			"/Page3.html",
+			"/page10.html"
+		]
+	);
+	let desc = r#"{"offset":0,"limit":100,"sort":{"key":"url","desc":true}}"#;
+	let mut reversed = urls_of(&mut ui, asc);
+	reversed.reverse();
+	assert_eq!(urls_of(&mut ui, desc), reversed);
+	// A window is cut from the sorted pages, not sorted after it is cut.
+	let window = r#"{"offset":2,"limit":2,"sort":{"key":"url"}}"#;
+	assert_eq!(urls_of(&mut ui, window), ["/page1.html", "/page2.html"]);
+	// The same order over the pages a query keeps.
+	let found = r#"{"offset":0,"limit":100,"q":"page","sort":{"key":"url","desc":true}}"#;
+	assert_eq!(
+		urls_of(&mut ui, found),
+		["/page10.html", "/Page3.html", "/page2.html", "/page1.html"]
+	);
+	let by_input = r#"{"offset":0,"limit":100,"sort":{"key":"inputPath"}}"#;
+	assert_eq!(urls_of(&mut ui, by_input).len(), 6);
+}
+
+#[test]
+fn a_page_without_a_value_goes_last_whichever_way_the_column_runs() {
+	let site = Site::new("sort_meta");
+	site.write("src/a.html", "---\norder: 10\n---\n");
+	site.write("src/b.html", "---\norder: 2\n---\n");
+	site.write("src/c.html", "---\ntitle: none\n---\n");
+	site.write("src/d.html", "---\norder: ~\n---\n");
+	site.write("src/e.html", "---\norder: 2\n---\n");
+	let mut ui = site.open("");
+	let asc = r#"{"offset":0,"limit":100,"sort":{"key":"meta:order"}}"#;
+	// `b` and `e` are equal: the plan's order (by URL) is kept.
+	assert_eq!(
+		urls_of(&mut ui, asc),
+		["/b.html", "/e.html", "/a.html", "/c.html", "/d.html"]
+	);
+	let desc = r#"{"offset":0,"limit":100,"sort":{"key":"meta:order","desc":true}}"#;
+	assert_eq!(
+		urls_of(&mut ui, desc),
+		["/a.html", "/b.html", "/e.html", "/c.html", "/d.html"]
+	);
+}
+
+#[test]
+fn the_order_kept_for_a_sort_follows_an_edit_and_a_new_plan() {
+	let site = Site::new("sort_cache");
+	site.write("src/a.html", "---\norder: 1\n---\n");
+	site.write("src/b.html", "---\norder: 2\n---\n");
+	site.write("src/c.html", "---\norder: 3\n---\n");
+	let mut ui = site.open("");
+	let query = r#"{"offset":0,"limit":100,"sort":{"key":"meta:order"}}"#;
+	assert_eq!(urls_of(&mut ui, query), ["/a.html", "/b.html", "/c.html"]);
+	// The same sort again is answered from what was kept: the same rows.
+	assert_eq!(urls_of(&mut ui, query), ["/a.html", "/b.html", "/c.html"]);
+	// An edit changes the version: the order is made again.
+	let all = all(&mut ui);
+	let row = page(&all, "/a.html");
+	let answer = edit(&mut ui, "/a.html", &expect(&all, &row), &set("order", "9"));
+	assert!(ok(&answer));
+	assert_eq!(urls_of(&mut ui, query), ["/b.html", "/c.html", "/a.html"]);
+	// A file changed outside is read in by a refresh, which is a new plan.
+	site.write("src/b.html", "---\norder: 20\n---\n");
+	ui.refresh().unwrap();
+	assert_eq!(urls_of(&mut ui, query), ["/c.html", "/a.html", "/b.html"]);
+	// A query keeps the order of the sort for the pages it keeps.
+	let found = r#"{"offset":0,"limit":100,"q":".html","sort":{"key":"meta:order","desc":true}}"#;
+	assert_eq!(urls_of(&mut ui, found), ["/b.html", "/a.html", "/c.html"]);
+	// And a window is cut from that order.
+	let window = r#"{"offset":1,"limit":1,"q":".html","sort":{"key":"meta:order","desc":true}}"#;
+	assert_eq!(urls_of(&mut ui, window), ["/a.html"]);
+}
+
+#[test]
+fn a_query_that_keeps_few_pages_is_sorted_the_same_with_or_without_the_order_of_every_page() {
+	let site = Site::new("sort_small");
+	for n in [10, 2, 1, 30, 3, 20, 4, 5, 6, 7] {
+		let tag = if n % 10 == 0 { "wanted" } else { "other" };
+		site.write(
+			&format!("src/p{n}.html"),
+			&format!("---\ntitle: {tag}\n---\n"),
+		);
+	}
+	let mut ui = site.open("");
+	// Three of ten pages are kept, which is more than one in eight: the order of every page is
+	// made and the kept pages are taken from it. The answer is the same from the cache.
+	let few = r#"{"offset":0,"limit":100,"q":"wanted","sort":{"key":"url"}}"#;
+	let all = r#"{"offset":0,"limit":100,"sort":{"key":"url"}}"#;
+	let wanted = ["/p10.html", "/p20.html", "/p30.html"];
+	assert_eq!(urls_of(&mut ui, few), wanted);
+	let _ = urls_of(&mut ui, all);
+	assert_eq!(urls_of(&mut ui, few), wanted);
+	// A query that keeps three pages of a hundred and ten is sorted by itself (nothing is cached
+	// for the new version) and gives the same rows, in the other direction.
+	for n in 100..200 {
+		site.write(&format!("src/q{n}.html"), "---\ntitle: filler\n---\n");
+	}
+	ui.refresh().unwrap();
+	let one = r#"{"offset":0,"limit":100,"q":"wanted","sort":{"key":"url","desc":true}}"#;
+	assert_eq!(
+		urls_of(&mut ui, one),
+		["/p30.html", "/p20.html", "/p10.html"]
+	);
+}
+
+#[test]
+fn the_path_columns_and_virtual_are_sorted_with_the_pages_that_have_no_value_last() {
+	let site = Site::new("sort_columns");
+	site.write("src/b.html", "---\ntitle: B\n---\n");
+	site.write("src/z/a.html", "---\ntitle: Z\n---\n");
+	site.write(
+		"pages.overrides.json",
+		r#"{ "version": 1, "pages": [ { "url": "/ext/", "virtual": true, "meta": { "title": "Ext" } } ] }"#,
+	);
+	let mut ui = site.open(r#", "pages": { "overrides": "pages.overrides.json" }"#);
+	let sort = |key: &str, desc: bool| {
+		format!(r#"{{"offset":0,"limit":100,"sort":{{"key":"{key}","desc":{desc}}}}}"#)
+	};
+	// `inputPath` is read from `dir.input` (`/b.html`, `/z/a.html`). The virtual page has no
+	// input path and is last, whichever way the column runs.
+	assert_eq!(
+		urls_of(&mut ui, &sort("inputPath", false)),
+		["/b.html", "/z/a.html", "/ext/"]
+	);
+	assert_eq!(
+		urls_of(&mut ui, &sort("inputPath", true)),
+		["/z/a.html", "/b.html", "/ext/"]
+	);
+	// `virtual`: false before true, and the other way round when descending.
+	let up = urls_of(&mut ui, &sort("virtual", false));
+	assert_eq!(up.last().map(String::as_str), Some("/ext/"));
+	let down = urls_of(&mut ui, &sort("virtual", true));
+	assert_eq!(down.first().map(String::as_str), Some("/ext/"));
+}
+
+#[test]
+fn values_that_are_not_text_are_sorted_by_how_they_are_written() {
+	let site = Site::new("sort_kinds");
+	site.write("src/a.html", "---\nflag: true\n---\n");
+	site.write("src/b.html", "---\nflag: false\n---\n");
+	site.write("src/c.html", "---\nitems: [1, 10]\n---\n");
+	site.write("src/d.html", "---\nitems: [1, 2]\n---\n");
+	let mut ui = site.open("");
+	let flags = r#"{"offset":0,"limit":100,"sort":{"key":"meta:flag"}}"#;
+	assert_eq!(&urls_of(&mut ui, flags)[..2], ["/b.html", "/a.html"]);
+	// The common prefix `[1,` goes first: `2]` before `10]`.
+	let items = r#"{"offset":0,"limit":100,"sort":{"key":"meta:items"}}"#;
+	assert_eq!(&urls_of(&mut ui, items)[..2], ["/d.html", "/c.html"]);
+}
+
+#[test]
+fn a_sort_that_is_not_one_is_an_error() {
+	let site = Site::new("sort_bad");
+	site.write("src/a.html", "---\ntitle: T\n---\n");
+	let mut ui = site.open("");
+	for sort in [
+		r#""url""#,
+		r#"{}"#,
+		r#"{"key":"outputPath"}"#,
+		r#"{"key":"meta:"}"#,
+		r#"{"key":"title"}"#,
+		r#"{"key":"url","desc":"yes"}"#,
+	] {
+		let query = format!(r#"{{"offset":0,"limit":1,"sort":{sort}}}"#);
+		assert!(ui.pages(&query).is_err(), "{sort}");
+	}
+	// `null` is no sort, as no `sort` is.
+	assert!(ui.pages(r#"{"offset":0,"limit":1,"sort":null}"#).is_ok());
+	// A column that no page has is a sort that leaves the plan's order.
+	let none = r#"{"offset":0,"limit":10,"sort":{"key":"meta:nothing"}}"#;
+	assert_eq!(urls_of(&mut ui, none), ["/a.html"]);
+}
+
 #[test]
 fn keys_that_cannot_be_edited_say_why() {
 	let site = Site::new("not_editable");

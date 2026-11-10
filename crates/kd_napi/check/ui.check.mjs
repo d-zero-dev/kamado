@@ -103,6 +103,57 @@ test('the rows say where each value comes from, in the order of the plan', () =>
 	}
 });
 
+test('sort orders every page, with the pages that have no value last either way', () => {
+	const site = makeSite();
+	const handle = native().uiOpen(site.config, '{}');
+	const urls = (sort, extra = {}) =>
+		JSON.parse(
+			native().uiPages(handle, JSON.stringify({ offset: 0, limit: 100, sort, ...extra })),
+		).pages.map((p) => p.url);
+	try {
+		assert.deepEqual(urls({ key: 'url' }), [
+			'/',
+			'/about/',
+			'/about/history.html',
+			'/ext/',
+		]);
+		assert.deepEqual(urls({ key: 'url', desc: true }), [
+			'/ext/',
+			'/about/history.html',
+			'/about/',
+			'/',
+		]);
+		// The virtual page has no input path: it is last, ascending or descending.
+		assert.equal(urls({ key: 'inputPath' }).at(-1), '/ext/');
+		assert.equal(urls({ key: 'inputPath', desc: true }).at(-1), '/ext/');
+		// `virtual`: false before true, and true first when descending.
+		assert.equal(urls({ key: 'virtual' }).at(-1), '/ext/');
+		assert.equal(urls({ key: 'virtual', desc: true })[0], '/ext/');
+		// Only `/about/` has `navHidden`; the others follow in the order of the plan.
+		assert.deepEqual(urls({ key: 'meta:navHidden', desc: true }), [
+			'/about/',
+			'/ext/',
+			'/about/history.html',
+			'/',
+		]);
+		// A window is cut after the sort.
+		assert.deepEqual(urls({ key: 'url' }, { offset: 1, limit: 2 }), [
+			'/about/',
+			'/about/history.html',
+		]);
+		assert.throws(
+			() =>
+				native().uiPages(
+					handle,
+					JSON.stringify({ offset: 0, limit: 1, sort: { key: 'title' } }),
+				),
+			/sort\.key/,
+		);
+	} finally {
+		native().uiClose(handle);
+	}
+});
+
 test('an edit changes the file the value comes from and no other byte', () => {
 	const site = makeSite();
 	const handle = native().uiOpen(site.config, '{}');
