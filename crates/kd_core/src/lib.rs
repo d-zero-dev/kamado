@@ -371,6 +371,45 @@ pub(crate) fn plan_cached(
 	cache: Option<&plan_cache::PlanCache>,
 	found: Option<Vec<String>>,
 ) -> Result<(Plan, Learned), String> {
+	let overrides = read_overrides(config)?;
+	plan_with_overrides(config, threads, cache, found, overrides.as_ref())
+}
+
+/// The page files of the input directory, as paths relative to it: what one walk of it finds
+/// for `pages.files` and `pages.ignore`.
+///
+/// # Errors
+///
+/// A message for an invalid glob or an input directory that cannot be read.
+pub(crate) fn discover_pages(config: &Config) -> Result<Vec<String>, String> {
+	let files = compile_globs(&config.pages.files)?;
+	let ignore = compile_globs(&config.pages.ignore)?;
+	kd_site::discover(&config.dir.input, &files, &ignore)
+		.map_err(|e| format!("cannot read input directory {}: {e}", config.dir.input))
+}
+
+/// Like [`plan_cached`], with `pages.overrides` as the caller read it (`read_overrides`:
+/// `Some` exactly when the config names a file). Why the caller reads it: the dev server keeps
+/// the overrides the plan was made with, and a file read twice (once to keep, once to plan)
+/// may have changed in between, which makes two plans of one.
+///
+/// # Errors
+///
+/// A message for any problem with the plan: an unreadable or invalid page file, a path that is
+/// no output path, an output path that is a source file, a conflict the config does not allow,
+/// an override that matches no page.
+pub(crate) fn plan_with_overrides(
+	config: &Config,
+	threads: usize,
+	cache: Option<&plan_cache::PlanCache>,
+	found: Option<Vec<String>>,
+	overrides: Option<&Overrides>,
+) -> Result<(Plan, Learned), String> {
+	debug_assert_eq!(
+		config.pages.overrides.is_some(),
+		overrides.is_some(),
+		"the overrides are the file the config names"
+	);
 	let dirs = Dirs {
 		input_dir: &config.dir.input,
 		output_dir: &config.dir.output,
@@ -379,12 +418,7 @@ pub(crate) fn plan_cached(
 	let t_plan = std::time::Instant::now();
 	let found = match found {
 		Some(found) => found,
-		None => {
-			let files = compile_globs(&config.pages.files)?;
-			let ignore = compile_globs(&config.pages.ignore)?;
-			kd_site::discover(&config.dir.input, &files, &ignore)
-				.map_err(|e| format!("cannot read input directory {}: {e}", config.dir.input))?
-		}
+		None => discover_pages(config)?,
 	};
 	if std::env::var_os("KD_TIMING").is_some() {
 		eprintln!("    plan: discovered in {}ms", t_plan.elapsed().as_millis());
@@ -515,10 +549,7 @@ pub(crate) fn plan_cached(
 		));
 	}
 
-	if let Some(path) = &config.pages.overrides {
-		let text = fs::read_to_string(path)
-			.map_err(|e| format!("cannot read pages.overrides {path}: {e}"))?;
-		let overrides = Overrides::parse(&text).map_err(|e| format!("{path}: {e}"))?;
+	if let (Some(path), Some(overrides)) = (&config.pages.overrides, overrides) {
 		// Where each page is, by URL (a sheet of tens of thousands of rows against
 		// as many pages must not be a search per row).
 		let mut at: std::collections::HashMap<String, usize> = pages
@@ -696,8 +727,9 @@ pub(crate) struct Reloaded {
 }
 
 /// Reads a page again (the dev server does this when the page's files
-/// changed). The output location is not recomputed: a change of the
-/// `outputPathField` takes a restart.
+/// changed). The output location is not recomputed: a page is somewhere else when its
+/// `outputPathField` changed, which takes the whole page list (two pages may now want the
+/// same output path), so the caller plans again when it sees that the field's value differs.
 ///
 /// # Errors
 ///
