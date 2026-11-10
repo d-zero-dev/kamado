@@ -114,6 +114,21 @@ struct OverridesFile {
 	parsed: Overrides,
 }
 
+/// What the command that serves the editor reads of the config (see [`Ui::server`]). A
+/// struct and not a tuple: the input and the output directory are both strings, and which is
+/// which is not for the order of a tuple to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServerSettings<'a> {
+	/// `devServer.port`
+	pub port: u16,
+	/// `devServer.open`
+	pub open: bool,
+	/// `dir.input`, absolute
+	pub input_dir: &'a str,
+	/// `dir.output`, absolute
+	pub output_dir: &'a str,
+}
+
 /// The editor of the pages of one site.
 pub struct Ui {
 	loaded: Loaded,
@@ -858,6 +873,31 @@ impl Ui {
 	pub fn refresh(&mut self) -> Result<u64, String> {
 		self.plan_again(None)?;
 		Ok(self.version)
+	}
+
+	/// What `devServer` of the config says about the port and the browser, for the command
+	/// that serves the editor: it listens on the port after the dev server's and opens the
+	/// browser when the dev server would. The input and output directories come with them:
+	/// the screen shows the paths of the files from these, and the paths of the machine do
+	/// not leave the process.
+	///
+	/// # Example
+	///
+	/// ```no_run
+	/// let loaded = kd_core::load("/site/kamado.config.jsonc").unwrap();
+	/// let ui = kd_core::Ui::open(loaded, &kd_core::BuildOptions::default()).unwrap();
+	/// let settings = ui.server();
+	/// assert!(settings.port > 0 && settings.input_dir.starts_with('/'));
+	/// ```
+	#[must_use]
+	pub fn server(&self) -> ServerSettings<'_> {
+		let config = &self.loaded.config;
+		ServerSettings {
+			port: config.dev_server.port,
+			open: config.dev_server.open,
+			input_dir: &config.dir.input,
+			output_dir: &config.dir.output,
+		}
 	}
 
 	/// The plan cache is kept in memory while the handle is open; this writes it for the next
