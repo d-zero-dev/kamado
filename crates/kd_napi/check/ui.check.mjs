@@ -342,3 +342,47 @@ test('a call that is not one throws', () => {
 		native().uiClose(handle);
 	}
 });
+
+test('the dev server finds a page the editor moved, and no longer finds it at its old URL', () => {
+	const site = makeSite();
+	const editor = native().uiOpen(site.config, '{}');
+	const server = JSON.parse(
+		native().serveOpen(
+			site.config,
+			JSON.stringify({ serving: true, tzOffsetMinutes: 0 }),
+			'file:///runtime.js',
+		),
+	).handle;
+	const ask = (url) => JSON.parse(native().serveRequest(server, url, '1')).kind;
+	const move = (from, to) => {
+		const rows = JSON.parse(native().uiPages(editor, query));
+		const row = rows.pages.find((p) => p.url === from);
+		return JSON.parse(
+			native().uiEdit(
+				editor,
+				JSON.stringify({
+					url: from,
+					expect: expectOf(rows, row),
+					change: { op: 'moveUrl', url: to },
+				}),
+			),
+		);
+	};
+	try {
+		assert.equal(ask('/about/history.html'), 'text');
+
+		// asked for at the old URL first
+		assert.equal(move('/about/history.html', '/company/history.html').ok, true);
+		assert.equal(ask('/about/history.html'), 'notFound');
+		assert.equal(ask('/company/history.html'), 'text');
+
+		// asked for at the new URL first (a request for a URL that is no page plans nothing)
+		assert.equal(move('/company/history.html', '/news/history.html').ok, true);
+		assert.equal(ask('/favicon.ico'), 'notFound');
+		assert.equal(ask('/news/history.html'), 'text');
+		assert.equal(ask('/company/history.html'), 'notFound');
+	} finally {
+		native().serveClose(server);
+		native().uiClose(editor);
+	}
+});
