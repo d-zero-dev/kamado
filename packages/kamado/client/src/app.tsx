@@ -16,11 +16,31 @@ import {
 } from 'react';
 
 import { ApiError, editPage, fetchRows, refreshSite, saveSettings } from './api.js';
-import { FIXED_COLUMNS, GridRow } from './grid-row.js';
+import { ColumnMenu, type MenuItem } from './column-menu.js';
+import { GridRow } from './grid-row.js';
 import { I18nContext, useI18n } from './i18n/context.js';
 import { resolveLanguage, translator } from './i18n/translate.js';
-import { cellOf, expectOf, metaColumns } from './logic/columns.js';
+import { cellOf, expectOf } from './logic/columns.js';
 import { nextCell, pageCount, rangeLabel } from './logic/grid.js';
+import {
+	MAX_COLUMN_WIDTH,
+	MIN_COLUMN_WIDTH,
+	columnIds,
+	columnName,
+	layoutOf,
+	moveColumn,
+	moveColumnTo,
+	opensMenu,
+	pinColumn,
+	positionOf,
+	resetWidth,
+	resizeColumn,
+	settingsOf,
+	stateOf,
+	unpinColumn,
+	widthOf,
+	type ColumnState,
+} from './logic/layout.js';
 import {
 	applyEdited,
 	createQueue,
@@ -34,8 +54,6 @@ import { createSaver } from './logic/settings-save.js';
 import {
 	ariaSortOf,
 	canSort,
-	columnKey,
-	nextSort,
 	sameSort,
 	sortAfterFailure,
 	type SortState,
@@ -58,6 +76,13 @@ const PAGE_SIZES = [100, 500, 1000, 5000] as const;
 const STALE_MS = 2000;
 /** Rows Page Up and Page Down move: about what a screen of 2.25rem rows shows. */
 const SCREEN_ROWS = 10;
+/** The type a dragged column header carries: it is dropped on another header, and on nothing else. */
+const COLUMN_MIME = 'application/x-kamado-column';
+/**
+ * Pixels the menu entries "Wider" and "Narrower" change a column by: a step that can be seen,
+ * and small enough to fit a column to its text in a few presses.
+ */
+const WIDTH_STEP = 32;
 
 /**
  * The messages of the errors of the server, in words of the screen.
@@ -145,7 +170,28 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	// at every start.
 	const savedSort = useRef<SortState | null>(settings.project?.sort ?? null);
 	// The column whose header button is the stop of Tab of the row of headers.
-	const [headerStop, setHeaderStop] = useState(0);
+	const [headerStop, setHeaderStop] = useState<string | null>(null);
+	const [columnState, setColumnState] = useState<ColumnState>(() =>
+		stateOf(settings.project?.columns),
+	);
+	// The width a column has while its edge is being dragged: kept apart from `columnState` so that
+	// it is saved once, when the drag ends.
+	const [liveWidth, setLiveWidth] = useState<{ id: string; width: number } | null>(null);
+	const [menu, setMenu] = useState<{
+		readonly id: string;
+		readonly anchor: { readonly left: number; readonly bottom: number };
+	} | null>(null);
+	// Where the focus goes back to when the menu is closed by a key: the header button it was
+	// opened from, or the grid.
+	const menuRestore = useRef<HTMLElement | null>(null);
+	const [dragging, setDragging] = useState<string | null>(null);
+	const [dropOn, setDropOn] = useState<string | null>(null);
+	const resize = useRef<{
+		id: string;
+		startX: number;
+		startWidth: number;
+		width: number;
+	} | null>(null);
 	const [settingsNote, setSettingsNote] = useState<SettingsNote | null>(() => {
 		if (settingsUnreadable) {
 			return { kind: 'unreadable' };
@@ -336,11 +382,27 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		}
 	}, [rows]);
 
-	const columns = useMemo(
-		() => metaColumns(rows?.columns ?? [], [...added.keys()]),
+	const known = useMemo(
+		() => columnIds([...(rows?.columns ?? []), ...added.keys()]),
 		[rows?.columns, added],
 	);
-	const colCount = FIXED_COLUMNS.length + columns.length;
+	// Which columns are shown, in what order, and how many are pinned. Not a function of the
+	// widths: the rows are drawn again only when this changes, not while a column is dragged.
+	const { order, pinned } = columnState;
+	const arrangement = useMemo(
+		() => layoutOf(known, { order, pinned, widths: {} }),
+		[known, order, pinned],
+	);
+	const columns = arrangement.shown;
+	const pinnedCount = arrangement.pinnedCount;
+	const colCount = columns.length;
+	// The widths, and where the pinned columns stick, with the width being dragged in.
+	const sized = layoutOf(
+		known,
+		liveWidth === null
+			? columnState
+			: resizeColumn(columnState, liveWidth.id, liveWidth.width),
+	);
 
 	// The cell with the focus stays in view (the grid keeps the focus itself, and names this
 	// cell as the active one).
@@ -411,23 +473,25 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		if (row === undefined) {
 			return;
 		}
-		if (at.col === 0) {
+		const column = columns[at.col];
+		if (column === undefined) {
+			return;
+		}
+		if (column === 'url') {
 			setEditing({
 				url: row.url,
-				col: 0,
+				column,
 				kind: 'text',
 				draft: row.url,
 				label: t('app.urlLabel', { url: row.url }),
 			});
 			return;
 		}
-		const key = columns[at.col - FIXED_COLUMNS.length];
-		if (key === undefined) {
-			setProblem(
-				t('app.cannotEditHere', { name: at.col === 1 ? 'virtual' : 'inputPath' }),
-			);
+		if (!column.startsWith('meta:')) {
+			setProblem(t('app.cannotEditHere', { name: column }));
 			return;
 		}
+		const key = columnName(column);
 		const { cell, kind } = cellOf(row, key, added);
 		if (cell !== undefined && !cell.editable) {
 			setProblem(t('app.cannotEdit', { key, reason: cell.reason ?? t('app.readOnly') }));
@@ -441,7 +505,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		setProblem('');
 		setEditing({
 			url: row.url,
-			col: at.col,
+			column,
 			kind,
 			draft: draftOf(cell === undefined ? defaultOf(kind) : cell.value, kind),
 			label: t('app.keyLabel', { key, url: row.url }),
@@ -461,15 +525,15 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			}
 			return;
 		}
-		if (at.col === 0) {
+		if (at.column === 'url') {
 			if (draft !== row.url) {
 				apply(row.url, { op: 'moveUrl', url: draft }, t('app.moved', { url: draft }));
 			}
 			return;
 		}
-		const key = columns[at.col - FIXED_COLUMNS.length];
+		const key = columnName(at.column);
 		const parsed = parseDraft(at.kind, draft);
-		if (key === undefined || !parsed.ok) {
+		if (!parsed.ok) {
 			return;
 		}
 		const { cell } = cellOf(row, key, added);
@@ -506,9 +570,18 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			startEdit(active);
 			return;
 		}
+		if (opensMenu(event.key, event.altKey, event.shiftKey)) {
+			const id = columns[active.col];
+			if (id !== undefined) {
+				event.preventDefault();
+				openMenu(id, null);
+			}
+			return;
+		}
 		if (event.key === 'Delete') {
 			const row = rows.pages[active.row];
-			const key = columns[active.col - FIXED_COLUMNS.length];
+			const id = columns[active.col];
+			const key = id?.startsWith('meta:') === true ? columnName(id) : undefined;
 			if (row !== undefined && key !== undefined) {
 				const { cell } = cellOf(row, key, added);
 				if (cell === undefined) {
@@ -571,18 +644,6 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	};
 
 	/**
-	 * A click on a header: the column goes ascending, then descending, then the rows are in the
-	 * order of the plan again. The first page is shown, as after a search: the place the person
-	 * was at is not in the same rows any more.
-	 * @param key - The identifier of the clicked column
-	 */
-	const changeSort = (key: string) => {
-		const next = nextSort(sort, key);
-		setSort(next);
-		go(0);
-	};
-
-	/**
 	 * The arrow keys, Home and End move the focus among the header buttons: the row of headers is
 	 * a single stop of Tab (the one that had the focus last), however many columns there are.
 	 * @param event - The key pressed in the row of headers
@@ -593,7 +654,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		}
 		const buttons = [
 			...event.currentTarget.querySelectorAll<HTMLButtonElement>(
-				'button.sort:not(:disabled)',
+				'button.menu-button:not(:disabled)',
 			),
 		];
 		const at = buttons.indexOf(event.target as HTMLButtonElement);
@@ -611,11 +672,250 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		}
 	};
 
-	const pages = rows === null ? 1 : pageCount(rows.total, pageSize);
-	const gridTemplate = useMemo(
-		() => `28rem 6rem 24rem ${columns.map(() => '14rem').join(' ')}`.trim(),
-		[columns],
+	/**
+	 * Puts the layout in a new state: the grid is drawn from it, the person's place in the grid
+	 * follows the column they were in, and it is kept for the next run (the three lists whole).
+	 * @param next - The new state
+	 * @param said - What is said of the change, for screen readers
+	 */
+	const changeLayout = (next: ColumnState, said: string | null) => {
+		const here = columns[active.col];
+		const after = layoutOf(known, next);
+		setEditing(null);
+		setColumnState(next);
+		setActive((prev) => ({
+			row: prev.row,
+			col: Math.max(0, here === undefined ? 0 : after.shown.indexOf(here)),
+		}));
+		remember({ project: { columns: settingsOf(next, known) } });
+		if (said !== null) {
+			setStatus(said);
+		}
+	};
+
+	/**
+	 * Opens the menu of a column under its header.
+	 * @param id - The identifier of the column
+	 * @param restore - The element the focus goes back to when a key closes the menu; the grid when `null`
+	 */
+	const openMenu = (id: string, restore: HTMLElement | null) => {
+		const header = [
+			...(gridRef.current?.querySelectorAll<HTMLElement>('[role="columnheader"]') ?? []),
+		].find((cell) => cell.dataset.column === id);
+		if (header === undefined) {
+			return;
+		}
+		const rect = header.getBoundingClientRect();
+		menuRestore.current = restore;
+		setMenu({ id, anchor: { left: rect.left, bottom: rect.bottom } });
+	};
+
+	const focusBack = useCallback(() => {
+		const back = menuRestore.current;
+		(back?.isConnected === true ? back : gridRef.current)?.focus();
+	}, []);
+
+	const closeMenu = useCallback(
+		(restoreFocus: boolean) => {
+			setMenu(null);
+			if (restoreFocus) {
+				focusBack();
+			}
+		},
+		[focusBack],
 	);
+
+	/**
+	 * What is said when a column was moved.
+	 * @param next - The state after the move
+	 * @param id - The column that was moved
+	 */
+	const movedSaid = (next: ColumnState, id: string) =>
+		t('column.movedTo', {
+			name: columnName(id),
+			position: positionOf(layoutOf(known, next), id) + 1,
+			count: colCount,
+		});
+
+	/**
+	 * What is said when a column was resized.
+	 * @param next - The state after the resize
+	 * @param id - The column that was resized
+	 */
+	const widthSaid = (next: ColumnState, id: string) =>
+		t('column.width', {
+			name: columnName(id),
+			width: widthOf(layoutOf(known, next), id),
+		});
+
+	/**
+	 * The entries of the menu of a column.
+	 * @param id - The identifier of the column
+	 */
+	const menuItems = (id: string): MenuItem[] => {
+		const place = columns.indexOf(id);
+		const isPinned = place < pinnedCount;
+		const first = isPinned ? 0 : pinnedCount;
+		const last = isPinned ? pinnedCount - 1 : colCount - 1;
+		const width = widthOf(sized, id);
+		return [
+			{
+				id: isPinned ? 'unpin' : 'pin',
+				label: t(isPinned ? 'column.unpin' : 'column.pin'),
+			},
+			{ id: 'left', label: t('column.moveLeft'), disabled: place <= first },
+			{ id: 'right', label: t('column.moveRight'), disabled: place >= last },
+			{ id: 'sortAscending', label: t('column.sortAscending'), disabled: !canSort(id) },
+			{ id: 'sortDescending', label: t('column.sortDescending'), disabled: !canSort(id) },
+			{ id: 'sortClear', label: t('column.sortClear'), disabled: sort?.key !== id },
+			{ id: 'wider', label: t('column.wider'), disabled: width >= MAX_COLUMN_WIDTH },
+			{
+				id: 'narrower',
+				label: t('column.narrower'),
+				disabled: width <= MIN_COLUMN_WIDTH,
+			},
+			{
+				id: 'resetWidth',
+				label: t('column.resetWidth'),
+				disabled: !Object.hasOwn(columnState.widths, id),
+			},
+		];
+	};
+
+	/**
+	 * Does what an entry of the menu says.
+	 * @param id - The identifier of the column
+	 * @param action - The id of the entry
+	 */
+	const runMenu = (id: string, action: string) => {
+		const name = columnName(id);
+		switch (action) {
+			case 'pin': {
+				changeLayout(pinColumn(columnState, known, id), t('column.pinned', { name }));
+				break;
+			}
+			case 'unpin': {
+				changeLayout(unpinColumn(columnState, known, id), t('column.unpinned', { name }));
+				break;
+			}
+			case 'left':
+			case 'right': {
+				const next = moveColumn(columnState, known, id, action === 'left' ? -1 : 1);
+				changeLayout(next, movedSaid(next, id));
+				break;
+			}
+			case 'sortAscending':
+			case 'sortDescending': {
+				setSort({ key: id, desc: action === 'sortDescending' });
+				go(0);
+				break;
+			}
+			case 'sortClear': {
+				setSort(null);
+				go(0);
+				break;
+			}
+			case 'wider':
+			case 'narrower': {
+				const current = widthOf(sized, id);
+				const next = resizeColumn(
+					columnState,
+					id,
+					current + (action === 'wider' ? WIDTH_STEP : -WIDTH_STEP),
+				);
+				changeLayout(next, widthSaid(next, id));
+				break;
+			}
+			case 'resetWidth': {
+				changeLayout(resetWidth(columnState, id), t('column.widthReset', { name }));
+				break;
+			}
+			default: {
+				break;
+			}
+		}
+	};
+
+	/**
+	 * The keys of the row of headers: the arrows move among the buttons, and the keys that open a
+	 * menu open the menu of the column.
+	 * @param event - The key pressed in the row of headers
+	 */
+	const onHeaderKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+		if (
+			opensMenu(event.key, event.altKey, event.shiftKey) ||
+			// In the row of headers the arrow down has no other use, so it opens the menu of the
+			// column as it does on any button that has one.
+			(event.key === 'ArrowDown' && !event.ctrlKey && !event.metaKey)
+		) {
+			const cell = (event.target as HTMLElement).closest<HTMLElement>(
+				'[role="columnheader"]',
+			);
+			const id = cell?.dataset.column;
+			if (id !== undefined) {
+				event.preventDefault();
+				openMenu(id, cell?.querySelector<HTMLElement>('button.menu-button') ?? null);
+			}
+			return;
+		}
+		moveAmongHeaders(event);
+	};
+
+	// The width of a column follows the pointer while its edge is dragged, and is kept when the
+	// button is let go.
+	const onResizeDown = (
+		event: React.PointerEvent<HTMLElement>,
+		id: string,
+		width: number,
+	) => {
+		if (event.button !== 0) {
+			return;
+		}
+		// The cell being edited is written first: this press does not move the focus (it is not a
+		// click on anything that takes it), so the input would not be left, and the edit would
+		// be dropped with the redraw. Only an input of a cell is left; the focus of the grid stays.
+		const focused = document.activeElement as HTMLElement | null;
+		if (focused?.matches('input.editor, textarea.editor') === true) {
+			focused.blur();
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		event.currentTarget.setPointerCapture(event.pointerId);
+		resize.current = { id, startX: event.clientX, startWidth: width, width };
+	};
+	const onResizeMove = (event: React.PointerEvent<HTMLElement>) => {
+		const drag = resize.current;
+		if (drag !== null) {
+			drag.width = Math.round(drag.startWidth + event.clientX - drag.startX);
+			setLiveWidth({ id: drag.id, width: drag.width });
+		}
+	};
+	const onResizeEnd = (event: React.PointerEvent<HTMLElement>) => {
+		const drag = resize.current;
+		resize.current = null;
+		setLiveWidth(null);
+		if (drag !== null && event.type === 'pointerup' && drag.width !== drag.startWidth) {
+			const next = resizeColumn(columnState, drag.id, drag.width);
+			// A width held to the range can be the width the column has: nothing changed, so nothing
+			// is saved or said.
+			if (
+				widthOf(layoutOf(known, next), drag.id) !==
+				widthOf(layoutOf(known, columnState), drag.id)
+			) {
+				changeLayout(next, widthSaid(next, drag.id));
+			}
+		}
+	};
+
+	const pages = rows === null ? 1 : pageCount(rows.total, pageSize);
+	const gridStyle = {
+		'--cols': sized.widths.map((width) => `${width}px`).join(' '),
+		// The width the pinned columns take: what a cell that is moved into view must clear.
+		'--pin-total': `${sized.widths.slice(0, pinnedCount).reduce((sum, width) => sum + width, 0)}px`,
+		...Object.fromEntries(
+			sized.lefts.map((left, place) => [`--pin-${place}`, `${left}px`]),
+		),
+	} as React.CSSProperties;
 
 	return (
 		<div className="app">
@@ -726,7 +1026,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				aria-busy={loading}
 				tabIndex={0}
 				className="grid"
-				style={{ '--cols': gridTemplate } as React.CSSProperties}
+				style={gridStyle}
 				onKeyDown={onKeyDown}
 				onClick={onClick}
 				onDoubleClick={onDoubleClick}>
@@ -734,27 +1034,59 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					role="row"
 					aria-rowindex={1}
 					className="row head"
-					onKeyDown={moveAmongHeaders}>
-					{[...FIXED_COLUMNS, ...columns].map((name, col) => {
-						const key = columnKey(name, col < FIXED_COLUMNS.length);
-						const direction = ariaSortOf(sort, key);
+					onKeyDown={onHeaderKeyDown}>
+					{columns.map((id, col) => {
+						const name = columnName(id);
+						const direction = ariaSortOf(sort, id);
+						const isPinned = col < pinnedCount;
+						// A column goes only to a place of its own group: the pinned ones among
+						// themselves, the others among themselves.
+						const droppable =
+							dragging !== null &&
+							dragging !== id &&
+							columns.indexOf(dragging) < pinnedCount === isPinned;
 						return (
 							<div
-								key={name}
+								key={id}
 								role="columnheader"
+								data-column={id}
 								aria-colindex={col + 1}
 								aria-sort={direction}
-								className="cell">
-								<button
-									type="button"
-									className="sort"
-									// One stop of Tab for the whole row of headers: the one that had the focus
-									// last (the first if that column is gone).
-									tabIndex={col === (headerStop < colCount ? headerStop : 0) ? 0 : -1}
-									onFocus={() => setHeaderStop(col)}
-									disabled={!canSort(key)}
-									title={t('app.sortBy', { name })}
-									onClick={() => changeSort(key)}>
+								draggable
+								style={isPinned ? { left: `var(--pin-${col})` } : undefined}
+								className={`cell${isPinned ? ' pinned' : ''}${col === pinnedCount - 1 ? ' pin-end' : ''}${dropOn === id ? ' drop-target' : ''}${dropOn === id && dragging !== null && columns.indexOf(dragging) < col ? ' drop-after' : ''}`}
+								onDragStart={(event) => {
+									// The edge of a column is for resizing, not for moving it.
+									if (resize.current !== null) {
+										event.preventDefault();
+										return;
+									}
+									event.dataTransfer.setData(COLUMN_MIME, id);
+									event.dataTransfer.effectAllowed = 'move';
+									setDragging(id);
+								}}
+								onDragOver={(event) => {
+									if (droppable) {
+										event.preventDefault();
+										event.dataTransfer.dropEffect = 'move';
+										setDropOn(id);
+									}
+								}}
+								onDragLeave={() => setDropOn((on) => (on === id ? null : on))}
+								onDrop={(event) => {
+									event.preventDefault();
+									if (dragging !== null && droppable) {
+										const next = moveColumnTo(columnState, known, dragging, id);
+										changeLayout(next, movedSaid(next, dragging));
+									}
+									setDragging(null);
+									setDropOn(null);
+								}}
+								onDragEnd={() => {
+									setDragging(null);
+									setDropOn(null);
+								}}>
+								<span className="name">
 									{name}
 									<span aria-hidden="true" className="sort-mark">
 										{direction === 'ascending'
@@ -763,7 +1095,47 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 												? '▼'
 												: ''}
 									</span>
+								</span>
+								{/* The one button of a header is its menu: the name is for dragging the column, and a click on
+								    it does nothing (the sort and the rest are chosen in the menu). The button is the single
+								    stop of Tab of the row of headers (the one that had the focus last; the first if that
+								    column is gone), and the arrows move among the buttons. */}
+								<button
+									type="button"
+									className="menu-button"
+									tabIndex={
+										id ===
+										(headerStop !== null && columns.includes(headerStop)
+											? headerStop
+											: columns[0])
+											? 0
+											: -1
+									}
+									onFocus={() => setHeaderStop(id)}
+									aria-haspopup="menu"
+									aria-expanded={menu?.id === id}
+									aria-label={t('column.menu', { name })}
+									onClick={(event) =>
+										menu?.id === id ? closeMenu(true) : openMenu(id, event.currentTarget)
+									}>
+									<span aria-hidden="true">⋮</span>
 								</button>
+								<span
+									aria-hidden="true"
+									className="resize-handle"
+									onPointerDown={(event) =>
+										onResizeDown(event, id, sized.widths[col] ?? 0)
+									}
+									onPointerMove={onResizeMove}
+									onPointerUp={onResizeEnd}
+									onPointerCancel={onResizeEnd}
+									onDoubleClick={() =>
+										changeLayout(
+											resetWidth(columnState, id),
+											t('column.widthReset', { name }),
+										)
+									}
+								/>
 							</div>
 						);
 					})}
@@ -775,6 +1147,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 						index={index}
 						ariaIndex={page * pageSize + index + 2}
 						columns={columns}
+						pinnedCount={pinnedCount}
 						addedKinds={added}
 						activeCol={active.row === index ? active.col : -1}
 						editing={editing !== null && editing.url === row.url ? editing : null}
@@ -784,10 +1157,25 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					/>
 				))}
 			</div>
+			{menu !== null && (
+				<ColumnMenu
+					label={t('column.menu', { name: columnName(menu.id) })}
+					anchor={menu.anchor}
+					items={menuItems(menu.id)}
+					onChoose={(action) => {
+						closeMenu(true);
+						runMenu(menu.id, action);
+						// A column that was moved is moved in the page, and a node that is moved loses
+						// the focus: it is given back once the page has been drawn again.
+						queueMicrotask(focusBack);
+					}}
+					onClose={closeMenu}
+				/>
+			)}
 			<AddKeyDialog
 				dialogRef={dialogRef}
 				onAdd={(name, kind) => {
-					if (columns.includes(name)) {
+					if (columns.includes(`meta:${name}`)) {
 						setStatus(t('app.alreadyColumn', { name }));
 						return;
 					}

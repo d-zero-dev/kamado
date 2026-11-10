@@ -5,6 +5,7 @@
  * again here; `crates/kd_napi/check/ui.check.mjs` reads the real answer through the server and
  * checks it has exactly these fields.
  */
+import type { ColumnSettings } from './logic/layout.js';
 
 /** Where a value is written: the file of the page, its sidecar, or `pages.overrides`. */
 export type Origin = 'inFile' | 'sidecar' | 'overrides';
@@ -54,6 +55,8 @@ export interface SettingsView {
 		readonly updatedAt: string;
 		/** The order of the rows; absent when the rows are in the order of the plan. */
 		readonly sort?: { readonly key: string; readonly desc: boolean };
+		/** The layout of the columns; absent when it has not been changed. */
+		readonly columns?: ColumnSettings;
 	} | null;
 	/** Why the settings file is not used as it is, or `null`. */
 	readonly warning: string | null;
@@ -66,6 +69,8 @@ export interface SettingsPatch {
 		readonly pageSize?: number;
 		/** `null` puts the rows back in the order of the plan. */
 		readonly sort?: { readonly key: string; readonly desc: boolean } | null;
+		/** Replaces the layout as a whole; `null` puts the default back. */
+		readonly columns?: ColumnSettings | null;
 	};
 }
 

@@ -6,16 +6,15 @@ import { memo, useRef, useState } from 'react';
 
 import { useI18n } from './i18n/context.js';
 import { cellOf } from './logic/columns.js';
+import { columnName } from './logic/layout.js';
 import { parseDraft, toText } from './logic/value.js';
-
-/** The columns before the keys of the metadata: the URL, whether the page is virtual, its file. */
-export const FIXED_COLUMNS = ['url', 'virtual', 'inputPath'] as const;
 
 /** The cell being edited. A new object for each edit, so that typing does not make rows redraw. */
 export interface Editing {
 	/** The page the cell is of, by its URL (its place in the list can change under the edit). */
 	readonly url: string;
-	readonly col: number;
+	/** The identifier of the column (`url`, or `meta:<key>`): the column can move under the edit. */
+	readonly column: string;
 	readonly kind: FieldKind;
 	readonly draft: string;
 	/** The name the input has for people who cannot see the column. */
@@ -163,7 +162,10 @@ interface RowProps {
 	readonly index: number;
 	/** The row's place in the whole list, from 1 (the header is row 1 of the grid). */
 	readonly ariaIndex: number;
+	/** The identifiers of the columns, left to right. */
 	readonly columns: readonly string[];
+	/** How many of the first columns are pinned to the left edge. */
+	readonly pinnedCount: number;
 	readonly addedKinds: ReadonlyMap<string, FieldKind>;
 	/** The column that has the focus in this row, or -1 when the focus is in another row. */
 	readonly activeCol: number;
@@ -178,31 +180,26 @@ interface RowProps {
  * The text of a cell and what it says about itself: the origin of a metadata value, or why
  * it cannot be edited.
  * @param row - The row
- * @param col - The column, from 0
- * @param columns - The keys of the metadata
+ * @param column - The identifier of the column
  * @param addedKinds - The kinds of keys added on the screen
  * @param t - Says the words of the cell in the language of the screen
  */
 function describe(
 	row: PageRow,
-	col: number,
-	columns: readonly string[],
+	column: string,
 	addedKinds: ReadonlyMap<string, FieldKind>,
 	t: Translate,
 ): { text: string; readOnly: boolean; note: string | undefined; origin?: string } {
-	if (col === 0) {
+	if (column === 'url') {
 		return { text: row.url, readOnly: false, note: undefined };
 	}
-	if (col === 1) {
+	if (column === 'virtual') {
 		return { text: row.virtual ? t('row.virtual') : '', readOnly: true, note: undefined };
 	}
-	if (col === 2) {
+	if (column === 'inputPath') {
 		return { text: row.inputPath ?? '', readOnly: true, note: undefined };
 	}
-	const key = columns[col - FIXED_COLUMNS.length];
-	if (key === undefined) {
-		return { text: '', readOnly: true, note: undefined };
-	}
+	const key = columnName(column);
 	const { cell } = cellOf(row, key, addedKinds);
 	if (cell === undefined) {
 		return { text: '', readOnly: false, note: undefined };
@@ -227,6 +224,7 @@ export const GridRow = memo(function GridRow({
 	index,
 	ariaIndex,
 	columns,
+	pinnedCount,
 	addedKinds,
 	activeCol,
 	editing,
@@ -236,12 +234,13 @@ export const GridRow = memo(function GridRow({
 }: RowProps) {
 	const { t } = useI18n();
 	const cells = [];
-	for (let col = 0; col < FIXED_COLUMNS.length + columns.length; col++) {
-		const { text, readOnly, note, origin } = describe(row, col, columns, addedKinds, t);
-		const isEditing = editing !== null && editing.col === col;
+	for (const [col, column] of columns.entries()) {
+		const { text, readOnly, note, origin } = describe(row, column, addedKinds, t);
+		const isEditing = editing !== null && editing.column === column;
+		const pinned = col < pinnedCount;
 		cells.push(
 			<div
-				key={col}
+				key={column}
 				role="gridcell"
 				id={`c-${index}-${col}`}
 				data-row={index}
@@ -250,7 +249,10 @@ export const GridRow = memo(function GridRow({
 				aria-readonly={readOnly || undefined}
 				aria-description={readOnly ? note : undefined}
 				title={note ?? (text === '' ? undefined : text)}
-				className={`cell${col === activeCol ? ' active' : ''}${readOnly ? ' readonly' : ''}${origin === undefined ? '' : ` origin-${origin}`}`}>
+				// A pinned cell sticks at the distance the grid sets in `--pin-<place>` (the widths
+				// change while a column is dragged, and the rows are not drawn again for it).
+				style={pinned ? { left: `var(--pin-${col})` } : undefined}
+				className={`cell${pinned ? ' pinned' : ''}${col === pinnedCount - 1 ? ' pin-end' : ''}${col === activeCol ? ' active' : ''}${readOnly ? ' readonly' : ''}${origin === undefined ? '' : ` origin-${origin}`}`}>
 				{isEditing ? (
 					<Editor
 						editing={editing}

@@ -41,7 +41,10 @@ export const MAX_ROWS = 5000;
 /** The largest body of an edit, in bytes. A value of a page's metadata is far smaller. */
 const MAX_BODY = 1024 * 1024;
 
-/** The largest body of a change of the settings: they are a few fields. */
+/**
+ * The largest body of a change of the settings: they are a few fields. The largest of them is
+ * the layout of the columns, whose limit (`MAX_COLUMNS` of `settings.ts`) is set to fit in this.
+ */
 const MAX_SETTINGS_BODY = 64 * 1024;
 
 /** Where the page of the screen has the token (replaced when the page is served). */

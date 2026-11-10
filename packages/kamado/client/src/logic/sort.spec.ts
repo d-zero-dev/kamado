@@ -4,7 +4,6 @@ import {
 	ariaSortOf,
 	canSort,
 	columnKey,
-	nextSort,
 	sameSort,
 	sortAfterFailure,
 	sortParams,
@@ -56,23 +55,6 @@ describe('canSort', () => {
 		expect(canSort('meta:title')).toBe(true);
 		expect(canSort(`meta:${'k'.repeat(251)}`)).toBe(true);
 		expect(canSort(`meta:${'k'.repeat(252)}`)).toBe(false);
-	});
-});
-
-describe('nextSort', () => {
-	test('goes ascending, descending, then back to no sort', () => {
-		const first = nextSort(null, 'url');
-		expect(first).toEqual({ key: 'url', desc: false });
-		const second = nextSort(first, 'url');
-		expect(second).toEqual({ key: 'url', desc: true });
-		expect(nextSort(second, 'url')).toBeNull();
-	});
-
-	test('starts a column that is not the sorted one ascending', () => {
-		expect(nextSort({ key: 'url', desc: true }, 'meta:title')).toEqual({
-			key: 'meta:title',
-			desc: false,
-		});
 	});
 });
 
