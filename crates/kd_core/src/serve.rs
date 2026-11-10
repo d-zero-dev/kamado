@@ -2303,6 +2303,16 @@ mod tests {
 		serve.finish_render(first.token, "<p>home</p>").unwrap();
 
 		site.write("pages.overrides.json", OVERRIDES_TWO);
+		// Not "a moment ago": a loaded machine can take longer than the grain of the
+		// modification times to get to the plan, and the file would have settled by then. Put
+		// ahead of it, the file has not settled whenever the plan is made.
+		let ahead = Duration::from_millis(600);
+		fs::File::options()
+			.write(true)
+			.open(format!("{}/pages.overrides.json", site.root))
+			.unwrap()
+			.set_modified(std::time::SystemTime::now() + ahead)
+			.unwrap();
 		let again = render(serve.request("/").unwrap());
 
 		assert!(!again.restart);
@@ -2324,7 +2334,7 @@ mod tests {
 		serve.finish_render(again.token, "<p>home</p>").unwrap();
 		// The file was written a moment before that plan: it is read once more when it is
 		// settled, and then not again while it does not change.
-		aged();
+		std::thread::sleep(ahead + crate::MTIME_GRAIN * 3);
 		for _ in 0..3 {
 			assert!(matches!(
 				serve.request("/other.html").unwrap(),
