@@ -1,6 +1,7 @@
 import type { ServerType } from '@hono/node-server';
 
 import { randomBytes } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { styleText } from 'node:util';
@@ -12,6 +13,7 @@ import { close as closeServer, listen, listenAddresses } from '../server/listen.
 import { openBrowser } from '../server/start.js';
 
 import { createUiApp } from './app.js';
+import { createSettingsStore, defaultSettingsFile } from './settings.js';
 
 /** Options of {@link ui}. */
 export interface UiOptions {
@@ -32,6 +34,12 @@ export interface UiOptions {
 	 * `dist/ui` of the package; a program has no reason to set it.
 	 */
 	readonly uiDir?: string;
+	/**
+	 * The file the screen keeps its settings in (RFC section 14.2). The default is
+	 * `~/.config/kamado/ui-settings.json` (or the file `KAMADO_UI_SETTINGS` names); a program
+	 * has little reason to set it.
+	 */
+	readonly settingsFile?: string;
 }
 
 /** A running editor. */
@@ -117,6 +125,22 @@ export async function ui(
 			);
 		}
 		open = options.open ?? dev.open;
+		// The project is told by the real path of its config file, as the command line finds it
+		// (a link to the project would otherwise be another project).
+		let project = configPath;
+		try {
+			project = realpathSync(configPath);
+		} catch {
+			// Not there: the editor of the core has failed already, so this is the path as given.
+		}
+		const settingsFile = options.settingsFile ?? defaultSettingsFile();
+		const settings = createSettingsStore(settingsFile, project);
+		const { warning: settingsWarning } = await settings.open();
+		if (settingsWarning !== null) {
+			// The terminal is the owner's: the file is named in full here, and by its name only
+			// on the screen.
+			write(`warning: ${settingsWarning} (${settingsFile})\n`);
+		}
 		const app = createUiApp(
 			{
 				handle,
@@ -127,6 +151,7 @@ export async function ui(
 			{
 				uiDir: options.uiDir ?? UI_DIR,
 				token: randomBytes(32).toString('base64url'),
+				settings,
 				roots: {
 					rootDir: path.dirname(configPath),
 					inputDir: dev.inputDir,

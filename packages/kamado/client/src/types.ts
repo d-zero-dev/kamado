@@ -45,6 +45,21 @@ export type Change =
 	| { readonly op: 'delete'; readonly key: string }
 	| { readonly op: 'moveUrl'; readonly url: string };
 
+/** What `GET /api/settings` answers: the settings of the screen (RFC section 14.2). */
+export interface SettingsView {
+	readonly global: { readonly locale: 'auto' | 'en' | 'ja' };
+	/** This project's settings; `null` before anything was saved. */
+	readonly project: { readonly pageSize: number; readonly updatedAt: string } | null;
+	/** Why the settings file is not used as it is, or `null`. */
+	readonly warning: string | null;
+}
+
+/** What `PUT /api/settings` takes. */
+export interface SettingsPatch {
+	readonly global?: { readonly locale?: 'auto' | 'en' | 'ja' };
+	readonly project?: { readonly pageSize?: number };
+}
+
 /** What `POST /api/edit` answers when the edit was made. */
 export interface Edited {
 	readonly ok: true;
