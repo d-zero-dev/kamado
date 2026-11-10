@@ -18,6 +18,11 @@
  * one was written by a newer kamado that understands it: it is left alone (this one neither
  * reads its entries nor writes), so that an old kamado run once does not undo a new one's work.
  *
+ * Why a field added to an entry does not raise `version`: a kamado that finds a higher version
+ * does not use the file at all, so one new field would make every setting unusable by an older
+ * kamado. The price is that an older kamado drops the field it does not know at its next save
+ * (`sort`, `columns`); the settings are a convenience, and that is the smaller loss.
+ *
  * Nothing here puts a path in a message that can reach the browser: the file is told by its
  * name, the way the rest of the screen's text is told without the directories of the machine.
  */
@@ -79,6 +84,32 @@ export interface SortSettings {
 	readonly desc: boolean;
 }
 
+/**
+ * The narrowest and the widest a column is made, in pixels. The screen writes the same numbers
+ * for itself, as it cannot import this module; `settings-columns.spec.ts` compares the two.
+ */
+export const MIN_COLUMN_WIDTH = 48;
+export const MAX_COLUMN_WIDTH = 2000;
+
+/**
+ * The most columns a list of the settings names. Three lists of this many columns with ordinary
+ * key names fit in the 64 KiB a change of the settings may be (`MAX_SETTINGS_BODY` of
+ * `app.ts`); a limit above what the body can hold would never be reached.
+ */
+export const MAX_COLUMNS = 500;
+
+/**
+ * How the columns are laid out. Every field is left out when the screen has not set it: the
+ * order of the columns, which are pinned (`pinned` left out is the default, the URL; an empty
+ * list is every column unpinned) and the widths of the columns that are not the default width.
+ * The columns are named as a sort names them (see {@link isSortKey}).
+ */
+export interface ColumnSettings {
+	readonly order?: readonly string[];
+	readonly pinned?: readonly string[];
+	readonly widths?: Readonly<Record<string, number>>;
+}
+
 /** What is kept for one project. */
 export interface ProjectSettings {
 	/** When it was last saved (ISO 8601), or an empty string if the file did not say. */
@@ -87,6 +118,8 @@ export interface ProjectSettings {
 	readonly pageSize: number;
 	/** The order of the rows; left out when the rows are in the order of the plan. */
 	readonly sort?: SortSettings;
+	/** The layout of the columns; left out when the screen has not changed it. */
+	readonly columns?: ColumnSettings;
 }
 
 /** The content of the file. */
@@ -111,6 +144,8 @@ export interface SettingsPatch {
 		readonly pageSize?: number;
 		/** `null` puts the rows back in the order of the plan. */
 		readonly sort?: SortSettings | null;
+		/** Replaces the layout of the columns as a whole; `null` puts the default back. */
+		readonly columns?: ColumnSettings | null;
 	};
 }
 
@@ -239,16 +274,70 @@ function readSort(value: unknown): SortSettings | undefined {
 }
 
 /**
+ * Whether a number is a width a column may have.
+ * @param value - Any value
+ */
+function isWidth(value: unknown): value is number {
+	return (
+		typeof value === 'number' &&
+		Number.isInteger(value) &&
+		value >= MIN_COLUMN_WIDTH &&
+		value <= MAX_COLUMN_WIDTH
+	);
+}
+
+/**
+ * The columns of a parsed value, for the file: what is allowed is kept, and the rest is
+ * dropped (the screen never sends it, so it is a file that somebody edited). The change of the
+ * screen is checked strictly by `parseColumns`; the two keep the same rules.
+ * @param value - `columns` of an entry
+ */
+function readColumns(value: unknown): ColumnSettings | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	const list = (items: unknown): string[] | undefined =>
+		Array.isArray(items)
+			? [
+					...new Set(
+						items.filter(
+							(item): item is string => typeof item === 'string' && isSortKey(item),
+						),
+					),
+				].slice(0, MAX_COLUMNS)
+			: undefined;
+	const order = list(value.order);
+	const pinned = list(value.pinned);
+	let widths: Record<string, number> | undefined;
+	if (isRecord(value.widths)) {
+		widths = {};
+		for (const [key, width] of Object.entries(value.widths).slice(0, MAX_COLUMNS)) {
+			if (isSortKey(key) && isWidth(width)) {
+				setOwn(widths, key, width);
+			}
+		}
+	}
+	const columns: ColumnSettings = {
+		...(order === undefined ? {} : { order }),
+		...(pinned === undefined ? {} : { pinned }),
+		...(widths === undefined ? {} : { widths }),
+	};
+	return Object.keys(columns).length === 0 ? undefined : columns;
+}
+
+/**
  * The settings of one project from a parsed value.
  * @param value - An entry of `projects`
  */
 function sanitizeProject(value: Record<string, unknown>): ProjectSettings {
 	const size = PAGE_SIZES.find((n) => n === value.pageSize);
 	const sort = readSort(value.sort);
+	const columns = readColumns(value.columns);
 	return {
 		updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : '',
 		pageSize: size ?? DEFAULT_PAGE_SIZE,
 		...(sort === undefined ? {} : { sort }),
+		...(columns === undefined ? {} : { columns }),
 	};
 }
 
@@ -330,6 +419,63 @@ export async function readSettingsFile(file: string): Promise<ReadResult> {
 }
 
 /**
+ * The columns of a change, checked: a list that is not a list of columns, one that names a column
+ * twice or is longer than the limit, and a width out of range are refused. The file is read
+ * leniently by `readColumns`; the two keep the same rules.
+ * @param value - `columns` of the change
+ * @throws {Error} naming what is not allowed
+ */
+function parseColumns(value: unknown): ColumnSettings | null {
+	if (value === null) {
+		return null;
+	}
+	if (!isRecord(value)) {
+		throw new Error('"columns" is null or an object');
+	}
+	const list = (name: 'order' | 'pinned'): string[] | undefined => {
+		const items = value[name];
+		if (items === undefined) {
+			return undefined;
+		}
+		if (
+			!Array.isArray(items) ||
+			items.length > MAX_COLUMNS ||
+			!items.every((item) => typeof item === 'string' && isSortKey(item)) ||
+			new Set(items).size !== items.length
+		) {
+			throw new Error(
+				`"columns.${name}" is a list of at most ${MAX_COLUMNS} different columns: url, inputPath, virtual or meta:<key>`,
+			);
+		}
+		return items as string[];
+	};
+	const order = list('order');
+	const pinned = list('pinned');
+	let widths: Record<string, number> | undefined;
+	if (value.widths !== undefined) {
+		const entries = isRecord(value.widths) ? Object.entries(value.widths) : undefined;
+		if (
+			entries === undefined ||
+			entries.length > MAX_COLUMNS ||
+			!entries.every(([key, width]) => isSortKey(key) && isWidth(width))
+		) {
+			throw new Error(
+				`"columns.widths" maps at most ${MAX_COLUMNS} columns to a whole number of pixels from ${MIN_COLUMN_WIDTH} to ${MAX_COLUMN_WIDTH}`,
+			);
+		}
+		widths = {};
+		for (const [key, width] of entries) {
+			setOwn(widths, key, width as number);
+		}
+	}
+	return {
+		...(order === undefined ? {} : { order }),
+		...(pinned === undefined ? {} : { pinned }),
+		...(widths === undefined ? {} : { widths }),
+	};
+}
+
+/**
  * The change the screen sent, checked. What is not known is dropped; a value that is of a
  * known field and not allowed is refused (the screen never sends one).
  * @param value - The parsed body
@@ -346,7 +492,11 @@ export function parsePatch(value: unknown): SettingsPatch {
 	}
 	const patch: {
 		global?: { locale: Locale };
-		project?: { pageSize?: number; sort?: SortSettings | null };
+		project?: {
+			pageSize?: number;
+			sort?: SortSettings | null;
+			columns?: ColumnSettings | null;
+		};
 	} = {};
 	if (value.global !== undefined) {
 		if (!isRecord(value.global)) {
@@ -365,8 +515,12 @@ export function parsePatch(value: unknown): SettingsPatch {
 		if (!isRecord(value.project)) {
 			throw new Error('"project" is not an object');
 		}
-		const { pageSize, sort } = value.project;
-		const project: { pageSize?: number; sort?: SortSettings | null } = {};
+		const { pageSize, sort, columns } = value.project;
+		const project: {
+			pageSize?: number;
+			sort?: SortSettings | null;
+			columns?: ColumnSettings | null;
+		} = {};
 		if (pageSize !== undefined) {
 			const known = PAGE_SIZES.find((n) => n === pageSize);
 			if (known === undefined) {
@@ -385,6 +539,9 @@ export function parsePatch(value: unknown): SettingsPatch {
 				throw new Error('"sort.desc" is a boolean');
 			}
 			project.sort = known;
+		}
+		if (columns !== undefined) {
+			project.columns = parseColumns(columns);
 		}
 		if (Object.keys(project).length > 0) {
 			patch.project = project;
@@ -665,10 +822,15 @@ export function createSettingsStore(file: string, key: string): SettingsStore {
 						patch.project.sort === undefined
 							? entry.sort
 							: (patch.project.sort ?? undefined);
+					const columns =
+						patch.project.columns === undefined
+							? entry.columns
+							: (readColumns(patch.project.columns) ?? undefined);
 					setOwn(projects, key, {
 						updatedAt: new Date().toISOString(),
 						pageSize: patch.project.pageSize ?? entry.pageSize,
 						...(sort === undefined ? {} : { sort }),
+						...(columns === undefined ? {} : { columns }),
 					});
 				}
 				return {
