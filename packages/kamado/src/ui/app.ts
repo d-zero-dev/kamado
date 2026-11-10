@@ -1,8 +1,9 @@
 /**
  * The HTTP side of `kamado ui` (RFC section 14.2). The core edits the files; this module is
  * the door the browser comes in by: the page of the screen (`GET /`), its files
- * (`GET /assets/<name>`), and three calls (`GET /api/pages`, `POST /api/refresh`,
- * `POST /api/edit`) that pass JSON to the editor of the core and its answer back, and the
+ * (`GET /assets/<name>`), and four calls (`GET /api/pages`, `GET /api/values`,
+ * `POST /api/refresh`, `POST /api/edit`) that pass JSON to the editor of the core and its
+ * answer back, and the
  * settings the screen keeps between runs (`GET` and `PUT /api/settings`, see `settings.ts`).
  *
  * Why a token for every call that is not a GET: the screen writes the source files of the
@@ -37,6 +38,14 @@ export const TOKEN_HEADER = 'X-Kamado-Token';
 
 /** The most rows a request may ask for (RFC section 14.2: the screen shows 5,000 at most). */
 export const MAX_ROWS = 5000;
+
+/**
+ * The most values `GET /api/values` may be asked for: the most the options of a column may be
+ * (200) with room to spare, so that the answer is never cut below what the screen keeps. Not
+ * lower than that, and not unbounded: the answer is one JSON, and a key every page holds
+ * differently (a title) has as many values as there are pages.
+ */
+export const MAX_VALUES = 1000;
 
 /** The largest body of an edit, in bytes. A value of a page's metadata is far smaller. */
 const MAX_BODY = 1024 * 1024;
@@ -73,7 +82,7 @@ type Page = { readonly inputPath: string | null; readonly outputPath: string };
  */
 export type Editor = Pick<
 	ReturnType<typeof native>,
-	'uiPages' | 'uiRefresh' | 'uiEdit'
+	'uiPages' | 'uiRefresh' | 'uiEdit' | 'uiValues'
 > & {
 	/** The handle of the editor. */
 	readonly handle: string;
@@ -309,6 +318,38 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 					warnings: rows.warnings.map((warning) => scrub(warning, roots)),
 				};
 			},
+			roots,
+		);
+	});
+
+	app.get('/api/values', (ctx) => {
+		const key = ctx.req.query('key');
+		const limit = integerOf(ctx.req.query('limit'), 100);
+		// Only a key of the metadata has values, so only `meta:<key>` is a key here, and its length
+		// is limited as the settings limit a column's name (an enum is kept there). The core takes a
+		// limit of 0; the server does not, as a request for no value is not one the screen makes.
+		if (
+			key === undefined ||
+			!key.startsWith('meta:') ||
+			!isSortKey(key) ||
+			limit === null ||
+			limit < 1 ||
+			limit > MAX_VALUES
+		) {
+			return ctx.json(
+				{
+					error: 'invalid',
+					message: `key is meta:<key>, and limit is a number from 1 to ${MAX_VALUES}`,
+				},
+				400,
+			);
+		}
+		return answer(
+			ctx,
+			() =>
+				JSON.parse(
+					editor.uiValues(editor.handle, JSON.stringify({ key, limit })),
+				) as unknown,
 			roots,
 		);
 	});

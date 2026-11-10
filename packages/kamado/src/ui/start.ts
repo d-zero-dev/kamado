@@ -145,6 +145,7 @@ export async function ui(
 			{
 				handle,
 				uiPages: (h, q) => core.uiPages(h, q),
+				uiValues: (h, q) => core.uiValues(h, q),
 				uiRefresh: (h) => core.uiRefresh(h),
 				uiEdit: (h, e) => core.uiEdit(h, e),
 			},

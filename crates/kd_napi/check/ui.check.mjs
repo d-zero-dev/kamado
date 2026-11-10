@@ -1,6 +1,6 @@
 /**
- * The editor of the pages through the built addon (`uiOpen`, `uiPages`, `uiEdit`, `uiRefresh`,
- * `uiClose`): the unit tests of the core call the same engine without the addon, so this is
+ * The editor of the pages through the built addon (`uiOpen`, `uiPages`, `uiValues`, `uiEdit`,
+ * `uiRefresh`, `uiClose`): the unit tests of the core call the same engine without the addon, so this is
  * the place where the JSON that crosses it is shown to be what RFC §14.2 says, and where an
  * edit is shown to change the files on disk and nothing else.
  *
@@ -148,6 +148,41 @@ test('sort orders every page, with the pages that have no value last either way'
 					JSON.stringify({ offset: 0, limit: 1, sort: { key: 'title' } }),
 				),
 			/sort\.key/,
+		);
+	} finally {
+		native().uiClose(handle);
+	}
+});
+
+test('the values of a key are counted over every page, most often first', () => {
+	const site = makeSite();
+	const handle = native().uiOpen(site.config, '{}');
+	const values = (key, limit = 100) =>
+		JSON.parse(native().uiValues(handle, JSON.stringify({ key, limit })));
+	try {
+		// `layout` is in the sidecar of `/` only; `title` is held by three pages, once each.
+		assert.deepEqual(values('meta:layout'), {
+			version: 1,
+			key: 'meta:layout',
+			total: 1,
+			values: [{ value: 'side', count: 1 }],
+		});
+		const title = values('meta:title');
+		assert.equal(title.total, 3);
+		assert.deepEqual(
+			title.values.map((v) => v.value),
+			['Ext', 'History', 'Top'],
+		);
+		// A boolean is a value of its own type; a key that no page has is no value.
+		assert.deepEqual(values('meta:navHidden').values, [{ value: false, count: 1 }]);
+		assert.deepEqual(values('meta:nothing').values, []);
+		assert.equal(values('meta:title', 2).values.length, 2);
+		assert.equal(values('meta:title', 2).total, 3);
+		assert.throws(() => native().uiValues(handle, '{"key":"title","limit":1}'), /meta:/);
+		assert.throws(() => native().uiValues(handle, '{"key":"meta:a"}'), /limit/);
+		assert.throws(
+			() => native().uiValues('999999', '{"key":"meta:a","limit":1}'),
+			/no editor/,
 		);
 	} finally {
 		native().uiClose(handle);
@@ -446,6 +481,7 @@ test('the server of kamado ui answers with what the core says, told without the 
 		{
 			handle,
 			uiPages: (h, q) => native().uiPages(h, q),
+			uiValues: (h, q) => native().uiValues(h, q),
 			uiRefresh: (h) => native().uiRefresh(h),
 			uiEdit: (h, e) => native().uiEdit(h, e),
 		},
@@ -505,6 +541,27 @@ test('the server of kamado ui answers with what the core says, told without the 
 		]);
 		const virtual = rows.pages.find((p) => p.virtual);
 		assert.equal(virtual.inputPath, null);
+
+		// The values of a key: the fields the screen reads (client/src/types.ts), and nothing of the machine.
+		const valued = await get('/api/values?key=meta:title&limit=10');
+		const valuedText = await valued.text();
+		assert.equal(valued.status, 200);
+		assert.ok(!valuedText.includes(site.root), 'an absolute path went to the screen');
+		const values = JSON.parse(valuedText);
+		assert.deepEqual(Object.keys(values).toSorted(), [
+			'key',
+			'total',
+			'values',
+			'version',
+		]);
+		assert.equal(values.key, 'meta:title');
+		assert.deepEqual(Object.keys(values.values[0]).toSorted(), ['count', 'value']);
+		assert.deepEqual(
+			values.values.map((v) => v.value),
+			['Ext', 'History', 'Top'],
+		);
+		const refused = await get('/api/values?key=title');
+		assert.equal(refused.status, 400);
 
 		const expect = {
 			input: about.hashes.input,
