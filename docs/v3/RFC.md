@@ -551,7 +551,7 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 
 ```
 uiOpen(configPath, optionsJson)    → handle         optionsJson: { cacheDir?, incremental? }
-uiPages(handle, queryJson)         → JSON           queryJson:   { offset, limit, q? }
+uiPages(handle, queryJson)         → JSON           queryJson:   { offset, limit, q?, sort? }
 uiRefresh(handle)                  → { version }
 uiEdit(handle, editJson)           → JSON
 uiServer(handle)                   → { port, open, inputDir, outputDir }
@@ -562,6 +562,10 @@ uiClose(handle)                    → { warning }
 - `uiOpen`は設定を読んで計画し、`Plan`・`pages.overrides`の内容・各ファイルの SHA-256 をハンドルがメモリに持つ。`incremental`（または`build.incremental`）のときは、前回の plan cache（§11）を読んで計画する。plan cache はハンドルがメモリに持ち続け、`uiClose`で、変わっていれば書く（編集のたびには書かない: 編集は何度も行われ、大きなサイトの cache は数十 MB になる。書かなかった分は、編集したファイルの更新時刻が変わっているので、次に読む側がそのファイルを読み直す）。`uiClose`の`warning`は、cache を書けなかったときの理由で、そうでなければ`null`
 - `uiPages`は計画し直さない。窓の各行は、編集できるキーを判断するために、そのページのファイルを（変わるまで 1 回）読む。`q`を渡すと、全ページの URL とメタの文字列値を見て回る。`uiRefresh`は、メモリの plan cache（§11）で計画し直す（ファイルは stat だけ。読めなかったときは、ハンドルは変わらない）
 - `uiPages`の`queryJson`は、`offset`と`limit`（どちらも 0 以上の整数。`limit`に上限は無い）で切り出す。`q`があれば、URL かメタの文字列値（一番上の階層）に`q`を含む（大文字小文字は区別しない）ページだけに絞る。返す JSON は次の形。`total`は絞り込み後の件数。`columns`は、メタのキーの和集合（全ページ。`outputPathField`のキーを除く。キー名のバイト順で、大文字が小文字より前）。`version`は、`uiOpen`で 1 になる。計画を読み直すたびに増える（`uiRefresh`、URL の移動、`conflict`を答えるための読み直し）。キーの編集 1 回ごとにも 1 増える。編集 1 回は、どう計画を読み直しても 1 である。拒否された編集は、`conflict`の読み直しのほかには、増やさない
+- `uiPages`の`sort`は`{ "key", "desc"? }`（`null`なら指定なし）で、全ページを並べた順のまま、絞り込んだページを`offset`と`limit`で切り出す（窓の中だけを並べるのではない）。全ページの並びは、計画が変わる（版が上がる）まで、同じ`sort`の問い合わせのあいだ使い回す。`key`は列の識別子で、`url`・`inputPath`・`virtual`、メタのキーは`meta:<key>`（メタのキーが`url`という名前でも`meta:url`なので、取り違えない）。これ以外の`key`と、真偽値でない`desc`（既定は偽）は例外にする
+  - 比べ方は`@d-zero/shared`の自然順（`src/sort/`）。`url`と`inputPath`は`pathComparator`、メタの値は文字列にして`numericalComparator`。メタの値の文字列は、文字列ならそのまま、数値・真偽値・配列・オブジェクトならコアが JSON を書くときの compact な形（`Value::to_json`。大きな数や小数の書き方は`JSON.stringify`と違うことがあるが、数として読めば同じ値）。`inputPath`は`dir.input`からの相対パスを`/`で始めて比べる。kamado の URL にはホスト・クエリ・ハッシュが無い（§6）ので、`pathComparator`のうちパスの分割、index の優先、basename、拡張子、`href`だけを移す。文字列は JavaScript と同じく UTF-16 コードユニットの順で比べる
+  - 値の無いページ（そのキーが無い、`null`、仮想ページの`inputPath`）は、昇順でも降順でも末尾。`virtual`は偽が真より先。比べて等しいページは、計画の順を保つ
+  - 2 つの値の比べた結果は`@d-zero/shared`と同じで、`crates/kd_core/tests/natural_golden.tsv`（`scripts/generate-natural-golden.mjs`が`@d-zero/shared`から作る）で照合する。ただしこの比べ方は全順序でない: `numericalComparator`は組ごとに共通の接頭辞を除いてから数を読むので、`2a`は`10b`の前、`10b`は`1c`の前、`1c`は`2a`の前、と循環しうる。コアの並べ替えは全順序を前提にしない自前の安定マージソートで、どんな比べ結果でも panic せずに終わる。循環を含む並びは、同じ入力と同じ向きなら同じ出力になるが、V8 の`Array.prototype.sort`と同じ並びは約束しない。循環が無い入力の並び全体を V8 の並びと照合する golden は持たない（2 値の比べ結果が同じで、並べ方は安定ソートなので、並びも同じになるはずのものとして扱う）
 
 ```jsonc
 {
@@ -603,12 +607,12 @@ uiClose(handle)                    → { warning }
 
 **画面とサーバー**（`packages/kamado`の`ui()`。コアの API ではなく、Node 側の仕様）
 
-- 待ち受けは`localhost`の 2 つのループバックアドレス（§12 と同じ）だけで、ホストを選ぶフラグは無い。要求を受けるのは`localhost`と IP アドレス宛てだけで、別のサイトからと印の付いた要求は`403`（§12 のガードと同じ規則。サイトの`devServer.allowedHosts`は引き継がない）。`GET /`（画面）、`GET /assets/<name>`、`GET /api/pages?offset&limit&q`（`limit`は 1〜5,000）、`POST /api/refresh`、`POST /api/edit`、`GET`と`PUT /api/settings`
+- 待ち受けは`localhost`の 2 つのループバックアドレス（§12 と同じ）だけで、ホストを選ぶフラグは無い。要求を受けるのは`localhost`と IP アドレス宛てだけで、別のサイトからと印の付いた要求は`403`（§12 のガードと同じ規則。サイトの`devServer.allowedHosts`は引き継がない）。`GET /`（画面）、`GET /assets/<name>`、`GET /api/pages?offset&limit&q&sort&desc`（`limit`は 1〜5,000。`sort`は列の識別子（`meta:<key>`は 256 文字まで。コアは長さを問わず、この制限はサーバーだけのもの）、`desc`は`true`か`false`。`sort`と`desc`のどちらも渡さないとき（`sort`が空文字で`desc`が無いときを含む）は指定なし。`sort`なしの`desc`、列でない`sort`、長すぎる`meta:<key>`、`true`・`false`以外の`desc`は`400`の`invalidSort`。`offset`と`limit`の誤りは`400`の`invalid`）、`POST /api/refresh`、`POST /api/edit`、`GET`と`PUT /api/settings`
 - `GET`と`HEAD`以外の要求（`POST`と`PUT`）は、起動のたびに作る 128 bit 以上の乱数のトークンを`X-Kamado-Token`に持たなければならない（`403`）。`POST`と`PUT`は加えて`Content-Type: application/json`（`charset`付きでもよい。`415`）で、`/api/edit`の本文は 1 MiB 以下（`413`）。トークンは画面の HTML の`<meta name="kamado-token">`にある。すべての答えに`Referrer-Policy: no-referrer`・`X-Content-Type-Options: nosniff`・`Cross-Origin-Resource-Policy: same-origin`と、`Cache-Control: no-store`を付ける。ただし`/assets/`の答えは、プロジェクトのデータを持たず名前が内容で変わらないので、`no-cache`と`ETag`にして、変わっていなければ`304`にする。`GET /`は`default-src 'self'`の CSP も付ける。存在しないルートは`{ "error": "not-found" }`の`404`、コアが例外を投げたときは`{ "error": "failed", "message" }`の`500`
 - 編集の答えは、コアの`code`を HTTP の状態にして返す: `conflict`と`collision`は`409`、`invalid`と`notEditable`は`400`、`notFound`は`404`、`io`は`500`。本文は`{ "error": <code>, "message", "current"? }`
-- `GET /api/settings`は、画面の設定を`{ "global": { "locale" }, "project": { "pageSize", "updatedAt" } | null, "warning": string | null }`で返す（`project`はこのプロジェクトの分だけで、ほかのプロジェクトの項目も、設定ファイルのパスも載せない。まだ保存が無ければ`null`）。`PUT /api/settings`は`{ "global"?: { "locale"?: "auto" | "en" | "ja" }, "project"?: { "pageSize"?: 100 | 500 | 1000 | 5000 } }`を保存して、保存後の`GET`と同じ形で返す（本文は 64 KiB 以下で`413`。許されない値は`400`の`invalid`。知らないフィールドは捨てる）。設定ファイルが新しい版のときは`409`の`newer`、ロックが取れないときは`503`の`locked`、ディスクの失敗は`500`の`failed`（メッセージにパスを入れず、エラーコードだけ）。`PUT`もトークンと`Content-Type`の規則（上）に従う
-- **画面の設定の保存**: `~/.config/kamado/ui-settings.json`（環境変数`KAMADO_UI_SETTINGS`があればそのファイル。`XDG_CONFIG_HOME`は読まない）に持つ。形は`{ "version": 1, "global": { "locale": "auto" | "en" | "ja" }, "projects": { "<設定ファイルの実体パス>": { "updatedAt", "pageSize" } } }`。画面の設定は、言語（`global.locale`）と 1 画面の行数（`project.pageSize`）で、画面が足した列（「キーの追加」）は保存しない
-  - プロジェクトは設定ファイル（`kamado.config.jsonc`）の実体パスで見分け、`projects`のキーはそのパス。許されない値は既定（`auto`と 500）にして、知らないフィールドは捨てる
+- `GET /api/settings`は、画面の設定を`{ "global": { "locale" }, "project": { "pageSize", "updatedAt", "sort"? } | null, "warning": string | null }`で返す（`project`はこのプロジェクトの分だけで、ほかのプロジェクトの項目も、設定ファイルのパスも載せない。まだ保存が無ければ`null`）。`PUT /api/settings`は`{ "global"?: { "locale"?: "auto" | "en" | "ja" }, "project"?: { "pageSize"?: 100 | 500 | 1000 | 5000, "sort"?: { "key", "desc"? } | null } }`（`sort`は`GET /api/pages`の列の識別子。`null`でソートを解く）を保存して、保存後の`GET`と同じ形で返す（本文は 64 KiB 以下で`413`。許されない値は`400`の`invalid`。知らないフィールドは捨てる）。設定ファイルが新しい版のときは`409`の`newer`、ロックが取れないときは`503`の`locked`、ディスクの失敗は`500`の`failed`（メッセージにパスを入れず、エラーコードだけ）。`PUT`もトークンと`Content-Type`の規則（上）に従う
+- **画面の設定の保存**: `~/.config/kamado/ui-settings.json`（環境変数`KAMADO_UI_SETTINGS`があればそのファイル。`XDG_CONFIG_HOME`は読まない）に持つ。形は`{ "version": 1, "global": { "locale": "auto" | "en" | "ja" }, "projects": { "<設定ファイルの実体パス>": { "updatedAt", "pageSize", "sort"? } } }`。画面の設定は、言語（`global.locale`）と 1 画面の行数（`project.pageSize`）と並び（`project.sort`: `{ "key", "desc" }`。無ければ計画の順）で、画面が足した列（「キーの追加」）は保存しない
+  - プロジェクトは設定ファイル（`kamado.config.jsonc`）の実体パスで見分け、`projects`のキーはそのパス。許されない値は既定（`auto`と 500）にして、知らないフィールドは捨てる。`sort`では、`key`が列の識別子でなければ`sort`ごと捨て、`desc`が真偽値でなければ偽にする。`sort`を足す前の kamado は、`sort`を知らないフィールドとして捨てるので、次の保存で失う（版は 1 のまま）
   - ファイルは所有者だけが読み書きできる（`0600`。ディレクトリは`0700`）。ほかのプロジェクトのパスを持つため
   - 書くときは`<file>.lock`を`wx`で作ってロックを取る。10 秒より古いロックは、落ちたプロセスのものとして取り直す。ロックの中でファイルを読み直し、自分のプロジェクトの項目と`global`だけを置き換えて、一時ファイルを書いて rename する。別のプロジェクトで動く`kamado ui`の保存を消さず、読む側が書きかけを見ないため
   - 壊れたファイルは、`kamado ui`の起動時に`<file>.<YYYYMMDDHHmmss>.bak`へ移して、空から作り直す。端末にはファイルのパスつきで、画面には名前だけで警告する。壊れたとは次のどれか: JSON でない。トップレベルがオブジェクトでない。`version`が 1 以上の整数でない。`global`か`projects`がオブジェクトでない
