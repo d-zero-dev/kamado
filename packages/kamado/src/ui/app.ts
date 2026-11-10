@@ -2,7 +2,8 @@
  * The HTTP side of `kamado ui` (RFC section 14.2). The core edits the files; this module is
  * the door the browser comes in by: the page of the screen (`GET /`), its files
  * (`GET /assets/<name>`), and three calls (`GET /api/pages`, `POST /api/refresh`,
- * `POST /api/edit`) that pass JSON to the editor of the core and its answer back.
+ * `POST /api/edit`) that pass JSON to the editor of the core and its answer back, and the
+ * settings the screen keeps between runs (`GET` and `PUT /api/settings`, see `settings.ts`).
  *
  * Why a token for every call that is not a GET: the screen writes the source files of the
  * project, and a page of another site can make a browser send a request to `localhost`. The
@@ -29,6 +30,7 @@ import { setGuard } from '../server/guard.js';
 import { contentTypeOf } from '../server/mime.js';
 
 import { scrub, showPaths } from './paths.js';
+import { parsePatch, SettingsError, type SettingsStore } from './settings.js';
 
 /** The header the token goes in. */
 export const TOKEN_HEADER = 'X-Kamado-Token';
@@ -38,6 +40,9 @@ export const MAX_ROWS = 5000;
 
 /** The largest body of an edit, in bytes. A value of a page's metadata is far smaller. */
 const MAX_BODY = 1024 * 1024;
+
+/** The largest body of a change of the settings: they are a few fields. */
+const MAX_SETTINGS_BODY = 64 * 1024;
 
 /** Where the page of the screen has the token (replaced when the page is served). */
 export const TOKEN_PLACEHOLDER = '__KAMADO_TOKEN__';
@@ -50,6 +55,11 @@ export interface UiAppOptions {
 	readonly token: string;
 	/** The directories the paths shown are told from; no absolute path goes to the screen. */
 	readonly roots: Roots;
+	/**
+	 * What the screen remembers between runs (`GET`/`PUT /api/settings`). Without it the
+	 * routes do not exist.
+	 */
+	readonly settings?: SettingsStore;
 }
 
 /** A row, as far as this module reads it. */
@@ -172,7 +182,7 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 			);
 		}
 		if (
-			ctx.req.method === 'POST' &&
+			(ctx.req.method === 'POST' || ctx.req.method === 'PUT') &&
 			ctx.req.header('content-type')?.split(';')[0]?.trim() !== 'application/json'
 		) {
 			return ctx.json(
@@ -319,6 +329,58 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 			);
 		},
 	);
+
+	const { settings } = options;
+	if (settings !== undefined) {
+		app.get('/api/settings', async (ctx) => ctx.json(await settings.view()));
+
+		app.put(
+			'/api/settings',
+			bodyLimit({
+				maxSize: MAX_SETTINGS_BODY,
+				onError: (ctx) =>
+					ctx.json({ error: 'invalid', message: 'the body is too large' }, 413),
+			}),
+			async (ctx) => {
+				let patch;
+				try {
+					patch = parsePatch(await ctx.req.json());
+				} catch (error) {
+					return ctx.json(
+						{
+							error: 'invalid',
+							message:
+								error instanceof SyntaxError
+									? 'the body is not JSON'
+									: error instanceof Error
+										? error.message
+										: String(error),
+						},
+						400,
+					);
+				}
+				try {
+					return ctx.json(await settings.update(patch));
+				} catch (error) {
+					if (error instanceof SettingsError) {
+						return ctx.json(
+							{ error: error.code, message: error.message },
+							error.code === 'newer' ? 409 : 503,
+						);
+					}
+					// What the disk says names the path of the file: only its code is passed on.
+					const code = (error as NodeJS.ErrnoException).code;
+					return ctx.json(
+						{
+							error: 'failed',
+							message: `the settings could not be saved${code === undefined ? '' : ` (${code})`}`,
+						},
+						500,
+					);
+				}
+			},
+		);
+	}
 
 	app.notFound((ctx) => ctx.json({ error: 'not-found', message: 'no such route' }, 404));
 	return app;

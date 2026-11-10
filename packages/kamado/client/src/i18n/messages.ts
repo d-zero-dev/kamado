@@ -1,0 +1,127 @@
+/**
+ * The words of the screen, in each language it speaks. `en` is the list of messages and the
+ * type of their names; `ja` must have every one of them (the compiler says when one is missing).
+ * A `{name}` in a message is where a value is put in (`translate.ts`).
+ *
+ * What is not here: the messages of the server and the core (the text of an error, a warning,
+ * the reason a value cannot be edited) are English and shown as they come, and the names of
+ * the columns and keys are names, not words. The README says so.
+ */
+export const en = {
+	'app.search': 'Search',
+	'app.searchPlaceholder': 'URL or text of a value',
+	'app.pageSize': 'Rows per page',
+	'app.pages': 'Pages',
+	'app.previous': 'Previous',
+	'app.next': 'Next',
+	'app.addKey': 'Add key',
+	'app.readAgain': 'Read again',
+	'app.language': 'Language',
+	'app.languageAuto': 'Auto',
+	'app.loading': 'Loading…',
+	'app.warnings': '{count} warning(s)',
+	'app.gridLabel': 'Pages of the site',
+	'app.settingsWarning': 'Settings: {message}',
+	'app.settingsNotSaved': 'The settings were not saved: {message}',
+	'app.settingsUnreadable': 'The settings could not be read: the defaults are used',
+	'app.listNotRead': '{message} (the list could not be read: use Read again)',
+	'app.notInList': '{url} is not in the list any more: nothing was written',
+	'app.cannotEditHere': '{name} cannot be edited here',
+	'app.cannotEdit': '{key} cannot be edited: {reason}',
+	'app.cannotRemove': '{key} cannot be removed: {reason}',
+	'app.readOnly': 'read only',
+	'app.conflict':
+		'{message} The page was changed elsewhere; it was read again. Make the edit again.',
+	'app.saved': '{key} saved',
+	'app.removed': '{key} removed',
+	'app.moved': 'Moved to {url}',
+	'app.movedElsewhere': 'Moved to {url} (not on this page)',
+	'app.alreadyColumn': '{name} is already a column',
+	'app.columnAdded': 'Column {name} added: edit a cell of it to give a page the key',
+	'app.urlLabel': 'url of {url}',
+	'app.keyLabel': '{key} of {url}',
+	'row.virtual': 'virtual',
+	'row.from': 'from {origin}',
+	'origin.inFile': 'inFile',
+	'origin.sidecar': 'sidecar',
+	'origin.overrides': 'overrides',
+	'edit.notANumber': 'what is typed is not a number',
+	'edit.notSaved': 'Not saved: {reason}',
+	'value.notNumber': '"{draft}" is not a number',
+	'value.notJson': 'not JSON yet: {message}',
+	'session.busy':
+		'The list is being read again: nothing was written. Make the edit when it is shown',
+	'session.failed':
+		'The list could not be read: nothing was written. Use Read again first',
+	'dialog.name': 'Name',
+	'dialog.type': 'Type',
+	'dialog.cancel': 'Cancel',
+	'dialog.add': 'Add',
+	'kind.text': 'text',
+	'kind.number': 'number',
+	'kind.boolean': 'boolean',
+	'kind.date': 'date',
+	'kind.json': 'json',
+} as const;
+
+/** The name of a message. */
+export type MessageKey = keyof typeof en;
+
+/** The messages in Japanese. */
+export const ja: Record<MessageKey, string> = {
+	'app.search': '検索',
+	'app.searchPlaceholder': 'URL または値の文字列',
+	'app.pageSize': '1 ページの行数',
+	'app.pages': 'ページ送り',
+	'app.previous': '前へ',
+	'app.next': '次へ',
+	'app.addKey': 'キーの追加',
+	'app.readAgain': '読み直す',
+	'app.language': '言語',
+	'app.languageAuto': '自動',
+	'app.loading': '読み込み中…',
+	'app.warnings': '警告 {count} 件',
+	'app.gridLabel': 'サイトのページ一覧',
+	'app.settingsWarning': '設定: {message}',
+	'app.settingsNotSaved': '設定を保存できませんでした: {message}',
+	'app.settingsUnreadable': '設定を読めなかったので、既定値を使っています',
+	'app.listNotRead': '{message}（一覧を読めませんでした。「読み直す」を使ってください）',
+	'app.notInList': '{url} はもう一覧にありません。何も書き込んでいません',
+	'app.cannotEditHere': '{name} はここでは編集できません',
+	'app.cannotEdit': '{key} は編集できません: {reason}',
+	'app.cannotRemove': '{key} は削除できません: {reason}',
+	'app.readOnly': '読み取り専用',
+	'app.conflict':
+		'{message} ページは別の場所で変更されたので、読み直しました。もう一度編集してください。',
+	'app.saved': '{key} を保存しました',
+	'app.removed': '{key} を削除しました',
+	'app.moved': '{url} へ移動しました',
+	'app.movedElsewhere': '{url} へ移動しました（このページには表示されていません）',
+	'app.alreadyColumn': '{name} はすでに列にあります',
+	'app.columnAdded':
+		'列 {name} を追加しました。その列のセルを編集すると、ページにキーができます',
+	'app.urlLabel': '{url} の url',
+	'app.keyLabel': '{url} の {key}',
+	'row.virtual': '仮想',
+	'row.from': '{origin} から',
+	'origin.inFile': 'ファイル内',
+	'origin.sidecar': 'sidecar',
+	'origin.overrides': 'overrides',
+	'edit.notANumber': '入力されているものは数値ではありません',
+	'edit.notSaved': '保存していません: {reason}',
+	'value.notNumber': '「{draft}」は数値ではありません',
+	'value.notJson': 'まだ JSON になっていません: {message}',
+	'session.busy':
+		'一覧を読み直しているので、何も書き込んでいません。一覧が表示されてから編集してください',
+	'session.failed':
+		'一覧を読めませんでした。何も書き込んでいません。先に「読み直す」を押してください',
+	'dialog.name': '名前',
+	'dialog.type': '型',
+	'dialog.cancel': 'キャンセル',
+	'dialog.add': '追加',
+	'kind.text': '文字列',
+	'kind.number': '数値',
+	'kind.boolean': '真偽値',
+	'kind.date': '日付',
+	'kind.json': 'JSON',
+};

@@ -53,7 +53,9 @@ node --test crates/kd_napi/check/load.check.mjs
 
 `kamado ui`の画面は`packages/kamado/client`（React）で、`yarn build`が型を検査して、`scripts/build-ui.mjs`が esbuild で`packages/kamado/dist/ui`にまとめる（`yarn dev`は画面を作り直さない）。React は`packages/kamado`の devDependencies で、bundle に入るので、パッケージの実行時の依存は増えない。画面の論理は DOM の無い関数（`client/src/logic/`）に分けて Vitest で、サーバー（`src/ui/`）は`app.request`で確かめる。サーバーが実物のコアの答えを正しく中継し、絶対パスを出さないことは、`ui.check.mjs`が実物のアドオンで確かめる（画面が読む JSON の項目もそこで固定する）。配布物に画面が入っていることは、`node scripts/check-package-ui.mjs packages/kamado`（ローカルでは`yarn build`のあと。publish のワークフローは展開したパッケージに対して）が確かめる。
 
-画面の描画と操作は、ブラウザで確かめる（コンポーネントのテストは無い）。手順: `benchmarks/v3/generate-jsx-fixtures.ts`か、front matter を持つ HTML を数千ページ置いたサイトを作り、`kamado ui --no-open --port <n>`を起動して chrome-devtools で開く。1 画面を 5,000 行にして、初回の表示（目安は 1 秒未満。500 行で約 130 ms）、矢印キーでの移動、セルの編集から表示までを測る。キーボードだけで編集でき、スクリーンリーダーに grid として伝わること（`take_snapshot`）、保存の失敗（ファイルを外で書き換えて`conflict`を起こす）から回復できることも見る。
+画面の設定の保存（`packages/kamado/src/ui/settings.ts`）は、一時ディレクトリのファイルで Vitest が確かめる（同時に保存して項目が消えないこと、壊れたファイルの退避、新しい版を書かないこと、パスがブラウザに出ないこと）。`kamado ui-settings`は`KAMADO_UI_SETTINGS`を一時ファイルにして動かせる。ルートの`vitest.config.ts`は、同じ環境変数を一時ディレクトリのファイルに向ける。設定ファイルを明示しない`ui()`のテストが、実行する人の`~/.config/kamado/ui-settings.json`を読んだり、壊れているものを退避したりしないため。表示言語の辞書（`client/src/i18n/messages.ts`）は、両言語に同じ項目があることを Vitest が確かめる。
+
+画面の描画と操作は、ブラウザで確かめる（コンポーネントのテストは無い）。手順: `benchmarks/v3/generate-jsx-fixtures.ts`か、front matter を持つ HTML を数千ページ置いたサイトを作り、`kamado ui --no-open --port <n>`を起動して chrome-devtools で開く。1 画面を 5,000 行にして、初回の表示（目安は 1 秒未満。500 行で約 130 ms）、矢印キーでの移動、セルの編集から表示までを測る。表示言語の自動判定（ブラウザの言語を変えて開く）と切り替え、設定が保存されて開き直しても残ること、キーボードだけで編集でき、スクリーンリーダーに grid として伝わること（`take_snapshot`）、保存の失敗（ファイルを外で書き換えて`conflict`を起こす）から回復できることも見る。
 
 panic の確認（`panic.check.mjs`）だけは、わざと panic する`panicCheck()`を足した別のビルドを使う。出荷するアドオンには、この関数は入れない（Cargo の feature `panic-check`）。
 

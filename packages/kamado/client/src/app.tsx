@@ -1,20 +1,24 @@
 import type { Editing } from './grid-row.js';
+import type { LocaleSetting } from './i18n/translate.js';
 import type { Position } from './logic/grid.js';
 import type { Reading } from './logic/session.js';
 import type { FieldKind } from './logic/value.js';
-import type { Change, Rows } from './types.js';
+import type { Change, Rows, SettingsPatch, SettingsView } from './types.js';
 
 import {
 	startTransition,
 	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
 } from 'react';
 
-import { ApiError, editPage, fetchRows, refreshSite } from './api.js';
+import { ApiError, editPage, fetchRows, refreshSite, saveSettings } from './api.js';
 import { FIXED_COLUMNS, GridRow } from './grid-row.js';
+import { I18nContext, useI18n } from './i18n/context.js';
+import { resolveLanguage, translator } from './i18n/translate.js';
 import { cellOf, expectOf, metaColumns } from './logic/columns.js';
 import { nextCell, pageCount, rangeLabel } from './logic/grid.js';
 import {
@@ -26,6 +30,7 @@ import {
 	rowByUrl,
 	shouldWrite,
 } from './logic/session.js';
+import { createSaver } from './logic/settings-save.js';
 import { FIELD_KINDS, defaultOf, draftOf, parseDraft } from './logic/value.js';
 
 /**
@@ -56,11 +61,83 @@ function messageOf(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-/** The screen: a grid of the pages, one row each, edited in place. */
-export function App() {
+/** What the screen starts with: the settings, and whether they could be read. */
+export interface AppProps {
+	readonly settings: SettingsView;
+	/** Set when the settings could not be read: the defaults are in `settings`. */
+	readonly settingsUnreadable: boolean;
+}
+
+/**
+ * What is said about the settings file, kept as what it is and not as a sentence: the sentence
+ * is made when it is drawn, so that it follows a change of language.
+ */
+type SettingsNote =
+	| { readonly kind: 'warning'; readonly message: string }
+	| { readonly kind: 'notSaved'; readonly message: string }
+	| { readonly kind: 'unreadable' };
+
+/**
+ * The screen, in the language that is set (or that of the browser). The language is chosen
+ * here and handed down, so that every message of the screen and of its logic is said in it.
+ * @param props - The settings the screen starts with
+ * @param props.settings - What was read from the server
+ * @param props.settingsUnreadable - Whether there are only the defaults because they could not be read
+ */
+export function App({ settings, settingsUnreadable }: AppProps) {
+	const [locale, setLocale] = useState<LocaleSetting>(settings.global.locale);
+	const language = resolveLanguage(locale, navigator.languages);
+	const i18n = useMemo(() => ({ language, t: translator(language) }), [language]);
+	useEffect(() => {
+		document.documentElement.lang = language;
+	}, [language]);
+	return (
+		<I18nContext.Provider value={i18n}>
+			<Screen
+				settings={settings}
+				settingsUnreadable={settingsUnreadable}
+				locale={locale}
+				onLocale={setLocale}
+			/>
+		</I18nContext.Provider>
+	);
+}
+
+interface ScreenProps extends AppProps {
+	readonly locale: LocaleSetting;
+	readonly onLocale: (locale: LocaleSetting) => void;
+}
+
+/**
+ * The grid of the pages, one row each, edited in place.
+ * @param props - What the screen starts with, and the language setting
+ * @param props.settings - What was read from the server
+ * @param props.settingsUnreadable - Whether the settings could not be read
+ * @param props.locale - The language setting
+ * @param props.onLocale - Called with the language the person chose
+ */
+function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps) {
+	const { t } = useI18n();
+	// The effects and the queued edits say things too: they read the translator of the latest
+	// render, so that a change of language does not read the list again.
+	// Written in a layout effect and not while drawing: a ref is not written during a render
+	// (a render that is thrown away would leave its value in it), and `useEffectEvent` cannot be
+	// called from a queued edit. The layout effect runs before the browser can send an event.
+	const tRef = useRef(t);
+	useLayoutEffect(() => {
+		tRef.current = t;
+	}, [t]);
 	const [rows, setRows] = useState<Rows | null>(null);
 	const rowsRef = useRef<Rows | null>(null);
-	const [pageSize, setPageSize] = useState<number>(500);
+	const [pageSize, setPageSize] = useState<number>(settings.project?.pageSize ?? 500);
+	const [settingsNote, setSettingsNote] = useState<SettingsNote | null>(() => {
+		if (settingsUnreadable) {
+			return { kind: 'unreadable' };
+		}
+		return settings.warning === null
+			? null
+			: { kind: 'warning', message: settings.warning };
+	});
 	const [page, setPage] = useState(0);
 	const [typed, setTyped] = useState('');
 	const [q, setQ] = useState('');
@@ -158,14 +235,14 @@ export function App() {
 					row: focusAfterLoad(urls, prev.row, wanted).row,
 					col: prev.col,
 				}));
-				const said = focusAfterLoad(urls, 0, wanted).said;
+				const said = focusAfterLoad(urls, 0, wanted, tRef.current).said;
 				if (said !== null) {
 					setStatus(said);
 				}
 			} catch (error) {
 				if (!controller.signal.aborted) {
 					reading.current = 'failed';
-					setProblem(`${messageOf(error)} (the list could not be read: use Read again)`);
+					setProblem(tRef.current('app.listNotRead', { message: messageOf(error) }));
 				}
 			} finally {
 				if (!controller.signal.aborted) {
@@ -236,10 +313,10 @@ export function App() {
 				const current = rowsRef.current;
 				const row = rowByUrl(current, url);
 				if (current === null || row === undefined) {
-					setProblem(`${url} is not in the list any more: nothing was written`);
+					setProblem(tRef.current('app.notInList', { url }));
 					return;
 				}
-				const blocked = editBlockedReason(reading.current);
+				const blocked = editBlockedReason(reading.current, tRef.current);
 				if (blocked !== null) {
 					setProblem(blocked);
 					return;
@@ -262,9 +339,7 @@ export function App() {
 					}
 				} catch (error) {
 					if (error instanceof ApiError && error.code === 'conflict') {
-						setProblem(
-							`${error.message} The page was changed elsewhere; it was read again. Make the edit again.`,
-						);
+						setProblem(tRef.current('app.conflict', { message: error.message }));
 						reload(true);
 					} else {
 						setProblem(messageOf(error));
@@ -276,6 +351,22 @@ export function App() {
 	);
 
 	const focusGrid = () => gridRef.current?.focus();
+
+	/**
+	 * Keeps a setting for the next run. A failure is said and does not stop anything: the screen
+	 * works the same, and keeps what was chosen until it is closed. A change that failed is sent
+	 * again with the next one, so the note goes only when what failed is saved.
+	 */
+	const [saver] = useState(() =>
+		createSaver(saveSettings, (failure) =>
+			setSettingsNote(
+				failure === null ? null : { kind: 'notSaved', message: messageOf(failure) },
+			),
+		),
+	);
+	const remember = (patch: SettingsPatch) => {
+		void saver(patch);
+	};
 
 	/**
 	 * Starts the edit of a cell, or makes it, for a checkbox (a toggle needs no input).
@@ -292,23 +383,25 @@ export function App() {
 				col: 0,
 				kind: 'text',
 				draft: row.url,
-				label: `url of ${row.url}`,
+				label: t('app.urlLabel', { url: row.url }),
 			});
 			return;
 		}
 		const key = columns[at.col - FIXED_COLUMNS.length];
 		if (key === undefined) {
-			setProblem(`${at.col === 1 ? 'virtual' : 'inputPath'} cannot be edited here`);
+			setProblem(
+				t('app.cannotEditHere', { name: at.col === 1 ? 'virtual' : 'inputPath' }),
+			);
 			return;
 		}
 		const { cell, kind } = cellOf(row, key, added);
 		if (cell !== undefined && !cell.editable) {
-			setProblem(`${key} cannot be edited: ${cell.reason ?? 'read only'}`);
+			setProblem(t('app.cannotEdit', { key, reason: cell.reason ?? t('app.readOnly') }));
 			return;
 		}
 		if (kind === 'boolean') {
 			const value = cell === undefined ? true : cell.value !== true;
-			apply(row.url, { op: 'set', key, value }, `${key} saved`);
+			apply(row.url, { op: 'set', key, value }, t('app.saved', { key }));
 			return;
 		}
 		setProblem('');
@@ -317,7 +410,7 @@ export function App() {
 			col: at.col,
 			kind,
 			draft: draftOf(cell === undefined ? defaultOf(kind) : cell.value, kind),
-			label: `${key} of ${row.url}`,
+			label: t('app.keyLabel', { key, url: row.url }),
 		});
 	};
 
@@ -330,13 +423,13 @@ export function App() {
 		const row = at === null ? undefined : rowByUrl(rowsRef.current, at.url);
 		if (at === null || row === undefined) {
 			if (at !== null) {
-				setProblem(`${at.url} is not in the list any more: nothing was written`);
+				setProblem(t('app.notInList', { url: at.url }));
 			}
 			return;
 		}
 		if (at.col === 0) {
 			if (draft !== row.url) {
-				apply(row.url, { op: 'moveUrl', url: draft }, `Moved to ${draft}`);
+				apply(row.url, { op: 'moveUrl', url: draft }, t('app.moved', { url: draft }));
 			}
 			return;
 		}
@@ -349,7 +442,7 @@ export function App() {
 		if (!shouldWrite(cell ?? null, draft, at.draft, parsed.value)) {
 			return;
 		}
-		apply(row.url, { op: 'set', key, value: parsed.value }, `${key} saved`);
+		apply(row.url, { op: 'set', key, value: parsed.value }, t('app.saved', { key }));
 	};
 
 	const onCancel = () => {
@@ -359,12 +452,14 @@ export function App() {
 
 	// The rows get these two functions as props. They must be the same functions at every
 	// render, or no row would be left alone by `memo` and typing in a cell would draw all
-	// five thousand rows; they call the ones made by the latest render. The ref is written in
-	// the render on purpose: it is read only by event handlers, after the commit of a render,
-	// and a render that is thrown away (StrictMode, a concurrent render) leaves in it
-	// functions that read the same state as the committed one's.
+	// five thousand rows; they call the ones made by the latest committed render. The ref is
+	// written in a layout effect and not while drawing (a render that is thrown away, in
+	// StrictMode or a concurrent render, would leave its functions in it); it runs before the
+	// browser can send the event that reads it.
 	const latest = useRef({ onCommit, onCancel });
-	latest.current = { onCommit, onCancel };
+	useLayoutEffect(() => {
+		latest.current = { onCommit, onCancel };
+	});
 	const commitStable = useCallback((draft: string) => latest.current.onCommit(draft), []);
 	const cancelStable = useCallback(() => latest.current.onCancel(), []);
 
@@ -387,9 +482,11 @@ export function App() {
 				}
 				event.preventDefault();
 				if (cell.editable) {
-					apply(row.url, { op: 'delete', key }, `${key} removed`);
+					apply(row.url, { op: 'delete', key }, t('app.removed', { key }));
 				} else {
-					setProblem(`${key} cannot be removed: ${cell.reason ?? 'read only'}`);
+					setProblem(
+						t('app.cannotRemove', { key, reason: cell.reason ?? t('app.readOnly') }),
+					);
 				}
 			}
 			return;
@@ -450,21 +547,23 @@ export function App() {
 			<header className="bar">
 				<h1>kamado ui</h1>
 				<label>
-					Search
+					{t('app.search')}
 					<input
 						type="search"
 						value={typed}
 						onChange={(event) => setTyped(event.target.value)}
-						placeholder="URL or text of a value"
+						placeholder={t('app.searchPlaceholder')}
 					/>
 				</label>
 				<label>
-					Rows per page
+					{t('app.pageSize')}
 					<select
 						value={pageSize}
 						onChange={(event) => {
-							setPageSize(Number(event.target.value));
+							const size = Number(event.target.value);
+							setPageSize(size);
 							go(0);
+							remember({ project: { pageSize: size } });
 						}}>
 						{PAGE_SIZES.map((n) => (
 							<option key={n} value={n}>
@@ -473,9 +572,9 @@ export function App() {
 						))}
 					</select>
 				</label>
-				<nav aria-label="Pages" className="pager">
+				<nav aria-label={t('app.pages')} className="pager">
 					<button type="button" disabled={page === 0} onClick={() => go(page - 1)}>
-						Previous
+						{t('app.previous')}
 					</button>
 					<span>
 						{rows === null
@@ -483,25 +582,56 @@ export function App() {
 							: rangeLabel(page * pageSize, rows.pages.length, rows.total)}
 					</span>
 					<button type="button" disabled={page >= pages - 1} onClick={() => go(page + 1)}>
-						Next
+						{t('app.next')}
 					</button>
 				</nav>
 				<button type="button" onClick={() => dialogRef.current?.showModal()}>
-					Add key
+					{t('app.addKey')}
 				</button>
 				<button type="button" onClick={reloadWhenIdle} disabled={loading}>
-					Read again
+					{t('app.readAgain')}
 				</button>
+				<label>
+					{t('app.language')}
+					<select
+						value={locale}
+						onChange={(event) => {
+							const next = event.target.value as LocaleSetting;
+							onLocale(next);
+							// What was said in the other language is not carried over in it.
+							setStatus('');
+							setProblem('');
+							remember({ global: { locale: next } });
+						}}>
+						<option value="auto">{t('app.languageAuto')}</option>
+						<option value="en">English</option>
+						<option value="ja">日本語</option>
+					</select>
+				</label>
 			</header>
 			<p role="status" className="status">
-				{loading ? 'Loading…' : status}
+				{loading ? t('app.loading') : status}
 			</p>
+			{settingsNote !== null && (
+				<p
+					role={settingsNote.kind === 'notSaved' ? 'alert' : 'status'}
+					className="problem">
+					{settingsNote.kind === 'unreadable'
+						? t('app.settingsUnreadable')
+						: t(
+								settingsNote.kind === 'warning'
+									? 'app.settingsWarning'
+									: 'app.settingsNotSaved',
+								{ message: settingsNote.message },
+							)}
+				</p>
+			)}
 			<p role="alert" className="problem">
 				{problem}
 			</p>
 			{rows !== null && rows.warnings.length > 0 && (
 				<details className="warnings">
-					<summary>{rows.warnings.length} warning(s)</summary>
+					<summary>{t('app.warnings', { count: rows.warnings.length })}</summary>
 					<ul>
 						{rows.warnings.map((w, i) => (
 							<li key={`${i}:${w}`}>{w}</li>
@@ -512,7 +642,7 @@ export function App() {
 			<div
 				ref={gridRef}
 				role="grid"
-				aria-label="Pages of the site"
+				aria-label={t('app.gridLabel')}
 				aria-rowcount={rows === null ? undefined : rows.total + 1}
 				aria-colcount={colCount}
 				aria-activedescendant={
@@ -552,11 +682,11 @@ export function App() {
 				dialogRef={dialogRef}
 				onAdd={(name, kind) => {
 					if (columns.includes(name)) {
-						setStatus(`${name} is already a column`);
+						setStatus(t('app.alreadyColumn', { name }));
 						return;
 					}
 					setAdded((prev) => new Map(prev).set(name, kind));
-					setStatus(`Column ${name} added: edit a cell of it to give a page the key`);
+					setStatus(t('app.columnAdded', { name }));
 				}}
 			/>
 		</div>
@@ -576,6 +706,7 @@ interface AddKeyProps {
  * @param props.onAdd - Called with the name and the kind when the form is sent
  */
 function AddKeyDialog({ dialogRef, onAdd }: AddKeyProps) {
+	const { t } = useI18n();
 	const [name, setName] = useState('');
 	const [kind, setKind] = useState<FieldKind>('text');
 	return (
@@ -596,9 +727,9 @@ function AddKeyDialog({ dialogRef, onAdd }: AddKeyProps) {
 					setName('');
 					dialogRef.current?.close();
 				}}>
-				<h2 id="add-key-title">Add key</h2>
+				<h2 id="add-key-title">{t('app.addKey')}</h2>
 				<label>
-					Name
+					{t('dialog.name')}
 					<input
 						required
 						autoFocus
@@ -607,22 +738,22 @@ function AddKeyDialog({ dialogRef, onAdd }: AddKeyProps) {
 					/>
 				</label>
 				<label>
-					Type
+					{t('dialog.type')}
 					<select
 						value={kind}
 						onChange={(event) => setKind(event.target.value as FieldKind)}>
 						{FIELD_KINDS.map((k) => (
 							<option key={k} value={k}>
-								{k}
+								{t(`kind.${k}` as const)}
 							</option>
 						))}
 					</select>
 				</label>
 				<div className="actions">
 					<button type="button" onClick={() => dialogRef.current?.close()}>
-						Cancel
+						{t('dialog.cancel')}
 					</button>
-					<button type="submit">Add</button>
+					<button type="submit">{t('dialog.add')}</button>
 				</div>
 			</form>
 		</dialog>

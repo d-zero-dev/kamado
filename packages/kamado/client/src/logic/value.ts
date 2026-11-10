@@ -10,6 +10,9 @@
  * a date (a string with an offset or a space is text, which an edit would otherwise cut
  * down to a day), and the day is the day as written.
  */
+import type { Translate } from '../i18n/translate.js';
+
+import { english } from '../i18n/translate.js';
 
 /** The kinds of input a value can be edited with. */
 export type FieldKind = 'text' | 'number' | 'boolean' | 'date' | 'json';
@@ -117,13 +120,18 @@ export type Parsed =
  * in BurgerEditor); a JSON text that is a number or a string makes the value that type.
  * @param kind - The kind of the input
  * @param draft - The text of the input
+ * @param t - Says why a text is not a value, in the language of the screen (English by default)
  * @example
  * ```ts
  * parseDraft('number', ''); // { ok: true, value: null }
  * parseDraft('json', '{'); // { ok: false, reason: ... }
  * ```
  */
-export function parseDraft(kind: FieldKind, draft: string): Parsed {
+export function parseDraft(
+	kind: FieldKind,
+	draft: string,
+	t: Translate = english,
+): Parsed {
 	switch (kind) {
 		case 'number': {
 			if (draft.trim() === '') {
@@ -132,7 +140,7 @@ export function parseDraft(kind: FieldKind, draft: string): Parsed {
 			const value = Number(draft);
 			return Number.isFinite(value)
 				? { ok: true, value }
-				: { ok: false, reason: `"${draft}" is not a number` };
+				: { ok: false, reason: t('value.notNumber', { draft }) };
 		}
 		case 'json': {
 			try {
@@ -140,7 +148,9 @@ export function parseDraft(kind: FieldKind, draft: string): Parsed {
 			} catch (error) {
 				return {
 					ok: false,
-					reason: `not JSON yet: ${error instanceof Error ? error.message : String(error)}`,
+					reason: t('value.notJson', {
+						message: error instanceof Error ? error.message : String(error),
+					}),
 				};
 			}
 		}

@@ -4,7 +4,10 @@
  * whether a cell that was left is to be written. They are functions of plain values so that
  * they can be tested without a browser; `app.tsx` only calls them.
  */
+import type { Translate } from '../i18n/translate.js';
 import type { Edited, Row, Rows } from '../types.js';
+
+import { english } from '../i18n/translate.js';
 
 import { clampPage } from './grid.js';
 import { sameValue } from './value.js';
@@ -20,19 +23,23 @@ export type Reading = 'busy' | 'failed' | 'ok';
  * Why an edit cannot be sent now, or `null` when it can. Said to the user, since an edit that
  * is dropped must not look as if it was written.
  * @param reading - The state of the list
+ * @param t - Says the reason in the language of the screen (English by default)
  * @example
  * ```ts
  * editBlockedReason('ok'); // null
  * editBlockedReason('busy'); // 'The list is being read again: ...'
  * ```
  */
-export function editBlockedReason(reading: Reading): string | null {
+export function editBlockedReason(
+	reading: Reading,
+	t: Translate = english,
+): string | null {
 	switch (reading) {
 		case 'busy': {
-			return 'The list is being read again: nothing was written. Make the edit when it is shown';
+			return t('session.busy');
 		}
 		case 'failed': {
-			return 'The list could not be read: nothing was written. Use Read again first';
+			return t('session.failed');
 		}
 		default: {
 			return null;
@@ -83,6 +90,7 @@ export function applyEdited(
  * @param urls - The URLs of the rows shown, in order
  * @param was - Where the focus was
  * @param moved - The URL a page was moved to, if the reading follows a move
+ * @param t - Says what was done in the language of the screen (English by default)
  * @returns The row, and what to say about a move (`null` when there was none)
  * @example
  * ```ts
@@ -93,6 +101,7 @@ export function focusAfterLoad(
 	urls: readonly string[],
 	was: number,
 	moved: string | null,
+	t: Translate = english,
 ): { row: number; said: string | null } {
 	const stay = Math.min(was, Math.max(0, urls.length - 1));
 	if (moved === null) {
@@ -100,8 +109,8 @@ export function focusAfterLoad(
 	}
 	const at = urls.indexOf(moved);
 	return at === -1
-		? { row: stay, said: `Moved to ${moved} (not on this page)` }
-		: { row: at, said: `Moved to ${moved}` };
+		? { row: stay, said: t('app.movedElsewhere', { url: moved }) }
+		: { row: at, said: t('app.moved', { url: moved }) };
 }
 
 /**

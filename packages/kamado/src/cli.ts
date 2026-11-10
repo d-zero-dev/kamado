@@ -11,6 +11,8 @@ import { start } from './server/start.js';
 import { summarize } from './summary.js';
 import { checkUiOnlyFlags } from './ui/arguments.js';
 import { uiCommand } from './ui/command.js';
+import { checkSettingsOnlyFlag, settingsCommand } from './ui/settings-command.js';
+import { defaultSettingsFile } from './ui/settings.js';
 
 const USAGE = `Usage:
   kamado build [globs...] [--incremental] [--force] [--skip-unchanged]
@@ -18,13 +20,20 @@ const USAGE = `Usage:
   kamado server           [--config <file>] [--cache-dir <dir>] [--verbose]
   kamado pages            [--out <file>] [--incremental] [--cache-dir <dir>] [--config <file>]
   kamado ui               [--port <n>] [--open | --no-open] [--cache-dir <dir>] [--config <file>]
+  kamado ui-settings list
+  kamado ui-settings reset [--config <file>]
+  kamado ui-settings delete <config-file> | --all
 
 The config file defaults to ./kamado.config.jsonc.
 \`pages\` lists every page of the plan as JSON, without building: to the standard output, or
 to --out.
 \`ui\` opens a screen in the browser to edit the URLs and the metadata of the pages, and
 writes them back to the source files. It listens on localhost, on the port of devServer plus
-one unless --port says otherwise.`;
+one unless --port says otherwise.
+\`ui-settings\` looks at what \`ui\` saved in ~/.config/kamado/ui-settings.json, for each project:
+\`list\` shows the projects, \`reset\` removes those of the project of the config file, and
+\`delete\` removes those of the project of the given config file (or, with --all, those of every
+project and the language).`;
 
 /**
  * A progress line on the terminal's error stream, rewritten in place (and
@@ -94,6 +103,7 @@ async function main(argv: readonly string[]): Promise<number> {
 			port: { type: 'string' },
 			open: { type: 'boolean', default: false },
 			'no-open': { type: 'boolean', default: false },
+			all: { type: 'boolean', default: false },
 			help: { type: 'boolean', short: 'h', default: false },
 		},
 	});
@@ -112,6 +122,10 @@ async function main(argv: readonly string[]): Promise<number> {
 	// A command that does not exist is said so by the `default` of the switch, not by a flag.
 	if (command !== 'ui' && ['build', 'server', 'pages'].includes(command)) {
 		checkUiOnlyFlags(command, values);
+	}
+	// `--all` is a flag of `ui-settings` alone, and is refused for the others for the same reason.
+	if (['build', 'server', 'pages', 'ui'].includes(command)) {
+		checkSettingsOnlyFlag(command, values);
 	}
 	switch (command) {
 		case 'build': {
@@ -174,6 +188,16 @@ async function main(argv: readonly string[]): Promise<number> {
 				resolveConfig: () => resolveConfig(values.config),
 			});
 			// The server keeps the process alive, as `server` does.
+			return 0;
+		}
+		case 'ui-settings': {
+			console.log(
+				await settingsCommand(rest, values, {
+					cwd: process.cwd(),
+					file: defaultSettingsFile(),
+					resolveConfig: () => resolveConfig(values.config),
+				}),
+			);
 			return 0;
 		}
 		default: {

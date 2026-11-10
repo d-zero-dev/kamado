@@ -1,8 +1,10 @@
+import type { Translate } from './i18n/translate.js';
 import type { FieldKind } from './logic/value.js';
 import type { Row as PageRow } from './types.js';
 
 import { memo, useRef, useState } from 'react';
 
+import { useI18n } from './i18n/context.js';
 import { cellOf } from './logic/columns.js';
 import { parseDraft, toText } from './logic/value.js';
 
@@ -38,6 +40,7 @@ interface EditorProps {
  * @param root0.onInvalid - Called with why the text is not a value yet
  */
 function Editor({ editing, onCommit, onCancel, onInvalid }: EditorProps) {
+	const { t } = useI18n();
 	const [draft, setDraft] = useState(editing.draft);
 	// A commit by Enter must not be repeated by the blur that follows when the input goes.
 	const settled = useRef(false);
@@ -58,9 +61,9 @@ function Editor({ editing, onCommit, onCancel, onInvalid }: EditorProps) {
 		// A number input that holds text which is not a number (`1e`, `-`) reports an empty
 		// value: read as that, the number would be erased.
 		if (editing.kind === 'number' && input.current?.validity.badInput === true) {
-			return 'what is typed is not a number';
+			return t('edit.notANumber');
 		}
-		const parsed = parseDraft(editing.kind, text);
+		const parsed = parseDraft(editing.kind, text, t);
 		return parsed.ok ? null : parsed.reason;
 	};
 	/**
@@ -77,7 +80,7 @@ function Editor({ editing, onCommit, onCancel, onInvalid }: EditorProps) {
 		const problem = problemOf(text);
 		if (problem !== null) {
 			if (leaving) {
-				onInvalid(`Not saved: ${problem}`);
+				onInvalid(t('edit.notSaved', { reason: problem }));
 				cancel();
 			} else {
 				onInvalid(problem);
@@ -178,18 +181,20 @@ interface RowProps {
  * @param col - The column, from 0
  * @param columns - The keys of the metadata
  * @param addedKinds - The kinds of keys added on the screen
+ * @param t - Says the words of the cell in the language of the screen
  */
 function describe(
 	row: PageRow,
 	col: number,
 	columns: readonly string[],
 	addedKinds: ReadonlyMap<string, FieldKind>,
+	t: Translate,
 ): { text: string; readOnly: boolean; note: string | undefined; origin?: string } {
 	if (col === 0) {
 		return { text: row.url, readOnly: false, note: undefined };
 	}
 	if (col === 1) {
-		return { text: row.virtual ? 'virtual' : '', readOnly: true, note: undefined };
+		return { text: row.virtual ? t('row.virtual') : '', readOnly: true, note: undefined };
 	}
 	if (col === 2) {
 		return { text: row.inputPath ?? '', readOnly: true, note: undefined };
@@ -205,7 +210,9 @@ function describe(
 	return {
 		text: toText(cell.value),
 		readOnly: !cell.editable,
-		note: cell.editable ? `from ${cell.origin}` : cell.reason,
+		note: cell.editable
+			? t('row.from', { origin: t(`origin.${cell.origin}` as const) })
+			: cell.reason,
 		origin: cell.origin,
 	};
 }
@@ -227,9 +234,10 @@ export const GridRow = memo(function GridRow({
 	onCancel,
 	onInvalid,
 }: RowProps) {
+	const { t } = useI18n();
 	const cells = [];
 	for (let col = 0; col < FIXED_COLUMNS.length + columns.length; col++) {
-		const { text, readOnly, note, origin } = describe(row, col, columns, addedKinds);
+		const { text, readOnly, note, origin } = describe(row, col, columns, addedKinds, t);
 		const isEditing = editing !== null && editing.col === col;
 		cells.push(
 			<div

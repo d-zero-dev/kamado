@@ -1,4 +1,4 @@
-import type { Change, Edited, Row, Rows } from './types.js';
+import type { Change, Edited, Row, Rows, SettingsPatch, SettingsView } from './types.js';
 
 /** An answer that was not a success. */
 export class ApiError extends Error {
@@ -83,6 +83,27 @@ export function fetchRows(
 		query.set('q', q);
 	}
 	return call<Rows>(`/api/pages?${query.toString()}`, { signal });
+}
+
+/**
+ * The settings the screen keeps between runs.
+ * @param signal - To give up on an answer that does not come
+ */
+export function fetchSettings(signal?: AbortSignal): Promise<SettingsView> {
+	return call<SettingsView>('/api/settings', { signal });
+}
+
+/**
+ * Keeps a change of the settings.
+ * @param patch - What changed
+ * @returns The settings after the change
+ */
+export function saveSettings(patch: SettingsPatch): Promise<SettingsView> {
+	return call<SettingsView>('/api/settings', {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token() },
+		body: JSON.stringify(patch),
+	});
 }
 
 /** Has the core read the site again. */
