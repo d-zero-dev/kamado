@@ -2223,9 +2223,21 @@ mod tests {
 			"pages.overrides.json",
 			OVERRIDES_ONE.replace("/other.html", "/").as_str(),
 		);
-		// No ageing: the file was written within the grain of the modification times.
+		// No ageing: the file was written within the grain of the modification times. Opening
+		// a site takes longer than that grain on a loaded machine (a macOS runner), so the
+		// modification time is put ahead of the plan, by more than opening takes, rather than
+		// left to be "a moment ago": the plan sees a file that has not settled either way.
+		let ahead = Duration::from_millis(600);
+		fs::File::options()
+			.write(true)
+			.open(format!("{}/pages.overrides.json", site.root))
+			.unwrap()
+			.set_modified(std::time::SystemTime::now() + ahead)
+			.unwrap();
 		let serve = site.serve(r#", "pages": { "overrides": "pages.overrides.json" }"#);
-		aged();
+		// Until the grain after that time has passed, so that the read the request makes finds
+		// the file settled.
+		std::thread::sleep(ahead + crate::MTIME_GRAIN * 3);
 
 		assert_eq!(text(serve.request("/").unwrap()).1, "<p>top</p>\n");
 		assert_eq!(
