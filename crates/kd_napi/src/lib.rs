@@ -592,6 +592,19 @@ unsafe fn ui_pages(env: napi_env, info: napi_callback_info) -> napi_value {
 	}
 }
 
+/// `uiValues(handle, queryJson)` -> the JSON of the values of a metadata key.
+unsafe fn ui_values(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<2>(
+			env,
+			info,
+			c"uiValues: expected (handle, queryJson) strings",
+			|[handle, query]| ui::values(&handle, &query).map_err(Thrown::from),
+		)
+	}
+}
+
 /// `uiRefresh(handle)` -> `{ "version" }`, after planning the site again.
 unsafe fn ui_refresh(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
@@ -837,6 +850,7 @@ unsafe fn register(env: napi_env, exports: napi_value) -> napi_value {
 		export_guarded!(api, env, exports, c"serveClose", serve_close);
 		export_guarded!(api, env, exports, c"uiOpen", ui_open);
 		export_guarded!(api, env, exports, c"uiPages", ui_pages);
+		export_guarded!(api, env, exports, c"uiValues", ui_values);
 		export_guarded!(api, env, exports, c"uiRefresh", ui_refresh);
 		export_guarded!(api, env, exports, c"uiEdit", ui_edit);
 		export_guarded!(api, env, exports, c"uiServer", ui_server);

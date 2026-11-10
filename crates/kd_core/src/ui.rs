@@ -727,14 +727,39 @@ fn parse_sort(v: &Value) -> Result<Option<Sort>, String> {
 	Ok(Some(Sort { column, desc }))
 }
 
+/// The member `key` of a request, which must be a non-negative integer.
+fn non_negative(v: &Value, key: &str) -> Result<usize, String> {
+	match v.get(key) {
+		Some(Value::Number(n)) if *n >= 0.0 && n.fract() == 0.0 && *n < 1e15 => Ok(*n as usize),
+		_ => Err(format!("query: `{key}` must be a non-negative integer")),
+	}
+}
+
+/// What `uiValues` was asked for: the name of the metadata key (the column `meta:<key>`), and
+/// the most values to answer with.
+struct ValuesQuery {
+	key: String,
+	limit: usize,
+}
+
+fn parse_values_query(json: &str) -> Result<ValuesQuery, String> {
+	let v = kd_jsonc::parse(json).map_err(|e| format!("query: invalid JSON: {e}"))?;
+	let key = match v.get("key") {
+		Some(Value::String(k)) => match k.strip_prefix("meta:") {
+			Some(name) if !name.is_empty() => name.to_string(),
+			_ => return Err("query: `key` must be `meta:<key>`".to_string()),
+		},
+		_ => return Err("query: `key` must be `meta:<key>`".to_string()),
+	};
+	Ok(ValuesQuery {
+		key,
+		limit: non_negative(&v, "limit")?,
+	})
+}
+
 fn parse_query(json: &str) -> Result<Query, String> {
 	let v = kd_jsonc::parse(json).map_err(|e| format!("query: invalid JSON: {e}"))?;
-	let number = |key: &str| -> Result<usize, String> {
-		match v.get(key) {
-			Some(Value::Number(n)) if *n >= 0.0 && n.fract() == 0.0 && *n < 1e15 => Ok(*n as usize),
-			_ => Err(format!("query: `{key}` must be a non-negative integer")),
-		}
-	};
+	let number = |key: &str| non_negative(&v, key);
 	let q = match v.get("q") {
 		None | Some(Value::Null) => None,
 		Some(Value::String(s)) if s.is_empty() => None,
@@ -1370,6 +1395,85 @@ impl Ui {
 						.warnings
 						.iter()
 						.map(|w| Value::String(w.clone()))
+						.collect(),
+				),
+			),
+		])
+		.to_json())
+	}
+
+	/// The values a metadata key has over every page, for the editor of a column whose values
+	/// are a few (RFC §14.2). `query_json` is `{ "key": "meta:<key>", "limit" }`. The answer is
+	/// `{ "version", "key", "total", "values": [{ "value", "count" }] }`: the strings, numbers
+	/// and booleans the pages hold under the key, each once with how many times it is held, the
+	/// most often first (a value held as often as another comes after it when it was first met
+	/// later in the order of the plan), at most `limit` of them. The items of an array count as
+	/// values; `null`, an object, and an array inside an array are not values here. `total` is
+	/// how many different values there are, whatever `limit` is. The number `1` and the text
+	/// `"1"` are two values.
+	///
+	/// # Errors
+	///
+	/// A message for a query that is not what it should be.
+	///
+	/// # Example
+	///
+	/// ```no_run
+	/// let loaded = kd_core::load("/site/kamado.config.jsonc").unwrap();
+	/// let ui = kd_core::Ui::open(loaded, &kd_core::BuildOptions::default()).unwrap();
+	/// let values = ui.values(r#"{"key":"meta:layout","limit":100}"#).unwrap();
+	/// assert!(values.contains(r#""values":["#));
+	/// ```
+	pub fn values(&self, query_json: &str) -> Result<String, String> {
+		let query = parse_values_query(query_json)?;
+		// A value is told from the others by how it is written as JSON, which is what tells
+		// the number `1` from the text `"1"`.
+		let mut at: HashMap<String, usize> = HashMap::new();
+		let mut found: Vec<(Value, usize)> = Vec::new();
+		let mut take = |value: &Value| {
+			if !matches!(value, Value::String(_) | Value::Number(_) | Value::Bool(_)) {
+				return;
+			}
+			match at.entry(value.to_json()) {
+				std::collections::hash_map::Entry::Occupied(e) => found[*e.get()].1 += 1,
+				std::collections::hash_map::Entry::Vacant(e) => {
+					e.insert(found.len());
+					found.push((value.clone(), 1));
+				}
+			}
+		};
+		for page in &self.plan.pages {
+			let Some((_, value)) = page.meta.iter().find(|(k, _)| *k == query.key) else {
+				continue;
+			};
+			match value {
+				Value::Array(items) => items.iter().for_each(&mut take),
+				other => take(other),
+			}
+		}
+		// Stable on purpose: equal counts keep the order they were first met in, which is the order
+		// of the plan, so the same site gives the same list.
+		found.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+		let total = found.len();
+		found.truncate(query.limit);
+		Ok(Value::Object(vec![
+			("version".to_owned(), Value::Number(self.version as f64)),
+			(
+				"key".to_owned(),
+				Value::String(format!("meta:{}", query.key)),
+			),
+			("total".to_owned(), Value::Number(total as f64)),
+			(
+				"values".to_owned(),
+				Value::Array(
+					found
+						.into_iter()
+						.map(|(value, count)| {
+							Value::Object(vec![
+								("value".to_owned(), value),
+								("count".to_owned(), Value::Number(count as f64)),
+							])
+						})
 						.collect(),
 				),
 			),
