@@ -148,6 +148,9 @@ pub struct Ui {
 	version: u64,
 	by_url: HashMap<String, usize>,
 	columns: BTreeSet<String>,
+	/// The names of the layouts in `pages.layouts.dir`, or `None` when there is no such
+	/// setting. Read when the handle is opened and refreshed, not for each page of rows.
+	layouts: Option<Vec<String>>,
 	file_info: HashMap<String, FileInfo>,
 	/// The order of every page for the last sort asked for, with the version of the plan it was
 	/// made on. Making it takes a key per page and a merge sort, which a page turn, a search or
@@ -200,6 +203,107 @@ fn really_inside(dir: &str, target: &str) -> bool {
 		at = parent.parent();
 	}
 	false
+}
+
+/// The names a layout can be given: the files `<name>.tsx` and `<name>.jsx` directly in
+/// `pages.layouts.dir`, by the name without the extension, each once, in the order of their
+/// bytes. The rule is the one that finds the layout of a page (a name with a path or `.` or `..`
+/// is none), so a name from here is always found. `None` when `pages.layouts.dir` is not set; a
+/// directory that is not there has no layouts.
+fn read_layouts(config: &kd_config::Config) -> Result<Option<Vec<String>>, String> {
+	let Some(dir) = &config.pages.layouts_dir else {
+		return Ok(None);
+	};
+	let entries = match fs::read_dir(dir) {
+		Ok(entries) => entries,
+		Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Some(Vec::new())),
+		Err(e) => return Err(format!("cannot read pages.layouts.dir {dir}: {e}")),
+	};
+	let mut names: BTreeSet<String> = BTreeSet::new();
+	for entry in entries {
+		let entry = entry.map_err(|e| format!("cannot read pages.layouts.dir {dir}: {e}"))?;
+		let Ok(file_name) = entry.file_name().into_string() else {
+			continue;
+		};
+		let Some(name) = file_name
+			.strip_suffix(".tsx")
+			.or_else(|| file_name.strip_suffix(".jsx"))
+		else {
+			continue;
+		};
+		if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
+			continue;
+		}
+		// A link is followed, as the build does; a directory called `x.tsx` is not a layout.
+		if fs::metadata(entry.path()).is_ok_and(|m| m.is_file()) {
+			names.insert(name.to_owned());
+		}
+	}
+	Ok(Some(names.into_iter().collect()))
+}
+
+/// Removes the directories a move left empty: the one the file was in, then its parent, and so
+/// on, up to but not including `root`. A directory that holds anything is not removed (nor are
+/// the ones above it), and neither is one that is a link.
+fn prune_empty_dirs(from: &str, root: &str) {
+	let prefix = format!("{}/", root.trim_end_matches('/'));
+	let mut at = std::path::Path::new(from).parent();
+	while let Some(dir) = at {
+		let Some(name) = dir.to_str() else {
+			break;
+		};
+		if !name.starts_with(&prefix) || fs::remove_dir(dir).is_err() {
+			break;
+		}
+		at = dir.parent();
+	}
+}
+
+/// The path a person typed for a page file, read from the input directory: `\` is `/`, a
+/// leading `/` is the input directory, and `.`, `..` and empty segments are folded. A path that
+/// ends in `/` (or `.`, `..`) names a directory, and the file is `index` with the extension of the
+/// page; a name without an extension gets it. Returns the path relative to the input directory.
+fn typed_path(typed: &str, ext: &str) -> F<String> {
+	if typed.is_empty() {
+		return fail("invalid", "the path is empty");
+	}
+	if typed.contains('\0') {
+		return fail("invalid", "the path has a NUL character");
+	}
+	let typed = typed.replace('\\', "/");
+	let segments: Vec<&str> = typed.split('/').collect();
+	let directory = matches!(segments.last().copied(), Some("" | "." | ".."));
+	let mut parts: Vec<String> = Vec::new();
+	for segment in segments {
+		match segment {
+			"" | "." => {}
+			".." => {
+				if parts.pop().is_none() {
+					return fail(
+						"invalid",
+						format!("{typed:?} is outside the input directory"),
+					);
+				}
+			}
+			name => parts.push(name.to_string()),
+		}
+	}
+	if directory {
+		parts.push(format!("index{ext}"));
+	} else if let Some(last) = parts.last_mut() {
+		let own = kd_site::path::extname(last);
+		if own.is_empty() {
+			last.push_str(ext);
+		} else if own != ext {
+			return fail(
+				"invalid",
+				format!(
+					"the extension of the file cannot change: {last:?} has {own:?}, the file has {ext:?}"
+				),
+			);
+		}
+	}
+	Ok(parts.join("/"))
 }
 
 /// Whether a relative path leaves the directory it is relative to (a segment that only starts
@@ -599,6 +703,9 @@ struct Txn {
 	/// whether the handle's copy of it was not the text that was edited (so the new text has to
 	/// be parsed, and the parsed form cannot be changed in place).
 	overrides_after: Option<(String, bool)>,
+	/// The input directory: when the moves are made, the directories they leave empty are
+	/// removed up to (not including) it.
+	prune_to: Option<String>,
 }
 
 impl Txn {
@@ -654,6 +761,12 @@ impl Txn {
 			written.push((path.clone(), old));
 			if let Err(e) = fs::write(path, text) {
 				return Err(undo(&renamed, &written, &made, io_fail(path, &e)));
+			}
+		}
+		// Everything is made, so nothing is put back: what was left empty can go.
+		if let Some(root) = &self.prune_to {
+			for (from, _) in &self.renames {
+				prune_empty_dirs(from, root);
 			}
 		}
 		Ok(())
@@ -778,6 +891,8 @@ fn parse_query(json: &str) -> Result<Query, String> {
 enum Change {
 	Key(KeyChange),
 	MoveUrl(String),
+	/// The path of the page file, as typed (relative to the input directory).
+	MovePath(String),
 }
 
 struct Edit {
@@ -819,8 +934,19 @@ fn parse_edit(json: &str) -> Result<Edit, String> {
 				return Err("edit: `change.url` (a string) is required for \"moveUrl\"".to_string());
 			}
 		},
+		Some(Value::String(op)) if op == "movePath" => match change.get("path") {
+			Some(Value::String(p)) => Change::MovePath(p.clone()),
+			_ => {
+				return Err(
+					"edit: `change.path` (a string) is required for \"movePath\"".to_string(),
+				);
+			}
+		},
 		_ => {
-			return Err("edit: `change.op` must be \"set\", \"delete\" or \"moveUrl\"".to_string());
+			return Err(
+				"edit: `change.op` must be \"set\", \"delete\", \"moveUrl\" or \"movePath\""
+					.to_string(),
+			);
 		}
 	};
 	Ok(Edit {
@@ -831,11 +957,14 @@ fn parse_edit(json: &str) -> Result<Edit, String> {
 }
 
 impl Ui {
-	/// Plans the site and keeps the plan.
+	/// Plans the site and keeps the plan, and reads the names of the layouts in
+	/// `pages.layouts.dir` (RFC §14.2).
 	///
 	/// # Errors
 	///
-	/// A message for any problem with the plan, as for `kamado pages`.
+	/// A message for any problem with the plan, as for `kamado pages`, and for a
+	/// `pages.layouts.dir` that is there but cannot be read (it is not a directory, or it is not
+	/// readable).
 	///
 	/// # Example
 	///
@@ -868,9 +997,11 @@ impl Ui {
 			version: 0,
 			by_url: HashMap::new(),
 			columns: BTreeSet::new(),
+			layouts: None,
 			file_info: HashMap::new(),
 			sort_cache: None,
 		};
+		ui.layouts = read_layouts(&ui.loaded.config)?;
 		ui.plan_again(on_disk)?;
 		Ok(ui)
 	}
@@ -949,12 +1080,13 @@ impl Ui {
 	}
 
 	/// Reads the plan again (the files are `stat`ed, and only the ones that changed are
-	/// read) and returns the new version. If the site cannot be read, nothing of the handle
+	/// read), and the names of the layouts in `pages.layouts.dir` again, and returns the new
+	/// version. If the site or the layouts directory cannot be read, nothing of the handle
 	/// changes.
 	///
 	/// # Errors
 	///
-	/// A message for any problem with the plan.
+	/// A message for any problem with the plan, or for a `pages.layouts.dir` that cannot be read.
 	///
 	/// # Example
 	///
@@ -965,7 +1097,11 @@ impl Ui {
 	/// assert!(ui.refresh().unwrap() > before);
 	/// ```
 	pub fn refresh(&mut self) -> Result<u64, String> {
+		// Read first: a directory that cannot be read leaves the handle as it was, as a site that
+		// cannot be planned does.
+		let layouts = read_layouts(&self.loaded.config)?;
 		self.plan_again(None)?;
+		self.layouts = layouts;
 		Ok(self.version)
 	}
 
@@ -1305,7 +1441,9 @@ impl Ui {
 	/// page that matches, not only the window.
 	/// The plan is not made again; each row of the window reads its page file once (until it
 	/// changes) to tell which keys can be edited, and a query `q` looks through the URL and the
-	/// text values of every page.
+	/// text values of every page. The answer also has `layouts`: the names of the layouts in
+	/// `pages.layouts.dir` as they were when the handle was opened or last refreshed (`null`
+	/// when that is not set, `[]` when the directory is not there).
 	///
 	/// # Errors
 	///
@@ -1385,6 +1523,13 @@ impl Ui {
 						.map(|c| Value::String(c.clone()))
 						.collect(),
 				),
+			),
+			(
+				"layouts".to_owned(),
+				match &self.layouts {
+					Some(names) => Value::Array(names.iter().cloned().map(Value::String).collect()),
+					None => Value::Null,
+				},
 			),
 			("overridesHash".to_owned(), self.overrides_hash_json()),
 			("pages".to_owned(), Value::Array(rows)),
@@ -1503,8 +1648,12 @@ impl Ui {
 		Value::Object(members).to_json()
 	}
 
-	/// Makes one edit (RFC §14.2). The answer says whether it was made; an edit that is
-	/// refused (a changed file, an invalid value, a collision) is an answer, not an error.
+	/// Makes one edit (RFC §14.2): `change.op` is `set` or `delete` (a key of the metadata),
+	/// `moveUrl` (the page gets another URL) or `movePath` (the page file gets another path,
+	/// given relative to `dir.input`; the only edit that carries a path). The directories a
+	/// move leaves empty are removed once it has been made. The answer says whether it was
+	/// made; an edit that is refused (a changed file, an invalid value, a collision) is an
+	/// answer, not an error.
 	///
 	/// # Errors
 	///
@@ -1533,6 +1682,7 @@ impl Ui {
 		let result = match &edit.change {
 			Change::Key(change) => self.edit_key(i, &edit.expect, change),
 			Change::MoveUrl(new_url) => self.move_url(i, &edit.expect, new_url),
+			Change::MovePath(path) => self.move_path(i, &edit.expect, path),
 		};
 		match result {
 			Ok(url) => {
@@ -1775,6 +1925,27 @@ impl Ui {
 		Ok(())
 	}
 
+	/// `dir.input` without a trailing `/`, the base the paths of the page files are made from.
+	fn input_dir(&self) -> String {
+		self.loaded
+			.config
+			.dir
+			.input
+			.trim_end_matches('/')
+			.to_string()
+	}
+
+	/// Plans the site again after the files were changed. The files are changed already, so a
+	/// plan that fails is said to be so: the editor does not know what the files hold now.
+	fn plan_after_files_changed(&mut self) -> F<()> {
+		self.plan_again(None).map_err(|message| Fail {
+			code: "io",
+			message: format!(
+				"the files were changed, but the site cannot be planned now: {message}"
+			),
+		})
+	}
+
 	fn dirs(&self) -> Dirs<'_> {
 		let c = &self.loaded.config;
 		Dirs {
@@ -1888,8 +2059,7 @@ impl Ui {
 			txn = self.key_txn(i, expect, &change, self.field_origin(&page, &field))?;
 		} else {
 			as_page()?;
-			let from = page.file.input_path.clone();
-			let ext = kd_site::path::extname(&from).to_string();
+			let ext = kd_site::path::extname(&page.file.input_path).to_string();
 			let rel = kd_site::url_to_local_path(new_url, &extension);
 			let stem = rel.strip_suffix(extension.as_str()).unwrap_or(&rel);
 			let to = format!("{input_dir}/{stem}{ext}");
@@ -1907,103 +2077,178 @@ impl Ui {
 					),
 				);
 			}
-			let rel_in_input = kd_site::path::relative(&input_dir, &moved.input_path);
-			if climbs(&rel_in_input) || !really_inside(&input_dir, &to) {
-				return fail("invalid", format!("{to} is outside the input directory"));
-			}
-			let config = &self.loaded.config;
-			let output_rel = kd_site::path::relative(&input_dir, &config.dir.output);
-			if !output_rel.is_empty()
-				&& !climbs(&output_rel)
-				&& (rel_in_input == output_rel
-					|| rel_in_input.starts_with(&format!("{output_rel}/")))
-			{
-				return fail("invalid", format!("{to} is inside the output directory"));
-			}
-			let matches_any = |globs: &[String]| -> Result<bool, Fail> {
-				let patterns = crate::compile_globs(globs).map_err(|message| Fail {
-					code: "invalid",
-					message,
-				})?;
-				Ok(patterns.iter().any(|p| p.matches(&rel_in_input)))
-			};
-			if !matches_any(&config.pages.files)? || matches_any(&config.pages.ignore)? {
-				return fail(
-					"invalid",
-					format!(
-						"{rel_in_input} is not a page by pages.files and pages.ignore, so the page would leave the site"
-					),
-				);
-			}
-			let sidecar_from = crate::sidecar_path(&from);
-			let sidecar_to = crate::sidecar_path(&to);
-			let has_sidecar = exists(&sidecar_from)?;
-			if occupied(&to, &from) {
-				return fail("collision", format!("{to} already exists"));
-			}
-			// A sidecar at the destination is taken even if the page has none: the moved
-			// page would read it as its own.
-			if occupied(&sidecar_to, &sidecar_from) {
-				return fail("collision", format!("{sidecar_to} already exists"));
-			}
-			if let Some(why) = self.output_collision(i, &moved) {
-				return fail("collision", why);
-			}
-			let text = read_expected(expect, "input", &from)?;
-			// A sidecar that is not there is part of what the editor saw (`null`): one that has
-			// appeared since is a conflict, and so is one that is gone.
-			hash_expectation(expect, "sidecar", &sidecar_from)?;
-			// A page's own imports are relative to where it is: they follow it.
-			if page.kind == PageKind::Tsx
-				&& let Some(rewritten) = rewrite_relative_imports(&from, &to, &text)?
-			{
-				let (before, _) =
-					crate::parse_page_text(&from, page.kind, text.clone()).map_err(|message| {
-						Fail {
-							code: "invalid",
-							message,
-						}
-					})?;
-				let (after, _) = crate::parse_page_text(&to, page.kind, rewritten.clone())
-					.map_err(|e| Fail {
-						code: "invalid",
-						message: format!("the new imports would leave {to} unreadable: {e}"),
-					})?;
-				if before != after {
-					return fail(
-						"invalid",
-						format!(
-							"the new imports would change the metadata of {to}; nothing was moved"
-						),
-					);
-				}
-				txn.writes.push((to.clone(), rewritten));
-			}
-			txn.renames.push((from, to));
-			if has_sidecar {
-				txn.renames.push((sidecar_from, sidecar_to));
-			}
+			txn = self.file_move(i, expect, &page, &to, &moved, true)?;
 		}
 		// The entry of the page in `pages.overrides` (a virtual page is nothing but that
 		// entry) is keyed by the URL, so it follows the page.
 		if overrides_entry {
-			let Some(o) = &self.overrides else {
-				return fail("invalid", "the site has no pages.overrides file");
-			};
-			let text = read_expected(expect, "overrides", &o.path)?;
-			let before = Self::overrides_before(o, &text)?;
-			let edited =
-				edit_overrides_text(&o.path, &text, &before, &old_url, None, Some(new_url))?;
-			txn.writes.push((o.path.clone(), edited));
+			self.follow_overrides(expect, &old_url, new_url, &mut txn)?;
 		}
 		txn.commit()?;
-		self.plan_again(None).map_err(|message| Fail {
-			code: "io",
-			message: format!(
-				"the files were changed, but the site cannot be planned now: {message}"
-			),
-		})?;
+		self.plan_after_files_changed()?;
 		Ok(new_url.to_string())
+	}
+
+	/// The changes that move the file of the page `i` (and its sidecar) to `to`, which is where
+	/// `moved` (the page file it makes) says it is: the checks that a place for a page file has to
+	/// pass (RFC §14.2), the `import`s of a module rewritten to name what they named, and the
+	/// files to move. `url_changes` is whether the output path of the page changes with the move
+	/// (a page whose URL a key makes keeps its URL, so it does not).
+	fn file_move(
+		&self,
+		i: usize,
+		expect: &Value,
+		page: &Page,
+		to: &str,
+		moved: &PageFile,
+		url_changes: bool,
+	) -> F<Txn> {
+		let input_dir = self.input_dir();
+		let from = page.file.input_path.clone();
+		let mut txn = Txn::default();
+		let rel_in_input = kd_site::path::relative(&input_dir, &moved.input_path);
+		if climbs(&rel_in_input) || !really_inside(&input_dir, to) {
+			return fail("invalid", format!("{to} is outside the input directory"));
+		}
+		let config = &self.loaded.config;
+		let output_rel = kd_site::path::relative(&input_dir, &config.dir.output);
+		if !output_rel.is_empty()
+			&& !climbs(&output_rel)
+			&& (rel_in_input == output_rel || rel_in_input.starts_with(&format!("{output_rel}/")))
+		{
+			return fail("invalid", format!("{to} is inside the output directory"));
+		}
+		let matches_any = |globs: &[String]| -> Result<bool, Fail> {
+			let patterns = crate::compile_globs(globs).map_err(|message| Fail {
+				code: "invalid",
+				message,
+			})?;
+			Ok(patterns.iter().any(|p| p.matches(&rel_in_input)))
+		};
+		if !matches_any(&config.pages.files)? || matches_any(&config.pages.ignore)? {
+			return fail(
+				"invalid",
+				format!(
+					"{rel_in_input} is not a page by pages.files and pages.ignore, so the page would leave the site"
+				),
+			);
+		}
+		let sidecar_from = crate::sidecar_path(&from);
+		let sidecar_to = crate::sidecar_path(to);
+		let has_sidecar = exists(&sidecar_from)?;
+		if occupied(to, &from) {
+			return fail("collision", format!("{to} already exists"));
+		}
+		// A sidecar at the destination is taken even if the page has none: the moved
+		// page would read it as its own.
+		if occupied(&sidecar_to, &sidecar_from) {
+			return fail("collision", format!("{sidecar_to} already exists"));
+		}
+		if url_changes && let Some(why) = self.output_collision(i, moved) {
+			return fail("collision", why);
+		}
+		let text = read_expected(expect, "input", &from)?;
+		// A sidecar that is not there is part of what the editor saw (`null`): one that has
+		// appeared since is a conflict, and so is one that is gone.
+		hash_expectation(expect, "sidecar", &sidecar_from)?;
+		// A page's own imports are relative to where it is: they follow it.
+		if page.kind == PageKind::Tsx
+			&& let Some(rewritten) = rewrite_relative_imports(&from, to, &text)?
+		{
+			let (before, _) =
+				crate::parse_page_text(&from, page.kind, text.clone()).map_err(|message| Fail {
+					code: "invalid",
+					message,
+				})?;
+			let (after, _) =
+				crate::parse_page_text(to, page.kind, rewritten.clone()).map_err(|e| Fail {
+					code: "invalid",
+					message: format!("the new imports would leave {to} unreadable: {e}"),
+				})?;
+			if before != after {
+				return fail(
+					"invalid",
+					format!("the new imports would change the metadata of {to}; nothing was moved"),
+				);
+			}
+			txn.writes.push((to.to_string(), rewritten));
+		}
+		txn.renames.push((from, to.to_string()));
+		if has_sidecar {
+			txn.renames.push((sidecar_from, sidecar_to));
+		}
+		txn.prune_to = Some(input_dir);
+		Ok(txn)
+	}
+
+	/// Changes the path of the file of the page `i` to what was typed (RFC §14.2): the file and
+	/// its sidecar move, and the URL follows the place unless a key makes it.
+	fn move_path(&mut self, i: usize, expect: &Value, typed: &str) -> F<String> {
+		let page = self.plan.pages[i].clone();
+		if page.is_virtual {
+			return fail(
+				"invalid",
+				"a virtual page has no file, so it has no path to change",
+			);
+		}
+		let input_dir = self.input_dir();
+		let from = page.file.input_path.clone();
+		let rel = typed_path(typed, kd_site::path::extname(&from))?;
+		let to = format!("{input_dir}/{rel}");
+		if to == from {
+			return fail("invalid", "the path is the same as it was");
+		}
+		let moved = kd_site::page_file(&to, &self.dirs());
+		let by_place = !self.url_from_field(&page);
+		if by_place {
+			if let Some(why) = kd_site::meta::not_a_page_path(&moved.url) {
+				return fail(
+					"invalid",
+					format!("the URL {:?} of the file {to} {why}", moved.url),
+				);
+			}
+			if moved.url != page.file.url && self.by_url.contains_key(&moved.url) {
+				return fail(
+					"collision",
+					format!("a page already has the URL {}", moved.url),
+				);
+			}
+		}
+		let mut txn = self.file_move(i, expect, &page, &to, &moved, by_place)?;
+		let new_url = if by_place {
+			moved.url.clone()
+		} else {
+			page.file.url.clone()
+		};
+		let overrides_entry = self
+			.overrides
+			.as_ref()
+			.is_some_and(|o| o.parsed.by_url.contains_key(&page.file.url));
+		if by_place && overrides_entry && new_url != page.file.url {
+			self.follow_overrides(expect, &page.file.url, &new_url, &mut txn)?;
+		}
+		txn.commit()?;
+		self.plan_after_files_changed()?;
+		Ok(new_url)
+	}
+
+	/// Adds to `txn` the rewrite of the entry of a page in `pages.overrides`, which is keyed by
+	/// the URL, so that it has `new_url`.
+	fn follow_overrides(
+		&self,
+		expect: &Value,
+		old_url: &str,
+		new_url: &str,
+		txn: &mut Txn,
+	) -> F<()> {
+		let Some(o) = &self.overrides else {
+			return fail("invalid", "the site has no pages.overrides file");
+		};
+		let text = read_expected(expect, "overrides", &o.path)?;
+		let before = Self::overrides_before(o, &text)?;
+		let edited = edit_overrides_text(&o.path, &text, &before, old_url, None, Some(new_url))?;
+		txn.writes.push((o.path.clone(), edited));
+		Ok(())
 	}
 
 	/// Whether the URL of the page is made by the `outputPathField` key. The plan reads the

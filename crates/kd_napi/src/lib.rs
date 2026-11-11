@@ -605,7 +605,8 @@ unsafe fn ui_values(env: napi_env, info: napi_callback_info) -> napi_value {
 	}
 }
 
-/// `uiRefresh(handle)` -> `{ "version" }`, after planning the site again.
+/// `uiRefresh(handle)` -> `{ "version" }`, after planning the site again and reading the
+/// layouts directory again.
 unsafe fn ui_refresh(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
 	unsafe {

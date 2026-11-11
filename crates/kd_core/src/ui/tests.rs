@@ -1833,3 +1833,519 @@ fn the_server_settings_have_the_defaults_of_the_config() {
 	assert_eq!(settings.port, 3000);
 	assert!(!settings.open);
 }
+
+fn move_path(path: &str) -> String {
+	format!(r#"{{"op":"movePath","path":{}}}"#, s(path).to_json())
+}
+
+fn layouts_of(ui: &mut Ui) -> Value {
+	rows(ui, r#"{"offset":0,"limit":10}"#)
+		.get("layouts")
+		.unwrap_or_else(|| panic!("no layouts"))
+		.clone()
+}
+
+fn names(list: &[&str]) -> Value {
+	Value::Array(list.iter().map(|n| s(n)).collect())
+}
+
+const LAYOUTS: &str = r#", "pages": { "layouts": { "dir": "layouts" } }"#;
+
+#[test]
+fn layouts_are_the_names_of_the_tsx_and_jsx_files_directly_in_the_layouts_dir() {
+	let site = Site::new("layouts_names");
+	site.write("src/a.html", "a");
+	site.write("layouts/sub.tsx", "export default () => null;");
+	site.write("layouts/sub-with-side.tsx", "export default () => null;");
+	site.write("layouts/only-jsx.jsx", "export default () => null;");
+	// the same name in both extensions is one name
+	site.write("layouts/both.tsx", "export default () => null;");
+	site.write("layouts/both.jsx", "export default () => null;");
+	// not layouts: another extension, a file in a directory, a directory with a layout's name
+	site.write("layouts/readme.md", "x");
+	site.write("layouts/nested/inner.tsx", "export default () => null;");
+	site.write("layouts/dir.tsx/keep", "x");
+	let mut ui = site.open(LAYOUTS);
+	// the order is the order of the bytes of the names
+	assert_eq!(
+		layouts_of(&mut ui),
+		names(&["both", "only-jsx", "sub", "sub-with-side"])
+	);
+}
+
+#[test]
+fn layouts_are_null_without_pages_layouts_dir_and_empty_for_a_missing_directory() {
+	let site = Site::new("layouts_null");
+	site.write("src/a.html", "a");
+	let mut ui = site.open("");
+	assert_eq!(layouts_of(&mut ui), Value::Null);
+	let mut ui = site.open(LAYOUTS);
+	assert_eq!(layouts_of(&mut ui), names(&[]));
+}
+
+#[test]
+fn a_layouts_dir_that_is_not_a_directory_cannot_be_opened() {
+	let site = Site::new("layouts_file");
+	site.write("src/a.html", "a");
+	site.write("layouts", "not a directory");
+	site.write(
+		"kamado.config.jsonc",
+		&format!(
+			r#"{{ "dir": {{ "input": "src", "output": "out" }}, "build": {{ "cacheDir": ".cache" }}{LAYOUTS} }}"#
+		),
+	);
+	let loaded = crate::load(&format!("{}/kamado.config.jsonc", site.root)).unwrap();
+	assert!(Ui::open(loaded, &BuildOptions::default()).is_err());
+}
+
+#[test]
+fn refreshing_reads_the_layouts_dir_again() {
+	let site = Site::new("layouts_refresh");
+	site.write("src/a.html", "a");
+	site.write("layouts/one.tsx", "export default () => null;");
+	let mut ui = site.open(LAYOUTS);
+	assert_eq!(layouts_of(&mut ui), names(&["one"]));
+	site.write("layouts/two.tsx", "export default () => null;");
+	// the list is read when the handle is opened and refreshed, not for each page of rows
+	assert_eq!(layouts_of(&mut ui), names(&["one"]));
+	ui.refresh().unwrap();
+	assert_eq!(layouts_of(&mut ui), names(&["one", "two"]));
+	fs::remove_file(format!("{}/layouts/one.tsx", site.root)).unwrap();
+	ui.refresh().unwrap();
+	assert_eq!(layouts_of(&mut ui), names(&["two"]));
+}
+
+/// Moves `from` (the URL of the page) to `path`, with the hashes the rows show.
+fn path_move(ui: &mut Ui, from: &str, path: &str) -> Value {
+	let rows = all(ui);
+	let ex = expect(&rows, &page(&rows, from));
+	edit(ui, from, &ex, &move_path(path))
+}
+
+#[test]
+fn a_page_moves_to_the_path_that_is_typed_and_its_url_follows() {
+	let site = Site::new("path_move");
+	site.write("src/customer/send/index.html", "---\ntitle: A\n---\n");
+	site.write("src/customer/send/index.json", r#"{"x":1}"#);
+	let mut ui = site.open("");
+	let answer = path_move(&mut ui, "/customer/send/", "customer/sending/");
+	assert!(ok(&answer), "{answer:?}");
+	assert!(!site.exists("src/customer/send/index.html"));
+	assert_eq!(
+		site.read("src/customer/sending/index.html"),
+		"---\ntitle: A\n---\n"
+	);
+	assert_eq!(site.read("src/customer/sending/index.json"), r#"{"x":1}"#);
+	let rows = all(&mut ui);
+	page(&rows, "/customer/sending/");
+	assert!(!ui.by_url.contains_key("/customer/send/"));
+}
+
+#[test]
+fn a_path_is_read_from_the_input_directory_and_written_in_any_of_the_ways_a_path_is() {
+	// each spelling and the file it names
+	let cases = [
+		("/b/c.html", "src/b/c.html"),
+		("b\\c.html", "src/b/c.html"),
+		("./b/c.html", "src/b/c.html"),
+		("b/./c.html", "src/b/c.html"),
+		("b//c.html", "src/b/c.html"),
+		("x/../b/c.html", "src/b/c.html"),
+		("b/c", "src/b/c.html"),
+		("b/c/", "src/b/c/index.html"),
+		("/", "src/index.html"),
+	];
+	for (n, (typed, file)) in cases.iter().enumerate() {
+		let site = Site::new(&format!("path_spelling_{n}"));
+		site.write("src/a/page.html", "a");
+		let mut ui = site.open("");
+		let answer = path_move(&mut ui, "/a/page.html", typed);
+		assert!(ok(&answer), "{typed:?}: {answer:?}");
+		assert_eq!(site.read(file), "a", "{typed:?}");
+		assert!(!site.exists("src/a/page.html"), "{typed:?}");
+	}
+}
+
+#[test]
+fn a_path_that_leaves_the_input_directory_or_is_not_a_path_is_refused() {
+	let site = Site::new("path_outside");
+	site.write("src/a/page.html", "a");
+	let mut ui = site.open("");
+	for typed in [
+		"../x.html",
+		"b/../../x.html",
+		"/../x.html",
+		"",
+		"b/\0c.html",
+	] {
+		let answer = path_move(&mut ui, "/a/page.html", typed);
+		assert_eq!(code(&answer), "invalid", "{typed:?}: {answer:?}");
+		assert_eq!(site.read("src/a/page.html"), "a");
+	}
+	assert!(!site.exists("x.html"));
+}
+
+#[test]
+fn a_path_cannot_change_the_extension_of_the_file() {
+	let site = Site::new("path_extension");
+	site.write("src/a.html", "a");
+	site.write("src/p.tsx", "export default () => null;\n");
+	let mut ui = site.open("");
+	// .htm and .html, .jsx and .tsx are other extensions; so is what reads as one: `v1.2`
+	for typed in ["a.htm", "a.md", "v1.2", "a.tsx"] {
+		let answer = path_move(&mut ui, "/a.html", typed);
+		assert_eq!(code(&answer), "invalid", "{typed:?}: {answer:?}");
+	}
+	let answer = path_move(&mut ui, "/p.html", "p.jsx");
+	assert_eq!(code(&answer), "invalid", "{answer:?}");
+	assert!(site.exists("src/a.html") && site.exists("src/p.tsx"));
+	// the extension of the source is the one that is added
+	let answer = path_move(&mut ui, "/p.html", "q/");
+	assert!(ok(&answer), "{answer:?}");
+	assert!(site.exists("src/q/index.tsx"));
+}
+
+#[test]
+fn the_same_path_writes_nothing() {
+	let site = Site::new("path_same");
+	site.write("src/a/index.html", "a");
+	let mut ui = site.open("");
+	for typed in ["a/", "/a/index.html", "./a/index", "a\\index.html"] {
+		let answer = path_move(&mut ui, "/a/", typed);
+		assert_eq!(code(&answer), "invalid", "{typed:?}: {answer:?}");
+	}
+	assert_eq!(site.read("src/a/index.html"), "a");
+}
+
+#[test]
+fn a_path_is_refused_where_a_url_move_would_be() {
+	let site = Site::new("path_refused");
+	site.write("src/a.html", "a");
+	site.write("src/taken.html", "t");
+	site.write("src/sidecar-here.json", "{}");
+	let mut ui = site.open(r#", "pages": { "ignore": ["**/ignored.html"] }"#);
+	// a file is there
+	assert_eq!(
+		code(&path_move(&mut ui, "/a.html", "taken.html")),
+		"collision"
+	);
+	// a sidecar is there
+	assert_eq!(
+		code(&path_move(&mut ui, "/a.html", "sidecar-here.html")),
+		"collision"
+	);
+	// pages.ignore
+	assert_eq!(
+		code(&path_move(&mut ui, "/a.html", "ignored.html")),
+		"invalid"
+	);
+	assert_eq!(site.read("src/a.html"), "a");
+}
+
+#[test]
+fn a_path_cannot_be_in_the_output_directory() {
+	let site = Site::new("path_into_output");
+	site.write("a.html", "a");
+	let mut ui = site.open_config(
+		r#"{ "dir": { "input": ".", "output": "out" }, "build": { "cacheDir": ".cache" }, "pages": { "ignore": [".cache/**", "node_modules/**"] } }"#,
+	);
+	let answer = path_move(&mut ui, "/a.html", "out/a.html");
+	assert_eq!(code(&answer), "invalid", "{answer:?}");
+	assert!(site.exists("a.html"));
+	assert!(!site.exists("out"));
+}
+
+#[test]
+fn a_virtual_page_has_no_path_to_move() {
+	let site = Site::new("path_virtual");
+	site.write("src/a.html", "a");
+	site.write(
+		"pages.overrides.json",
+		r#"{"version":1,"pages":[{"url":"/v/","virtual":true,"meta":{"title":"V"}}]}"#,
+	);
+	let mut ui = site.open(r#", "pages": { "overrides": "pages.overrides.json" }"#);
+	let answer = path_move(&mut ui, "/v/", "v/index.html");
+	assert_eq!(code(&answer), "invalid", "{answer:?}");
+}
+
+#[test]
+fn moving_the_path_of_a_page_whose_url_a_key_makes_keeps_its_url() {
+	let site = Site::new("path_field_keeps_url");
+	site.write("src/1.html", "---\npath: /en/news.html\ntitle: T\n---\n");
+	site.write("src/1.json", r#"{"x":1}"#);
+	let mut ui = site.open(r#", "pages": { "outputPathField": "path" }"#);
+	let answer = path_move(&mut ui, "/en/news.html", "moved/one.html");
+	assert!(ok(&answer), "{answer:?}");
+	assert!(!site.exists("src/1.html") && !site.exists("src/1.json"));
+	assert_eq!(
+		site.read("src/moved/one.html"),
+		"---\npath: /en/news.html\ntitle: T\n---\n"
+	);
+	assert_eq!(site.read("src/moved/one.json"), r#"{"x":1}"#);
+	let rows = all(&mut ui);
+	let row = page(&rows, "/en/news.html");
+	assert_eq!(
+		row.get("inputPath"),
+		Some(&s(&format!("{}/src/moved/one.html", site.root)))
+	);
+}
+
+#[test]
+fn moving_the_path_of_a_page_takes_its_entry_in_pages_overrides_along() {
+	let site = Site::new("path_entry");
+	site.write("src/a.html", "---\ntitle: A\n---\n");
+	site.write(
+		"pages.overrides.json",
+		r#"{"version":1,"pages":[{"url":"/a.html","meta":{"nav":true}}]}"#,
+	);
+	let mut ui = site.open(r#", "pages": { "overrides": "pages.overrides.json" }"#);
+	let answer = path_move(&mut ui, "/a.html", "z.html");
+	assert!(ok(&answer), "{answer:?}");
+	assert!(site.exists("src/z.html"));
+	assert_eq!(
+		site.read("pages.overrides.json"),
+		r#"{"version":1,"pages":[{"url":"/z.html","meta":{"nav":true}}]}"#
+	);
+}
+
+#[test]
+fn moving_the_path_of_a_module_moves_its_imports() {
+	let site = Site::new("path_imports");
+	site.write(
+		"src/p/page.tsx",
+		"import { Head } from '../shared/head';\nexport const meta = { title: 'T' };\nexport default () => <Head />;\n",
+	);
+	let mut ui = site.open("");
+	let answer = path_move(&mut ui, "/p/page.html", "a/b/page.tsx");
+	assert!(ok(&answer), "{answer:?}");
+	assert!(
+		site.read("src/a/b/page.tsx")
+			.contains("from '../../shared/head'")
+	);
+}
+
+#[test]
+fn a_path_that_makes_the_url_of_another_page_is_a_collision() {
+	let site = Site::new("path_url_collision");
+	site.write("src/a.html", "a");
+	site.write("src/b/index.html", "b");
+	let mut ui = site.open("");
+	let answer = path_move(&mut ui, "/a.html", "b/");
+	assert_eq!(code(&answer), "collision", "{answer:?}");
+	assert_eq!(site.read("src/a.html"), "a");
+}
+
+#[test]
+fn the_directories_a_move_empties_are_removed_up_to_the_input_directory() {
+	let site = Site::new("prune_path");
+	site.write("src/one/two/three/page.html", "p");
+	let mut ui = site.open("");
+	let answer = path_move(&mut ui, "/one/two/three/page.html", "page.html");
+	assert!(ok(&answer), "{answer:?}");
+	assert!(site.exists("src/page.html"));
+	assert!(!site.exists("src/one"));
+	// the input directory is not removed
+	assert!(site.exists("src"));
+}
+
+#[test]
+fn a_directory_that_holds_something_is_kept_when_a_move_empties_what_is_below_it() {
+	let site = Site::new("prune_keeps");
+	site.write("src/one/two/page.html", "p");
+	site.write("src/one/keep.txt", "k");
+	let mut ui = site.open("");
+	let answer = path_move(&mut ui, "/one/two/page.html", "page.html");
+	assert!(ok(&answer), "{answer:?}");
+	assert!(!site.exists("src/one/two"));
+	assert!(site.exists("src/one/keep.txt"));
+}
+
+#[test]
+fn moving_a_url_removes_the_directory_it_empties_too() {
+	let site = Site::new("prune_url");
+	site.write("src/a/b/index.html", "p");
+	let mut ui = site.open("");
+	let rows = all(&mut ui);
+	let ex = expect(&rows, &page(&rows, "/a/b/"));
+	let answer = edit(&mut ui, "/a/b/", &ex, &move_to("/c/"));
+	assert!(ok(&answer), "{answer:?}");
+	assert!(site.exists("src/c/index.html"));
+	assert!(!site.exists("src/a"));
+}
+
+#[test]
+fn a_move_that_stays_in_the_same_directory_does_not_remove_it() {
+	let site = Site::new("prune_same_dir");
+	site.write("src/a/one.html", "p");
+	let mut ui = site.open("");
+	let answer = path_move(&mut ui, "/a/one.html", "a/two.html");
+	assert!(ok(&answer), "{answer:?}");
+	assert!(site.exists("src/a/two.html"));
+}
+
+#[test]
+fn a_move_request_without_a_path_is_an_error() {
+	let site = Site::new("path_request");
+	site.write("src/a.html", "a");
+	let mut ui = site.open("");
+	assert!(
+		ui.edit(r#"{"url":"/a.html","change":{"op":"movePath"}}"#)
+			.is_err()
+	);
+	assert!(
+		ui.edit(r#"{"url":"/a.html","change":{"op":"movePath","path":1}}"#)
+			.is_err()
+	);
+}
+
+#[test]
+fn a_refresh_that_cannot_read_the_layouts_dir_leaves_the_handle_as_it_was() {
+	let site = Site::new("layouts_refresh_fails");
+	site.write("src/a.html", "a");
+	site.write("layouts/one.tsx", "export default () => null;");
+	let mut ui = site.open(LAYOUTS);
+	let version = ui.version;
+	// the directory is now a file: it is there, and it cannot be read as a directory
+	fs::remove_dir_all(format!("{}/layouts", site.root)).unwrap();
+	site.write("layouts", "not a directory");
+	site.write("src/b.html", "b");
+	assert!(ui.refresh().is_err());
+	assert_eq!(ui.version, version);
+	assert_eq!(layouts_of(&mut ui), names(&["one"]));
+	// and the page that was added is not in the plan the handle kept
+	assert!(!ui.by_url.contains_key("/b.html"));
+}
+
+#[test]
+fn a_layout_name_is_what_comes_before_tsx_or_jsx_and_is_a_name_the_build_finds() {
+	let site = Site::new("layouts_edge_names");
+	site.write("src/a.html", "a");
+	// a dot inside a name is a name (`a.b.tsx` is looked for as `a.b`); `.tsx` alone has no name
+	site.write("layouts/a.b.tsx", "export default () => null;");
+	site.write("layouts/.tsx", "export default () => null;");
+	site.write("layouts/plain.txt", "x");
+	let mut ui = site.open(LAYOUTS);
+	assert_eq!(layouts_of(&mut ui), names(&["a.b"]));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_layout_that_is_a_link_to_a_file_is_a_layout_and_a_link_to_a_directory_is_not() {
+	let site = Site::new("layouts_links");
+	site.write("src/a.html", "a");
+	site.write("shared/real.tsx", "export default () => null;");
+	site.write("shared/dir/keep", "x");
+	fs::create_dir_all(format!("{}/layouts", site.root)).unwrap();
+	std::os::unix::fs::symlink(
+		format!("{}/shared/real.tsx", site.root),
+		format!("{}/layouts/linked.tsx", site.root),
+	)
+	.unwrap();
+	std::os::unix::fs::symlink(
+		format!("{}/shared/dir", site.root),
+		format!("{}/layouts/folder.tsx", site.root),
+	)
+	.unwrap();
+	let mut ui = site.open(LAYOUTS);
+	assert_eq!(layouts_of(&mut ui), names(&["linked"]));
+}
+
+#[test]
+fn a_path_that_ends_in_a_dot_names_a_directory() {
+	for (n, typed) in ["b/c/..", "b/."].iter().enumerate() {
+		let site = Site::new(&format!("path_dot_end_{n}"));
+		site.write("src/a/page.html", "a");
+		let mut ui = site.open("");
+		let answer = path_move(&mut ui, "/a/page.html", typed);
+		assert!(ok(&answer), "{typed:?}: {answer:?}");
+		assert_eq!(site.read("src/b/index.html"), "a", "{typed:?}");
+	}
+}
+
+#[test]
+fn a_path_that_would_make_a_url_that_is_not_a_page_url_is_refused() {
+	let site = Site::new("path_bad_url");
+	site.write("src/a.html", "a");
+	let mut ui = site.open("");
+	for typed in ["q?x.html", "q#x.html"] {
+		let answer = path_move(&mut ui, "/a.html", typed);
+		assert_eq!(code(&answer), "invalid", "{typed:?}: {answer:?}");
+		assert_eq!(site.read("src/a.html"), "a");
+	}
+}
+
+#[test]
+fn a_page_whose_url_a_key_makes_keeps_its_entry_in_pages_overrides_when_the_file_moves() {
+	let site = Site::new("path_field_entry");
+	site.write("src/1.html", "---\npath: /en/news.html\n---\n");
+	let entry = r#"{"version":1,"pages":[{"url":"/en/news.html","meta":{"nav":true}}]}"#;
+	site.write("pages.overrides.json", entry);
+	let mut ui = site
+		.open(r#", "pages": { "outputPathField": "path", "overrides": "pages.overrides.json" }"#);
+	let answer = path_move(&mut ui, "/en/news.html", "moved/one.html");
+	assert!(ok(&answer), "{answer:?}");
+	assert!(site.exists("src/moved/one.html"));
+	// the URL did not change, so the entry that is keyed by it did not either
+	assert_eq!(site.read("pages.overrides.json"), entry);
+	let rows = all(&mut ui);
+	assert_eq!(
+		cell(&page(&rows, "/en/news.html"), "nav").get("value"),
+		Some(&Value::Bool(true))
+	);
+}
+
+#[test]
+fn a_move_into_a_directory_below_keeps_the_directory_it_left_from() {
+	let site = Site::new("prune_child");
+	site.write("src/a/b/x.html", "x");
+	let mut ui = site.open("");
+	let answer = path_move(&mut ui, "/a/b/x.html", "a/b/c/x.html");
+	assert!(ok(&answer), "{answer:?}");
+	assert!(site.exists("src/a/b/c/x.html"));
+	assert!(site.exists("src/a/b"));
+}
+
+#[test]
+fn the_input_directory_is_kept_when_it_is_the_root_of_the_project() {
+	let site = Site::new("prune_dot_input");
+	site.write("a/x.html", "x");
+	let mut ui = site.open_config(
+		r#"{ "dir": { "input": ".", "output": "out" }, "build": { "cacheDir": ".cache" }, "pages": { "ignore": [".cache/**", "node_modules/**"] } }"#,
+	);
+	let answer = path_move(&mut ui, "/a/x.html", "x.html");
+	assert!(ok(&answer), "{answer:?}");
+	assert!(site.exists("x.html"));
+	assert!(!site.exists("a"));
+	assert!(site.exists("kamado.config.jsonc"));
+}
+
+#[test]
+fn only_empty_directories_below_the_root_are_removed() {
+	let site = Site::new("prune_function");
+	let root = format!("{}/src", site.root);
+	fs::create_dir_all(format!("{root}/one/two/three")).unwrap();
+	fs::create_dir_all(format!("{root}/one/other")).unwrap();
+	prune_empty_dirs(&format!("{root}/one/two/three/page.html"), &root);
+	// `three` and `two` were empty; `one` still holds `other`; the root is never touched
+	assert!(!site.exists("src/one/two"));
+	assert!(site.exists("src/one/other"));
+	fs::remove_dir_all(format!("{root}/one")).unwrap();
+	prune_empty_dirs(&format!("{root}/gone/page.html"), &root);
+	assert!(site.exists("src"));
+	// a path outside the root is not walked at all
+	fs::create_dir_all(format!("{}/outside/deep", site.root)).unwrap();
+	prune_empty_dirs(&format!("{}/outside/deep/page.html", site.root), &root);
+	assert!(site.exists("outside/deep"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_directory_that_is_a_link_is_not_removed() {
+	let site = Site::new("prune_link");
+	let root = format!("{}/src", site.root);
+	fs::create_dir_all(format!("{}/elsewhere", site.root)).unwrap();
+	std::os::unix::fs::symlink(format!("{}/elsewhere", site.root), format!("{root}/link")).unwrap();
+	prune_empty_dirs(&format!("{root}/link/page.html"), &root);
+	assert!(site.exists("src/link"));
+	assert!(site.exists("elsewhere"));
+}
