@@ -8,12 +8,13 @@
  *
  * Usage: node scripts/build-ui.mjs   (from the repository root)
  */
-import { realpathSync } from 'node:fs';
 import { copyFile, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
+
+import { isMain } from './is-main.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const client = path.join(root, 'packages', 'kamado', 'client');
@@ -46,7 +47,7 @@ export function bundleOptions() {
 	};
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) {
+if (isMain(import.meta.filename)) {
 	// Only what this script wrote: the compiled server code of the same directory stays.
 	await rm(path.join(out, 'assets'), { recursive: true, force: true });
 	await mkdir(path.join(out, 'assets'), { recursive: true });
