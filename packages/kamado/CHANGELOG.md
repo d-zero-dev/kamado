@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [3.0.0-alpha.6](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.5...v3.0.0-alpha.6) (2026-11-11)
+
+### Bug Fixes
+
+- **kamado:** reject unknown CLI flags and API option keys for build, pages, start, and ui ([d839ada](https://github.com/d-zero-dev/kamado/commit/d839ada84927262a02a9760631fcfaee6e1b98a2))
+
+### Features
+
+- **kamado:** export page and layout prop types from kamado/jsx ([970e747](https://github.com/d-zero-dev/kamado/commit/970e7478841c6d1f8edfa04de1232f12b3f0a658))
+
 # [3.0.0-alpha.5](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.4...v3.0.0-alpha.5) (2026-11-11)
 
 ### Bug Fixes
