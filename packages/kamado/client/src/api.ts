@@ -1,6 +1,7 @@
 import type { SortState } from './logic/sort.js';
 import type {
 	Change,
+	Diffs,
 	Edited,
 	GitInfo,
 	Row,
@@ -178,5 +179,50 @@ export function editPage(
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token() },
 		body: JSON.stringify({ url, expect, change }),
+	});
+}
+
+/**
+ * The difference of some pages from the commit that is checked out.
+ * @param urls - The URLs of the pages (the window on the screen)
+ * @param signal - To drop an answer that is not wanted any more
+ * @returns `null` when there is nothing to compare with (no git, no repository, no commit)
+ * @example
+ * ```ts
+ * await fetchDiff(['/about/']); // { head: { oid }, version: 4, pages: { '/about/': { … } }, columns: [] }
+ * ```
+ */
+export function fetchDiff(
+	urls: readonly string[],
+	signal?: AbortSignal,
+): Promise<Diffs | null> {
+	return call<Diffs | null>('/api/diff', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token() },
+		body: JSON.stringify({ urls }),
+		signal,
+	});
+}
+
+/**
+ * Puts a value back as the commit that is checked out has it.
+ * @param url - The page
+ * @param expect - The hashes of the files the screen read the page from
+ * @param expect.input - The hash of the page file (`null` for none)
+ * @param expect.sidecar - The hash of its sidecar (`null` for none)
+ * @param expect.overrides - The hash of `pages.overrides` (`null` for none)
+ * @param key - The key of the metadata; `null` for the key that makes the URL
+ * @param head - The commit the screen compared with ({@link fetchDiff}), by its id in full
+ */
+export function revertCell(
+	url: string,
+	expect: { input: string | null; sidecar: string | null; overrides: string | null },
+	key: string | null,
+	head: string,
+): Promise<Edited> {
+	return call<Edited>('/api/revert', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token() },
+		body: JSON.stringify({ url, expect, key, head }),
 	});
 }

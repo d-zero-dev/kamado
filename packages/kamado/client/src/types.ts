@@ -42,6 +42,11 @@ export interface Rows {
 	 * The core always says it. A list without it (a value made by hand) is read as `null`.
 	 */
 	readonly layouts?: readonly string[] | null;
+	/**
+	 * The `pages.overrides` file, relative to the directory of the config file; `null` when the site has
+	 * none. A list without it (a value made by hand) is read as `null`.
+	 */
+	readonly overridesFile?: string | null;
 	readonly pages: readonly Row[];
 	readonly warnings: readonly string[];
 }
@@ -110,4 +115,36 @@ export interface Edited {
 	readonly version: number;
 	readonly overridesHash: string | null;
 	readonly page: Row;
+}
+
+/** How a value differs from what the commit that is checked out (HEAD) holds. */
+export type DiffKind = 'modified' | 'added' | 'deleted';
+
+/** The difference of one cell from HEAD. */
+export interface CellDiff {
+	readonly kind: DiffKind;
+	/** The value HEAD holds (for `modified` and `deleted`). */
+	readonly head?: unknown;
+	/** Whether the value can be put back as HEAD has it. */
+	readonly revertible: boolean;
+	/** The files putting it back writes (the places a value is written); with `revertible`. */
+	readonly writes?: readonly Origin[];
+}
+
+/** The differences of one page from HEAD. */
+export interface PageDiff {
+	readonly url?: CellDiff;
+	readonly inputPath?: CellDiff;
+	readonly meta?: Readonly<Record<string, CellDiff>>;
+}
+
+/** What `POST /api/diff` answers (`null` when there is no commit to compare with). */
+export interface Diffs {
+	/** The commit the pages were compared with, by its id in full. */
+	readonly head: { readonly oid: string };
+	readonly version: number;
+	/** The pages that differ, by URL. */
+	readonly pages: Readonly<Record<string, PageDiff>>;
+	/** The keys HEAD holds that no page has now (the screen has no column for them). */
+	readonly columns: readonly string[];
 }

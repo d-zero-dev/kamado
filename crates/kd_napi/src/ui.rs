@@ -77,13 +77,23 @@ pub(crate) fn refresh(handle: &str) -> Result<String, String> {
 	})
 }
 
+/// The git blob ids of the files the pages at `urls` are read from (`{ "urls", "format" }`).
+pub(crate) fn diff_files(handle: &str, query_json: &str) -> Result<String, String> {
+	with(handle, |ui| ui.diff_files(query_json))
+}
+
+/// The difference between the pages at `urls` and HEAD (`{ "urls", "format", "head" }`).
+pub(crate) fn diff(handle: &str, query_json: &str) -> Result<String, String> {
+	with(handle, |ui| ui.diff(query_json))
+}
+
 /// Makes one edit.
 pub(crate) fn edit(handle: &str, edit_json: &str) -> Result<String, String> {
 	with(handle, |ui| ui.edit(edit_json))
 }
 
 /// The port and the browser setting of `devServer`, and the input and output directories:
-/// `{ "port", "open", "inputDir", "outputDir" }`.
+/// `{ "port", "open", "inputDir", "outputDir", "overrides" }`.
 pub(crate) fn server(handle: &str) -> Result<String, String> {
 	with(handle, |ui| {
 		let settings = ui.server();
@@ -97,6 +107,12 @@ pub(crate) fn server(handle: &str) -> Result<String, String> {
 			(
 				"outputDir".to_owned(),
 				Value::String(settings.output_dir.to_owned()),
+			),
+			(
+				"overrides".to_owned(),
+				settings
+					.overrides
+					.map_or(Value::Null, |path| Value::String(path.to_owned())),
 			),
 		])
 		.to_json())

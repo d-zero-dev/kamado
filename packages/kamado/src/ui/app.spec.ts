@@ -421,8 +421,10 @@ describe('what the screen and the server agree on', () => {
 	});
 	test('the screen sends the token in the header the server reads', async () => {
 		const api = await readFile(path.join(client, 'src', 'api.ts'), 'utf8');
+		// Behavior change: the screen also sends the token to read the difference from HEAD and to put a value back
+		expect(api.match(new RegExp(`'${TOKEN_HEADER}'`, 'g'))?.length).toBe(5);
 		// Behavior change: the screen also sends the token when it saves its settings
-		expect(api.match(new RegExp(`'${TOKEN_HEADER}'`, 'g'))?.length).toBe(3);
+		// expect(api.match(new RegExp(`'${TOKEN_HEADER}'`, 'g'))?.length).toBe(3); // previous
 		// expect(api.match(new RegExp(`'${TOKEN_HEADER}'`, 'g'))?.length).toBe(2); // previous
 	});
 });

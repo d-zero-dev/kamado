@@ -24,6 +24,7 @@ use crate::plan_cache::{CachedPage, PlanCache};
 use crate::session::PlanSettings;
 use crate::{BuildOptions, Loaded, Page, PageKind, Plan};
 
+mod diff;
 mod natural;
 
 /// What the editor shows for a key whose value comes from the URL.
@@ -130,6 +131,8 @@ pub struct ServerSettings<'a> {
 	pub input_dir: &'a str,
 	/// `dir.output`, absolute
 	pub output_dir: &'a str,
+	/// `pages.overrides`, absolute, if the site has one
+	pub overrides: Option<&'a str>,
 }
 
 /// The editor of the pages of one site.
@@ -156,6 +159,8 @@ pub struct Ui {
 	/// made on. Making it takes a key per page and a merge sort, which a page turn, a search or
 	/// a refocus of the screen must not pay again; an edit or a new plan changes the version.
 	sort_cache: Option<(u64, Sort, Arc<Vec<usize>>)>,
+	/// What was made of the files of HEAD (see `diff`).
+	head: diff::HeadCache,
 }
 
 fn hash_hex(bytes: &[u8]) -> String {
@@ -893,6 +898,11 @@ enum Change {
 	MoveUrl(String),
 	/// The path of the page file, as typed (relative to the input directory).
 	MovePath(String),
+	/// Puts a key back as HEAD has it (`None`: the key that makes the URL), with what HEAD holds of the files.
+	Revert {
+		key: Option<String>,
+		head: std::collections::HashMap<String, diff::HeadFile>,
+	},
 }
 
 struct Edit {
@@ -942,9 +952,22 @@ fn parse_edit(json: &str) -> Result<Edit, String> {
 				);
 			}
 		},
+		Some(Value::String(op)) if op == "revert" => Change::Revert {
+			key: match change.get("key") {
+				Some(Value::String(k)) if !k.is_empty() => Some(k.clone()),
+				None | Some(Value::Null) => None,
+				Some(_) => {
+					return Err(
+						"edit: `change.key` must be a non-empty string or null for \"revert\""
+							.to_string(),
+					);
+				}
+			},
+			head: diff::parse_head(change.get("head")).map_err(|e| format!("edit: {e}"))?,
+		},
 		_ => {
 			return Err(
-				"edit: `change.op` must be \"set\", \"delete\", \"moveUrl\" or \"movePath\""
+				"edit: `change.op` must be \"set\", \"delete\", \"moveUrl\", \"movePath\" or \"revert\""
 					.to_string(),
 			);
 		}
@@ -1000,6 +1023,7 @@ impl Ui {
 			layouts: None,
 			file_info: HashMap::new(),
 			sort_cache: None,
+			head: diff::HeadCache::default(),
 		};
 		ui.layouts = read_layouts(&ui.loaded.config)?;
 		ui.plan_again(on_disk)?;
@@ -1127,6 +1151,7 @@ impl Ui {
 			open: config.dev_server.open,
 			input_dir: &config.dir.input,
 			output_dir: &config.dir.output,
+			overrides: config.pages.overrides.as_deref(),
 		}
 	}
 
@@ -1678,11 +1703,18 @@ impl Ui {
 			};
 			return Ok(self.fail_json(&f, None));
 		};
+		if let Change::Revert { head, .. } = &edit.change {
+			let need = self.revert_needs(i, head);
+			if !need.is_empty() {
+				return Ok(Ui::need_json(need));
+			}
+		}
 		let version = self.version;
 		let result = match &edit.change {
 			Change::Key(change) => self.edit_key(i, &edit.expect, change),
 			Change::MoveUrl(new_url) => self.move_url(i, &edit.expect, new_url),
 			Change::MovePath(path) => self.move_path(i, &edit.expect, path),
+			Change::Revert { key, head } => self.revert(i, &edit.expect, key.as_deref(), head),
 		};
 		match result {
 			Ok(url) => {
@@ -2286,5 +2318,7 @@ impl Ui {
 	}
 }
 
+#[cfg(test)]
+mod diff_tests;
 #[cfg(test)]
 mod tests;

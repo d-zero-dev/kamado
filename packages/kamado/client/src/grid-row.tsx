@@ -1,7 +1,7 @@
 import type { Translate } from './i18n/translate.js';
 import type { EnumOption, KindsSettings } from './logic/kinds.js';
 import type { FieldKind } from './logic/value.js';
-import type { Row as PageRow } from './types.js';
+import type { Origin, PageDiff, Row as PageRow } from './types.js';
 
 import { memo, useRef, useState } from 'react';
 
@@ -9,6 +9,7 @@ import { EnumEditor } from './enum-editor.js';
 import { useI18n } from './i18n/context.js';
 import { ListEditor } from './list-editor.js';
 import { editKindOf } from './logic/columns.js';
+import { cellDiffOf, diffNote, originLabel, originName } from './logic/diff.js';
 import { enumKindOf } from './logic/kinds.js';
 import { columnName } from './logic/layout.js';
 import { parseDraft, toText } from './logic/value.js';
@@ -210,6 +211,10 @@ interface RowProps {
 	readonly activeCol: number;
 	/** The cell being edited, when it is in this row. */
 	readonly editing: Editing | null;
+	/** How the row differs from HEAD; `undefined` when it does not (or nothing is known). */
+	readonly diff: PageDiff | undefined;
+	/** The `pages.overrides` file as the server names it, or `null` when the site has none. */
+	readonly overridesFile: string | null;
 	readonly onCommit: (draft: string) => void;
 	readonly onCancel: () => void;
 	readonly onInvalid: (reason: string) => void;
@@ -223,6 +228,7 @@ interface RowProps {
  * @param addedKinds - The kinds of keys added on the screen, and of keys of booleans
  * @param kinds - The columns that are an enum
  * @param layouts - The names of the layouts, if the site has a layouts directory
+ * @param overridesFile - The `pages.overrides` file, as the server names it
  * @param t - Says the words of the cell in the language of the screen
  */
 function describe(
@@ -231,12 +237,13 @@ function describe(
 	addedKinds: ReadonlyMap<string, FieldKind>,
 	kinds: KindsSettings | undefined,
 	layouts: readonly string[] | null | undefined,
+	overridesFile: string | null,
 	t: Translate,
 ): {
 	text: string;
 	readOnly: boolean;
 	note: string | undefined;
-	origin?: string;
+	origin?: Origin;
 	/** For a boolean: whether it is checked (a page without the key is not). */
 	checked?: boolean;
 } {
@@ -275,7 +282,7 @@ function describe(
 		text: toText(cell.value),
 		readOnly: !cell.editable,
 		note: cell.editable
-			? t('row.from', { origin: t(`origin.${cell.origin}` as const) })
+			? t('row.from', { origin: originName(cell.origin, overridesFile, t) })
 			: cell.reason,
 		origin: cell.origin,
 		...(checked === undefined ? {} : { checked }),
@@ -298,6 +305,8 @@ export const GridRow = memo(function GridRow({
 	layouts,
 	activeCol,
 	editing,
+	diff,
+	overridesFile,
 	onCommit,
 	onCancel,
 	onInvalid,
@@ -311,10 +320,22 @@ export const GridRow = memo(function GridRow({
 			addedKinds,
 			kinds,
 			layouts,
+			overridesFile,
 			t,
 		);
 		const isEditing = editing !== null && editing.column === column;
 		const pinned = col < pinnedCount;
+		const cellDiff = cellDiffOf(diff, column);
+		const label = origin === undefined ? null : originLabel(origin, t);
+		const differs = cellDiff === undefined ? undefined : diffNote(cellDiff, t);
+		const tip = [note ?? (text === '' ? undefined : text), differs].filter(
+			(part) => part !== undefined,
+		);
+		// What a screen reader is told besides the value: why the cell is read only, where the value
+		// is written when that is not the page file, and how it differs from HEAD.
+		const description = [readOnly || label !== null ? note : undefined, differs].filter(
+			(part) => part !== undefined,
+		);
 		cells.push(
 			<div
 				key={column}
@@ -324,12 +345,28 @@ export const GridRow = memo(function GridRow({
 				data-col={col}
 				aria-colindex={col + 1}
 				aria-readonly={readOnly || undefined}
-				aria-description={readOnly ? note : undefined}
-				title={note ?? (text === '' ? undefined : text)}
+				aria-description={description.length === 0 ? undefined : description.join('. ')}
+				title={tip.length === 0 ? undefined : tip.join('\n')}
 				// A pinned cell sticks at the distance the grid sets in `--pin-<place>` (the widths
 				// change while a column is dragged, and the rows are not drawn again for it).
 				style={pinned ? { left: `var(--pin-${col})` } : undefined}
-				className={`cell${pinned ? ' pinned' : ''}${col === pinnedCount - 1 ? ' pin-end' : ''}${col === activeCol ? ' active' : ''}${readOnly ? ' readonly' : ''}${origin === undefined ? '' : ` origin-${origin}`}`}>
+				className={`cell${pinned ? ' pinned' : ''}${col === pinnedCount - 1 ? ' pin-end' : ''}${col === activeCol ? ' active' : ''}${readOnly ? ' readonly' : ''}`}>
+				{cellDiff !== undefined &&
+					(cellDiff.revertible ? (
+						// A button for the pointer: the keyboard puts a value back with Alt+Backspace in the
+						// cell (a button in every cell would be a stop of Tab in each, in a grid that Tab
+						// leaves).
+						<button
+							type="button"
+							tabIndex={-1}
+							className="diff-mark"
+							data-revert=""
+							data-kind={cellDiff.kind}
+							aria-label={t('diff.revertCell')}
+						/>
+					) : (
+						<span aria-hidden="true" className="diff-mark" data-kind={cellDiff.kind} />
+					))}
 				{isEditing ? (
 					<Editor
 						editing={editing}
@@ -338,7 +375,7 @@ export const GridRow = memo(function GridRow({
 						onInvalid={onInvalid}
 					/>
 				) : checked === undefined ? (
-					text
+					<span className="cell-text">{text}</span>
 				) : (
 					<>
 						{/* The box is for the eye and the pointer (a click on it makes the edit, see `data-toggle`);
@@ -352,6 +389,12 @@ export const GridRow = memo(function GridRow({
 						<span className="sr-only">{String(checked)}</span>
 					</>
 				)}
+				{/* Under the value, for a value that is not written in the page file: always there, empty
+				    or not, so that every row has the same height. A screen reader is told in the
+				    description of the cell. */}
+				<span aria-hidden="true" className="origin-label">
+					{label}
+				</span>
 			</div>,
 		);
 	}

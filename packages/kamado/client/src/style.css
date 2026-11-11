@@ -9,6 +9,11 @@
 	--active-bg: #dbe8ff;
 	--readonly-bg: #f8f9fa;
 	--error: #b3261e;
+	/* How a value differs from the commit that is checked out (the colours of the gutter of
+	   VS Code: changed is blue, added is green, deleted is red). */
+	--diff-modified: #1f7fc4;
+	--diff-added: #2f855a;
+	--diff-deleted: #d1242f;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,6 +27,9 @@
 		--active-bg: #26395c;
 		--readonly-bg: #191e24;
 		--error: #f2b8b5;
+		--diff-modified: #3a9fdc;
+		--diff-added: #57ab5a;
+		--diff-deleted: #f14c4c;
 	}
 }
 
@@ -144,7 +152,8 @@ button:disabled {
 	min-width: 100%;
 	border-bottom: 1px solid var(--line);
 	content-visibility: auto;
-	contain-intrinsic-block-size: auto 2.25rem;
+	/* The height of a row of values: the value, and under it the line for where it is written. */
+	contain-intrinsic-block-size: auto 3rem;
 }
 
 .row.head {
@@ -156,9 +165,13 @@ button:disabled {
 	font-weight: 600;
 }
 
+/* The left padding is the width of the bar that a difference from HEAD is shown by (and that
+   puts the value back when it is pressed): every cell has it, so that the values start at the
+   same place. */
 .cell {
-	min-height: 2.25rem;
-	padding: 0.45rem 0.5rem;
+	position: relative;
+	min-height: 3rem;
+	padding: 0.45rem 0.5rem 0.45rem 24px;
 	overflow: hidden;
 	white-space: nowrap;
 	text-overflow: ellipsis;
@@ -282,12 +295,91 @@ button:disabled {
 	background: var(--active-bg);
 }
 
-.cell.origin-sidecar {
-	border-left: 3px solid var(--accent);
+/* The text of a cell is what is cut with an ellipsis, so that the line under it (where the value
+   is written) is not. */
+.cell-text {
+	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
-.cell.origin-overrides {
-	border-left: 3px dashed var(--accent);
+/* Where a value is written, when it is not the page file. It is always drawn (empty for the page
+   file), so that every row has the same height. */
+.origin-label {
+	display: block;
+	height: 0.8rem;
+	overflow: hidden;
+	font-size: 0.7rem;
+	line-height: 0.8rem;
+	color: var(--muted);
+	text-overflow: ellipsis;
+}
+
+/* The bar at the left edge of a cell that differs from HEAD, 5px wide, in the colour of the kind
+   of the difference. A button puts the value back when it can be put back; the bar is as wide as
+   a button has to be (24px, WCAG 2.2, 2.5.8) and draws only its first 5px. */
+.diff-mark {
+	--diff: var(--diff-modified);
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	width: 24px;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: linear-gradient(to right, var(--diff) 5px, transparent 5px);
+}
+
+.diff-mark[data-kind='added'] {
+	--diff: var(--diff-added);
+}
+
+.diff-mark[data-kind='deleted'] {
+	--diff: var(--diff-deleted);
+}
+
+button.diff-mark:hover::after,
+button.diff-mark:focus-visible::after {
+	content: '\21ba';
+	position: absolute;
+	top: 50%;
+	left: 7px;
+	font-size: 0.85rem;
+	line-height: 1;
+	color: var(--diff);
+	transform: translateY(-50%);
+}
+
+/* The line between the bar of tools and the table: what the labels and the bars mean. */
+.legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.1rem 1.25rem;
+	margin: 0.25rem 0;
+	font-size: 0.8rem;
+	color: var(--muted);
+}
+
+.legend-sample {
+	position: relative;
+	display: inline-block;
+	width: 8px;
+	height: 1em;
+	margin-right: 0.3rem;
+	vertical-align: -0.15em;
+}
+
+/* The sample is drawn with the class of the bar of a cell, at the size of its first 5px. */
+.legend-sample .diff-mark {
+	width: 8px;
+}
+
+.legend-kinds {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 0 0.75rem;
 }
 
 .cell.active {

@@ -84,15 +84,29 @@ export interface Native {
 	 */
 	uiRefresh(handle: string): string;
 	/**
-	 * Makes one edit (`{ url, expect, change }`, where `change.op` is `set`, `delete`, `moveUrl`
-	 * or `movePath`; `movePath` carries `path`, relative to `dir.input`); the result is JSON,
+	 * Makes one edit (`{ url, expect, change }`, where `change.op` is `set`, `delete`, `moveUrl`,
+	 * `movePath` or `revert`; `movePath` carries `path`, relative to `dir.input`, and `revert` the `key`
+	 * and what a commit holds of the files, as `uiDiff` is told it); the result is JSON,
 	 * `{ ok: true, ... }` or `{ ok: false, code, message, current? }`. A move removes the
 	 * directories it leaves empty. A request that is not one throws.
 	 */
 	uiEdit(handle: string, editJson: string): string;
 	/**
+	 * The git blob ids of what the files of some pages hold now (`{ urls, format }`, where `format`
+	 * is `sha1` or `sha256`); the result is JSON, `{ files: [{ path, blob }], overrides }`. A URL no
+	 * page has is skipped. The core runs no `git`: the caller compares these with the ids git has.
+	 */
+	uiDiffFiles(handle: string, queryJson: string): string;
+	/**
+	 * The difference of some pages from a commit (`{ urls, format, head }`, where `head` says what the
+	 * commit holds of each file `uiDiffFiles` listed); the result is JSON, `{ version, pages, columns }`,
+	 * or `{ need: [path, …] }` when the text of files of the commit has to be given.
+	 */
+	uiDiff(handle: string, queryJson: string): string;
+	/**
 	 * What the config says that the command serving the editor needs: the result is
-	 * `{ port, open, inputDir, outputDir }` (`devServer.port`, `devServer.open`, `dir.*`).
+	 * `{ port, open, inputDir, outputDir, overrides }` (`devServer.port`, `devServer.open`, `dir.*`, and
+	 * the absolute path of `pages.overrides`, or `null`).
 	 */
 	uiServer(handle: string): string;
 	/** Forgets an editor; the result is `{ warning }`. */

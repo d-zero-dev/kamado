@@ -1,11 +1,13 @@
 /**
  * The HTTP side of `kamado ui` (RFC section 14.2). The core edits the files; this module is
- * the door the browser comes in by: the page of the screen (`GET /`), its files
- * (`GET /assets/<name>`), four calls (`GET /api/pages`, `GET /api/values`,
- * `POST /api/refresh`, `POST /api/edit`) that pass JSON to the editor of the core and its
- * answer back, the branch and commit of the site's repository (`GET /api/git`, see
- * `git.ts`), and the settings the screen keeps between runs (`GET` and `PUT /api/settings`,
- * see `settings.ts`).
+ * the door the browser comes in by:
+ * - the page of the screen (`GET /`) and its files (`GET /assets/<name>`);
+ * - four calls (`GET /api/pages`, `GET /api/values`, `POST /api/refresh`, `POST /api/edit`) that pass
+ *   JSON to the editor of the core and its answer back;
+ * - the branch and commit of the site's repository (`GET /api/git`, see `git.ts`);
+ * - the difference of pages from that commit and the edit that goes back to it (`POST /api/diff`
+ *   and `POST /api/revert`, see `head-diff.ts`);
+ * - the settings the screen keeps between runs (`GET` and `PUT /api/settings`, see `settings.ts`).
  *
  * Why a token for every call that is not a GET: the screen writes the source files of the
  * project, and a page of another site can make a browser send a request to `localhost`. The
@@ -17,6 +19,7 @@
  * Why only the loopback: there is no `--host`. What is edited is the source of the site.
  */
 import type { GitInfo } from './git.js';
+import type { HeadDiff } from './head-diff.js';
 import type { Roots } from './paths.js';
 import type { native } from '../native.js';
 import type { Hono as HonoApp } from 'hono';
@@ -80,6 +83,17 @@ export interface UiAppOptions {
 	 * answer for a moment, see `cachedReadGit`). Without it the answer is `null`.
 	 */
 	readonly git?: () => Promise<GitInfo | null>;
+	/**
+	 * The difference of pages from the commit that is checked out, and the edit that puts a value
+	 * back as the commit had it (`POST /api/diff`, `POST /api/revert`). Without it the answer of
+	 * the first is `null`, and the second is refused as there being no commit.
+	 */
+	readonly head?: HeadDiff;
+	/**
+	 * The `pages.overrides` file as the screen names it: relative to the directory of the config
+	 * file, with `/` (no absolute path goes to the screen). `null` or absent when the site has none.
+	 */
+	readonly overridesFile?: string | null;
 }
 
 /** A row, as far as this module reads it. */
@@ -103,7 +117,10 @@ export type Editor = Pick<
 function statusOf(code: string): 400 | 404 | 409 | 500 {
 	switch (code) {
 		case 'conflict':
-		case 'collision': {
+		case 'collision':
+		case 'noHead':
+		case 'headMoved':
+		case 'need': {
 			return 409;
 		}
 		case 'notFound': {
@@ -322,6 +339,7 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 				) as { pages: Page[]; warnings: string[] };
 				return {
 					...rows,
+					overridesFile: options.overridesFile ?? null,
 					pages: rows.pages.map((page) => showPaths(page, roots)),
 					warnings: rows.warnings.map((warning) => scrub(warning, roots)),
 				};
@@ -397,17 +415,18 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 					400,
 				);
 			}
-			let result: {
-				ok: boolean;
-				code?: string;
-				message?: string;
-				page?: Page;
-				current?: Page;
-			};
+			if ((request as { change: { op?: unknown } }).change.op === 'revert') {
+				// What HEAD held is read here, by `git`: it is not something a request says.
+				return ctx.json(
+					{ error: 'invalid', message: 'a revert is made by POST /api/revert' },
+					400,
+				);
+			}
+			let result: EditResult;
 			try {
 				result = JSON.parse(
 					editor.uiEdit(editor.handle, JSON.stringify(request)),
-				) as typeof result;
+				) as EditResult;
 			} catch (error) {
 				return ctx.json(
 					{
@@ -417,23 +436,100 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 					500,
 				);
 			}
-			if (result.ok) {
-				return ctx.json({
-					...result,
-					...(result.page === undefined ? {} : { page: showPaths(result.page, roots) }),
-				});
+			return editResponse(ctx, result, roots);
+		},
+	);
+
+	app.post(
+		'/api/diff',
+		bodyLimit({
+			maxSize: MAX_BODY,
+			onError: (ctx) =>
+				ctx.json({ error: 'invalid', message: 'the body is too large' }, 413),
+		}),
+		async (ctx) => {
+			let body: unknown;
+			try {
+				body = await ctx.req.json();
+			} catch {
+				return ctx.json({ error: 'invalid', message: 'the body is not JSON' }, 400);
 			}
-			const code = result.code ?? 'failed';
-			return ctx.json(
-				{
-					error: code,
-					message: scrub(result.message ?? '', roots),
-					...(result.current === undefined
-						? {}
-						: { current: showPaths(result.current, roots) }),
-				},
-				statusOf(code),
-			);
+			const urls = urlsOf(body);
+			if (urls === null) {
+				return ctx.json(
+					{
+						error: 'invalid',
+						message: `the body is not { urls } with 1 to ${MAX_ROWS} strings`,
+					},
+					400,
+				);
+			}
+			try {
+				// Not a failure when there is nothing to compare with: the screen shows no mark.
+				return ctx.json((await options.head?.diff(urls)) ?? null);
+			} catch (error) {
+				return ctx.json(
+					{
+						error: 'failed',
+						message: scrub(error instanceof Error ? error.message : String(error), roots),
+					},
+					500,
+				);
+			}
+		},
+	);
+
+	app.post(
+		'/api/revert',
+		bodyLimit({
+			maxSize: MAX_BODY,
+			onError: (ctx) =>
+				ctx.json({ error: 'invalid', message: 'the body is too large' }, 413),
+		}),
+		async (ctx) => {
+			let body: unknown;
+			try {
+				body = await ctx.req.json();
+			} catch {
+				return ctx.json({ error: 'invalid', message: 'the body is not JSON' }, 400);
+			}
+			const request = revertRequestOf(body);
+			if (request === null) {
+				return ctx.json(
+					{
+						error: 'invalid',
+						message: 'the body is not { url, expect, key, head }',
+					},
+					400,
+				);
+			}
+			try {
+				const reverted = (await options.head?.revert(request)) ?? { kind: 'noHead' };
+				if (reverted.kind === 'noHead') {
+					return ctx.json(
+						{ error: 'noHead', message: 'there is no commit to go back to' },
+						409,
+					);
+				}
+				if (reverted.kind === 'headMoved') {
+					return ctx.json(
+						{
+							error: 'headMoved',
+							message: 'the commit that is checked out is not the one that was compared',
+						},
+						409,
+					);
+				}
+				return editResponse(ctx, reverted.result as EditResult, roots);
+			} catch (error) {
+				return ctx.json(
+					{
+						error: 'failed',
+						message: scrub(error instanceof Error ? error.message : String(error), roots),
+					},
+					500,
+				);
+			}
 		},
 	);
 
@@ -491,6 +587,102 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 
 	app.notFound((ctx) => ctx.json({ error: 'not-found', message: 'no such route' }, 404));
 	return app;
+}
+
+/** The answer of the core to an edit. */
+interface EditResult {
+	ok: boolean;
+	code?: string;
+	message?: string;
+	page?: Page;
+	current?: Page;
+}
+
+/**
+ * Sends the answer of the core to an edit: the page it made, or why it was not made, with the
+ * status of the reason (told without the directories of the machine).
+ * @param ctx - The context
+ * @param ctx.json - Makes the JSON response
+ * @param result - The answer of the core
+ * @param roots - The directories the paths are told from
+ */
+function editResponse(
+	ctx: { json: (data: unknown, status?: 400 | 404 | 409 | 500) => Response },
+	result: EditResult,
+	roots: Roots,
+): Response {
+	if (result.ok) {
+		return ctx.json({
+			...result,
+			...(result.page === undefined ? {} : { page: showPaths(result.page, roots) }),
+		});
+	}
+	const code = result.code ?? 'failed';
+	return ctx.json(
+		{
+			error: code,
+			message: scrub(result.message ?? '', roots),
+			...(result.current === undefined
+				? {}
+				: { current: showPaths(result.current, roots) }),
+		},
+		statusOf(code),
+	);
+}
+
+/** The longest a URL of a window may be (the core has no limit, a request must have one). */
+const MAX_URL_LENGTH = 4096;
+
+/**
+ * The URLs of the body of `POST /api/diff`.
+ * @param body - The parsed body
+ * @returns The URLs, or `null` when the body is not `{ urls }` of 1 to `MAX_ROWS` strings
+ */
+function urlsOf(body: unknown): string[] | null {
+	if (typeof body !== 'object' || body === null) {
+		return null;
+	}
+	const { urls } = body as Record<string, unknown>;
+	if (
+		!Array.isArray(urls) ||
+		urls.length === 0 ||
+		urls.length > MAX_ROWS ||
+		!urls.every((url) => typeof url === 'string' && url.length <= MAX_URL_LENGTH)
+	) {
+		return null;
+	}
+	return urls as string[];
+}
+
+/**
+ * The parts of the body of `POST /api/revert`: the shape of them, not what is in them (the core
+ * checks that, and says why).
+ * @param body - The parsed body
+ * @returns The request, or `null` when the body is not `{ url, expect, key, head }`
+ */
+function revertRequestOf(body: unknown): {
+	url: string;
+	expect: unknown;
+	key: string | null;
+	head: string;
+} | null {
+	if (typeof body !== 'object' || body === null) {
+		return null;
+	}
+	const { url, expect, key, head } = body as Record<string, unknown>;
+	if (
+		typeof url !== 'string' ||
+		url.length > MAX_URL_LENGTH ||
+		typeof expect !== 'object' ||
+		expect === null ||
+		Array.isArray(expect) ||
+		!(key === null || (typeof key === 'string' && key !== '' && key.length <= 256)) ||
+		typeof head !== 'string' ||
+		!/^[\da-f]{40}(?:[\da-f]{24})?$/u.test(head)
+	) {
+		return null;
+	}
+	return { url, expect, key, head };
 }
 
 /**
