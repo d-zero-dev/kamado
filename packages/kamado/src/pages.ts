@@ -13,7 +13,10 @@ export interface PagesOptions {
 	 * modification time are what the cache recorded is not read again.
 	 */
 	readonly incremental?: boolean;
-	/** Where the plan cache is kept (the same as `build`'s `cacheDir`). */
+	/**
+	 * Where the plan cache is kept (the same as `build`'s `cacheDir`): a relative path is relative
+	 * to the directory of the config file.
+	 */
 	readonly cacheDir?: string;
 }
 

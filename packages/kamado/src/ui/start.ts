@@ -25,7 +25,10 @@ export interface UiOptions {
 	readonly port?: number;
 	/** Open the screen in the default browser. The default is `devServer.open`. */
 	readonly open?: boolean;
-	/** The cache directory (the same as `build`'s `cacheDir`). */
+	/**
+	 * The cache directory (the same as `build`'s `cacheDir`): a relative path is relative to the
+	 * directory of the config file.
+	 */
 	readonly cacheDir?: string;
 	/** Where lines of the log go (default: stdout). */
 	readonly write?: (text: string) => void;

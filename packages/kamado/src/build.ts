@@ -23,6 +23,16 @@ export interface BuildOptions {
 	 */
 	readonly targets?: readonly string[];
 	readonly jobs?: number;
+	/**
+	 * Where the build manifest and the plan cache are kept. A relative path is relative to
+	 * the directory of the config file (the command line's `--cache-dir` is relative to the
+	 * cwd, so the same relative path names another cache there); an absolute one is used as
+	 * it is. The default is a directory of `os.tmpdir()` named after the project.
+	 * @example
+	 * ```ts
+	 * await build('/site/kamado.config.jsonc', { incremental: true, cacheDir: '.cache' }); // /site/.cache
+	 * ```
+	 */
 	readonly cacheDir?: string;
 	/**
 	 * Called as pages are rendered with the number done and the number to
