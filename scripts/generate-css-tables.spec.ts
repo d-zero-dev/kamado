@@ -10,6 +10,7 @@ import {
 	renderColorTable,
 	renderPropertyTable,
 } from './generate-css-tables.mjs';
+import { committedVersion } from './generated-file.test-util.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 const src = path.join(root, 'crates', 'kd_css', 'src');
@@ -27,13 +28,17 @@ describe('generate-css-tables', () => {
 		expect(renderColorTable(readColorNames(readSources().colorNames))).toBe(committed);
 	});
 
-	test('property_table.rs is what the generator writes for the installed mdn-data', () => {
+	test('property_table.rs is what the generator writes for the installed mdn-data, apart from the version in the header', () => {
 		const { mdnData } = readSources();
 		const committed = readFileSync(path.join(src, 'property_table.rs'), 'utf8');
+		const version = committedVersion(
+			committed,
+			/^\/\/! Source: the properties of mdn-data (\S+) /mu,
+		);
 		// If this fails after mdn-data was upgraded: node scripts/generate-css-tables.mjs
-		expect(
-			renderPropertyTable(knownProperties(mdnData.properties), mdnData.version),
-		).toBe(committed);
+		expect(renderPropertyTable(knownProperties(mdnData.properties), version)).toBe(
+			committed,
+		);
 	});
 
 	test('the properties lose their vendor prefix, once each', () => {

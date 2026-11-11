@@ -11,12 +11,16 @@
  *
  * Run it when `esbuild-v2` is changed: `node scripts/generate-jsx-entities.mjs`.
  * `scripts/generate-jsx-entities.spec.ts` fails while the committed table is not
- * what it writes.
+ * what it writes, apart from the version in the header: that records the esbuild
+ * the table was last generated from, so a release that decodes the same names
+ * passes without a regeneration.
  */
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { transformSync, version as esbuildVersion } from 'esbuild-v2';
+
+import { isMain } from './is-main.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -93,21 +97,7 @@ export function renderJsxEntities({ names, version }) {
 	return { text: lines.join('\n'), count: decoded.length };
 }
 
-/**
- * Whether Node was started with this file. Node resolves the main module
- * through symbolic links while `argv[1]` keeps the path as given; a runner or
- * `--eval` has no path of a file that exists.
- * @returns {boolean} Whether this is the script that runs
- */
-function isMain() {
-	try {
-		return realpathSync(process.argv[1]) === import.meta.filename;
-	} catch {
-		return false;
-	}
-}
-
-if (isMain()) {
+if (isMain(import.meta.filename)) {
 	const { text, count } = renderJsxEntities(readSources());
 	const out = path.join(root, 'crates', 'kd_js', 'src', 'jsx_entities.rs');
 	writeFileSync(out, text);

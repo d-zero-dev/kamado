@@ -22,11 +22,15 @@
  *
  * Run it when colordx or mdn-data is upgraded: `node scripts/generate-css-tables.mjs`.
  * `scripts/generate-css-tables.spec.ts` fails while the committed tables are not
- * what it writes.
+ * what it writes, apart from the version in the header: that records the mdn-data
+ * the table was last generated from, so a release that leaves the properties as
+ * they are passes without a regeneration.
  */
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+
+import { isMain } from './is-main.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const require = createRequire(import.meta.url);
@@ -261,7 +265,7 @@ export function knownProperties(properties) {
 /**
  * The text of `property_table.rs`.
  * @param {readonly string[]} names - From {@link knownProperties}
- * @param {string} version - The version of mdn-data
+ * @param {string} version - The version of mdn-data that the header names
  * @returns {string}
  * @example
  * renderPropertyTable(['color'], readSources().mdnData.version);
@@ -280,9 +284,7 @@ export function renderPropertyTable(names, version) {
 	return props;
 }
 
-// Node resolves the main module through symbolic links, `argv[1]` keeps the path
-// as given.
-if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) {
+if (isMain(import.meta.filename)) {
 	const { colorNames, mdnData } = readSources();
 	const colors = readColorNames(colorNames);
 	writeFileSync(path.join(outDir, 'color_table.rs'), renderColorTable(colors));

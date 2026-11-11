@@ -17,7 +17,7 @@
  * `scripts/generate-natural-golden.spec.ts` fails while the committed file is not what this
  * writes. Run it when `@d-zero/shared` changes: `node scripts/generate-natural-golden.mjs`.
  */
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { numericalComparator } from '@d-zero/shared/sort/numerical';
@@ -27,6 +27,8 @@ import {
 	createRng,
 	randomUrl,
 } from '../packages/kamado/src/page-data/random.test-util.ts';
+
+import { isMain } from './is-main.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -229,7 +231,7 @@ export function render() {
 	return `${lines.join('\n')}\n`;
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) {
+if (isMain(import.meta.filename)) {
 	mkdirSync(path.dirname(GOLDEN_FILE), { recursive: true });
 	writeFileSync(GOLDEN_FILE, render());
 }

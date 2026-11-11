@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import { readSources, renderJsxEntities } from './generate-jsx-entities.mjs';
+import { committedVersion, importGenerator } from './generated-file.test-util.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -20,15 +21,16 @@ describe('generate-jsx-entities', () => {
 
 	// The generator asks esbuild about each of the 2000+ names.
 	test(
-		'jsx_entities.rs is what the generator writes for the installed esbuild-v2',
+		'jsx_entities.rs is what the generator writes for the installed esbuild-v2, apart from the version in the header',
 		{ timeout: 60_000 },
 		() => {
 			const committed = readFileSync(
 				path.join(root, 'crates', 'kd_js', 'src', 'jsx_entities.rs'),
 				'utf8',
 			);
+			const version = committedVersion(committed, /^\/\/ Source: esbuild (\S+) /mu);
 			// If this fails after esbuild-v2 was changed: node scripts/generate-jsx-entities.mjs
-			expect(renderJsxEntities(readSources()).text).toBe(committed);
+			expect(renderJsxEntities({ ...readSources(), version }).text).toBe(committed);
 		},
 	);
 
@@ -57,5 +59,13 @@ describe('generate-jsx-entities', () => {
 		);
 		expect(run.status).toBe(0);
 		expect(run.stdout).toBe('');
+	});
+
+	test('importing the generator leaves its output file as it is', () => {
+		expect(
+			importGenerator(path.join(root, 'scripts', 'generate-jsx-entities.mjs'), [
+				path.join(root, 'crates', 'kd_js', 'src', 'jsx_entities.rs'),
+			]).changed,
+		).toEqual([]);
 	});
 });
