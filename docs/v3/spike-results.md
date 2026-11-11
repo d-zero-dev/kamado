@@ -278,3 +278,28 @@ x86_64 の SHA-NI と、命令を使った実装は採用していない（`kd_h
 - 作り直しを起こした要求の全体は 1.1〜1.9 s（作り直し約 1 s、続いて描画ワーカーを作り直して 10 万ページの全コンテキストを渡し、そのページを組み立てる）。作り直したあとの同じページは 4〜10 ms。`pages.overrides`を書いた直後の要求は、書いたあとに落ち着くのを待って、もう 1 回読み直す（RFC §12）ので、ハーネスはそれを測りに入れていない
 - 外れ値: `pages.overrides`を書いた直後の要求が、3 回の実行で約 4.0 s かかった（作り直しの 0.78 s のほかに約 3.2 s）。そのときのログには作り直しが 1 回しか無く、作り直しは書き込みから 50 ms より後に始まっている。つまり、遅れはコアの外（作り直しの前）で起きた。ロガーを付けた実行では、同じ手順が 1.5 s で、再現しなかった。原因は特定していない
 - 起動時の計画（cache なし、全ページを読む）は約 9.4 s。作り直しは、起動時の計画が覚えたファイルの (size, mtime) をメモリで使うので、これより短い
+
+## CSS の圧縮サイズ（`kd_css`と cssnano、2026-11-11、`dev`の`ee86753`）
+
+コーパスは公開している手順で作り直せる（案件の CSS は使わない）。`scripts/fuzz-css.mjs`が、シード付きの乱数で作る CSS、手書きのケース（`css-golden-cases.mjs`）、`node_modules`の CSS（300 バイト超）を混ぜる。最後の件数は依存の入れ方で変わる。
+
+```sh
+node scripts/fuzz-css.mjs /tmp/kd-css 600 1
+node scripts/generate-css-oracle.mjs /tmp/kd-css
+cargo build --release --offline -p kd_css --example minify
+KD_CSS_DIR=/tmp/kd-css node scripts/check-css.mjs
+```
+
+oracle は`cssnano` 8.0.2、`cssnano-preset-default` 8.0.10（`yarn.lock`）、`postcss` 8.5.25。`cssnano-preset-default`とそのプラグインは公開済みの v2（`2.0.0-alpha.17`）の`yarn.lock`より新しい版に解決されているので、この値は v2 の cssnano の値ではない。
+
+| 項目                                                | 値                                                                                                                                                    |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ファイル数（`node_modules`の CSS は 4 件）          | 1068（`generate-css-oracle.mjs`は 19 件を「rejected」と報告した）                                                                                     |
+| 合計バイト                                          | 元 936,786、cssnano 734,785、kd_css 733,825（cssnano の 99.87%、元の 78.33%）                                                                         |
+| ファイルごとの比                                    | 中央値 1.0000、最大 2.0588（case 1054。17 バイトのファイルで、cssnano が落とす重複した`border-width`を kd_css は落とさない。`mergeLonghand`は対象外） |
+| gzip（level 9）の合計                               | cssnano 391,173、kd_css 391,899（cssnano の 100.19%）                                                                                                 |
+| 大きいケース                                        | 82,703 対 82,424（1.0034）が最大                                                                                                                      |
+| 意味の一致（`cssnano(mine) === cssnano(original)`） | 993 件一致、56 件は cssnano の残りだけの差、説明できない差は 0                                                                                        |
+| 失敗                                                | rust / parse / equivalence / size / idempotence のすべて 0                                                                                            |
+
+上の値は生成したコーパスの値で、実在の CSS の値ではない（合計の大半はランダムな入力）。実在の CSS で測った値は、誰でも同じ入力を用意できないので載せず、RFC §10 は数値の目標を置かない。cssnano の版を動かしたときは、この手順を実行し、`check-css.mjs`が失敗しないことを確かめる。

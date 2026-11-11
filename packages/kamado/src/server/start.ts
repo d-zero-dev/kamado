@@ -18,7 +18,10 @@ import { close as closeServer, urlHost, listen, listenAddresses } from './listen
 export interface StartOptions {
 	/** Log every request, files included. */
 	readonly verbose?: boolean;
-	/** Cache directory override. */
+	/**
+	 * Cache directory override (the same as `build`'s `cacheDir`): a relative path is relative to
+	 * the directory of the config file.
+	 */
 	readonly cacheDir?: string;
 	/** Where lines of the log go (default: stdout). */
 	readonly write?: (text: string) => void;

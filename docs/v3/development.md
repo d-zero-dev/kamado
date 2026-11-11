@@ -51,6 +51,8 @@ node --test crates/kd_napi/check/load.check.mjs
 
 ページの編集（`ui*`。RFC §14.2）は、`yarn build`のあとに`node --test crates/kd_napi/check/ui.check.mjs`で、実物のアドオンを通す。コアの単体テスト（`crates/kd_core/src/ui/tests.rs`）が同じ処理をアドオンなしで確かめ、こちらは JSON がアドオンを越えても RFC の形であることと、編集がディスクのファイルだけを変えることを確かめる。ファイルを書き戻す 3 つの実装（`kd_yaml::edit`の front matter、`kd_jsonc::edit`の JSONC、`kd_js::meta_edit`の`export const meta`）に oracle は無く、YAML と TS は手書きのテストだけで確かめる（書き戻しの規則は「触らない部分のバイトを変えない」で、同じ書式にそろえる oracle が無い）。JSONC は下の表の`jsonc-parser`の golden で、結果の値だけ照合する。
 
+相対パスの`cacheDir`の基準（API は設定ファイルのディレクトリ、CLI の`--cache-dir`は cwd。RFC §13）は、`node --test crates/kd_napi/check/cache-dir.check.mjs`で、実物のアドオンと CLI を通す（`yarn build`のあと）。
+
 `kamado ui`の画面は`packages/kamado/client`（React）で、`yarn build`が型を検査して、`scripts/build-ui.mjs`が esbuild で`packages/kamado/dist/ui`にまとめる（`yarn dev`は画面を作り直さない）。React は`packages/kamado`の devDependencies で、bundle に入るので、パッケージの実行時の依存は増えない。画面の論理は DOM の無い関数（`client/src/logic/`）に分けて Vitest で、サーバー（`src/ui/`）は`app.request`で確かめる。サーバーが実物のコアの答えを正しく中継し、絶対パスを出さないことは、`ui.check.mjs`が実物のアドオンで確かめる（画面が読む JSON の項目もそこで固定する）。配布物に画面が入っていることは、`node scripts/check-package-ui.mjs packages/kamado`（ローカルでは`yarn build`のあと。publish のワークフローは展開したパッケージに対して）が確かめる。
 
 画面の設定の保存（`packages/kamado/src/ui/settings.ts`）は、一時ディレクトリのファイルで Vitest が確かめる（同時に保存して項目が消えないこと、壊れたファイルの退避、新しい版を書かないこと、パスがブラウザに出ないこと）。`kamado ui-settings`は`KAMADO_UI_SETTINGS`を一時ファイルにして動かせる。ルートの`vitest.config.ts`は、同じ環境変数を一時ディレクトリのファイルに向ける。設定ファイルを明示しない`ui()`のテストが、実行する人の`~/.config/kamado/ui-settings.json`を読んだり、壊れているものを退避したりしないため。表示言語の辞書（`client/src/i18n/messages.ts`）は、両言語に同じ項目があることを Vitest が確かめる。
