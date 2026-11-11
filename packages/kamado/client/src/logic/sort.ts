@@ -5,7 +5,10 @@
 
 /** The column the rows are ordered by, and which way; `null` is the order of the plan. */
 export interface SortState {
-	/** The identifier of the column: `url`, `inputPath`, `virtual` or `meta:<key>`. */
+	/**
+	 * The identifier of the column: `url`, `inputPath`, `virtual`, `order`, `outputPath`,
+	 * `parent`, `depth` or `meta:<key>`.
+	 */
 	readonly key: string;
 	readonly desc: boolean;
 }
@@ -14,7 +17,7 @@ export interface SortState {
  * The identifier of a column, as the server and the settings name it. A key of the metadata is
  * told from a fixed column by `meta:`, so that a key called `url` is not the URL.
  * @param name - The text of the header
- * @param fixed - Whether the column is one of the three fixed ones
+ * @param fixed - Whether the column is one of the fixed ones (the columns every row has)
  * @example
  * ```ts
  * columnKey('title', false); // 'meta:title'

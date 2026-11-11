@@ -352,12 +352,17 @@ button.diff-mark:focus-visible::after {
 	transform: translateY(-50%);
 }
 
-/* The line between the bar of tools and the table: what the labels and the bars mean. */
+/* Under the table: what the labels and the bars mean. It keeps its height (the table takes the
+   rest), so the rows do not move when a line of it comes or goes. */
+.foot {
+	flex: none;
+}
+
 .legend {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.1rem 1.25rem;
-	margin: 0.25rem 0;
+	margin: 0.25rem 0 0;
 	font-size: 0.8rem;
 	color: var(--muted);
 }
@@ -564,4 +569,39 @@ button.diff-mark:focus-visible::after {
 	display: flex;
 	gap: 0.5rem;
 	justify-content: end;
+}
+
+/* A dialog that explains what it is about to do: its sentences wrap at a width that is read
+   easily, and are not spread over the width of the window. */
+.dialog.wordy {
+	max-width: min(36rem, calc(100vw - 2rem));
+}
+
+.dialog.wordy p {
+	margin: 0;
+}
+
+.dialog-hint {
+	font-size: 0.85rem;
+	color: var(--muted);
+}
+
+/* What is lost for good (the files that are deleted). */
+.dialog-warning {
+	color: var(--error);
+	overflow-wrap: anywhere;
+}
+
+/* Such a dialog says a problem only when there is one: no line is kept for it. */
+.dialog.wordy .problem {
+	min-height: 0;
+}
+
+.dialog.wordy .problem:empty {
+	display: none;
+}
+
+/* The button that deletes. The colour is not the only sign: its name says what it does. */
+.dialog button.danger {
+	color: var(--error);
 }

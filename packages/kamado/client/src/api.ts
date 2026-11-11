@@ -3,7 +3,9 @@ import type {
 	Change,
 	Diffs,
 	Edited,
+	Expect,
 	GitInfo,
+	Removed,
 	Row,
 	Rows,
 	SettingsPatch,
@@ -179,6 +181,52 @@ export function editPage(
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token() },
 		body: JSON.stringify({ url, expect, change }),
+	});
+}
+
+/**
+ * Makes a page that is not there: a page file at `path`, or a virtual page (an entry of
+ * `pages.overrides`) when there is no path.
+ * @param url - The URL the page is to have; `null` for the URL the place of the file gives
+ * @param path - The path of the page file, from `dir.input`; `null` for a virtual page
+ * @param overridesHash - The hash of `pages.overrides` as the screen read it (`null` for none):
+ * a virtual page is written there
+ * @example
+ * ```ts
+ * await createPage(null, 'about/index.html', null); // the page /about/
+ * await createPage('/service/', null, 'abc…'); // a virtual page
+ * ```
+ */
+export function createPage(
+	url: string | null,
+	path: string | null,
+	overridesHash: string | null,
+): Promise<Edited> {
+	return call<Edited>('/api/edit', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token() },
+		body: JSON.stringify({
+			url,
+			expect: { overrides: overridesHash },
+			change: { op: 'create', path },
+		}),
+	});
+}
+
+/**
+ * Removes a page: its file and its sidecar, and its entry in `pages.overrides`.
+ * @param url - The page
+ * @param expect - The hashes of the files the screen read the page from
+ * @example
+ * ```ts
+ * await removePage('/about/', { input: 'abc…', sidecar: null, overrides: null });
+ * ```
+ */
+export function removePage(url: string, expect: Expect): Promise<Removed> {
+	return call<Removed>('/api/edit', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token() },
+		body: JSON.stringify({ url, expect, change: { op: 'deletePage' } }),
 	});
 }
 

@@ -90,7 +90,7 @@
 			"matchPackageNames": ["mdn-data"]
 		},
 		{
-			"description": "The oracle of crates/kd_jsonc/tests/edit_golden.json, which v2 does not decide: the golden is regenerated in the same PR (docs/v3/development.md)",
+			"description": "The oracle of crates/kd_jsonc/tests/edit_golden.json and edit_array_golden.json, which v2 does not decide: the goldens are regenerated in the same PR (docs/v3/development.md)",
 			"groupName": "jsonc-parser",
 			"matchPackageNames": ["jsonc-parser"]
 		},

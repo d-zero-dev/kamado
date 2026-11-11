@@ -10,7 +10,7 @@ import {
 } from './sort.js';
 
 describe('columnKey', () => {
-	test('names the three fixed columns by themselves and a key of the metadata with meta:', () => {
+	test('names the fixed columns by themselves and a key of the metadata with meta:', () => {
 		expect(columnKey('url', true)).toBe('url');
 		expect(columnKey('virtual', true)).toBe('virtual');
 		expect(columnKey('inputPath', true)).toBe('inputPath');

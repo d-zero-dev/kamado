@@ -11,7 +11,7 @@ kamado — オンデマンド静的サイトジェネレータ（v3）。コア�
 作業前に以下のファイルを確認し、プロジェクトの状態を把握すること:
 
 - `package.json` — scripts、devDependencies、Volta（Node 26/Yarn 4）。ワークスペースは`packages/*`
-- `lerna.json` — 版（`3.0.0-alpha.0`）と publish の設定。`packages/*`
+- `lerna.json` — 版（正本。リリースのたびに変わるのでここには書かない）と publish の設定。`packages/*`
 - `Cargo.toml` — Rust のワークスペース（`crates/*`）。外部クレートなし
 - `crates/` — Rust のコア（`kd_*`）。各クレートの担当は`docs/v3/development.md`
 - `packages/kamado/` — Node 側のパッケージ（npm 名`kamado`、bin `kamado`、`kamado/jsx`）。公開のパイプラインは`.github/workflows/publish.yml`（`docs/v3/RFC.md` §18）

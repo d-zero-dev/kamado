@@ -27,9 +27,10 @@ const USAGE = `Usage:
 The config file defaults to ./kamado.config.jsonc.
 \`pages\` lists every page of the plan as JSON, without building: to the standard output, or
 to --out.
-\`ui\` opens a screen in the browser to edit the URLs and the metadata of the pages, and
-writes them back to the source files. It listens on localhost, on the port of devServer plus
-one unless --port says otherwise.
+\`ui\` opens a screen in the browser to edit the URLs and the metadata of the pages, to add
+pages, to make a page virtual (its file goes, its URL stays) and to remove pages, and writes
+them back to the source files. It listens on localhost, on the port of devServer plus one
+unless --port says otherwise.
 \`ui-settings\` looks at what \`ui\` saved in ~/.config/kamado/ui-settings.json, for each project:
 \`list\` shows the projects, \`reset\` removes those of the project of the config file, and
 \`delete\` removes those of the project of the given config file (or, with --all, those of every

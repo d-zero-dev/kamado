@@ -10,7 +10,14 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -598,16 +605,28 @@ test('the server of kamado ui answers with what the core says, told without the 
 			'warnings',
 		]);
 		const about = rows.pages.find((p) => p.url === '/about/history.html');
+		// Behavior change: a row says its place in the plan (`order`)
 		assert.deepEqual(Object.keys(about).toSorted(), [
 			'depth',
 			'hashes',
 			'inputPath',
 			'meta',
+			'order',
 			'outputPath',
 			'parent',
 			'url',
 			'virtual',
 		]);
+		// assert.deepEqual(Object.keys(about).toSorted(), [ // previous
+		// 	'depth', // previous
+		// 	'hashes', // previous
+		// 	'inputPath', // previous
+		// 	'meta', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'url', // previous
+		// 	'virtual', // previous
+		// ]); // previous
 		assert.equal(about.inputPath, 'about/history.html');
 		assert.equal(about.outputPath, 'about/history.html');
 		assert.deepEqual(Object.keys(about.meta.title).toSorted(), [
@@ -789,6 +808,274 @@ test('the path the screen shows for a page is the path it can send back to move 
 	} finally {
 		native().uiClose(handle);
 	}
+});
+
+test('a page is made, made virtual, given a file again and removed, and only its files change', async () => {
+	const site = makeSite();
+	const handle = native().uiOpen(site.config, '{}');
+	const edit = (request) => JSON.parse(native().uiEdit(handle, JSON.stringify(request)));
+	const others = () => [
+		site.read('src/index.html'),
+		site.read('src/index.json'),
+		site.read('src/about/index.tsx'),
+		site.read('src/about/history.html'),
+	];
+	const before = others();
+	try {
+		// a page file where the path says; the place gives the URL, and the row its place in the plan
+		const made = edit({
+			url: null,
+			expect: {},
+			change: { op: 'create', path: 'news/index.html' },
+		});
+		assert.equal(made.ok, true, JSON.stringify(made));
+		assert.equal(made.page.url, '/news/');
+		assert.equal(made.page.virtual, false);
+		assert.equal(site.read('src/news/index.html'), '');
+		// after the two pages of `pages.overrides`, then in the order of the files:
+		// /about/history.html, /, /news/
+		assert.equal(made.page.order, 5);
+
+		// a virtual page: an entry after the last one of `pages.overrides`
+		const virtual = edit({
+			url: '/service/',
+			expect: { overrides: made.overridesHash },
+			change: { op: 'create', path: null },
+		});
+		assert.equal(virtual.ok, true, JSON.stringify(virtual));
+		assert.equal(virtual.page.virtual, true);
+		assert.equal(virtual.page.inputPath, null);
+		assert.match(
+			site.read('pages.overrides.json'),
+			/\{ "url": "\/ext\/", "virtual": true, "meta": \{ "title": "Ext" \} \},\n\t\t\{"url":"\/service\/","virtual":true\}\n\t\]/,
+		);
+
+		// a key of the new page, then the page made virtual: the key goes to `pages.overrides` with it
+		let rows = JSON.parse(native().uiPages(handle, query));
+		let news = rows.pages.find((p) => p.url === '/news/');
+		const titled = edit({
+			url: '/news/',
+			expect: expectOf(rows, news),
+			change: { op: 'set', key: 'title', value: 'News' },
+		});
+		assert.equal(titled.ok, true, JSON.stringify(titled));
+		rows = JSON.parse(native().uiPages(handle, query));
+		news = rows.pages.find((p) => p.url === '/news/');
+		const gone = edit({
+			url: '/news/',
+			expect: expectOf(rows, news),
+			change: { op: 'virtualize' },
+		});
+		assert.equal(gone.ok, true, JSON.stringify(gone));
+		assert.equal(gone.page.virtual, true);
+		assert.equal(gone.page.meta.title.value, 'News');
+		assert.equal(gone.page.meta.title.origin, 'overrides');
+		assert.equal(existsSync(path.join(site.root, 'src/news')), false);
+		assert.ok(
+			site
+				.read('pages.overrides.json')
+				.includes('{"url":"/news/","virtual":true,"meta":{"title":"News"}}'),
+		);
+
+		// given a file again, where its URL says: the key goes back into the file, the entry goes
+		const back = edit({
+			url: '/news/',
+			expect: { overrides: gone.overridesHash },
+			change: { op: 'materialize', path: null },
+		});
+		assert.equal(back.ok, true, JSON.stringify(back));
+		assert.equal(back.page.virtual, false);
+		assert.equal(back.page.meta.title.origin, 'inFile');
+		assert.equal(site.read('src/news/index.html'), '---\ntitle: News\n---\n');
+		assert.equal(site.read('pages.overrides.json').includes('/news/'), false);
+
+		// removed: the answer has no page, and the list one row less
+		rows = JSON.parse(native().uiPages(handle, query));
+		news = rows.pages.find((p) => p.url === '/news/');
+		const removed = edit({
+			url: '/news/',
+			expect: expectOf(rows, news),
+			change: { op: 'deletePage' },
+		});
+		assert.deepEqual(Object.keys(removed).toSorted(), [
+			'ok',
+			'overridesHash',
+			'page',
+			'version',
+		]);
+		assert.equal(removed.ok, true);
+		assert.equal(removed.page, null);
+		assert.equal(existsSync(path.join(site.root, 'src/news')), false);
+		const service = edit({
+			url: '/service/',
+			expect: { overrides: removed.overridesHash },
+			change: { op: 'deletePage' },
+		});
+		assert.equal(service.ok, true, JSON.stringify(service));
+		const after = JSON.parse(native().uiPages(handle, query));
+		assert.deepEqual(
+			after.pages.map((p) => p.url),
+			['/about/', '/ext/', '/about/history.html', '/'],
+		);
+		// the file is what it was before the pages came and went, to the byte
+		assert.equal(
+			site.read('pages.overrides.json'),
+			'{\n\t"version": 1,\n\t"pages": [\n\t\t{ "url": "/about/", "meta": { "navHidden": false } },\n\t\t{ "url": "/ext/", "virtual": true, "meta": { "title": "Ext" } }\n\t]\n}\n',
+		);
+		assert.deepEqual(others(), before);
+
+		// The columns every row has are sorts: the rows come in the order of each, both ways.
+		// (The plan is /about/, /ext/, /about/history.html, /.)
+		const sortedBy = (key, desc) =>
+			JSON.parse(
+				native().uiPages(
+					handle,
+					JSON.stringify({ offset: 0, limit: 100, sort: { key, desc } }),
+				),
+			).pages.map((p) => p.url);
+		const orders = {
+			order: ['/about/', '/ext/', '/about/history.html', '/'],
+			// the files below the output directory: index.html, about/index.html, about/history.html, ext/index.html
+			outputPath: ['/', '/about/', '/about/history.html', '/ext/'],
+			// the page above: / for /about/ and /ext/, /about/ for the history; / has none and is last
+			parent: ['/about/', '/ext/', '/about/history.html', '/'],
+			// 0 for /, 1 for /about/ and /ext/ (in the order of the plan), 2 for the history
+			depth: ['/', '/about/', '/ext/', '/about/history.html'],
+		};
+		const reversed = {
+			order: ['/', '/about/history.html', '/ext/', '/about/'],
+			outputPath: ['/ext/', '/about/history.html', '/about/', '/'],
+			// the page without a value is last this way too
+			parent: ['/about/history.html', '/about/', '/ext/', '/'],
+			depth: ['/about/history.html', '/about/', '/ext/', '/'],
+		};
+		for (const key of Object.keys(orders)) {
+			assert.deepEqual(sortedBy(key, false), orders[key], key);
+			assert.deepEqual(sortedBy(key, true), reversed[key], `${key} desc`);
+		}
+		// Every column the server takes as a sort is one the core takes: a column added to one
+		// and not to the other is found here.
+		const { BUILTIN_COLUMNS } = await import(
+			pathToFileURL(path.join(dist, 'ui', 'settings.js')).href
+		);
+		assert.deepEqual(
+			[...BUILTIN_COLUMNS].toSorted(),
+			['url', 'virtual', 'inputPath', ...Object.keys(orders)].toSorted(),
+		);
+		for (const key of BUILTIN_COLUMNS) {
+			assert.equal(sortedBy(key, false).length, 4, key);
+		}
+		assert.throws(() => sortedBy('hashes', false), /sort\.key/);
+	} finally {
+		native().uiClose(handle);
+	}
+});
+
+test('the screen makes and removes pages by the paths it shows, and a build finds what it left', async () => {
+	const { createUiApp } = await import(
+		pathToFileURL(path.join(dist, 'ui', 'app.js')).href
+	);
+	const site = makeSite();
+	// The sidecar of the top page names a layout the site of these checks does not have, which
+	// only a build minds. It is taken away before the editor opens, so that the site the editor
+	// leaves is the site that is built, with nothing changed in between.
+	rmSync(path.join(site.root, 'src/index.json'));
+	const handle = native().uiOpen(site.config, '{}');
+	const settings = JSON.parse(native().uiServer(handle));
+	const token = 'a-token-for-the-check';
+	const app = createUiApp(
+		{
+			handle,
+			uiPages: (h, q) => native().uiPages(h, q),
+			uiValues: (h, q) => native().uiValues(h, q),
+			uiRefresh: (h) => native().uiRefresh(h),
+			uiEdit: (h, e) => native().uiEdit(h, e),
+		},
+		{
+			uiDir: path.join(site.root, 'no-screen'),
+			token,
+			roots: {
+				rootDir: site.root,
+				inputDir: settings.inputDir,
+				outputDir: settings.outputDir,
+			},
+		},
+	);
+	const post = async (body) => {
+		const response = await app.request('http://localhost/api/edit', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token },
+			body: JSON.stringify(body),
+		});
+		const text = await response.text();
+		assert.ok(!text.includes(site.root), `an absolute path went to the screen: ${text}`);
+		return { status: response.status, body: JSON.parse(text) };
+	};
+	try {
+		// a module, by the path as it is typed: relative to the input directory
+		const made = await post({
+			url: null,
+			expect: {},
+			change: { op: 'create', path: 'team/index.tsx' },
+		});
+		assert.equal(made.status, 200, JSON.stringify(made.body));
+		assert.equal(made.body.page.url, '/team/');
+		assert.equal(made.body.page.inputPath, 'team/index.tsx');
+		assert.equal(made.body.page.outputPath, 'team/index.html');
+		assert.equal(
+			site.read('src/team/index.tsx'),
+			'export default function Page() {\n\treturn null;\n}\n',
+		);
+
+		// what is in the way is said without the directories of the machine
+		const again = await post({
+			url: null,
+			expect: {},
+			change: { op: 'create', path: 'team/index.tsx' },
+		});
+		assert.equal(again.status, 409);
+		assert.equal(again.body.error, 'collision');
+		assert.ok(again.body.message.includes('<input>/team/index.tsx'), again.body.message);
+
+		// the page file goes, and the URL stays as a virtual page
+		const listed = await app.request('http://localhost/api/pages?limit=100');
+		const rows = await listed.json();
+		const history = rows.pages.find((p) => p.url === '/about/history.html');
+		const virtual = await post({
+			url: history.url,
+			expect: {
+				input: history.hashes.input,
+				sidecar: history.hashes.sidecar,
+				overrides: rows.overridesHash,
+			},
+			change: { op: 'virtualize' },
+		});
+		assert.equal(virtual.status, 200, JSON.stringify(virtual.body));
+		assert.equal(virtual.body.page.inputPath, null);
+		assert.equal(virtual.body.page.meta.title.value, 'History');
+		assert.equal(existsSync(path.join(site.root, 'src/about/history.html')), false);
+
+		// a page that is removed is answered as no page
+		const removed = await post({
+			url: '/ext/',
+			expect: { overrides: virtual.body.overridesHash },
+			change: { op: 'deletePage' },
+		});
+		assert.equal(removed.status, 200, JSON.stringify(removed.body));
+		assert.equal(removed.body.page, null);
+	} finally {
+		native().uiClose(handle);
+	}
+	// What the editor left is a site that builds: the module that was made is a page, the
+	// page made virtual is in the report and not in the output, the page removed is nowhere.
+	const { build } = await import(pathToFileURL(path.join(dist, 'build.js')).href);
+	const report = await build(site.config, {});
+	const status = Object.fromEntries(report.pages.map((p) => [p.url, p.status]));
+	assert.equal(status['/team/'], 'built', JSON.stringify(report.pages));
+	assert.equal(status['/about/history.html'], 'virtual');
+	assert.equal('/ext/' in status, false);
+	assert.equal(existsSync(path.join(site.root, 'out/team/index.html')), true);
+	assert.equal(existsSync(path.join(site.root, 'out/about/history.html')), false);
 });
 
 test('the difference from HEAD reaches the screen as RFC §14.2 says, and a revert writes only the files it has to', async () => {

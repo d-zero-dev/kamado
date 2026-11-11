@@ -15,9 +15,11 @@ interface LegendProps {
 const KINDS: readonly DiffKind[] = ['modified', 'added', 'deleted'];
 
 /**
- * The line between the bar of tools and the table that says what the small labels under the
- * values and the bars at the left edge of the cells mean. It is a paragraph, so that a screen
- * reader reads it as a sentence, and it has no button to close it: it is always there.
+ * The line under the table (in the footer of the screen) that says what the small labels under
+ * the values and the bars at the left edge of the cells mean. It is a paragraph, so that a screen
+ * reader reads it as a sentence, and it has no button to close it: it is always there. Why not
+ * above the table: a line of it comes and goes with what is known of HEAD, and under the table
+ * that does not move the rows.
  * @param props - What the screen knows
  * @param props.overridesFile - The `pages.overrides` file, or `null`
  * @param props.git - The branch and the commit, or `null`

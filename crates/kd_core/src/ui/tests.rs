@@ -399,7 +399,13 @@ fn a_sort_that_is_not_one_is_an_error() {
 		r#"{"key":"url","desc":"yes"}"#,
 	] {
 		let query = format!(r#"{{"offset":0,"limit":1,"sort":{sort}}}"#);
-		assert!(ui.pages(&query).is_err(), "{sort}");
+		// Behavior change: `outputPath` is a column of the screen, so it is a sort
+		assert_eq!(
+			ui.pages(&query).is_err(),
+			sort != r#"{"key":"outputPath"}"#,
+			"{sort}"
+		);
+		// assert!(ui.pages(&query).is_err(), "{sort}"); // previous
 	}
 	// `null` is no sort, as no `sort` is.
 	assert!(ui.pages(r#"{"offset":0,"limit":1,"sort":null}"#).is_ok());

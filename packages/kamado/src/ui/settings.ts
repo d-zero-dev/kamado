@@ -22,6 +22,9 @@
  * does not use the file at all, so one new field would make every setting unusable by an older
  * kamado. The price is that an older kamado drops the field it does not know at its next save
  * (`sort`, `columns`, `kinds`); the settings are a convenience, and that is the smaller loss.
+ * The same goes for a column a kamado does not know: a sort by it is dropped whole, and the
+ * column is taken out of the order, the pinned columns and the widths (a kamado whose columns
+ * are `url`, `inputPath`, `virtual` and the keys drops `order`, `outputPath`, `parent`, `depth`).
  *
  * Nothing here puts a path in a message that can reach the browser: the file is told by its
  * name, the way the rest of the screen's text is told without the directories of the machine.
@@ -59,20 +62,50 @@ export interface GlobalSettings {
 export const MAX_SORT_KEY = 256;
 
 /**
- * Whether `key` names a column of the screen: `url`, `inputPath`, `virtual` or
- * `meta:<key>` (RFC section 14.2).
+ * The columns every row has, by their identifiers (RFC section 14.2): what a page is (`url`,
+ * `virtual`, `inputPath`) and what the plan makes of it (`order`, `outputPath`, `parent`,
+ * `depth`). A key of the metadata is `meta:<key>`, so a key of one of these names is another
+ * column. The core takes the same ones as a sort; `crates/kd_napi/check/ui.check.mjs` asks the
+ * core for a sort by each, so that one added here and not there is found.
+ * @example
+ * ```ts
+ * BUILTIN_COLUMNS.has('order'); // true
+ * BUILTIN_COLUMNS.has('title'); // false (a key of the metadata is `meta:title`)
+ * ```
+ */
+export const BUILTIN_COLUMNS: ReadonlySet<string> = new Set([
+	'url',
+	'virtual',
+	'inputPath',
+	'order',
+	'outputPath',
+	'parent',
+	'depth',
+]);
+
+/**
+ * The identifiers a column can have, as a message that refuses one says them.
+ * @example
+ * ```ts
+ * COLUMN_NAMES; // 'url, virtual, inputPath, order, outputPath, parent, depth or meta:<key>'
+ * ```
+ */
+export const COLUMN_NAMES = `${[...BUILTIN_COLUMNS].join(', ')} or meta:<key>`;
+
+/**
+ * Whether `key` names a column of the screen: `url`, `inputPath`, `virtual`, `order`,
+ * `outputPath`, `parent`, `depth` or `meta:<key>` (RFC section 14.2).
  * @param key - A column's identifier
  * @example
  * ```ts
  * isSortKey('meta:title'); // true
+ * isSortKey('order'); // true
  * isSortKey('title'); // false
  * ```
  */
 export function isSortKey(key: string): boolean {
 	return (
-		key === 'url' ||
-		key === 'inputPath' ||
-		key === 'virtual' ||
+		BUILTIN_COLUMNS.has(key) ||
 		(key.startsWith('meta:') && key.length > 'meta:'.length && key.length <= MAX_SORT_KEY)
 	);
 }
@@ -608,7 +641,7 @@ function parseColumns(value: unknown): ColumnSettings | null {
 			new Set(items).size !== items.length
 		) {
 			throw new Error(
-				`"columns.${name}" is a list of at most ${MAX_COLUMNS} different columns: url, inputPath, virtual or meta:<key>`,
+				`"columns.${name}" is a list of at most ${MAX_COLUMNS} different columns: ${COLUMN_NAMES}`,
 			);
 		}
 		return items as string[];
@@ -718,9 +751,7 @@ export function parsePatch(value: unknown): SettingsPatch {
 		if (sort !== undefined) {
 			const known = sort === null ? null : readSort(sort);
 			if (known === undefined) {
-				throw new Error(
-					'"sort" is null or { key, desc } of a column: url, inputPath, virtual or meta:<key>',
-				);
+				throw new Error(`"sort" is null or { key, desc } of a column: ${COLUMN_NAMES}`);
 			}
 			if (isRecord(sort) && sort.desc !== undefined && typeof sort.desc !== 'boolean') {
 				throw new Error('"sort.desc" is a boolean');

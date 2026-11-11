@@ -3,7 +3,9 @@
  * texts in many layouts (inline, one member per line, tabs or spaces, trailing commas, comments,
  * CRLF, nested objects and arrays), an edit of each kind (set an existing key, add a key, delete
  * a key) at every object of the text, and what `jsonc-parser` (the library VS Code edits JSONC
- * with, the oracle) makes of it, as the value the edited text must read as.
+ * with, the oracle) makes of it, as the value the edited text must read as. The edits of an
+ * array (add an item at the end, delete an item, at every array of the same texts) are a file of
+ * their own (`crates/kd_jsonc/tests/edit_array_golden.json`).
  *
  * What is compared is the value and not the bytes: the oracle formats what it inserts with its
  * own rules, and `kd_jsonc::edit` follows the layout of the file it edits (its unit tests
@@ -27,6 +29,20 @@ export const GOLDEN_FILE = path.resolve(
 	'edit_golden.json',
 );
 
+/**
+ * Where the golden of the edits of an array is written.
+ * @example
+ * writeFileSync(ARRAY_GOLDEN_FILE, renderArrays());
+ */
+export const ARRAY_GOLDEN_FILE = path.resolve(
+	import.meta.dirname,
+	'..',
+	'crates',
+	'kd_jsonc',
+	'tests',
+	'edit_array_golden.json',
+);
+
 const bases = [
 	'{}',
 	'{"a":1}',
@@ -44,6 +60,23 @@ const bases = [
 	'{\n\t"a": [\n\t],\n\t"b": {\n\t}\n}\n',
 	'{ "a": 1 /* tail */ }',
 	'{\n\t"a": 1 // last, no comma\n}\n',
+];
+
+/** Texts whose root is an array, and arrays in the layouts `pages.overrides` is written in. */
+const arrayBases = [
+	'[]',
+	'[1]',
+	'[ 1, 2, 3 ]',
+	'[\n\t1,\n\t2\n]\n',
+	'[\n  1,\n  2,\n]\n',
+	'// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n',
+	'[\r\n\t1,\r\n\t2\r\n]\r\n',
+	'[\n]\n',
+	'{\n\t"version": 1,\n\t"pages": [\n\t\t{\n\t\t\t"url": "/a/",\n\t\t\t"meta": { "t": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t"url": "/b/",\n\t\t\t"virtual": true\n\t\t}\n\t]\n}\n',
+	'{ "version": 1, "pages": [] }',
+	'[ 1 /* tail */ ]',
+	'[\n\t1 // last, no comma\n]\n',
+	'[[1, 2], [], [[3]]]',
 ];
 
 const values = [
@@ -151,6 +184,100 @@ export function cases() {
 }
 
 /**
+ * What the oracle makes of an item added after the last one of an array, as the JSON the
+ * result must read as.
+ * @param {string} text the JSONC text
+ * @param {(string | number)[]} arrayPath the path of the array
+ * @param {unknown} value the new item
+ * @returns {string} compact JSON
+ * @example
+ * expectedPush('{"a":[1]}', ['a'], 2); // '{"a":[1,2]}'
+ */
+export function expectedPush(text, arrayPath, value) {
+	const edits = modify(text, [...arrayPath, -1], value, {
+		formattingOptions,
+		isArrayInsertion: true,
+	});
+	const result = applyEdits(text, edits);
+	return JSON.stringify(parse(result, [], { allowTrailingComma: true }));
+}
+
+/**
+ * The cases of the golden of arrays: for every array of every text, a push of each value and
+ * a delete of each item.
+ * @returns {object[]} The cases
+ * @example
+ * arrayCases()[0].op; // 'push'
+ */
+export function arrayCases() {
+	const out = [];
+	for (const text of [...bases, ...arrayBases]) {
+		const root = parse(text, [], { allowTrailingComma: true });
+		for (const { path: at, value } of containers(root)) {
+			if (!Array.isArray(value)) {
+				continue;
+			}
+			for (const v of values) {
+				out.push({
+					text,
+					op: 'push',
+					path: at,
+					value: v,
+					expected: expectedPush(text, at, v),
+				});
+			}
+			for (const index of value.keys()) {
+				const oracle = expected(text, [...at, index]);
+				// The oracle removes the last item of an array by a count of bytes that takes a
+				// blank before the `]` for granted: `[1, 2]` becomes `[12]`. Where it does not
+				// remove the item, it is no oracle, and the case is left out (the unit tests of
+				// `kd_jsonc::edit` have it).
+				if (oracle !== JSON.stringify(without(root, at, index))) {
+					continue;
+				}
+				out.push({
+					text,
+					op: 'deleteElement',
+					path: at,
+					index,
+					expected: oracle,
+				});
+			}
+		}
+	}
+	return out;
+}
+
+/**
+ * A value without one item of one of its arrays.
+ * @param {unknown} root the value
+ * @param {(string | number)[]} arrayPath the path of the array
+ * @param {number} index the item to leave out
+ * @returns {unknown} a copy of the value
+ * @example
+ * without({ a: [1, 2] }, ['a'], 0); // { a: [2] }
+ */
+export function without(root, arrayPath, index) {
+	if (arrayPath.length === 0) {
+		return root.toSpliced(index, 1);
+	}
+	const [head, ...rest] = arrayPath;
+	const copy = Array.isArray(root) ? [...root] : { ...root };
+	copy[head] = without(root[head], rest, index);
+	return copy;
+}
+
+/**
+ * The text of the golden file of arrays.
+ * @returns {string} The cases as JSON, one tab of indentation
+ * @example
+ * renderArrays().startsWith('['); // true
+ */
+export function renderArrays() {
+	return `${JSON.stringify(arrayCases(), null, '\t')}\n`;
+}
+
+/**
  * The text of the golden file.
  * @returns {string} The cases as JSON, one tab of indentation
  * @example
@@ -164,5 +291,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) {
 	writeFileSync(GOLDEN_FILE, render());
 	console.log(
 		`wrote ${cases().length} cases to ${path.relative(process.cwd(), GOLDEN_FILE)}`,
+	);
+	writeFileSync(ARRAY_GOLDEN_FILE, renderArrays());
+	console.log(
+		`wrote ${arrayCases().length} cases to ${path.relative(process.cwd(), ARRAY_GOLDEN_FILE)}`,
 	);
 }
