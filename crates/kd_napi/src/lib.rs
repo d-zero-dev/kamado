@@ -632,7 +632,33 @@ unsafe fn ui_edit(env: napi_env, info: napi_callback_info) -> napi_value {
 	}
 }
 
-/// `uiServer(handle)` -> `{ "port", "open", "inputDir", "outputDir" }`.
+/// `uiDiffFiles(handle, queryJson)` -> the JSON of the git blob ids of the files of some pages.
+unsafe fn ui_diff_files(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<2>(
+			env,
+			info,
+			c"uiDiffFiles: expected (handle, queryJson) strings",
+			|[handle, query]| ui::diff_files(&handle, &query).map_err(Thrown::from),
+		)
+	}
+}
+
+/// `uiDiff(handle, queryJson)` -> the JSON of the difference of some pages from HEAD.
+unsafe fn ui_diff(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<2>(
+			env,
+			info,
+			c"uiDiff: expected (handle, queryJson) strings",
+			|[handle, query]| ui::diff(&handle, &query).map_err(Thrown::from),
+		)
+	}
+}
+
+/// `uiServer(handle)` -> `{ "port", "open", "inputDir", "outputDir", "overrides" }`.
 unsafe fn ui_server(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
 	unsafe {
@@ -854,6 +880,8 @@ unsafe fn register(env: napi_env, exports: napi_value) -> napi_value {
 		export_guarded!(api, env, exports, c"uiValues", ui_values);
 		export_guarded!(api, env, exports, c"uiRefresh", ui_refresh);
 		export_guarded!(api, env, exports, c"uiEdit", ui_edit);
+		export_guarded!(api, env, exports, c"uiDiffFiles", ui_diff_files);
+		export_guarded!(api, env, exports, c"uiDiff", ui_diff);
 		export_guarded!(api, env, exports, c"uiServer", ui_server);
 		export_guarded!(api, env, exports, c"uiClose", ui_close);
 		#[cfg(feature = "panic-check")]
