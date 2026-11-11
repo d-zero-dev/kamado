@@ -563,6 +563,22 @@ test('kamado pages writes the map to the standard output or to --out and tells t
 	}
 	assert.equal(existsSync(path.join(site, 'out')), false);
 
+	// `server` refuses a positional and a flag it does not read (RFC §13), as `pages` does.
+	const serverPositional = spawnSync(
+		process.execPath,
+		[cli, 'server', '--config', config, 'foo'],
+		{ cwd: site, encoding: 'utf8' },
+	);
+	assert.equal(serverPositional.status, 1);
+	assert.match(serverPositional.stderr, /server takes no arguments/);
+	const serverForce = spawnSync(
+		process.execPath,
+		[cli, 'server', '--config', config, '--force'],
+		{ cwd: site, encoding: 'utf8' },
+	);
+	assert.equal(serverForce.status, 1);
+	assert.match(serverForce.stderr, /server does not take --force/);
+
 	const help = run('--help');
 	assert.equal(help.status, 0);
 	assert.match(help.stdout, /kamado pages {12}\[--out <file>\]/);

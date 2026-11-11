@@ -62,9 +62,12 @@ pub struct RenderJob {
 enum Decision {
 	Virtual,
 	Skipped,
-	/// Up to date. The entry is the manifest's own, to be kept as it is
-	/// (`None`), or with refreshed fingerprints.
-	Cached(Option<kd_build::Entry>),
+	/// Up to date. `entry` carries the warnings to re-emit; `refresh` is set when
+	/// fingerprints moved and the entry must be written back.
+	Cached {
+		entry: kd_build::Entry,
+		refresh: bool,
+	},
 	/// To be built; `render` is what JavaScript has to do for it.
 	Build {
 		render: Option<RenderPlan>,
@@ -774,9 +777,17 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 				page_env,
 				&fingerprinter,
 			) {
-				kd_build::Verdict::Unchanged => return First::Done(Decision::Cached(None)),
+				kd_build::Verdict::Unchanged => {
+					return First::Done(Decision::Cached {
+						entry: entry.clone(),
+						refresh: false,
+					});
+				}
 				kd_build::Verdict::UpToDate(refreshed) => {
-					return First::Done(Decision::Cached(Some(refreshed)));
+					return First::Done(Decision::Cached {
+						entry: refreshed,
+						refresh: true,
+					});
 				}
 				kd_build::Verdict::Stale => {}
 			}
@@ -955,11 +966,17 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 				&fingerprinter,
 			) {
 				kd_build::Verdict::Unchanged => {
-					asset_decisions.push(Decision::Cached(None));
+					asset_decisions.push(Decision::Cached {
+						entry: entry.clone(),
+						refresh: false,
+					});
 					continue;
 				}
 				kd_build::Verdict::UpToDate(refreshed) => {
-					asset_decisions.push(Decision::Cached(Some(refreshed)));
+					asset_decisions.push(Decision::Cached {
+						entry: refreshed,
+						refresh: true,
+					});
 					continue;
 				}
 				kd_build::Verdict::Stale => {}
@@ -1376,12 +1393,12 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 	let render = match decision {
 		Decision::Virtual => return Ok((result(Status::Virtual), None, Vec::new(), Vec::new())),
 		Decision::Skipped => return Ok((result(Status::Skipped), None, Vec::new(), Vec::new())),
-		Decision::Cached(entry) => {
+		Decision::Cached { entry, refresh } => {
 			return Ok((
 				result(Status::Cached),
-				entry.clone(),
-				Vec::new(),
-				Vec::new(),
+				refresh.then(|| entry.clone()),
+				entry.warnings.clone(),
+				entry.replaced_chars.clone(),
 			));
 		}
 		Decision::Build { render } => render,
@@ -1424,6 +1441,8 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 		},
 		output_size: bytes.len() as u64,
 		deps,
+		warnings: out.warnings.clone(),
+		replaced_chars: replaced.clone(),
 	};
 	Ok((result(status), Some(entry), out.warnings, replaced))
 }
@@ -1520,8 +1539,12 @@ fn finish_asset(shared: &Shared, i: usize, script: Option<&ScriptOutput>) -> Ass
 		Decision::Virtual | Decision::Skipped => {
 			return Ok((result(Status::Skipped), None, Vec::new()));
 		}
-		Decision::Cached(entry) => {
-			return Ok((result(Status::Cached), entry.clone(), Vec::new()));
+		Decision::Cached { entry, refresh } => {
+			return Ok((
+				result(Status::Cached),
+				refresh.then(|| entry.clone()),
+				entry.warnings.clone(),
+			));
 		}
 		Decision::Build { .. } => {}
 	}
@@ -1551,13 +1574,16 @@ fn finish_asset(shared: &Shared, i: usize, script: Option<&ScriptOutput>) -> Ass
 	};
 	let bytes = built.text.as_bytes();
 	let status = write_output(&asset.output_path, bytes, shared.skip_unchanged)?;
+	let warnings = built.warnings;
 	let entry = built.settled.then(|| kd_build::Entry {
 		input_path: asset.input_path.clone(),
 		env: env.clone(),
 		output_size: bytes.len() as u64,
 		deps: built.deps,
+		warnings: warnings.clone(),
+		replaced_chars: Vec::new(),
 	});
-	Ok((result(status), entry, built.warnings))
+	Ok((result(status), entry, warnings))
 }
 
 /// Runs a build that needs no JavaScript and returns the report. A site with
