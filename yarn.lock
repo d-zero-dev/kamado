@@ -7890,6 +7890,8 @@ __metadata:
     hono: "npm:4.13.16"
     react: "npm:19.3.0"
     react-dom: "npm:19.3.0"
+  peerDependencies:
+    "@types/react": 19.3.0
   bin:
     kamado: ./dist/cli.js
   languageName: unknown
