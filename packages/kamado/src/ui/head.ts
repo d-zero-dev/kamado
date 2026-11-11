@@ -28,6 +28,9 @@ export const MAX_OVERRIDES_BYTES = 256 * 1024 * 1024;
 /** How long `git` may take to give the texts of files: more than a question about them. */
 const TEXTS_TIMEOUT_MS = 60_000;
 
+/** The byte of a line break (written in decimal: a hexadecimal literal is cased one way by the linter and the other by the formatter). */
+const LINE_FEED = 10;
+
 /** A commit by its id in full, as `git` writes one. */
 const OBJECT_ID = /^[\da-f]{40}(?:[\da-f]{24})?$/u;
 
@@ -324,7 +327,7 @@ export async function readHeadTexts(
 	const decoder = new TextDecoder('utf-8', { fatal: true });
 	let at = 0;
 	for (const oid of wanted) {
-		const end = out.indexOf(0x0a, at);
+		const end = out.indexOf(LINE_FEED, at);
 		if (end === -1) {
 			return null;
 		}

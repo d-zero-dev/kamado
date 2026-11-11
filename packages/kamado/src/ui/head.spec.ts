@@ -333,7 +333,7 @@ describe('readHeadTexts', () => {
 
 	test('is nothing for a blob that is not UTF-8, and for one that is not there', async () => {
 		git('init', '-q', '-b', 'main');
-		const binary = Buffer.from([0xff, 0xfe, 0x00, 0x41]);
+		const binary = Buffer.from([255, 254, 0, 65]);
 		await write('bin.dat', binary);
 		await write('after.txt', 'after\n');
 		git('add', '.');
