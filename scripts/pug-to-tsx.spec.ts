@@ -22,7 +22,7 @@ const repo = path.resolve(import.meta.dirname, '..');
 const dist = path.join(repo, 'packages', 'kamado', 'dist', 'jsx');
 const available =
 	existsSync(path.join(dist, 'attr-table.js')) &&
-	existsSync(path.join(dist, 'runtime.d.ts'));
+	existsSync(path.join(dist, 'index.d.ts'));
 
 const FILES: Record<string, string> = {
 	'__assets/htdocs/index.pug': `include /mixin/m.pug
@@ -682,19 +682,23 @@ describe.skipIf(!available && !process.env.CI)(
 			expect(page).not.toContain('!!(!');
 		});
 
-		test('puts the type of the props after the imports, which go in the order of import-x/order', () => {
+		test('imports PageProps from kamado/jsx with the other imports in import-x/order', () => {
 			const page = read('__assets/htdocs/index.tsx');
-			const head = page.slice(0, page.indexOf('\n\n', page.indexOf('type PageProps')));
-			expect(head).toBe(
+			const htmlImport = page.indexOf("import { html } from 'kamado/jsx';");
+			const typeImport = page.indexOf("import type { PageProps } from 'kamado/jsx';");
+			const relative = page.indexOf(
+				"import CStatic from '../_libs/component/c-static.tsx';",
+			);
+			expect(htmlImport).toBeGreaterThanOrEqual(0);
+			expect(typeImport).toBeGreaterThan(htmlImport);
+			expect(relative).toBeGreaterThan(typeImport);
+			expect(page.slice(htmlImport, relative).trimEnd()).toBe(
 				[
 					"import { html } from 'kamado/jsx';",
-					'',
-					"import CStatic from '../_libs/component/c-static.tsx';",
-					"import { A, Card } from '../_libs/mixin/m.tsx';",
-					'',
-					'type PageProps = Record<string, any>;',
+					"import type { PageProps } from 'kamado/jsx';",
 				].join('\n'),
 			);
+			expect(page).toMatch(/props: PageProps & Record<string, any>/);
 		});
 
 		test('writes a constant at the top of a file of mixins at the top of the module', () => {
@@ -736,7 +740,7 @@ describe.skipIf(!available && !process.env.CI)(
 		test('writes the declarations of what the types of React lack', () => {
 			const declarations = read('__assets/kamado-jsx.d.ts');
 			expect(declarations).toContain('commandfor?: string | undefined;');
-			expect(declarations).toContain('static?: boolean | undefined;');
+			expect(declarations).not.toContain('static?: boolean | undefined;');
 		});
 
 		test('passes the type check of the strictest configuration', () => {
@@ -758,7 +762,7 @@ describe.skipIf(!available && !process.env.CI)(
 						types: ['react'],
 						paths: {
 							react: [path.join(repo, 'node_modules', '@types', 'react')],
-							'kamado/jsx': [path.join(dist, 'runtime.d.ts')],
+							'kamado/jsx': [path.join(dist, 'index.d.ts')],
 						},
 					},
 					include: ['__assets/**/*.tsx', '__assets/**/*.d.ts'],
@@ -932,7 +936,7 @@ block content
 						types: ['react'],
 						paths: {
 							react: [path.join(repo, 'node_modules', '@types', 'react')],
-							'kamado/jsx': [path.join(dist, 'runtime.d.ts')],
+							'kamado/jsx': [path.join(dist, 'index.d.ts')],
 						},
 					},
 					include: ['__assets/**/*.tsx', '__assets/**/*.d.ts'],
@@ -1020,7 +1024,7 @@ html
 						types: ['react'],
 						paths: {
 							react: [path.join(repo, 'node_modules', '@types', 'react')],
-							'kamado/jsx': [path.join(dist, 'runtime.d.ts')],
+							'kamado/jsx': [path.join(dist, 'index.d.ts')],
 						},
 					},
 					include: ['__assets/**/*.tsx', '__assets/**/*.d.ts'],

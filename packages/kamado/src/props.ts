@@ -3,6 +3,16 @@
  * `page`, `meta`, `site`, `data`, `pages`, `nav()`, `breadcrumbs`,
  * `titleList()` and `formatDate()`, plus `content` for layouts.
  */
+import type {
+	GlobalData,
+	LayoutProps,
+	PageEntry,
+	PageMeta,
+	PageProps,
+	SiteInfo,
+} from './jsx/index.js';
+
+import { basePathOf } from './base-path.js';
 import {
 	formatDate,
 	getBreadcrumbs,
@@ -10,38 +20,14 @@ import {
 	titleList,
 	type BreadcrumbItem,
 	type GetNavTreeOptions,
-	type NavNode,
 	type PageInfo,
 	type TitleListOptions,
 } from './page-data/index.js';
 
-/** A page as the core describes it. */
-export interface PageEntry {
-	readonly url: string;
-	readonly inputPath: string;
-	readonly outputPath: string;
-	readonly fileSlug: string;
-	readonly filePathStem: string;
-	readonly extension: string;
-	/** ISO 8601 time the file object was created (the build's start). */
-	readonly date: string;
-	readonly meta: Record<string, unknown>;
-}
-
-/** The `site` values of the config. */
-export interface SiteInfo {
-	readonly host: string | null;
-	readonly baseURL: string | null;
-	readonly siteName: string | null;
-	readonly siteNameEn: string | null;
-	readonly name: string | null;
-	readonly version: string | null;
-}
-
 /** What the core sends along with the render jobs. */
 export interface RenderContext {
 	readonly site: SiteInfo;
-	readonly data: Record<string, unknown>;
+	readonly data: GlobalData;
 	readonly pages: readonly PageEntry[];
 }
 
@@ -65,31 +51,13 @@ function pageInfos(context: RenderContext): readonly PageInfo[] {
 }
 
 /**
- * The path part of the site's base URL, which is what the breadcrumbs cut
- * at: `https://example.com/sub/` is `/sub/`, a plain path stays as it is.
- * @param baseURL - `site.baseURL`
- */
-export function basePathOf(baseURL: string | null): string {
-	if (!baseURL) {
-		return '/';
-	}
-	if (baseURL.startsWith('/')) {
-		return baseURL;
-	}
-	try {
-		return new URL(baseURL).pathname;
-	} catch {
-		return '/';
-	}
-}
-
-/**
  * Creates the props of one page. `breadcrumbs` is computed when it is read,
  * because scanning the whole page list for every page costs more than most
  * pages need.
  * @param context - Site, data and the page list
  * @param index - The page's index in `context.pages`
  * @param extra - Further props (`content` for a layout)
+ * @param extra.content
  * @example
  * ```ts
  * const props = createProps(context, 0, { content: '<p>body</p>' });
@@ -99,27 +67,37 @@ export function basePathOf(baseURL: string | null): string {
 export function createProps(
 	context: RenderContext,
 	index: number,
+	extra: { readonly content: string },
+): LayoutProps;
+export function createProps(
+	context: RenderContext,
+	index: number,
 	extra?: Record<string, unknown>,
-): Record<string, unknown> {
+): PageProps;
+export function createProps(
+	context: RenderContext,
+	index: number,
+	extra?: Record<string, unknown>,
+): PageProps {
 	const page = context.pages[index]!;
 	const infos = pageInfos(context);
 	const info = infos[index]!;
-	let crumbs: BreadcrumbItem[] | undefined;
-	const breadcrumbs = (): BreadcrumbItem[] => {
-		crumbs ??= getBreadcrumbs(
+	let crumbs: BreadcrumbItem<PageMeta>[] | undefined;
+	const breadcrumbs = (): BreadcrumbItem<PageMeta>[] => {
+		crumbs ??= getBreadcrumbs<PageMeta>(
 			{ page: info, pageList: infos },
 			{ baseURL: basePathOf(context.site.baseURL) },
 		);
 		return crumbs;
 	};
-	const props: Record<string, unknown> = {
+	const props = {
 		page,
 		meta: page.meta,
 		site: context.site,
 		data: context.data,
 		pages: context.pages,
-		nav: (options?: GetNavTreeOptions): NavNode | null =>
-			getNavTree({ currentPage: page, pages: infos }, options),
+		nav: (options?: GetNavTreeOptions<PageMeta>) =>
+			getNavTree<PageMeta>({ currentPage: page, pages: infos }, options),
 		titleList: (options?: TitleListOptions): string =>
 			titleList(breadcrumbs(), {
 				siteName: context.site.siteName ?? undefined,
@@ -135,5 +113,15 @@ export function createProps(
 	if (extra) {
 		Object.assign(props, extra);
 	}
-	return props;
+	return props as PageProps;
 }
+
+export {
+	type GlobalData,
+	type LayoutProps,
+	type PageEntry,
+	type PageMeta,
+	type PageProps,
+	type SiteInfo,
+} from './jsx/index.js';
+export { basePathOf } from './base-path.js';

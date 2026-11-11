@@ -248,14 +248,14 @@ yarn build
 - **属性名は React の綴り**: `charset` → `charSet`、`itemprop` → `itemProp`、`itemtype` → `itemType`、`itemid` → `itemID`。小文字のままだと、`<meta charset>`は先頭に置かれず、`<meta itemprop>`（パンくずの`position`）が`<head>`に持ち上げられる。上のほかの属性（`datetime` → `dateTime`、`srcset` → `srcSet`など）も、`@types/react`の型が求める綴りで出す。対応表は react-dom の`possibleStandardNames`から`scripts/generate-react-prop-names.mjs`が作る。出力の HTML は、どちらの綴りでも同じになる。
 - **型検査と lint に通す**: 変換結果は、`@d-zero/tsconfig`（strictest）の型検査と、型付きの eslint に通る。project の`tsconfig.json`に次を足す。
   - `"jsx": "preserve"`と`"allowImportingTsExtensions": true`。`include`に`**/*.tsx`を足す（`**/*.ts`が`.d.ts`も拾う）。型付きの eslint は、その`tsconfig.json`を`parserOptions.project`に使う。
-  - `@types/react`を devDependency に固定で足す。`react`自体は要らない（型だけを読む）。kamado は React の型を同梱しない。`html()`の戻り値だけは、React の`ReactElement`と同じ形の型を宣言してある。
-  - 変換スクリプトは`<out>/__assets/kamado-jsx.d.ts`も書く。`@types/react`に無い、`<html static>`の`static`と、`command`/`commandfor`（Invoker Commands）の型の補強です。`__assets`に置きます。
+  - `@types/react`は`kamado`の peerDependency（版はパッケージに合わせる）。プロジェクトの devDependency にも固定で足してよい。`react`自体は要らない（型だけを読む）。`html()`の戻り値の型`HtmlChild`と、`<html static>`の`static`は`kamado/jsx`が宣言する。ページ／レイアウトの props 型（`PageProps`等）と`basePathOf`も`kamado/jsx`から import する。
+  - 変換スクリプトは`<out>/__assets/kamado-jsx.d.ts`も書く。中身は`command`/`commandfor`（Invoker Commands）の補強だけ（`static`は`kamado/jsx`側）。`__assets`に置きます。
   - 数字の文字列（`maxlength="255"`）は、`maxLength={255}`のように数値で出す。`on*`の文字列属性（`oncontextmenu="return false;"`）は、型が関数なので、型のつかない展開（`{...{ oncontextmenu: "..." }}`）で出す。
   - Pug の JavaScript の無名関数の引数は`(item: any) =>`と型を付け、オブジェクトリテラルの定数は`Record<string, any>`にする。使わない`props`の引数は`_props`にする。
   - Pug で宣言して、どこからも読まない変数と関数（`- const url = ...`だけで`url`を使わない、`- function helper() {}`を呼ばない）は書かない。属性の値の文字列（`property="og:url"`）の中の名前は、読んでいるとは数えない。初期値が何かをしうるもの（関数の呼び出し、`new`、代入、`x++`、タグ付きテンプレート、`await`など。`- const x = track()`）は、消すと動きが変わりうるので書き、`warning:`を出す。手で直す。
   - `style`の CSS の文字列と、`hidden="until-found"`（`@types/react`の型に無い値）は`as any`を付けて出す。条件式の枝の`false`と`null`（`cond ? "_blank" : false`、`cond ? "noopener" : null`）は`undefined`にする。Pug は、`false`や`null`の属性を出さず、`undefined`と同じに扱う。`disabled`のような真偽値の prop は、`false`に意味があるので残し、`null`だけを`undefined`にする。
   - 型を通すために`any`が入る。出力は必ず読み、必要なら型を付け直す。
-  - import は`@d-zero/eslint-config`の`import-x/order`の並び（組み込み、パッケージ、`../`、`./`、index の順で、グループの間は空行、中はパスの昇順。index は`.`/`./`/`./index`/`./index.js`だけで、`./index.tsx`は`./`に入る）で出し、`type PageProps`はその後ろに置く。分割代入は、再代入される名前だけを`let`にして`const`と分ける（オブジェクトパターンの引数も同じ。プロパティごとに分け、`...rest`を含む階層や、分けられない塊は、`let`にする名前を別名で受けて後から`let a = _a;`と宣言する）。
+  - import は`@d-zero/eslint-config`の`import-x/order`の並び（組み込み、パッケージ、`../`、`./`、index の順で、グループの間は空行、中はパスの昇順。index は`.`/`./`/`./index`/`./index.js`だけで、`./index.tsx`は`./`に入る）で出し、`import type { PageProps } from 'kamado/jsx'`を同じ規則で混ぜる。分割代入は、再代入される名前だけを`let`にして`const`と分ける（オブジェクトパターンの引数も同じ。プロパティごとに分け、`...rest`を含む階層や、分けられない塊は、`let`にする名前を別名で受けて後から`let a = _a;`と宣言する）。
   - eslint には、変換結果の TSX にだけ当てる設定を足す（flat config）。次の規則は、変換結果と合わない。
     - `@typescript-eslint/no-explicit-any`: 外す。`--fix`（lint-staged の pre-commit も）が`any`を`unknown`に書き換えて、型が通らなくなる。
     - `@typescript-eslint/no-unused-vars`: `argsIgnorePattern: '^_'`にする。使わない`props`の引数は`_props`で出る。あとから`props`を使わなくなった部品も、`_props`に直す。

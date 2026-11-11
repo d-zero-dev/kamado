@@ -110,13 +110,24 @@ export async function createRenderer(
 			let html: string;
 			if (job.main) {
 				const main = await loadPage({ ...job, main: job.main });
-				html = render(main, createProps(context, job.page));
+				// Why not pass PageProps: `render`'s props type is still a string-key
+				// bag from the JSX runtime; widening PageProps would pull page types
+				// into every render call site.
+				html = render(
+					main,
+					createProps(context, job.page) as unknown as Record<string, unknown>,
+				);
 			} else {
 				html = job.content ?? '';
 			}
 			if (job.layout) {
 				const layout = await loadComponent(job.layout, 'a layout');
-				html = render(layout, createProps(context, job.page, { content: markup(html) }));
+				html = render(
+					layout,
+					createProps(context, job.page, {
+						content: markup(html),
+					}) as unknown as Record<string, unknown>,
+				);
 			}
 			return [job.page, html];
 		} catch (error) {

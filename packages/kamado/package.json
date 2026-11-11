@@ -10,7 +10,10 @@
 	"exports": {
 		".": "./dist/index.js",
 		"./build": "./dist/build.js",
-		"./jsx": "./dist/jsx/runtime.js"
+		"./jsx": "./dist/jsx/index.js"
+	},
+	"peerDependencies": {
+		"@types/react": "19.3.0"
 	},
 	"engines": {
 		"node": ">=24.11.0"
