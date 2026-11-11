@@ -161,6 +161,9 @@ pub struct Ui {
 	sort_cache: Option<(u64, Sort, Arc<Vec<usize>>)>,
 	/// What was made of the files of HEAD (see `diff`).
 	head: diff::HeadCache,
+	/// The files the last edit set aside to remove and could not remove (with the reason): the
+	/// answer to that edit says them as a warning. Emptied when the next edit begins.
+	left_behind: Vec<String>,
 }
 
 fn hash_hex(bytes: &[u8]) -> String {
@@ -269,6 +272,28 @@ fn prune_empty_dirs(from: &str, root: &str) {
 /// ends in `/` (or `.`, `..`) names a directory, and the file is `index` with the extension of the
 /// page; a name without an extension gets it. Returns the path relative to the input directory.
 fn typed_path(typed: &str, ext: &str) -> F<String> {
+	let (mut parts, directory) = typed_parts(typed)?;
+	if directory {
+		parts.push(format!("index{ext}"));
+	} else if let Some(last) = parts.last_mut() {
+		let own = kd_site::path::extname(last);
+		if own.is_empty() {
+			last.push_str(ext);
+		} else if own != ext {
+			return fail(
+				"invalid",
+				format!(
+					"the extension of the file cannot change: {last:?} has {own:?}, the file has {ext:?}"
+				),
+			);
+		}
+	}
+	Ok(parts.join("/"))
+}
+
+/// The segments of a path a person typed, read from the input directory (see [`typed_path`]),
+/// and whether the path names a directory (it ends in `/`, `.` or `..`).
+fn typed_parts(typed: &str) -> F<(Vec<String>, bool)> {
 	if typed.is_empty() {
 		return fail("invalid", "the path is empty");
 	}
@@ -293,22 +318,50 @@ fn typed_path(typed: &str, ext: &str) -> F<String> {
 			name => parts.push(name.to_string()),
 		}
 	}
-	if directory {
-		parts.push(format!("index{ext}"));
-	} else if let Some(last) = parts.last_mut() {
-		let own = kd_site::path::extname(last);
-		if own.is_empty() {
-			last.push_str(ext);
-		} else if own != ext {
-			return fail(
-				"invalid",
-				format!(
-					"the extension of the file cannot change: {last:?} has {own:?}, the file has {ext:?}"
-				),
-			);
-		}
+	Ok((parts, directory))
+}
+
+/// The extensions a page file has, in the order a file is looked for when only the URL of the
+/// page is known (a virtual page that is given a file without a path). They are the ones
+/// `crate::page_kind` takes; a test holds the two together.
+const PAGE_EXTENSIONS: [&str; 4] = [".html", ".tsx", ".jsx", ".htm"];
+
+/// The path a person typed for a page file that is not there yet, relative to the input
+/// directory. It is folded as [`typed_path`] folds one, but nothing is filled in: there is no
+/// file whose extension the name could take, so the name is written with its extension, which
+/// is what makes the file a page and says of which kind.
+fn typed_new_path(typed: &str) -> F<String> {
+	let (parts, directory) = typed_parts(typed)?;
+	let ext = match parts.last() {
+		Some(name) if !directory => kd_site::path::extname(name).to_ascii_lowercase(),
+		_ => String::new(),
+	};
+	if !PAGE_EXTENSIONS.contains(&ext.as_str()) {
+		return fail(
+			"invalid",
+			format!(
+				"{typed:?} does not name a page file: write the name of the file with its extension ({})",
+				PAGE_EXTENSIONS.join(", ")
+			),
+		);
 	}
 	Ok(parts.join("/"))
+}
+
+/// What a page file holds when it is made: nothing for an HTML page, and for a module the
+/// least a page needs to be built, a component that renders nothing.
+fn new_page_text(path: &str) -> &'static str {
+	match kd_site::path::extname(path).to_ascii_lowercase().as_str() {
+		".tsx" | ".jsx" => "export default function Page() {\n\treturn null;\n}\n",
+		_ => "",
+	}
+}
+
+/// Whether there is anything at `path`: a file, a directory, or a link (also one that leads
+/// nowhere: writing through it would make a file somewhere else). What cannot be looked at
+/// is in the way as much as what can.
+fn taken(path: &str) -> bool {
+	!matches!(fs::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
 }
 
 /// Whether a relative path leaves the directory it is relative to (a segment that only starts
@@ -345,13 +398,19 @@ fn read_expected(expect: &Value, field: &str, path: &str) -> F<String> {
 
 fn hash_expectation(expect: &Value, field: &str, path: &str) -> F<()> {
 	let current = file_hash(path).map_err(|e| io_fail(path, &e))?;
+	hash_expected(expect, field, path, current.as_deref())
+}
+
+/// Checks that `current`, the hash of the file at `path` as it was just read (`None`: there is
+/// no such file), is the one `expect` has for `field`.
+fn hash_expected(expect: &Value, field: &str, path: &str, current: Option<&str>) -> F<()> {
 	match expect.get(field) {
 		None => fail(
 			"invalid",
 			format!("`expect.{field}` (the hash of {path}) is required for this change"),
 		),
 		Some(Value::Null) if current.is_none() => Ok(()),
-		Some(Value::String(h)) if current.as_deref() == Some(h.as_str()) => Ok(()),
+		Some(Value::String(h)) if current == Some(h.as_str()) => Ok(()),
 		Some(_) => fail(
 			"conflict",
 			format!("{path} was changed after it was read; load the pages again"),
@@ -491,8 +550,9 @@ fn edit_overrides_text(
 		match change {
 			KeyChange::Set(k, v) => match trusted(&edited).set_member(&meta_path, k, v) {
 				Ok(text) => edited = text,
-				// the entry has no `meta` yet
-				Err(E::NoSuchPath(_)) => {
+				// The entry has no `meta` yet, or a `meta` that is `null` (which the plan reads
+				// as none): the key is the first of a new one.
+				Err(E::NoSuchPath(_) | E::NotAContainer(_)) => {
 					let meta = Value::Object(vec![(k.clone(), v.clone())]);
 					edited = trusted(&edited)
 						.set_member(&entry_path, "meta", &meta)
@@ -511,7 +571,13 @@ fn edit_overrides_text(
 		if let Value::Object(members) = &mut expected {
 			match members.iter_mut().find(|(k, _)| k == "meta") {
 				Some((_, Value::Object(meta))) => *meta = change.apply(meta),
-				_ => {
+				// a `meta` that is `null` is replaced by the one the key makes
+				Some((_, slot)) => {
+					if let KeyChange::Set(k, v) = change {
+						*slot = Value::Object(vec![(k.clone(), v.clone())]);
+					}
+				}
+				None => {
 					if let KeyChange::Set(k, v) = change {
 						members.push((
 							"meta".to_string(),
@@ -557,6 +623,153 @@ fn edit_overrides_text(
 		);
 	}
 	Ok(edited)
+}
+
+/// The entry of a page as it is written when it is added to `pages.overrides`: the members a
+/// reader needs and no others (`virtual` only when it is, `meta` only when there is some).
+fn overrides_entry_value(entry: &kd_site::meta::Override) -> Value {
+	let mut members = vec![("url".to_string(), Value::String(entry.url.clone()))];
+	if entry.is_virtual {
+		members.push(("virtual".to_string(), Value::Bool(true)));
+	}
+	if !entry.meta.is_empty() {
+		members.push(("meta".to_string(), Value::Object(entry.meta.clone())));
+	}
+	if let Some(lastmod) = &entry.lastmod {
+		members.push(("lastmod".to_string(), Value::String(lastmod.clone())));
+	}
+	Value::Object(members)
+}
+
+/// Checks that `edited`, the text of `pages.overrides` once its entries were changed, reads
+/// as `expected`. The whole text is read, where an edit of one key reads the entry it
+/// changed: a change of the entries themselves (one added, one removed, one made virtual or
+/// not) is followed by a new plan of the site, which reads the whole file anyway, and the
+/// items of the array before and after the change are not at the same offsets to compare.
+fn checked_overrides(path: &str, edited: String, expected: &Overrides) -> F<String> {
+	match Overrides::parse(&edited) {
+		Ok(after) if after == *expected => Ok(edited),
+		Ok(_) => fail(
+			"invalid",
+			format!("the edit would not read back as written in {path}; nothing was written"),
+		),
+		Err(e) => fail(
+			"invalid",
+			format!("the edit would leave {path} unreadable: {e}"),
+		),
+	}
+}
+
+fn overrides_edit_fail(path: &str, e: &kd_jsonc::edit::EditError) -> Fail {
+	Fail {
+		code: "invalid",
+		message: format!("{path}: {e}"),
+	}
+}
+
+/// The text of `pages.overrides` with `entry` added after its last entry. `before` is what
+/// `text` reads as.
+fn add_overrides_entry(
+	path: &str,
+	text: &str,
+	before: &Overrides,
+	entry: kd_site::meta::Override,
+) -> F<String> {
+	if before.by_url.contains_key(&entry.url) {
+		return fail(
+			"collision",
+			format!("{path} has an entry for {} already", entry.url),
+		);
+	}
+	let edited = kd_jsonc::edit::trusted(text)
+		.push_element(&[Seg::Key("pages")], &overrides_entry_value(&entry))
+		.map_err(|e| overrides_edit_fail(path, &e))?;
+	let mut expected = before.clone();
+	expected.order.push(entry.url.clone());
+	expected.by_url.insert(entry.url.clone(), entry);
+	checked_overrides(path, edited, &expected)
+}
+
+/// The text of `pages.overrides` without the entry of `url`. `before` is what `text` reads as.
+fn remove_overrides_entry(path: &str, text: &str, before: &Overrides, url: &str) -> F<String> {
+	let Some(idx) = before.order.iter().position(|u| u == url) else {
+		return fail("invalid", format!("{path} has no entry for {url}"));
+	};
+	let edited = kd_jsonc::edit::trusted(text)
+		.delete_element(&[Seg::Key("pages")], idx)
+		.map_err(|e| overrides_edit_fail(path, &e))?;
+	let mut expected = before.clone();
+	expected.order.remove(idx);
+	expected.by_url.remove(url);
+	checked_overrides(path, edited, &expected)
+}
+
+/// The text of `pages.overrides` with the entry of `url` made virtual or not, and with the
+/// keys `add` added to its `meta` and the keys `take` taken from it. The other members of the
+/// entry, and the keys of its `meta` that are not named, keep their bytes. A `meta` that the
+/// keys taken leave empty goes with them. `before` is what `text` reads as.
+fn change_overrides_entry(
+	path: &str,
+	text: &str,
+	before: &Overrides,
+	url: &str,
+	is_virtual: bool,
+	add: &Meta,
+	take: &[String],
+) -> F<String> {
+	use kd_jsonc::edit::{EditError as E, trusted};
+	let Some(idx) = before.order.iter().position(|u| u == url) else {
+		return fail("invalid", format!("{path} has no entry for {url}"));
+	};
+	let bad = |e: E| overrides_edit_fail(path, &e);
+	let mut expected = before.clone();
+	let Some(entry) = expected.by_url.get_mut(url) else {
+		return fail("invalid", format!("{path} has no entry for {url}"));
+	};
+	// The entry is found once and edited as a text of its own: each key is then a walk over
+	// the entry and not over the file, which is megabytes on a site of a hundred thousand
+	// pages.
+	let (start, end) = trusted(text)
+		.value_range(&[Seg::Key("pages"), Seg::Index(idx)])
+		.map_err(bad)?;
+	let meta_path = [Seg::Key("meta")];
+	let mut edited = if is_virtual {
+		trusted(&text[start..end])
+			.set_member(&[], "virtual", &Value::Bool(true))
+			.map_err(bad)?
+	} else {
+		// (Only the entry of a virtual page is made not virtual, and that one says `virtual`.)
+		trusted(&text[start..end])
+			.delete_member(&[], "virtual")
+			.map_err(bad)?
+	};
+	entry.is_virtual = is_virtual;
+	for (key, value) in add {
+		edited = match trusted(&edited).set_member(&meta_path, key, value) {
+			Ok(edited) => edited,
+			// The entry has no `meta` yet, or a `meta` that is `null` (which reads as none).
+			Err(E::NoSuchPath(_) | E::NotAContainer(_)) => trusted(&edited)
+				.set_member(
+					&[],
+					"meta",
+					&Value::Object(vec![(key.clone(), value.clone())]),
+				)
+				.map_err(bad)?,
+			Err(e) => return Err(bad(e)),
+		};
+		entry.meta = KeyChange::Set(key.clone(), value.clone()).apply(&entry.meta);
+	}
+	for key in take {
+		edited = trusted(&edited)
+			.delete_member(&meta_path, key)
+			.map_err(bad)?;
+		entry.meta.retain(|(k, _)| k != key);
+	}
+	if !take.is_empty() && entry.meta.is_empty() {
+		edited = trusted(&edited).delete_member(&[], "meta").map_err(bad)?;
+	}
+	let whole = format!("{}{edited}{}", &text[..start], &text[end..]);
+	checked_overrides(path, whole, &expected)
 }
 
 /// Whether `target` is a file other than `source`. A file system that does not tell cases
@@ -699,10 +912,36 @@ fn put_back(
 	stuck
 }
 
-/// Files to write and move together: all of them or none.
+/// The name a file that is to be removed has until the other changes are made: in the same
+/// directory (a rename there cannot cross a file system), hidden, and with an extension that
+/// is not a page's (a plan made while the file has this name reads no page of it). A name that
+/// is taken (a file that an editor which was stopped half way left behind) is not used and not
+/// touched: the next free one is, with a number, so that what was left never stands in the way
+/// of removing a file again.
+fn set_aside_name(path: &str) -> String {
+	let dir = kd_site::path::dirname(path);
+	let name = kd_site::path::basename(path);
+	let base = format!("{dir}/.{name}.kamado-removed");
+	let mut candidate = base.clone();
+	let mut n = 0u32;
+	// Only a name that is seen to be there is passed over. One that cannot be looked at (too
+	// long for a name, a directory that cannot be searched) is tried: the rename then says why
+	// it cannot be, where looking for a free name would never end.
+	while fs::symlink_metadata(&candidate).is_ok() {
+		n += 1;
+		candidate = format!("{base}.{n}");
+	}
+	candidate
+}
+
+/// Files to write, move and remove together: all of them or none.
 #[derive(Default)]
 struct Txn {
 	renames: Vec<(String, String)>,
+	/// The files to remove. Each is set aside under another name before anything is written and
+	/// removed for good once everything is: until then a rename brings it back as it was (its
+	/// mode, and a link as a link), which writing its bytes again would not.
+	removes: Vec<String>,
 	writes: Vec<(String, String)>,
 	/// The text `pages.overrides` has once the writes are made, if they include it, and
 	/// whether the handle's copy of it was not the text that was edited (so the new text has to
@@ -715,9 +954,19 @@ struct Txn {
 
 impl Txn {
 	/// Makes the changes; if one fails, the ones made are undone: the files written get what
-	/// they held (a file that was not there is removed), the files moved go back, and the
-	/// directories made for them are removed. What could not be put back is in the message.
-	fn commit(self) -> F<()> {
+	/// they held (a file that was not there is removed), the files moved and the files set
+	/// aside to be removed go back, and the directories made for them are removed. What could
+	/// not be put back is in the message.
+	///
+	/// The last step is removing for good the files that were set aside, and it is not part of
+	/// "all or none": by then every change is made (the files are gone from their names, and
+	/// what was written says so). A set-aside file that cannot be removed is left where it is,
+	/// hidden, as a directory that cannot be removed is left by a move. Why not undo: the files
+	/// removed before it cannot come back, and taking back what was written would leave the
+	/// site saying less than the files do. What was left is returned (the set-aside names, with
+	/// the reason), so that the answer to the edit says it: an edit that is made and leaves a
+	/// file behind is a success with a warning, not a failure.
+	fn commit(self) -> F<Vec<String>> {
 		let mut renamed: Vec<(String, String)> = Vec::new();
 		// What each file held before it was written (`None`: there was no such file).
 		let mut written: Vec<(String, Option<Vec<u8>>)> = Vec::new();
@@ -755,7 +1004,27 @@ impl Txn {
 			}
 			renamed.push((from.clone(), to.clone()));
 		}
+		let mut aside: Vec<String> = Vec::new();
+		for path in &self.removes {
+			let hold = set_aside_name(path);
+			if let Err(e) = fs::rename(path, &hold) {
+				return Err(undo(&renamed, &written, &made, io_fail(path, &e)));
+			}
+			renamed.push((path.clone(), hold.clone()));
+			aside.push(hold);
+		}
 		for (path, text) in &self.writes {
+			// A file that is new can be in a directory that is new.
+			if let Some(parent) = std::path::Path::new(path).parent() {
+				let new_dirs = missing_dirs(parent);
+				if !new_dirs.is_empty() {
+					let created = fs::create_dir_all(parent);
+					made.extend(new_dirs);
+					if let Err(e) = created {
+						return Err(undo(&renamed, &written, &made, io_fail(path, &e)));
+					}
+				}
+			}
 			let old = match fs::read(path) {
 				Ok(bytes) => Some(bytes),
 				Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -768,13 +1037,25 @@ impl Txn {
 				return Err(undo(&renamed, &written, &made, io_fail(path, &e)));
 			}
 		}
+		// Everything is made: what was set aside goes for good (see above for one that stays).
+		let mut left: Vec<String> = Vec::new();
+		for hold in &aside {
+			if let Err(e) = fs::remove_file(hold) {
+				left.push(format!("{hold} ({e})"));
+			}
+		}
 		// Everything is made, so nothing is put back: what was left empty can go.
 		if let Some(root) = &self.prune_to {
-			for (from, _) in &self.renames {
+			for from in self
+				.renames
+				.iter()
+				.map(|(from, _)| from)
+				.chain(&self.removes)
+			{
 				prune_empty_dirs(from, root);
 			}
 		}
-		Ok(())
+		Ok(left)
 	}
 }
 
@@ -789,8 +1070,16 @@ enum SortColumn {
 	Url,
 	InputPath,
 	Virtual,
+	/// The place of the page in the plan.
+	Order,
+	OutputPath,
+	Parent,
+	Depth,
 	Meta(String),
 }
+
+/// What a `sort.key` that names no column is answered with.
+const SORT_KEY_REASON: &str = "query: `sort.key` must be `url`, `inputPath`, `virtual`, `order`, `outputPath`, `parent`, `depth` or `meta:<key>`";
 
 /// The order a query asks for.
 #[derive(Clone, PartialEq, Eq)]
@@ -809,7 +1098,7 @@ struct Query {
 }
 
 /// The `sort` of a query: `None` when there is none (absent or `null`), an error naming the
-/// field when `key` is not one of the four identifiers or `desc` is not a boolean. The length
+/// field when `key` is not the identifier of a column or `desc` is not a boolean. The length
 /// of a `meta:` key is not limited here; the server of `kamado ui` limits it.
 fn parse_sort(v: &Value) -> Result<Option<Sort>, String> {
 	let spec = match v.get("sort") {
@@ -821,21 +1110,15 @@ fn parse_sort(v: &Value) -> Result<Option<Sort>, String> {
 		Some(Value::String(k)) if k == "url" => SortColumn::Url,
 		Some(Value::String(k)) if k == "inputPath" => SortColumn::InputPath,
 		Some(Value::String(k)) if k == "virtual" => SortColumn::Virtual,
+		Some(Value::String(k)) if k == "order" => SortColumn::Order,
+		Some(Value::String(k)) if k == "outputPath" => SortColumn::OutputPath,
+		Some(Value::String(k)) if k == "parent" => SortColumn::Parent,
+		Some(Value::String(k)) if k == "depth" => SortColumn::Depth,
 		Some(Value::String(k)) => match k.strip_prefix("meta:") {
 			Some(name) if !name.is_empty() => SortColumn::Meta(name.to_string()),
-			_ => {
-				return Err(
-					"query: `sort.key` must be `url`, `inputPath`, `virtual` or `meta:<key>`"
-						.to_string(),
-				);
-			}
+			_ => return Err(SORT_KEY_REASON.to_string()),
 		},
-		_ => {
-			return Err(
-				"query: `sort.key` must be `url`, `inputPath`, `virtual` or `meta:<key>`"
-					.to_string(),
-			);
-		}
+		_ => return Err(SORT_KEY_REASON.to_string()),
 	};
 	let desc = match spec.get("desc") {
 		None | Some(Value::Null) => false,
@@ -903,9 +1186,33 @@ enum Change {
 		key: Option<String>,
 		head: std::collections::HashMap<String, diff::HeadFile>,
 	},
+	/// A page that is not there yet: a page file at `path` (as typed, relative to the input
+	/// directory), or a virtual page when there is no path. `url` is the URL it is to have;
+	/// without one, it is the URL the place of the file gives.
+	Create {
+		url: Option<String>,
+		path: Option<String>,
+	},
+	/// The page file and its sidecar go, and the page stays as an entry of `pages.overrides`.
+	Virtualize,
+	/// A virtual page gets a page file at the path (as typed), or where its URL says when
+	/// there is no path.
+	Materialize(Option<String>),
+	/// The page goes: its files, and its entry in `pages.overrides`.
+	DeletePage,
+}
+
+/// What an edit was, when it was made.
+enum Done {
+	/// The page it leaves has this URL.
+	Page(String),
+	/// It leaves no page.
+	Gone,
 }
 
 struct Edit {
+	/// The URL of the page to change; empty for a page that is made (`Change::Create` has
+	/// the URL the new page is to have).
 	url: String,
 	expect: Value,
 	change: Change,
@@ -913,9 +1220,22 @@ struct Edit {
 
 fn parse_edit(json: &str) -> Result<Edit, String> {
 	let v = kd_jsonc::parse(json).map_err(|e| format!("edit: invalid JSON: {e}"))?;
+	let creates = matches!(
+		v.get("change").and_then(|c| c.get("op")),
+		Some(Value::String(op)) if op == "create"
+	);
 	let url = match v.get("url") {
-		Some(Value::String(s)) => s.clone(),
+		Some(Value::String(s)) => Some(s.clone()),
+		None | Some(Value::Null) if creates => None,
 		_ => return Err("edit: `url` (a string) is required".to_string()),
+	};
+	// The path of a page file that is to be made: a string, or none.
+	let new_path = |change: &Value, op: &str| match change.get("path") {
+		Some(Value::String(p)) => Ok(Some(p.clone())),
+		None | Some(Value::Null) => Ok(None),
+		Some(_) => Err(format!(
+			"edit: `change.path` must be a string or null for \"{op}\""
+		)),
 	};
 	let expect = match v.get("expect") {
 		Some(e @ Value::Object(_)) => e.clone(),
@@ -965,15 +1285,36 @@ fn parse_edit(json: &str) -> Result<Edit, String> {
 			},
 			head: diff::parse_head(change.get("head")).map_err(|e| format!("edit: {e}"))?,
 		},
+		Some(Value::String(op)) if op == "create" => {
+			let path = new_path(change, "create")?;
+			if url.is_none() && path.is_none() {
+				return Err(
+					"edit: `url` (a string) or `change.path` (a string) is required for \"create\""
+						.to_string(),
+				);
+			}
+			Change::Create {
+				url: url.clone(),
+				path,
+			}
+		}
+		Some(Value::String(op)) if op == "virtualize" => Change::Virtualize,
+		Some(Value::String(op)) if op == "materialize" => {
+			Change::Materialize(new_path(change, "materialize")?)
+		}
+		Some(Value::String(op)) if op == "deletePage" => Change::DeletePage,
 		_ => {
 			return Err(
-				"edit: `change.op` must be \"set\", \"delete\", \"moveUrl\", \"movePath\" or \"revert\""
+				"edit: `change.op` must be \"set\", \"delete\", \"moveUrl\", \"movePath\", \"revert\", \"create\", \"virtualize\", \"materialize\" or \"deletePage\""
 					.to_string(),
 			);
 		}
 	};
 	Ok(Edit {
-		url,
+		url: match &change {
+			Change::Create { .. } => String::new(),
+			_ => url.unwrap_or_default(),
+		},
 		expect,
 		change,
 	})
@@ -1024,6 +1365,7 @@ impl Ui {
 			file_info: HashMap::new(),
 			sort_cache: None,
 			head: diff::HeadCache::default(),
+			left_behind: Vec::new(),
 		};
 		ui.layouts = read_layouts(&ui.loaded.config)?;
 		ui.plan_again(on_disk)?;
@@ -1327,6 +1669,8 @@ impl Ui {
 				Value::String(f.output_path.clone()),
 			),
 			("virtual".to_owned(), Value::Bool(page.is_virtual)),
+			// The place of the page in the plan, from 1: the order `pages` and `nav()` have.
+			("order".to_owned(), Value::Number((i + 1) as f64)),
 			("depth".to_owned(), Value::Number(depth as f64)),
 			(
 				"parent".to_owned(),
@@ -1435,6 +1779,53 @@ impl Ui {
 			}
 			SortColumn::Virtual => {
 				let keys: Vec<Option<bool>> = pages.iter().map(|p| Some(p.is_virtual)).collect();
+				arrange(indices, keys, &mut present, &mut missing, |a, b| {
+					order(a.cmp(b))
+				});
+			}
+			SortColumn::Order => {
+				// The index of a page is its place in the plan.
+				let keys: Vec<Option<usize>> = indices.iter().map(|&i| Some(i)).collect();
+				arrange(indices, keys, &mut present, &mut missing, |a, b| {
+					order(a.cmp(b))
+				});
+			}
+			SortColumn::OutputPath => {
+				let output_dir = self
+					.loaded
+					.config
+					.dir
+					.output
+					.trim_end_matches('/')
+					.to_owned();
+				let keys: Vec<Option<natural::Path>> = pages
+					.iter()
+					.map(|p| {
+						let rel = kd_site::path::relative(&output_dir, &p.file.output_path);
+						Some(natural::Path::new(&format!("/{rel}")))
+					})
+					.collect();
+				arrange(indices, keys, &mut present, &mut missing, |a, b| {
+					order(natural::path(a, b))
+				});
+			}
+			SortColumn::Parent => {
+				let keys: Vec<Option<natural::Path>> = pages
+					.iter()
+					.map(|p| {
+						let (_, parent) = kd_site::url_depth_and_parent(&p.file.url);
+						parent.map(|url| natural::Path::new(&url))
+					})
+					.collect();
+				arrange(indices, keys, &mut present, &mut missing, |a, b| {
+					order(natural::path(a, b))
+				});
+			}
+			SortColumn::Depth => {
+				let keys: Vec<Option<usize>> = pages
+					.iter()
+					.map(|p| Some(kd_site::url_depth_and_parent(&p.file.url).0))
+					.collect();
 				arrange(indices, keys, &mut present, &mut missing, |a, b| {
 					order(a.cmp(b))
 				});
@@ -1651,14 +2042,31 @@ impl Ui {
 		.to_json())
 	}
 
-	fn ok_json(&mut self, i: usize) -> String {
-		Value::Object(vec![
+	/// The answer to an edit that was made: the page as it is now, or `null` for a page the
+	/// edit removed.
+	///
+	/// A file that was set aside to be removed and could not be is told in `warning`: the edit
+	/// is made, and the file stays under another name.
+	fn ok_json(&mut self, page: Option<usize>) -> String {
+		let mut members = vec![
 			("ok".to_owned(), Value::Bool(true)),
 			("version".to_owned(), Value::Number(self.version as f64)),
 			("overridesHash".to_owned(), self.overrides_hash_json()),
-			("page".to_owned(), self.page_json(i)),
-		])
-		.to_json()
+			(
+				"page".to_owned(),
+				page.map_or(Value::Null, |i| self.page_json(i)),
+			),
+		];
+		if !self.left_behind.is_empty() {
+			members.push((
+				"warning".to_owned(),
+				Value::String(format!(
+					"the edit was made, but these files could not be removed and stay under another name: {}",
+					self.left_behind.join("; ")
+				)),
+			));
+		}
+		Value::Object(members).to_json()
 	}
 
 	fn fail_json(&mut self, fail: &Fail, current: Option<usize>) -> String {
@@ -1674,11 +2082,15 @@ impl Ui {
 	}
 
 	/// Makes one edit (RFC §14.2): `change.op` is `set` or `delete` (a key of the metadata),
-	/// `moveUrl` (the page gets another URL) or `movePath` (the page file gets another path,
-	/// given relative to `dir.input`; the only edit that carries a path). The directories a
-	/// move leaves empty are removed once it has been made. The answer says whether it was
-	/// made; an edit that is refused (a changed file, an invalid value, a collision) is an
-	/// answer, not an error.
+	/// `moveUrl` (the page gets another URL), `movePath` (the page file gets another path),
+	/// `create` (a page that is not there yet: a page file at a path, or a virtual page),
+	/// `virtualize` (the page file goes and the page stays as an entry of `pages.overrides`),
+	/// `materialize` (a virtual page gets a page file) or `deletePage` (the page goes). The
+	/// paths of `movePath`, `create` and `materialize` are given relative to `dir.input`; no
+	/// other edit carries a path. The directories a move or a removal leaves empty are removed
+	/// once it has been made. The answer says whether the edit was made, with the page as it
+	/// is now (`"page": null` when it is gone); an edit that is refused (a changed file, an
+	/// invalid value, a collision) is an answer, not an error.
 	///
 	/// # Errors
 	///
@@ -1696,34 +2108,55 @@ impl Ui {
 	/// ```
 	pub fn edit(&mut self, edit_json: &str) -> Result<String, String> {
 		let edit = parse_edit(edit_json)?;
-		let Some(&i) = self.by_url.get(&edit.url) else {
-			let f = Fail {
-				code: "notFound",
-				message: format!("there is no page with the URL {}", edit.url),
-			};
-			return Ok(self.fail_json(&f, None));
-		};
-		if let Change::Revert { head, .. } = &edit.change {
-			let need = self.revert_needs(i, head);
-			if !need.is_empty() {
-				return Ok(Ui::need_json(need));
-			}
-		}
 		let version = self.version;
-		let result = match &edit.change {
-			Change::Key(change) => self.edit_key(i, &edit.expect, change),
-			Change::MoveUrl(new_url) => self.move_url(i, &edit.expect, new_url),
-			Change::MovePath(path) => self.move_path(i, &edit.expect, path),
-			Change::Revert { key, head } => self.revert(i, &edit.expect, key.as_deref(), head),
+		self.left_behind.clear();
+		// A page that is made is the one edit that is not of a page that is there.
+		let result = match (&edit.change, self.by_url.get(&edit.url).copied()) {
+			(Change::Create { url, path }, _) => self
+				.create(url.as_deref(), path.as_deref(), &edit.expect)
+				.map(Done::Page),
+			(_, None) => {
+				let f = Fail {
+					code: "notFound",
+					message: format!("there is no page with the URL {}", edit.url),
+				};
+				return Ok(self.fail_json(&f, None));
+			}
+			(Change::Key(change), Some(i)) => {
+				self.edit_key(i, &edit.expect, change).map(Done::Page)
+			}
+			(Change::MoveUrl(new_url), Some(i)) => {
+				self.move_url(i, &edit.expect, new_url).map(Done::Page)
+			}
+			(Change::MovePath(path), Some(i)) => {
+				self.move_path(i, &edit.expect, path).map(Done::Page)
+			}
+			(Change::Revert { key, head }, Some(i)) => {
+				let need = self.revert_needs(i, head);
+				if !need.is_empty() {
+					return Ok(Ui::need_json(need));
+				}
+				self.revert(i, &edit.expect, key.as_deref(), head)
+					.map(Done::Page)
+			}
+			(Change::Virtualize, Some(i)) => self.virtualize(i, &edit.expect).map(Done::Page),
+			(Change::Materialize(path), Some(i)) => self
+				.materialize(i, &edit.expect, path.as_deref())
+				.map(Done::Page),
+			(Change::DeletePage, Some(i)) => self.delete_page(i, &edit.expect).map(|()| Done::Gone),
 		};
 		match result {
-			Ok(url) => {
+			Ok(done) => {
 				// Planning the site again counts a version of its own: the edit is one.
 				if self.version == version {
 					self.version += 1;
 				}
+				let url = match done {
+					Done::Page(url) => url,
+					Done::Gone => return Ok(self.ok_json(None)),
+				};
 				match self.by_url.get(&url).copied() {
-					Some(at) => Ok(self.ok_json(at)),
+					Some(at) => Ok(self.ok_json(Some(at))),
 					None => {
 						let f = Fail {
 							code: "io",
@@ -1970,10 +2403,20 @@ impl Ui {
 	/// Plans the site again after the files were changed. The files are changed already, so a
 	/// plan that fails is said to be so: the editor does not know what the files hold now.
 	fn plan_after_files_changed(&mut self) -> F<()> {
+		let left = if self.left_behind.is_empty() {
+			String::new()
+		} else {
+			// The files an edit could not remove are told here too: this answer is the only one
+			// the person gets.
+			format!(
+				" (these files could not be removed and stay under another name: {})",
+				self.left_behind.join("; ")
+			)
+		};
 		self.plan_again(None).map_err(|message| Fail {
 			code: "io",
 			message: format!(
-				"the files were changed, but the site cannot be planned now: {message}"
+				"the files were changed, but the site cannot be planned now: {message}{left}"
 			),
 		})
 	}
@@ -2006,6 +2449,459 @@ impl Ui {
 		None
 	}
 
+	/// The page file a URL names by its place: what a page that has no key of its own to say
+	/// where it is can be moved to, and what a virtual page is. A page whose URL a key makes
+	/// can have any URL §5 allows. A URL written another way than a page's own is refused.
+	fn url_as_page(&self, url: &str) -> F<PageFile> {
+		let extension = &self.loaded.config.pages.output_extension;
+		let rel = kd_site::url_to_local_path(url, extension);
+		let file = kd_site::page_file(&format!("{}/{rel}", self.input_dir()), &self.dirs());
+		if file.url != url {
+			let ext = if extension.is_empty() {
+				"a file without an extension".to_string()
+			} else {
+				format!("a file with {extension:?}")
+			};
+			return fail(
+				"invalid",
+				format!(
+					"{url:?} is not written as a page URL (it would be read as {:?}); write the URL a page has: a directory with its trailing \"/\", {ext}",
+					file.url
+				),
+			);
+		}
+		Ok(file)
+	}
+
+	/// Checks that a URL a person wrote can be the URL of a page (RFC §6).
+	fn check_url(url: &str) -> F<()> {
+		if !url.starts_with('/') {
+			return fail("invalid", format!("the URL must start with '/': {url:?}"));
+		}
+		if let Some(why) = kd_site::meta::not_a_page_path(url) {
+			return fail("invalid", format!("the URL {url:?} {why}"));
+		}
+		Ok(())
+	}
+
+	/// Checks that `to` is a place for a page file: inside the input directory, not inside the
+	/// output directory, and a page by `pages.files` and `pages.ignore` (RFC §14.2). `placed` is
+	/// the page file it makes.
+	fn check_place(&self, to: &str, placed: &PageFile) -> F<()> {
+		let input_dir = self.input_dir();
+		let rel_in_input = kd_site::path::relative(&input_dir, &placed.input_path);
+		if climbs(&rel_in_input) || !really_inside(&input_dir, to) {
+			return fail("invalid", format!("{to} is outside the input directory"));
+		}
+		let config = &self.loaded.config;
+		let output_rel = kd_site::path::relative(&input_dir, &config.dir.output);
+		if !output_rel.is_empty()
+			&& !climbs(&output_rel)
+			&& (rel_in_input == output_rel || rel_in_input.starts_with(&format!("{output_rel}/")))
+		{
+			return fail("invalid", format!("{to} is inside the output directory"));
+		}
+		let matches_any = |globs: &[String]| -> Result<bool, Fail> {
+			let patterns = crate::compile_globs(globs).map_err(|message| Fail {
+				code: "invalid",
+				message,
+			})?;
+			Ok(patterns.iter().any(|p| p.matches(&rel_in_input)))
+		};
+		if !matches_any(&config.pages.files)? || matches_any(&config.pages.ignore)? {
+			return fail(
+				"invalid",
+				format!(
+					"{rel_in_input} is not a page by pages.files and pages.ignore, so the page would leave the site"
+				),
+			);
+		}
+		Ok(())
+	}
+
+	/// The page file to make at `rel` (relative to the input directory) for a page that is to
+	/// have the URL `url` (`None`: the URL the place gives) and the metadata `meta`: its path,
+	/// its text and the page file it makes. The place is checked as the place a page is moved
+	/// to is, and nothing may be there, nor a `.json` of the same name (the new page would
+	/// read it as its sidecar). A URL that is not the one of the place is written in the
+	/// `outputPathField` key, if the site has one. The text is what [`new_page_text`] gives with
+	/// the keys set as an edit sets them, so it reads back as `meta`.
+	fn new_page_file(
+		&self,
+		rel: &str,
+		url: Option<&str>,
+		meta: &Meta,
+	) -> F<(String, String, PageFile)> {
+		let to = format!("{}/{rel}", self.input_dir());
+		let placed = kd_site::page_file(&to, &self.dirs());
+		self.check_place(&to, &placed)?;
+		if taken(&to) {
+			return fail("collision", format!("{to} already exists"));
+		}
+		let sidecar = crate::sidecar_path(&to);
+		if taken(&sidecar) {
+			return fail("collision", format!("{sidecar} already exists"));
+		}
+		let kind = crate::page_kind(&kd_site::path::extname(&to).to_ascii_lowercase()).map_err(
+			|message| Fail {
+				code: "invalid",
+				message: format!("{to}: {message}"),
+			},
+		)?;
+		let mut text = new_page_text(&to).to_string();
+		let mut file = placed.clone();
+		if let Some(url) = url
+			&& url != placed.url
+		{
+			let Some(field) = self.output_path_field() else {
+				return fail(
+					"invalid",
+					format!(
+						"the file {to} would have the URL {:?}, not {url:?}",
+						placed.url
+					),
+				);
+			};
+			file = kd_site::apply_meta_path_override(&placed, url, &self.dirs()).map_err(|e| {
+				Fail {
+					code: "invalid",
+					message: format!("{url:?} cannot be the value of {field:?}: {e}"),
+				}
+			})?;
+			if file.url != url {
+				return fail(
+					"invalid",
+					format!(
+						"{url:?} would be read as the URL {:?} when it is the value of {field:?}",
+						file.url
+					),
+				);
+			}
+			let change = KeyChange::Set(field.to_string(), Value::String(url.to_string()));
+			text = edit_page_text(&to, kind, &text, &change)?;
+		}
+		for (key, value) in meta {
+			let change = KeyChange::Set(key.clone(), value.clone());
+			text = edit_page_text(&to, kind, &text, &change)?;
+		}
+		if let Some(why) = kd_site::meta::not_a_page_path(&file.url) {
+			return fail(
+				"invalid",
+				format!("the URL {:?} of the file {to} {why}", file.url),
+			);
+		}
+		// The text of a page that is made is read as the plan reads it, like the text of a page
+		// that is edited: a file that the plan cannot read would stop every later plan.
+		crate::parse_page_text(&to, kind, text.clone()).map_err(|e| Fail {
+			code: "invalid",
+			message: format!("the new file {to} would be unreadable: {e}"),
+		})?;
+		Ok((to, text, file))
+	}
+
+	/// The `pages.overrides` file of the site and its text, read and checked against
+	/// `expect.overrides`. `why` says what needs the file, for the site that has none.
+	fn overrides_expected(&self, expect: &Value, why: &str) -> F<(&OverridesFile, String)> {
+		let Some(o) = &self.overrides else {
+			return fail(
+				"invalid",
+				format!("the site has no pages.overrides file, and {why}"),
+			);
+		};
+		let text = read_expected(expect, "overrides", &o.path)?;
+		Ok((o, text))
+	}
+
+	/// Makes a page that is not there (RFC §14.2). With `path`, a page file at that path, with
+	/// the text a new page has; `url`, if given, is the URL it must have. Without `path`, a
+	/// virtual page: an entry of `pages.overrides` for `url`.
+	fn create(&mut self, url: Option<&str>, path: Option<&str>, expect: &Value) -> F<String> {
+		if let Some(url) = url {
+			Self::check_url(url)?;
+		}
+		let mut txn = Txn::default();
+		let new_url = match (path, url) {
+			(Some(typed), _) => {
+				let rel = typed_new_path(typed)?;
+				let (to, text, file) = self.new_page_file(&rel, url, &Vec::new())?;
+				if self.by_url.contains_key(&file.url) {
+					return fail(
+						"collision",
+						format!("a page already has the URL {}", file.url),
+					);
+				}
+				if let Some(why) = self.output_collision(usize::MAX, &file) {
+					return fail("collision", why);
+				}
+				txn.writes.push((to, text));
+				file.url
+			}
+			(None, Some(url)) => {
+				let file = self.url_as_page(url)?;
+				if self.by_url.contains_key(url) {
+					return fail("collision", format!("a page already has the URL {url}"));
+				}
+				if let Some(why) = self.output_collision(usize::MAX, &file) {
+					return fail("collision", why);
+				}
+				let (o, text) = self.overrides_expected(
+					expect,
+					"a page without a file is an entry of it: write the path of a file for the page",
+				)?;
+				let before = Self::overrides_before(o, &text)?;
+				let entry = kd_site::meta::Override {
+					url: url.to_string(),
+					is_virtual: true,
+					meta: Vec::new(),
+					lastmod: None,
+				};
+				let edited = add_overrides_entry(&o.path, &text, &before, entry)?;
+				txn.writes.push((o.path.clone(), edited));
+				url.to_string()
+			}
+			(None, None) => {
+				return fail("invalid", "a new page needs a URL or the path of its file");
+			}
+		};
+		txn.commit()?;
+		self.plan_after_files_changed()?;
+		Ok(new_url)
+	}
+
+	/// Checks that the page file at `from` is one this editor removes: a file whose directory
+	/// is really inside the input directory. A directory of the input tree that is a link leads
+	/// to files that are somewhere else, and may be someone else's: a file is not made there
+	/// nor moved there, and what is there is not removed either (it cannot be brought back).
+	/// A page file that is itself a link is removed as the link it is.
+	fn check_removable(&self, from: &str) -> F<()> {
+		if really_inside(&self.input_dir(), from) {
+			return Ok(());
+		}
+		fail(
+			"invalid",
+			format!(
+				"{from} is outside the input directory (a directory on the way is a link), so it is not removed here"
+			),
+		)
+	}
+
+	/// Makes the page `i` virtual (RFC §14.2): its page file and its sidecar are removed, and
+	/// the page stays as an entry of `pages.overrides` with the metadata it had (the key that
+	/// makes the URL apart: the URL of a virtual page is the `url` of its entry). An entry the
+	/// page has already is the one that is made virtual, with its keys as they are and the keys
+	/// of the files added.
+	fn virtualize(&mut self, i: usize, expect: &Value) -> F<String> {
+		let page = self.plan.pages[i].clone();
+		if page.is_virtual {
+			return fail("invalid", "the page is virtual already");
+		}
+		let url = page.file.url.clone();
+		let (o, text) = self.overrides_expected(
+			expect,
+			"a virtual page is an entry of it: the page cannot be made virtual",
+		)?;
+		let before = Self::overrides_before(o, &text)?;
+		// A virtual page is where its URL says, read as the plan reads the entry, and it is
+		// written to the same output path as the page was (the output of a page whose URL a key
+		// makes can differ from the one its URL gives; the plan would then refuse the site after
+		// the files were changed).
+		let placed = self.url_as_page(&url)?;
+		if placed.output_path != page.file.output_path {
+			return fail(
+				"invalid",
+				format!(
+					"as a virtual page {url} would be written to {}, not to {}: the page is not made virtual",
+					placed.output_path, page.file.output_path
+				),
+			);
+		}
+		let from = page.file.input_path.clone();
+		self.check_removable(&from)?;
+		let (read, _) = crate::read_files(&from, None).map_err(|message| Fail {
+			code: "invalid",
+			message,
+		})?;
+		let hash_of = |dep: &kd_build::Dep| {
+			(dep.hash != kd_build::MISSING_FILE_HASH).then(|| dep.hash.clone())
+		};
+		hash_expected(expect, "input", &from, hash_of(&read.input_dep).as_deref())?;
+		hash_expected(
+			expect,
+			"sidecar",
+			&read.sidecar,
+			hash_of(&read.sidecar_dep).as_deref(),
+		)?;
+		let field = self.output_path_field();
+		let mut from_files = kd_site::meta::merge(&[&read.in_file, &read.side]);
+		from_files.retain(|(k, _)| Some(k.as_str()) != field);
+		let edited = match before.by_url.get(&url) {
+			Some(entry) => {
+				// What the entry says wins over the files already (§4), so its keys stay.
+				let add: Meta = from_files
+					.into_iter()
+					.filter(|(k, _)| !entry.meta.iter().any(|(ek, _)| ek == k))
+					.collect();
+				change_overrides_entry(&o.path, &text, &before, &url, true, &add, &[])?
+			}
+			None => add_overrides_entry(
+				&o.path,
+				&text,
+				&before,
+				kd_site::meta::Override {
+					url: url.clone(),
+					is_virtual: true,
+					meta: from_files,
+					lastmod: None,
+				},
+			)?,
+		};
+		let mut txn = Txn::default();
+		txn.writes.push((o.path.clone(), edited));
+		txn.removes.push(from);
+		if read.sidecar_dep.hash != kd_build::MISSING_FILE_HASH {
+			txn.removes.push(read.sidecar);
+		}
+		txn.prune_to = Some(self.input_dir());
+		self.left_behind = txn.commit()?;
+		self.plan_after_files_changed()?;
+		Ok(url)
+	}
+
+	/// Gives the virtual page `i` a page file (RFC §14.2): at `path` (as typed), or, without
+	/// one, where its URL says, with the first of the extensions of a page that `pages.files`
+	/// takes. The metadata of its entry in `pages.overrides` moves into the file, and the entry
+	/// goes; an entry that says more than that (`lastmod`, the key that makes the URL, which is
+	/// not written in the file unless it has to make the URL) stays without `virtual` and
+	/// without the keys that moved.
+	fn materialize(&mut self, i: usize, expect: &Value, path: Option<&str>) -> F<String> {
+		let page = self.plan.pages[i].clone();
+		if !page.is_virtual {
+			return fail("invalid", "the page has a file already");
+		}
+		let url = page.file.url.clone();
+		let (o, text) = self.overrides_expected(expect, "a virtual page is an entry of it")?;
+		let before = Self::overrides_before(o, &text)?;
+		let Some(entry) = before.by_url.get(&url) else {
+			return fail("invalid", format!("{} has no entry for {url}", o.path));
+		};
+		let field = self.output_path_field();
+		let (moved, kept): (Meta, Meta) = entry
+			.meta
+			.iter()
+			.cloned()
+			.partition(|(k, _)| Some(k.as_str()) != field);
+		let rel = match path {
+			Some(typed) => typed_new_path(typed)?,
+			None => self.path_for_url(&url)?,
+		};
+		let (to, page_text, file) = self.new_page_file(&rel, Some(&url), &moved)?;
+		if let Some(why) = self.output_collision(i, &file) {
+			return fail("collision", why);
+		}
+		let edited = if kept.is_empty() && entry.lastmod.is_none() {
+			remove_overrides_entry(&o.path, &text, &before, &url)?
+		} else {
+			let take: Vec<String> = moved.iter().map(|(k, _)| k.clone()).collect();
+			change_overrides_entry(&o.path, &text, &before, &url, false, &Vec::new(), &take)?
+		};
+		let mut txn = Txn::default();
+		txn.writes.push((to, page_text));
+		txn.writes.push((o.path.clone(), edited));
+		txn.commit()?;
+		self.plan_after_files_changed()?;
+		Ok(url)
+	}
+
+	/// Where the page file of the URL is, relative to the input directory, when nothing says
+	/// which file it is: the place the URL names (§5, read backwards), with the first of the
+	/// extensions of a page that makes it a page by `pages.files` and `pages.ignore` and whose
+	/// place is free (no file there, and no `.json` of the same name).
+	fn path_for_url(&self, url: &str) -> F<String> {
+		let config = &self.loaded.config;
+		let rel = kd_site::url_to_local_path(url, &config.pages.output_extension);
+		let stem = rel
+			.strip_suffix(config.pages.output_extension.as_str())
+			.unwrap_or(&rel);
+		let input_dir = self.input_dir();
+		// Why each place was passed over, so that the refusal says it and not only that there
+		// is none.
+		let mut passed: Vec<String> = Vec::new();
+		for ext in PAGE_EXTENSIONS {
+			let candidate = format!("{stem}{ext}");
+			let to = format!("{input_dir}/{candidate}");
+			let sidecar = crate::sidecar_path(&to);
+			match self.check_place(&to, &kd_site::page_file(&to, &self.dirs())) {
+				Err(why) => passed.push(why.message),
+				Ok(()) if taken(&to) => passed.push(format!("{to} already exists")),
+				Ok(()) if taken(&sidecar) => passed.push(format!("{sidecar} already exists")),
+				Ok(()) => return Ok(candidate),
+			}
+		}
+		fail(
+			"invalid",
+			format!(
+				"there is no place for a file of {url} ({}): write the path of the file",
+				passed.join("; ")
+			),
+		)
+	}
+
+	/// Removes the page `i` (RFC §14.2): its page file and its sidecar, and its entry in
+	/// `pages.overrides` (an entry without a page would stop the next plan; a virtual page is
+	/// nothing but its entry).
+	fn delete_page(&mut self, i: usize, expect: &Value) -> F<()> {
+		let page = self.plan.pages[i].clone();
+		let url = page.file.url.clone();
+		let mut txn = Txn::default();
+		if !page.is_virtual {
+			let from = page.file.input_path.clone();
+			self.check_removable(&from)?;
+			let sidecar = crate::sidecar_path(&from);
+			hash_expectation(expect, "input", &from)?;
+			hash_expectation(expect, "sidecar", &sidecar)?;
+			txn.removes.push(from);
+			if exists(&sidecar)? {
+				txn.removes.push(sidecar);
+			}
+			txn.prune_to = Some(self.input_dir());
+		}
+		// Whether the page has an entry is asked of the file as it is now, not of what the handle
+		// read last: an entry written since then would be left without its page, which no plan
+		// accepts. The file is read once, for the question, for the hash that is checked only
+		// when there is an entry to remove, and for the edit (it is megabytes on a site of a
+		// hundred thousand pages, and the handle's parsed copy answers when the text is the
+		// one it read).
+		let entry_removed = match &self.overrides {
+			Some(o) => {
+				let now = fs::read_to_string(&o.path).map_err(|e| io_fail(&o.path, &e))?;
+				let before = Self::overrides_before(o, &now)?;
+				if page.is_virtual || before.by_url.contains_key(&url) {
+					let hash = hash_hex(now.as_bytes());
+					hash_expected(expect, "overrides", &o.path, Some(hash.as_str()))?;
+					Some((
+						o.path.clone(),
+						remove_overrides_entry(&o.path, &now, &before, &url)?,
+					))
+				} else {
+					None
+				}
+			}
+			None if page.is_virtual => {
+				return fail(
+					"invalid",
+					"the site has no pages.overrides file, and a virtual page is an entry of it",
+				);
+			}
+			None => None,
+		};
+		if let Some((path, edited)) = entry_removed {
+			txn.writes.push((path, edited));
+		}
+		self.left_behind = txn.commit()?;
+		self.plan_after_files_changed()?;
+		Ok(())
+	}
+
 	/// Moves the page `i` to `new_url`, in the way its URL is made (RFC §14.2).
 	fn move_url(&mut self, i: usize, expect: &Value, new_url: &str) -> F<String> {
 		let old_url = self.plan.pages[i].file.url.clone();
@@ -2028,27 +2924,7 @@ impl Ui {
 				c.pages.output_extension.clone(),
 			)
 		};
-		// The page file a URL names by its place: what a page that has no key of its own to say
-		// where it is can be moved to. A page whose URL a key makes can have any URL §5 allows.
-		let as_page = || -> F<PageFile> {
-			let rel = kd_site::url_to_local_path(new_url, &extension);
-			let file = kd_site::page_file(&format!("{input_dir}/{rel}"), &self.dirs());
-			if file.url != new_url {
-				let ext = if extension.is_empty() {
-					"a file without an extension".to_string()
-				} else {
-					format!("a file with {extension:?}")
-				};
-				return fail(
-					"invalid",
-					format!(
-						"{new_url:?} is not written as a page URL (it would be read as {:?}); write the URL a page has: a directory with its trailing \"/\", {ext}",
-						file.url
-					),
-				);
-			}
-			Ok(file)
-		};
+		let as_page = || self.url_as_page(new_url);
 		if self.by_url.contains_key(new_url) {
 			return fail("collision", format!("a page already has the URL {new_url}"));
 		}
@@ -2138,33 +3014,7 @@ impl Ui {
 		let input_dir = self.input_dir();
 		let from = page.file.input_path.clone();
 		let mut txn = Txn::default();
-		let rel_in_input = kd_site::path::relative(&input_dir, &moved.input_path);
-		if climbs(&rel_in_input) || !really_inside(&input_dir, to) {
-			return fail("invalid", format!("{to} is outside the input directory"));
-		}
-		let config = &self.loaded.config;
-		let output_rel = kd_site::path::relative(&input_dir, &config.dir.output);
-		if !output_rel.is_empty()
-			&& !climbs(&output_rel)
-			&& (rel_in_input == output_rel || rel_in_input.starts_with(&format!("{output_rel}/")))
-		{
-			return fail("invalid", format!("{to} is inside the output directory"));
-		}
-		let matches_any = |globs: &[String]| -> Result<bool, Fail> {
-			let patterns = crate::compile_globs(globs).map_err(|message| Fail {
-				code: "invalid",
-				message,
-			})?;
-			Ok(patterns.iter().any(|p| p.matches(&rel_in_input)))
-		};
-		if !matches_any(&config.pages.files)? || matches_any(&config.pages.ignore)? {
-			return fail(
-				"invalid",
-				format!(
-					"{rel_in_input} is not a page by pages.files and pages.ignore, so the page would leave the site"
-				),
-			);
-		}
+		self.check_place(to, moved)?;
 		let sidecar_from = crate::sidecar_path(&from);
 		let sidecar_to = crate::sidecar_path(to);
 		let has_sidecar = exists(&sidecar_from)?;
@@ -2320,5 +3170,7 @@ impl Ui {
 
 #[cfg(test)]
 mod diff_tests;
+#[cfg(test)]
+mod page_tests;
 #[cfg(test)]
 mod tests;
