@@ -738,13 +738,14 @@ describe('booleanCondition', () => {
 });
 
 describe('jsxDeclarations', () => {
-	test('declares what the converted pages use and @types/react does not have', () => {
+	test('declares Invoker Commands; <html static> comes from kamado/jsx', () => {
 		const text = jsxDeclarations();
 		expect(text).toContain("declare module 'react'");
 		expect(text).toContain('command?: string | undefined;');
 		expect(text).toContain('commandfor?: string | undefined;');
-		expect(text).toContain('interface HtmlHTMLAttributes<T>');
-		expect(text).toContain('static?: boolean | undefined;');
+		expect(text).toContain('kamado/jsx');
+		expect(text).not.toContain('interface HtmlHTMLAttributes<T>');
+		expect(text).not.toContain('static?: boolean | undefined;');
 	});
 });
 
