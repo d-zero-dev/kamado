@@ -72,9 +72,19 @@ describe('GET /api/pages with a sort', () => {
 			'sort=url&desc=1',
 		]) {
 			const response = await app.request(`/api/pages?${query}`, { headers: HOST });
-			expect(response.status, query).toBe(400);
-			expect(await response.json()).toMatchObject({ error: 'invalidSort' });
+			// Behavior change: `outputPath` is a column of the screen, so it is a sort the core is asked for
+			expect(response.status, query).toBe(query === 'sort=outputPath' ? 200 : 400);
+			// expect(response.status, query).toBe(400); // previous
+			// Behavior change: the answer to a sort by `outputPath` is the list, not a refusal
+			expect(await response.json()).toMatchObject(
+				query === 'sort=outputPath' ? { pages: [] } : { error: 'invalidSort' },
+			);
+			// expect(await response.json()).toMatchObject({ error: 'invalidSort' }); // previous
 		}
-		expect(queries).toEqual([]);
+		// Behavior change: the core is asked once, for the sort by `outputPath`
+		expect(queries).toEqual([
+			{ offset: 0, limit: 100, sort: { key: 'outputPath', desc: false } },
+		]);
+		// expect(queries).toEqual([]); // previous
 	});
 });

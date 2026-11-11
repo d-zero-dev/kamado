@@ -25,6 +25,8 @@ export interface Row {
 	readonly inputPath: string | null;
 	readonly outputPath: string;
 	readonly virtual: boolean;
+	/** The place of the page in the plan, from 1 (the order `pages` and `nav()` have). */
+	readonly order: number;
 	readonly depth: number;
 	readonly parent: string | null;
 	readonly hashes: { readonly input: string | null; readonly sidecar: string | null };
@@ -51,12 +53,37 @@ export interface Rows {
 	readonly warnings: readonly string[];
 }
 
-/** What `POST /api/edit` takes as the change. */
+/**
+ * What `POST /api/edit` takes as the change of a page that is there and stays: a key, its URL,
+ * the path of its file, or whether it has a file at all (`virtualize` takes the file away and
+ * keeps the page as an entry of `pages.overrides`; `materialize` gives a virtual page a file,
+ * at the path, or where its URL says when the path is `null`). A page that is made and a page
+ * that is removed are not changes of a page that stays: see `createPage` and `removePage`.
+ * @example
+ * ```ts
+ * const change: Change = { op: 'materialize', path: 'service/index.html' };
+ * ```
+ */
 export type Change =
 	| { readonly op: 'set'; readonly key: string; readonly value: unknown }
 	| { readonly op: 'delete'; readonly key: string }
 	| { readonly op: 'moveUrl'; readonly url: string }
-	| { readonly op: 'movePath'; readonly path: string };
+	| { readonly op: 'movePath'; readonly path: string }
+	| { readonly op: 'virtualize' }
+	| { readonly op: 'materialize'; readonly path: string | null };
+
+/**
+ * The hashes of the files an edit was made on (`null` for a file that is not there).
+ * @example
+ * ```ts
+ * const expect: Expect = { input: 'abc…', sidecar: null, overrides: 'def…' };
+ * ```
+ */
+export interface Expect {
+	readonly input: string | null;
+	readonly sidecar: string | null;
+	readonly overrides: string | null;
+}
 
 /** What `GET /api/git` answers: the branch and the commit of the site's repository. */
 export interface GitInfo {
@@ -115,6 +142,24 @@ export interface Edited {
 	readonly version: number;
 	readonly overridesHash: string | null;
 	readonly page: Row;
+	/** What the edit left undone: a file that could not be removed and stays under another name. */
+	readonly warning?: string;
+}
+
+/**
+ * What `POST /api/edit` answers when the edit removed the page (`deletePage`): no page is left.
+ * @example
+ * ```ts
+ * const removed: Removed = { ok: true, version: 4, overridesHash: null, page: null };
+ * ```
+ */
+export interface Removed {
+	readonly ok: true;
+	readonly version: number;
+	readonly overridesHash: string | null;
+	readonly page: null;
+	/** What the edit left undone: a file that could not be removed and stays under another name. */
+	readonly warning?: string;
 }
 
 /** How a value differs from what the commit that is checked out (HEAD) holds. */

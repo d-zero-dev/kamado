@@ -10,6 +10,7 @@ import { useI18n } from './i18n/context.js';
 import { ListEditor } from './list-editor.js';
 import { editKindOf } from './logic/columns.js';
 import { cellDiffOf, diffNote, originLabel, originName } from './logic/diff.js';
+import { fixedCellOf } from './logic/fixed-cells.js';
 import { enumKindOf } from './logic/kinds.js';
 import { columnName } from './logic/layout.js';
 import { parseDraft, toText } from './logic/value.js';
@@ -18,7 +19,7 @@ import { parseDraft, toText } from './logic/value.js';
 export interface Editing {
 	/** The page the cell is of, by its URL (its place in the list can change under the edit). */
 	readonly url: string;
-	/** The identifier of the column (`url`, `inputPath`, or `meta:<key>`): the column can move under the edit. */
+	/** The identifier of the column (`url`, `inputPath`, or `meta:<key>`, the ones that are typed into): the column can move under the edit. */
 	readonly column: string;
 	readonly kind: FieldKind;
 	readonly draft: string;
@@ -247,18 +248,13 @@ function describe(
 	/** For a boolean: whether it is checked (a page without the key is not). */
 	checked?: boolean;
 } {
-	if (column === 'url') {
-		return { text: row.url, readOnly: false, note: undefined };
-	}
-	if (column === 'virtual') {
-		return { text: row.virtual ? t('row.virtual') : '', readOnly: true, note: undefined };
-	}
-	if (column === 'inputPath') {
-		// A virtual page has no file to move.
+	// A column every row has: what it holds and whether it is edited is said by the logic.
+	const fixed = fixedCellOf(row, column);
+	if (fixed !== null) {
 		return {
-			text: row.inputPath ?? '',
-			readOnly: row.inputPath === null,
-			note: undefined,
+			...fixed,
+			// The box of `virtual` says what it is when it is checked.
+			note: fixed.checked === true ? t('row.virtual') : undefined,
 		};
 	}
 	const key = columnName(column);

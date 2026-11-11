@@ -6,7 +6,8 @@
  * calls the functions below when a person acts.
  *
  * A column is named by its identifier, as the server and the settings name it: `url`,
- * `virtual`, `inputPath`, or `meta:<key>` (a key called `url` is not the URL).
+ * `virtual`, `inputPath`, `order`, `outputPath`, `parent`, `depth`, or `meta:<key>` (a key
+ * called `url` is not the URL).
  */
 import type { Translate } from '../i18n/translate.js';
 
@@ -36,8 +37,20 @@ export const MAX_COLUMNS_BYTES = 48 * 1024;
 /** The columns that are pinned until the person changes it. */
 export const DEFAULT_PINNED: readonly string[] = ['url'];
 
-/** The columns before the keys of the metadata: the URL, whether the page is virtual, its file. */
-const BUILTIN: readonly string[] = ['url', 'virtual', 'inputPath'];
+/**
+ * The columns before the keys of the metadata, which every row has: what a page is (its URL,
+ * whether it is virtual, its file) and what the plan makes of it (its place in the plan, the
+ * file it is written to, the page above it, how deep it is). The last four are read only.
+ */
+const BUILTIN: readonly string[] = [
+	'url',
+	'virtual',
+	'inputPath',
+	'order',
+	'outputPath',
+	'parent',
+	'depth',
+];
 
 /**
  * The widths a column has until it is changed, in pixels and not in rem: the places the pinned
@@ -48,6 +61,11 @@ const BUILTIN_WIDTHS: Readonly<Record<string, number>> = {
 	url: 448,
 	virtual: 96,
 	inputPath: 384,
+	// As wide as `virtual`: a number of a few digits needs less, the name in the header does not.
+	order: 96,
+	outputPath: 384,
+	parent: 320,
+	depth: 96,
 };
 const META_WIDTH = 224;
 
@@ -114,7 +132,8 @@ export function stateOf(settings?: ColumnSettings): ColumnState {
  * @param keys - The keys of the metadata (the pages' and those added on the screen)
  * @example
  * ```ts
- * columnIds(['b', 'a']); // ['url', 'virtual', 'inputPath', 'meta:a', 'meta:b']
+ * columnIds(['b', 'a']);
+ * // ['url', 'virtual', 'inputPath', 'order', 'outputPath', 'parent', 'depth', 'meta:a', 'meta:b']
  * ```
  */
 export function columnIds(keys: readonly string[]): string[] {
@@ -135,8 +154,9 @@ export function columnName(id: string): string {
 }
 
 /**
- * Whether a column of metadata has the name of a fixed column (a key called `url`, `virtual`
- * or `inputPath`), so that the two cannot be told apart by their names.
+ * Whether a column of metadata has the name of a fixed column (a key called `url`, `virtual`,
+ * `inputPath`, `order`, `outputPath`, `parent` or `depth`), so that the two cannot be told
+ * apart by their names.
  * @param id - The identifier of the column
  * @example
  * ```ts

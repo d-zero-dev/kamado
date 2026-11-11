@@ -42,7 +42,9 @@ describe('isSortKey', () => {
 			expect(isSortKey(key), key).toBe(true);
 		}
 		for (const key of ['', 'title', 'meta:', 'outputPath', `meta:${'k'.repeat(300)}`]) {
-			expect(isSortKey(key), key).toBe(false);
+			// Behavior change: `outputPath` is a column of the screen, so it names a sort
+			expect(isSortKey(key), key).toBe(key === 'outputPath');
+			// expect(isSortKey(key), key).toBe(false); // previous
 		}
 	});
 });

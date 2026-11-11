@@ -36,7 +36,13 @@ import { setGuard } from '../server/guard.js';
 import { contentTypeOf } from '../server/mime.js';
 
 import { scrub, showPaths } from './paths.js';
-import { isSortKey, parsePatch, SettingsError, type SettingsStore } from './settings.js';
+import {
+	COLUMN_NAMES,
+	isSortKey,
+	parsePatch,
+	SettingsError,
+	type SettingsStore,
+} from './settings.js';
 
 /** The header the token goes in. */
 export const TOKEN_HEADER = 'X-Kamado-Token';
@@ -166,8 +172,9 @@ function integerOf(value: string | undefined, fallback: number): number | null {
 
 /**
  * Reads the sort of a request. The column is named by its identifier: `url`, `inputPath`,
- * `virtual`, or `meta:<key>` (RFC section 14.2). The core takes the same four and says no to
- * anything else; this says it at the door with a `400` and keeps a long key out of the call.
+ * `virtual`, `order`, `outputPath`, `parent`, `depth` or `meta:<key>` (RFC section 14.2). The
+ * core takes the same ones and says no to anything else; this says it at the door with a `400`
+ * and keeps a long key out of the call.
  * @param key - The `sort` parameter
  * @param desc - The `desc` parameter (`true` or `false`)
  * @returns `undefined` when there is no sort (neither parameter is given, or `sort` is empty
@@ -317,8 +324,7 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 					// Told apart from `invalid` (a bad offset or limit): the screen lets go of a
 					// sort that is refused, and must not do so for any other refusal.
 					error: 'invalidSort',
-					message:
-						'sort is url, inputPath, virtual or meta:<key>, and desc is true or false',
+					message: `sort is ${COLUMN_NAMES}, and desc is true or false`,
 				},
 				400,
 			);
@@ -594,13 +600,17 @@ interface EditResult {
 	ok: boolean;
 	code?: string;
 	message?: string;
-	page?: Page;
+	/** The page as the edit left it; `null` when the edit removed the page. */
+	page?: Page | null;
 	current?: Page;
+	/** What the edit that was made left undone (a file that stays under another name). */
+	warning?: string;
 }
 
 /**
- * Sends the answer of the core to an edit: the page it made, or why it was not made, with the
- * status of the reason (told without the directories of the machine).
+ * Sends the answer of the core to an edit: the page it made (`null` for a page that was
+ * removed), or why it was not made, with the status of the reason (told without the
+ * directories of the machine).
  * @param ctx - The context
  * @param ctx.json - Makes the JSON response
  * @param result - The answer of the core
@@ -614,7 +624,11 @@ function editResponse(
 	if (result.ok) {
 		return ctx.json({
 			...result,
-			...(result.page === undefined ? {} : { page: showPaths(result.page, roots) }),
+			...(result.page === undefined || result.page === null
+				? {}
+				: { page: showPaths(result.page, roots) }),
+			// Told without the directories of the machine, like every message.
+			...(result.warning === undefined ? {} : { warning: scrub(result.warning, roots) }),
 		});
 	}
 	const code = result.code ?? 'failed';
@@ -687,7 +701,9 @@ function revertRequestOf(body: unknown): {
 
 /**
  * Whether a parsed body has the parts of an edit request: the shape of the three, not what
- * is in them (the core checks that, and says why).
+ * is in them (the core checks that, and says why). The URL is the page the edit is of; only
+ * the edit that makes a page (`create`) can go without one (`null`), when it says the path of
+ * the file, whose place gives the URL.
  * @param value - The parsed body
  */
 function isEditRequest(value: unknown): boolean {
@@ -695,14 +711,23 @@ function isEditRequest(value: unknown): boolean {
 		return false;
 	}
 	const { url, expect, change } = value as Record<string, unknown>;
+	if (
+		typeof expect !== 'object' ||
+		expect === null ||
+		Array.isArray(expect) ||
+		typeof change !== 'object' ||
+		change === null ||
+		Array.isArray(change)
+	) {
+		return false;
+	}
+	// A page that is made without a URL is made at a path: a request that says neither names
+	// no page at all, and is refused here like any other body that is not a request.
 	return (
-		typeof url === 'string' &&
-		typeof expect === 'object' &&
-		expect !== null &&
-		!Array.isArray(expect) &&
-		typeof change === 'object' &&
-		change !== null &&
-		!Array.isArray(change)
+		typeof url === 'string' ||
+		(url === null &&
+			(change as { op?: unknown }).op === 'create' &&
+			typeof (change as { path?: unknown }).path === 'string')
 	);
 }
 

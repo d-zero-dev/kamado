@@ -23,6 +23,7 @@ function row(url: string, title = 'T'): Row {
 		inputPath: `${url.slice(1)}index.html`,
 		outputPath: `${url.slice(1)}index.html`,
 		virtual: false,
+		order: 1,
 		depth: 1,
 		parent: '/',
 		hashes: { input: `h-${url}`, sidecar: null },

@@ -1,12 +1,14 @@
 import type { Editing } from './grid-row.js';
 import type { LocaleSetting } from './i18n/translate.js';
 import type { Position } from './logic/grid.js';
+import type { PageChoice, PageQuestion } from './logic/page-questions.js';
 import type { Reading } from './logic/session.js';
 import type { FieldKind } from './logic/value.js';
 import type { RevertRequest } from './revert-dialog.js';
 import type {
 	Change,
 	Diffs,
+	Expect,
 	GitInfo,
 	Rows,
 	SettingsPatch,
@@ -23,13 +25,16 @@ import {
 	useState,
 } from 'react';
 
+import { AddPageDialog } from './add-page-dialog.js';
 import {
 	ApiError,
+	createPage,
 	editPage,
 	fetchDiff,
 	fetchGit,
 	fetchRows,
 	refreshSite,
+	removePage,
 	revertCell,
 	saveSettings,
 } from './api.js';
@@ -54,6 +59,7 @@ import {
 	withPageDiff,
 	writeNames,
 } from './logic/diff.js';
+import { isFixedBox } from './logic/fixed-cells.js';
 import { gitLabel } from './logic/git-label.js';
 import { nextCell, pageCount, rangeLabel } from './logic/grid.js';
 import {
@@ -85,7 +91,15 @@ import {
 	widthOf,
 	type ColumnState,
 } from './logic/layout.js';
-import { pathChangeOf } from './logic/move-path.js';
+import {
+	filesOf,
+	pathEditOf,
+	stillToMake,
+	urlEditOf,
+	virtualEditOf,
+	withoutPage,
+} from './logic/page-edits.js';
+import { answerOf, holdsVirtualPages, saidAfterLoad } from './logic/page-questions.js';
 import {
 	applyEdited,
 	createQueue,
@@ -105,6 +119,7 @@ import {
 } from './logic/sort.js';
 import { FIELD_KINDS, defaultOf, draftOf, parseDraft } from './logic/value.js';
 import { OptionsDialog } from './options-dialog.js';
+import { PageDialog } from './page-dialog.js';
 import { RevertDialog } from './revert-dialog.js';
 
 /**
@@ -238,6 +253,11 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		  })
 		| null
 	>(null);
+	// What is being asked before a page is added as a virtual one, made virtual or deleted.
+	const [asking, setAsking] = useState<PageQuestion | null>(null);
+	// The form that adds a page keeps what was typed until the page is made (a page that is
+	// refused is asked for again by changing a part); a new number then makes a new, empty form.
+	const [addForm, setAddForm] = useState(0);
 	// Counts the reads of the list: the marks asked for before a read that came later are not used.
 	const diffGeneration = useRef(0);
 	const rowsRef = useRef<Rows | null>(null);
@@ -308,6 +328,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 
 	const gridRef = useRef<HTMLDivElement>(null);
 	const dialogRef = useRef<HTMLDialogElement>(null);
+	const addPageRef = useRef<HTMLDialogElement>(null);
 	const needRefresh = useRef(false);
 	// Whether the list on the screen can be edited. While it is being read again, the hashes it
 	// holds may be those of before: an edit made then would be refused as a conflict, so it is
@@ -315,6 +336,9 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	const reading = useRef<Reading>('busy');
 	const qRef = useRef('');
 	const pendingFocus = useRef<string | null>(null);
+	// What was done to the page the focus is to go to, when it was not moved (it was added, made
+	// virtual or given a file): said once the list was read again, in place of "Moved to".
+	const pendingSaid = useRef<string | null>(null);
 	const loadedAt = useRef(0);
 	const queue = useRef(createQueue());
 
@@ -469,12 +493,14 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				}
 				const wanted = pendingFocus.current;
 				pendingFocus.current = null;
+				const done = pendingSaid.current;
+				pendingSaid.current = null;
 				const urls = result.pages.map((p) => p.url);
 				setActive((prev) => ({
 					row: focusAfterLoad(urls, prev.row, wanted).row,
 					col: prev.col,
 				}));
-				const said = focusAfterLoad(urls, 0, wanted, tRef.current).said;
+				const said = saidAfterLoad(urls, wanted, done, tRef.current);
 				if (said !== null) {
 					setStatus(said);
 				}
@@ -583,9 +609,13 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 	}, [active, visible]);
 
-	/** Edits are made one after another: each is made on the hashes the one before returned. */
+	/**
+	 * Edits are made one after another: each is made on the hashes the one before returned.
+	 * `asked` is given for an edit that a dialog asked about: the hashes of the files as they
+	 * were when it opened, so that what is written (or removed) is what the dialog showed.
+	 */
 	const apply = useCallback(
-		(url: string, change: Change, saved: string) => {
+		(url: string, change: Change, saved: string, asked?: Expect) => {
 			// The page is named by its URL, not by its place in the list: the list may be read
 			// again (and ordered differently) before this edit's turn comes.
 			queue.current.enqueue(async () => {
@@ -593,6 +623,10 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				const row = rowByUrl(current, url);
 				if (current === null || row === undefined) {
 					setProblem(tRef.current('app.notInList', { url }));
+					return;
+				}
+				if (!stillToMake(row, change)) {
+					// Asked twice (a box clicked twice): the first answer made it so.
 					return;
 				}
 				const blocked = editBlockedReason(reading.current, tRef.current);
@@ -603,7 +637,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				try {
 					const result = await editPage(
 						row.url,
-						expectOf(row, current.overridesHash),
+						asked ?? expectOf(row, current.overridesHash),
 						change,
 					);
 					const latest = rowsRef.current;
@@ -611,9 +645,23 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 						commitRows(applyEdited(latest, row.url, result));
 					}
 					setProblem('');
-					setStatus(saved);
+					// An edit that was made and left a file behind says so with what it did.
+					const said =
+						result.warning === undefined
+							? saved
+							: tRef.current('app.leftBehind', { said: saved, warning: result.warning });
+					setStatus(said);
 					if (change.op === 'moveUrl' || change.op === 'movePath') {
 						pendingFocus.current = result.page.url;
+						// A move is said as a move: what was to be said of a page before it (one
+						// whose list was never read) is not said of this one.
+						pendingSaid.current = null;
+						reload(true);
+					} else if (change.op === 'virtualize' || change.op === 'materialize') {
+						// The page has another place in the plan (the pages of `pages.overrides` come
+						// first), and other files: the list is read again, and the focus follows it.
+						pendingFocus.current = result.page.url;
+						pendingSaid.current = said;
 						reload(true);
 					} else {
 						await refreshDiff([row.url]);
@@ -632,6 +680,180 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	);
 
 	const focusGrid = () => gridRef.current?.focus();
+
+	/**
+	 * Says why an edit that adds or removes a page was not made, and reads the files again when
+	 * they are not what the screen had (a conflict).
+	 * @param error - What was thrown
+	 */
+	const pageEditFailed = useCallback(
+		(error: unknown) => {
+			if (error instanceof ApiError && error.code === 'conflict') {
+				setProblem(tRef.current('app.conflict', { message: error.message }));
+				reload(true);
+			} else {
+				setProblem(messageOf(error));
+			}
+		},
+		[reload],
+	);
+
+	/**
+	 * Makes a page that is not there, in the queue of the edits: a page file at the path, or a
+	 * virtual page when there is none. The list is read again (the page is a new row somewhere
+	 * in it), and the focus goes to the page.
+	 * @param url - The URL of the page; `null` for the URL the place of the file gives
+	 * @param path - The path of the page file; `null` for a virtual page
+	 */
+	const addPage = useCallback(
+		(url: string | null, path: string | null) => {
+			queue.current.enqueue(async () => {
+				const blocked = editBlockedReason(reading.current, tRef.current);
+				if (blocked !== null) {
+					setProblem(blocked);
+					return;
+				}
+				try {
+					const result = await createPage(
+						url,
+						path,
+						rowsRef.current?.overridesHash ?? null,
+					);
+					setProblem('');
+					pendingFocus.current = result.page.url;
+					pendingSaid.current = tRef.current('app.pageAdded', { url: result.page.url });
+					// The page is made: the form that asked for it is empty the next time.
+					setAddForm((n) => n + 1);
+					reload(true);
+				} catch (error) {
+					pageEditFailed(error);
+				}
+			});
+		},
+		[reload, pageEditFailed],
+	);
+
+	/**
+	 * Removes a page, in the queue of the edits, on the hashes the dialog that asked had.
+	 * @param url - The page
+	 * @param expect - The hashes of its files as they were when the dialog opened
+	 */
+	const deletePage = useCallback(
+		(url: string, expect: Expect) => {
+			queue.current.enqueue(async () => {
+				const blocked = editBlockedReason(reading.current, tRef.current);
+				if (blocked !== null) {
+					setProblem(blocked);
+					return;
+				}
+				try {
+					const result = await removePage(url, expect);
+					const latest = rowsRef.current;
+					if (latest !== null) {
+						commitRows(withoutPage(latest, url, result));
+					}
+					setProblem('');
+					const removed = tRef.current('app.pageRemoved', { url });
+					setStatus(
+						result.warning === undefined
+							? removed
+							: tRef.current('app.leftBehind', {
+									said: removed,
+									warning: result.warning,
+								}),
+					);
+					// The rows after it move up, and their places in the plan change.
+					reload(true);
+				} catch (error) {
+					pageEditFailed(error);
+				}
+			});
+		},
+		[commitRows, reload, pageEditFailed],
+	);
+
+	/**
+	 * Asks before the file of a page, or the page, goes. The dialog is made when the edits
+	 * already asked for have been made, from what is on the screen then: the files it names and
+	 * the hashes that are sent are one and the same state.
+	 * @param url - The page
+	 * @param kind - What is asked: the `inputPath` was emptied, the box of `virtual` was checked,
+	 * or the `url` was emptied
+	 */
+	const askAboutPage = (url: string, kind: 'delete' | 'emptyPath' | 'virtualize') => {
+		setProblem('');
+		void queue.current.idle().then(() => {
+			const current = rowsRef.current;
+			const row = rowByUrl(current, url);
+			if (current === null || row === undefined) {
+				setProblem(tRef.current('app.notInList', { url }));
+				return;
+			}
+			if (kind === 'virtualize' && !holdsVirtualPages(current.overridesFile)) {
+				// Nothing to choose: there is no file to write the page in.
+				setProblem(tRef.current('app.noOverrides'));
+				return;
+			}
+			setAsking({
+				kind,
+				url,
+				files: filesOf(row),
+				virtual: row.virtual,
+				expect: expectOf(row, current.overridesHash),
+			});
+		});
+	};
+
+	/**
+	 * Does what was chosen in the dialog.
+	 * @param choice - The button that was pressed
+	 */
+	const answerPageQuestion = (choice: PageChoice) => {
+		const question = asking;
+		setAsking(null);
+		focusGrid();
+		const answer = question === null ? null : answerOf(question, choice);
+		if (answer === null) {
+			return;
+		}
+		if (answer.kind === 'create') {
+			addPage(answer.url, null);
+		} else if (answer.kind === 'virtualize') {
+			apply(
+				answer.url,
+				{ op: 'virtualize' },
+				t('app.pageVirtual', { url: answer.url }),
+				answer.expect,
+			);
+		} else {
+			deletePage(answer.url, answer.expect);
+		}
+	};
+
+	/**
+	 * Takes what the form that adds a page asks for: a page with a path is made, and a page
+	 * without one is asked about first (it would be a virtual page).
+	 * @param url - The URL that was typed, or `null`
+	 * @param path - The path that was typed, or `null`
+	 */
+	const requestAddPage = (url: string | null, path: string | null) => {
+		if (path !== null) {
+			addPage(url, path);
+			// The focus is to go to the row of the new page, which is in the grid: not back to the
+			// button that opened the form, where a closed dialog puts it.
+			focusGrid();
+			return;
+		}
+		if (url === null) {
+			return;
+		}
+		if (!holdsVirtualPages(rowsRef.current?.overridesFile)) {
+			setProblem(t('app.noOverrides'));
+			return;
+		}
+		setProblem('');
+		setAsking({ kind: 'addVirtual', url });
+	};
 
 	const remember = (patch: SettingsPatch) => {
 		void saver(patch);
@@ -661,19 +883,27 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			return;
 		}
 		if (column === 'inputPath') {
-			// A virtual page has no file; any other page's file is moved by naming where it goes.
-			if (row.inputPath === null) {
-				setProblem(t('app.cannotEditHere', { name: column }));
-				return;
-			}
+			// The file of a page is moved by naming where it goes, and taken away by naming
+			// nothing; a virtual page has no file, and is given one by naming where it is.
 			setProblem('');
 			setEditing({
 				url: row.url,
 				column,
 				kind: 'text',
-				draft: row.inputPath,
+				draft: row.inputPath ?? '',
 				label: t('app.pathLabel', { url: row.url }),
 			});
+			return;
+		}
+		if (column === 'virtual') {
+			// A box, turned over without an input: a virtual page gets a file where its URL says,
+			// and a page with a file is made virtual once the person has said so.
+			const edit = virtualEditOf(row);
+			if (edit.kind === 'ask') {
+				askAboutPage(row.url, 'virtualize');
+			} else {
+				apply(row.url, edit.change, t('app.pageFile', { url: row.url }));
+			}
 			return;
 		}
 		if (!column.startsWith('meta:')) {
@@ -740,12 +970,15 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 
 	/**
 	 * The kind of input that edits the cell at a place, or `undefined` when it is not a cell of
-	 * metadata.
+	 * metadata nor the box of `virtual`.
 	 * @param at - The cell, by its place in what is shown
 	 */
 	const kindAt = (at: Position): FieldKind | undefined => {
 		const row = rows?.pages[at.row];
 		const column = columns[at.col];
+		if (row !== undefined && column !== undefined && isFixedBox(column)) {
+			return 'boolean';
+		}
 		if (row === undefined || column === undefined || !column.startsWith('meta:')) {
 			return undefined;
 		}
@@ -846,6 +1079,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				if (request.key === null) {
 					// The URL is what the key says: the page has another URL now.
 					pendingFocus.current = result.page.url;
+					pendingSaid.current = null;
 					reload(true);
 				} else {
 					await refreshDiff([row.url]);
@@ -893,15 +1127,36 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			return;
 		}
 		if (at.column === 'url') {
-			if (draft !== row.url) {
-				apply(row.url, { op: 'moveUrl', url: draft }, t('app.moved', { url: draft }));
+			const edit = urlEditOf(row, draft);
+			if (edit.kind === 'move') {
+				apply(row.url, edit.change, t('app.moved', { url: draft }));
+			} else if (edit.kind === 'ask') {
+				// A page without a URL is no page.
+				askAboutPage(row.url, 'delete');
 			}
 			return;
 		}
 		if (at.column === 'inputPath') {
-			const change = pathChangeOf(row, draft);
-			if (change !== null) {
-				apply(row.url, change, t('app.movedPath', { path: draft }));
+			const edit = pathEditOf(row, draft);
+			switch (edit.kind) {
+				case 'move': {
+					apply(row.url, edit.change, t('app.movedPath', { path: draft }));
+
+					break;
+				}
+				case 'materialize': {
+					apply(row.url, edit.change, t('app.pageFile', { url: row.url }));
+
+					break;
+				}
+				case 'ask': {
+					// Without its file the page would be gone: whether it stays as a virtual page
+					// is the person's to say.
+					askAboutPage(row.url, 'emptyPath');
+
+					break;
+				}
+				// No default
 			}
 			return;
 		}
@@ -1414,6 +1669,9 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 						{t('app.next')}
 					</button>
 				</nav>
+				<button type="button" onClick={() => addPageRef.current?.showModal()}>
+					{t('app.addPage')}
+				</button>
 				<button type="button" onClick={() => dialogRef.current?.showModal()}>
 					{t('app.addKey')}
 				</button>
@@ -1438,7 +1696,6 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					</select>
 				</label>
 			</header>
-			<Legend overridesFile={rows?.overridesFile} git={git} compared={diffs !== null} />
 			<p role="status" className="status">
 				{loading ? t('app.loading') : status}
 			</p>
@@ -1616,6 +1873,11 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					/>
 				))}
 			</div>
+			{/* What the marks of the table mean is under it: the tools are above, and the rows start
+			    right below them. */}
+			<footer className="foot" aria-label={t('app.legend')}>
+				<Legend overridesFile={rows?.overridesFile} git={git} compared={diffs !== null} />
+			</footer>
 			{menu !== null && (
 				<ColumnMenu
 					label={t('column.menu', { name: columnLabel(menu.id, t) })}
@@ -1657,6 +1919,16 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					focusGrid();
 				}}
 			/>
+			<PageDialog
+				question={asking}
+				overridesFile={rows?.overridesFile ?? null}
+				onChoose={answerPageQuestion}
+				onCancel={() => {
+					setAsking(null);
+					focusGrid();
+				}}
+			/>
+			<AddPageDialog key={addForm} dialogRef={addPageRef} onAdd={requestAddPage} />
 			<AddKeyDialog
 				dialogRef={dialogRef}
 				onAdd={(name, kind) => {
