@@ -241,7 +241,10 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 
 ### 7.2 コンポーネントと型
 
-- 型定義（`PageProps`などの`.d.ts`）は同梱しない。コンポーネントの props の型は、使う側が宣言する（`jsx`の型は`@types/react`など、使うプロジェクトが持つもので足りる）。`tsconfig.json`は`"jsx": "preserve"`にする。例外は`html()`の戻り値の型`HtmlChild`だけで、`@types/react`が子として受け付けるように、`ReactElement`と同じ形で宣言してある（値は`Markup`で、中身は読めない）。
+- `kamado/jsx`がページ／レイアウトの props の型を公開する: `PageProps`、`LayoutProps`、`PageEntry`、`SiteInfo`、`BreadcrumbItem`、`TitleListOptions`、`NavNode`、`GetNavTreeOptions`、およびパンくずの起点を求める`basePathOf`。`page.date`は ISO 8601 の文字列、`site.*`は`string | null`、`BreadcrumbItem.title`は`string | undefined`。
+- 案件ごとの`meta`と`data`のキーは、空の interface `PageMeta`/`GlobalData`を宣言マージで足す（`declare module 'kamado/jsx' { interface PageMeta { … } }`）。
+- `<html static>`の`static`は`kamado/jsx`が`@types/react`の`HtmlHTMLAttributes`へ宣言マージする。`@types/react`は`kamado`の peerDependency（JSX の型検査に使う。`react`のランタイムは要らない）。
+- `tsconfig.json`は`"jsx": "preserve"`にする。`html()`の戻り値の型`HtmlChild`は、`@types/react`が子として受け付けるように、`ReactElement`と同じ形で宣言してある（値は`Markup`で、中身は読めない）。
 - hooks（`useState`など）、Context、`Suspense`は**非対応**。コンポーネントは**純粋関数**（同じ props なら同じ出力、モジュールの変数を書き換えない）。ワーカーが並列に描画するので、この契約を破ると結果が不定になる。
 - `import`できるもの: 相対パスと`pages.alias`で指定した別名の TSX/TS/JSON、npm パッケージ（Node が解決し、ESM のみ）。CSS の import は非対応。
 
@@ -258,7 +261,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 | `pages`                     | 全ページの一覧（`page`と`meta`）。ワーカーに 1 回渡した配列を、そのワーカーのすべてのページが共有する（ページごとにはコピーしない。Rust のインデックスを引くアクセサではない）                                                                                                                                                                                                                                                      |
 | `nav(options?)`             | v2 と同じ。`{ ignoreGlobs, baseDepth }`。ツリーのノードは`{ page, meta, children }`。絞り込みと並べ替えは、返ってきた配列を JSX 側で加工する                                                                                                                                                                                                                                                                                        |
 | `breadcrumbs`               | v2 と同じ（ただし v2 で`pageList`が無いと、タイトルはメタを持たない一覧から取るので`__NO_TITLE__`になった。v3 はページのメタのタイトル。§2 #41）。祖先の`index`ページとページ自身。`{ title, href, depth, meta }`。タイトルがなければ`__NO_TITLE__`。起点は`site.baseURL`の**パス部分**（`https://example.com/sub/`なら`/sub/`）で、それより浅い階層は含めない（v2 は値をそのまま数えたので、フル URL を書くと上位 2 階層が欠けた） |
-| `titleList(options?)`       | v2 と同じ（ただし v2 で`pageList`が無いと、各タイトルは`__NO_TITLE__`になった。v3 はページのメタのタイトル。§2 #41）。`{ separator, baseURL, prefix, suffix, fallback }`。トップ（`baseURL`と`/`）は除き、残りが無ければ`fallback`、最後に`suffix`を区切りなしで付ける（トップは既定で`SITESITE`、`suffix: ''`で`SITE`）。`prefix` / `suffix`は trim する                                                                           |
+| `titleList(options?)`       | v2 と同じ（ただし v2 で`pageList`が無いと、各タイトルは`__NO_TITLE__`になった。v3 はページのメタのタイトル。§2 #41）。`{ separator, baseURL, prefix, suffix, siteName, fallback }`。トップ（`baseURL`と`/`）は除き、残りが無ければ`fallback`、最後に`suffix`を区切りなしで付ける（トップは既定で`SITESITE`、`suffix: ''`で`SITE`）。`prefix` / `suffix`は trim する。`createProps`は既定の`siteName`に`site.siteName`を渡す         |
 | `formatDate(value, format)` | dayjs のトークンのサブセット（`YYYY YY M MM MMM MMMM D DD d dd ddd dddd H HH h hh m mm s ss SSS A a Z ZZ X x`、`[…]`でエスケープ、英語、ローカルのタイムゾーン）。`value`は文字列・数値・Date                                                                                                                                                                                                                                       |
 
 レイアウトは追加で`content`（ページの描画結果。エスケープ済みの HTML として印字されるので、`{content}`、`dangerouslySetInnerHTML={{ __html: content }}`、`html(content)`のどれでも二重にエスケープされない）を受け取る。`meta.layout`に`layouts.dir`内のファイル名（拡張子なし）を書く。`.html`ページはこれがレイアウトを使う唯一の手段。JSX ページは`<Layout>`を直接合成してもよい。存在しないレイアウト名はエラー。
@@ -715,13 +718,13 @@ uiClose(handle)                    → { warning }
 
 ## 17. 論点と決定
 
-| #   | 論点                                                          | 決定                                                                                                                                                                                                         |
-| --- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Q2  | `html.rules`の`pages`は出力 URL か入力パスか                  | 出力 URL（`/a/b/`や`/a/b.html`）。ユーザーが見るのは URL                                                                                                                                                     |
-| Q3  | `HTML`ページ（`.html`）での JSX                               | 不可。`.html`は HTML としてのみ扱い、レイアウトだけが JSX                                                                                                                                                    |
-| Q4  | `pages.files`の既定に`.md`を含めるか                          | 含めない（v2 にもない）                                                                                                                                                                                      |
-| Q5  | `Html`型の実体（文字列のラッパークラス / ブランド型の文字列） | 文字列のラッパークラス（ランタイムの`Markup`）。型は同梱しない。ただし`html()`の戻り値の型`HtmlChild`は除く（§7.2）                                                                                          |
-| Q6  | `kamado/jsx`を公開するか                                      | `./jsx`として export する。ユーザー向けの名前は`html`（と、その戻り値の型`HtmlChild`）と`styleOf`だけで、それ以外（コンパイル後の JS が使う`Markup` `el` `k` `c` `a` `render`など）は内部 API で、変更しうる |
+| #   | 論点                                                          | 決定                                                                                                                                                                                                                                      |
+| --- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q2  | `html.rules`の`pages`は出力 URL か入力パスか                  | 出力 URL（`/a/b/`や`/a/b.html`）。ユーザーが見るのは URL                                                                                                                                                                                  |
+| Q3  | `HTML`ページ（`.html`）での JSX                               | 不可。`.html`は HTML としてのみ扱い、レイアウトだけが JSX                                                                                                                                                                                 |
+| Q4  | `pages.files`の既定に`.md`を含めるか                          | 含めない（v2 にもない）                                                                                                                                                                                                                   |
+| Q5  | `Html`型の実体（文字列のラッパークラス / ブランド型の文字列） | 文字列のラッパークラス（ランタイムの`Markup`）。`html()`の戻り値の型は`HtmlChild`（§7.2）                                                                                                                                                 |
+| Q6  | `kamado/jsx`を公開するか                                      | `./jsx`として export する。ユーザー向けは`html` / `HtmlChild` / `styleOf`、ページ props の型（`PageProps`等）と`basePathOf`、`<html static>`の型。コンパイル後の JS が使う`Markup` `el` `k` `c` `a` `render`などは内部 API で、変更しうる |
 
 Q1 は欠番（番号の飛びで、内容は記録に残っていない）。
 

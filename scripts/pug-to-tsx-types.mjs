@@ -601,7 +601,8 @@ export function literalKeys(source, acorn) {
  */
 export function jsxDeclarations() {
 	return `// Types of what the converted pages use and @types/react does not have.
-// If a later @types/react declares them itself, delete the clashing members.
+// \`<html static>\` is declared by \`kamado/jsx\` (peer \`@types/react\`).
+// If a later @types/react declares command/commandfor itself, delete the clashing members.
 import 'react';
 
 declare module 'react' {
@@ -610,12 +611,6 @@ declare module 'react' {
 	interface HTMLAttributes<T> {
 		command?: string | undefined;
 		commandfor?: string | undefined;
-	}
-
-	// kamado: \`<html static>\` writes the page in the order of the template.
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	interface HtmlHTMLAttributes<T> {
-		static?: boolean | undefined;
 	}
 }
 `;

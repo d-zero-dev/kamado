@@ -3,6 +3,30 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [3.0.0-alpha.5](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.4...v3.0.0-alpha.5) (2026-11-11)
+
+### Bug Fixes
+
+- **kamado:** send the static files of the dev server with no charset ([bcbb188](https://github.com/d-zero-dev/kamado/commit/bcbb188d80b29a03062488b3d673450a040ae3e7))
+- **kamado:** write the byte values of head.ts in decimal ([26df2fd](https://github.com/d-zero-dev/kamado/commit/26df2fd788c4678d01984da26ab70caeb539f78f))
+
+### Features
+
+- **kamado:** add the pages command and the pages() API ([3bdffa8](https://github.com/d-zero-dev/kamado/commit/3bdffa8d77e1b77c76e0863fe3c2ba7ae9523136))
+- **kamado:** add the screen of kamado ui ([fb88297](https://github.com/d-zero-dev/kamado/commit/fb882978df32eb122b3c3eab9ca3716aff9a6987))
+- **kamado:** add, make virtual and remove pages in kamado ui, and show what the plan made ([3a23b18](https://github.com/d-zero-dev/kamado/commit/3a23b187ebb22f4609366247be4b978e0a6e29de))
+- **kamado:** declare the editor functions of the addon ([734c4b0](https://github.com/d-zero-dev/kamado/commit/734c4b0bc3388f22828dbc6ca26ca659b1afb8c7))
+- **kamado:** edit lists, choices and booleans in kamado ui ([e8b955f](https://github.com/d-zero-dev/kamado/commit/e8b955fa07e62442b600c494b7314311f69e8b3f))
+- **kamado:** edit the path of a page file, choose layouts and show the branch in kamado ui ([3f51011](https://github.com/d-zero-dev/kamado/commit/3f5101196d9051468b2a88d06ed49db9400a676f))
+- **kamado:** keep the layout of the columns of kamado ui in the settings ([83fa244](https://github.com/d-zero-dev/kamado/commit/83fa2443f9e627d462216a1af831c67d95ba185b))
+- **kamado:** pin, reorder and resize the columns of kamado ui ([aa123a0](https://github.com/d-zero-dev/kamado/commit/aa123a0b1c55aa1b8f00669a4b787a604f9822d4))
+- **kamado:** read the difference from HEAD and put a value back in the server of kamado ui ([a1d44df](https://github.com/d-zero-dev/kamado/commit/a1d44dffc851bc3c8e6071025d70157914b60193))
+- **kamado:** save the settings of kamado ui and add the ui-settings command ([c5084fc](https://github.com/d-zero-dev/kamado/commit/c5084fc5d41c530b1abc3e4c3c9dc1e8b64f1fd1))
+- **kamado:** serve the editor of the pages with kamado ui ([f151c3a](https://github.com/d-zero-dev/kamado/commit/f151c3a61601051dfe8e859156e4eed149791f24))
+- **kamado:** serve the values of a key and keep the kinds of columns ([4391a76](https://github.com/d-zero-dev/kamado/commit/4391a76c8b9f7fe6881bd3eab567dc78b47f3bae))
+- **kamado:** show where a value is written and how it differs from HEAD in kamado ui ([329c6d2](https://github.com/d-zero-dev/kamado/commit/329c6d2005de4a0d59cdd5f60362b16b37f2139e))
+- **kamado:** sort the rows of kamado ui by a column and keep the order ([9729328](https://github.com/d-zero-dev/kamado/commit/97293281b501deaa3ae61d643c99b997f4e8ac4d))
+
 # [3.0.0-alpha.4](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.3...v3.0.0-alpha.4) (2026-11-02)
 
 **Note:** Version bump only for package kamado
