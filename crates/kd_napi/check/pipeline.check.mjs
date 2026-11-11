@@ -18,6 +18,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	realpathSync,
+	rmSync,
 	symlinkSync,
 	writeFileSync,
 } from 'node:fs';
@@ -565,4 +566,29 @@ test('kamado pages writes the map to the standard output or to --out and tells t
 	const help = run('--help');
 	assert.equal(help.status, 0);
 	assert.match(help.stdout, /kamado pages {12}\[--out <file>\]/);
+});
+
+test('pages.files: [] builds the styles and scripts and no page (MIGRATION §2)', async () => {
+	const site = realpathSync(mkdtempSync(path.join(tmpdir(), 'kd-pipeline-no-pages-')));
+	mkdirSync(path.join(site, 'src'), { recursive: true });
+	writeFileSync(path.join(site, 'package.json'), '{}');
+	writeFileSync(path.join(site, 'src', 'index.html'), '<p>not a page</p>\n');
+	writeFileSync(path.join(site, 'src', 'a.css'), 'a { color: red; }\n');
+	const config = path.join(site, 'kamado.config.jsonc');
+	writeFileSync(
+		config,
+		JSON.stringify({
+			dir: { input: 'src', output: 'out' },
+			build: { cacheDir: '.cache' },
+			pages: { files: [] },
+		}),
+	);
+	try {
+		const report = await build(config, {});
+		assert.equal(report.pages.length, 0);
+		assert.ok(existsSync(path.join(site, 'out', 'a.css')));
+		assert.ok(!existsSync(path.join(site, 'out', 'index.html')));
+	} finally {
+		rmSync(site, { recursive: true, force: true });
+	}
 });

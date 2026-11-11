@@ -111,3 +111,8 @@ jobs:
       # files on disk and nothing else.
       - name: Edit the pages through the addon
         run: node --test crates/kd_napi/check/ui.check.mjs
+
+      # A relative cache directory is relative to the config file for the API and to the
+      # directory the command was typed in for --cache-dir (RFC §13).
+      - name: Resolve a relative cache directory
+        run: node --test crates/kd_napi/check/cache-dir.check.mjs
