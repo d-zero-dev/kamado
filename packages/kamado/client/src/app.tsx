@@ -3,7 +3,15 @@ import type { LocaleSetting } from './i18n/translate.js';
 import type { Position } from './logic/grid.js';
 import type { Reading } from './logic/session.js';
 import type { FieldKind } from './logic/value.js';
-import type { Change, GitInfo, Rows, SettingsPatch, SettingsView } from './types.js';
+import type { RevertRequest } from './revert-dialog.js';
+import type {
+	Change,
+	Diffs,
+	GitInfo,
+	Rows,
+	SettingsPatch,
+	SettingsView,
+} from './types.js';
 
 import {
 	startTransition,
@@ -18,15 +26,18 @@ import {
 import {
 	ApiError,
 	editPage,
+	fetchDiff,
 	fetchGit,
 	fetchRows,
 	refreshSite,
+	revertCell,
 	saveSettings,
 } from './api.js';
 import { ColumnMenu, type MenuItem } from './column-menu.js';
 import { GridRow } from './grid-row.js';
 import { I18nContext, useI18n } from './i18n/context.js';
 import { resolveLanguage, translator } from './i18n/translate.js';
+import { Legend } from './legend.js';
 import {
 	cellOf,
 	columnHoldsArrays,
@@ -35,6 +46,14 @@ import {
 	inferredKinds,
 	sameKinds,
 } from './logic/columns.js';
+import {
+	cellDiffOf,
+	revertFailureOf,
+	revertKeyOf,
+	valueText,
+	withPageDiff,
+	writeNames,
+} from './logic/diff.js';
 import { gitLabel } from './logic/git-label.js';
 import { nextCell, pageCount, rangeLabel } from './logic/grid.js';
 import {
@@ -86,6 +105,7 @@ import {
 } from './logic/sort.js';
 import { FIELD_KINDS, defaultOf, draftOf, parseDraft } from './logic/value.js';
 import { OptionsDialog } from './options-dialog.js';
+import { RevertDialog } from './revert-dialog.js';
 
 /**
  * Rows put in the page at a time: the first paint is not held up by the rest. 500 rows drew
@@ -110,6 +130,8 @@ const COLUMN_MIME = 'application/x-kamado-column';
  * and small enough to fit a column to its text in a few presses.
  */
 const WIDTH_STEP = 32;
+/** The columns that HEAD alone has, when nothing is known of HEAD: one list, so that memoised values do not change. */
+const NO_COLUMNS: readonly string[] = [];
 
 /**
  * The messages of the errors of the server, in words of the screen.
@@ -197,6 +219,27 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	// Whether the header still has to be asked: it is until an answer came, and again when the
 	// files are read again (a request dropped for the next list leaves it asked for).
 	const gitDue = useRef(true);
+	// How the rows on the screen differ from HEAD (`null` when nothing is known: no repository, or
+	// not read yet), and the cell that is being asked about putting back.
+	const [diffs, setDiffs] = useState<Diffs | null>(null);
+	const diffsRef = useRef<Diffs | null>(null);
+	// What was asked is kept as it was when the dialog opened, with the commit it showed and the
+	// hashes of the files it showed: what is written is that and nothing that came after.
+	const [reverting, setReverting] = useState<
+		| (RevertRequest & {
+				readonly column: string;
+				readonly key: string | null;
+				readonly head: string;
+				readonly expect: {
+					input: string | null;
+					sidecar: string | null;
+					overrides: string | null;
+				};
+		  })
+		| null
+	>(null);
+	// Counts the reads of the list: the marks asked for before a read that came later are not used.
+	const diffGeneration = useRef(0);
 	const rowsRef = useRef<Rows | null>(null);
 	const [pageSize, setPageSize] = useState<number>(settings.project?.pageSize ?? 500);
 	const [sort, setSort] = useState<SortState | null>(settings.project?.sort ?? null);
@@ -280,6 +323,38 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		setRows(next);
 	}, []);
 
+	const commitDiffs = useCallback((next: Diffs | null) => {
+		diffsRef.current = next;
+		setDiffs(next);
+	}, []);
+
+	/**
+	 * Reads how some pages differ from HEAD again, after they were edited. An answer for another
+	 * commit than the one the rest was read for (the branch was switched) makes the whole window
+	 * be read again. Not being able to read it leaves what is shown: the list is what matters.
+	 * @param urls - The pages
+	 */
+	const refreshDiff = useCallback(
+		async (urls: readonly string[]) => {
+			const generation = diffGeneration.current;
+			try {
+				const answer = await fetchDiff(urls);
+				let next = withPageDiff(diffsRef.current, urls, answer);
+				if (next === null && answer !== null) {
+					// Nothing was known of the rest of the window, or it was of another commit: all of it is read.
+					const all = rowsRef.current?.pages.map((row) => row.url) ?? [];
+					next = all.length === 0 ? null : await fetchDiff(all);
+				}
+				if (generation === diffGeneration.current) {
+					commitDiffs(next);
+				}
+			} catch {
+				// The marks stay as they were.
+			}
+		},
+		[commitDiffs],
+	);
+
 	/** Reads the list again, from the files when `refresh` (otherwise from the core's memory). */
 	const reload = useCallback((refresh: boolean) => {
 		needRefresh.current ||= refresh;
@@ -318,6 +393,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		void (async () => {
 			setLoading(true);
 			reading.current = 'busy';
+			diffGeneration.current += 1;
 			try {
 				if (needRefresh.current) {
 					// Asked again with the files: a request dropped for the next list leaves it due.
@@ -349,6 +425,25 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				reading.current = 'ok';
 				loadedAt.current = Date.now();
 				setProblem('');
+				// Not part of reading the list either: a site that is not in a repository shows no
+				// mark. An answer that was dropped (another list was asked for) is not used.
+				// (An empty list asks for nothing, and keeps what is known: the legend would flicker.)
+				if (result.pages.length > 0) {
+					fetchDiff(
+						result.pages.map((row) => row.url),
+						controller.signal,
+					).then(
+						(answer) => {
+							if (!controller.signal.aborted) {
+								commitDiffs(answer);
+							}
+						},
+						() => {
+							// The marks stay as they were (and the columns that go with them): a read that
+							// failed says nothing of the repository, and the list is what matters.
+						},
+					);
+				}
 				if (gitDue.current) {
 					// Not part of reading the list: a repository that cannot be read shows nothing.
 					fetchGit(controller.signal).then(
@@ -402,7 +497,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			}
 		})();
 		return () => controller.abort();
-	}, [page, pageSize, q, sort, tick, commitRows, saver]);
+	}, [page, pageSize, q, sort, tick, commitRows, commitDiffs, saver]);
 
 	// The rest of the rows go into the page a chunk at a time, so that typing and scrolling
 	// are not held up by the drawing of five thousand rows.
@@ -441,9 +536,12 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		}
 	}, [rows]);
 
+	// The keys that HEAD has and no page has now are columns too: a deleted value has a cell to be
+	// put back from.
+	const headColumns = diffs === null ? NO_COLUMNS : diffs.columns;
 	const known = useMemo(
-		() => columnIds([...(rows?.columns ?? []), ...added.keys()]),
-		[rows?.columns, added],
+		() => columnIds([...(rows?.columns ?? []), ...added.keys(), ...headColumns]),
+		[rows?.columns, added, headColumns],
 	);
 	// The kind of a key for a page that has no value to say it: the kind a key was added as, and
 	// boolean for a key whose values on the screen are booleans (the page then shows an empty box,
@@ -517,6 +615,8 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					if (change.op === 'moveUrl' || change.op === 'movePath') {
 						pendingFocus.current = result.page.url;
 						reload(true);
+					} else {
+						await refreshDiff([row.url]);
 					}
 				} catch (error) {
 					if (error instanceof ApiError && error.code === 'conflict') {
@@ -528,7 +628,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				}
 			});
 		},
-		[commitRows, reload],
+		[commitRows, reload, refreshDiff],
 	);
 
 	const focusGrid = () => gridRef.current?.focus();
@@ -653,6 +753,132 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			.kind;
 	};
 
+	/**
+	 * Asks whether to put the value of a cell back as HEAD has it, when it can be. The dialog is
+	 * made when the edits already asked for have been made, from what is on the screen then: what it
+	 * shows, the commit it was compared with and the hashes of the files are one and the same state.
+	 * @param at - The cell, by its place in what is shown
+	 */
+	const requestRevert = (at: Position) => {
+		const row = rows?.pages[at.row];
+		const column = columns[at.col];
+		if (rows === null || row === undefined || column === undefined) {
+			return;
+		}
+		const name = columnLabel(column, t);
+		const diff = cellDiffOf(diffs?.pages[row.url], column);
+		if (diff === undefined) {
+			setStatus(t('diff.noDifference', { name }));
+			return;
+		}
+		const target = revertKeyOf(column);
+		if (!diff.revertible || target === null) {
+			setProblem(t('diff.cannotRevert', { name }));
+			return;
+		}
+		setProblem('');
+		const url = row.url;
+		void queue.current.idle().then(() => {
+			const current = rowsRef.current;
+			const latest = rowByUrl(current, url);
+			const known = diffsRef.current;
+			const latestDiff = cellDiffOf(known?.pages[url], column);
+			if (current === null || latest === undefined || known === null) {
+				setProblem(tRef.current('app.notInList', { url }));
+				return;
+			}
+			if (latestDiff?.revertible !== true) {
+				setStatus(tRef.current('diff.noDifference', { name }));
+				return;
+			}
+			const cell = target.key === null ? undefined : latest.meta[target.key];
+			const none = tRef.current('revert.none');
+			setReverting({
+				url,
+				column,
+				key: target.key,
+				name,
+				now: target.key === null ? url : valueText(cell?.value, none),
+				head: known.head.oid,
+				headValue: valueText(
+					latestDiff.kind === 'added' ? undefined : latestDiff.head,
+					none,
+				),
+				where: writeNames(latestDiff.writes, current.overridesFile ?? null, tRef.current),
+				expect: expectOf(latest, current.overridesHash),
+			});
+		});
+	};
+
+	/** Puts the value back, in the queue of the edits: each is made on the hashes the one before returned. */
+	const confirmRevert = () => {
+		const request = reverting;
+		setReverting(null);
+		focusGrid();
+		if (request === null) {
+			return;
+		}
+		queue.current.enqueue(async () => {
+			const current = rowsRef.current;
+			const row = rowByUrl(current, request.url);
+			if (current === null || row === undefined) {
+				setProblem(tRef.current('app.notInList', { url: request.url }));
+				return;
+			}
+			const blocked = editBlockedReason(reading.current, tRef.current);
+			if (blocked !== null) {
+				setProblem(blocked);
+				return;
+			}
+			try {
+				const result = await revertCell(
+					row.url,
+					request.expect,
+					request.key,
+					request.head,
+				);
+				const latest = rowsRef.current;
+				if (latest !== null) {
+					commitRows(applyEdited(latest, row.url, result));
+				}
+				setProblem('');
+				setStatus(tRef.current('diff.reverted', { name: request.name }));
+				if (request.key === null) {
+					// The URL is what the key says: the page has another URL now.
+					pendingFocus.current = result.page.url;
+					reload(true);
+				} else {
+					await refreshDiff([row.url]);
+				}
+			} catch (error) {
+				const failure = error instanceof ApiError ? revertFailureOf(error.code) : null;
+				if (failure === null) {
+					setProblem(messageOf(error));
+					return;
+				}
+				if (failure.note !== null) {
+					setProblem(tRef.current(failure.note));
+				} else if (failure.rereadFiles) {
+					setProblem(
+						tRef.current('app.conflict', {
+							message: error instanceof Error ? error.message : '',
+						}),
+					);
+				} else {
+					setProblem(messageOf(error));
+				}
+				if (failure.rereadFiles) {
+					reload(true);
+				} else if (failure.marks === 'read') {
+					// The marks were of another commit: they are read again with the list.
+					reload(false);
+				} else if (failure.marks === 'drop') {
+					commitDiffs(null);
+				}
+			}
+		});
+	};
+
 	const onCommit = (draft: string) => {
 		const at = editing;
 		setEditing(null);
@@ -742,6 +968,13 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			startEdit(active);
 			return;
 		}
+		// Alt+Backspace puts the value of the cell back as HEAD has it (the bar of the cell does the
+		// same for the pointer).
+		if (event.key === 'Backspace' && event.altKey && !event.ctrlKey && !event.metaKey) {
+			event.preventDefault();
+			requestRevert(active);
+			return;
+		}
 		if (event.key === 'Delete') {
 			const row = rows.pages[active.row];
 			const id = columns[active.col];
@@ -793,6 +1026,11 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		if (at !== null && editing === null) {
 			setActive(at);
 			focusGrid();
+			// A click on the bar of a difference asks whether to put the value back.
+			if ((event.target as HTMLElement).closest('[data-revert]') !== null) {
+				requestRevert(at);
+				return;
+			}
 			// A click on the box of a boolean turns it over (the box is the only part of the cell
 			// that does: a click on the rest of it only gives the cell the focus).
 			if ((event.target as HTMLElement).closest('[data-toggle]') !== null) {
@@ -807,7 +1045,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		if (
 			at !== null &&
 			editing === null &&
-			(event.target as HTMLElement).closest('[data-toggle]') === null
+			(event.target as HTMLElement).closest('[data-toggle], [data-revert]') === null
 		) {
 			setActive(at);
 			startEdit(at);
@@ -957,6 +1195,14 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				label: t('column.resetWidth'),
 				disabled: !Object.hasOwn(columnState.widths, id),
 			},
+			// The value of the row with the focus, put back as HEAD has it.
+			{
+				id: 'revert',
+				label: t('column.revert'),
+				disabled:
+					cellDiffOf(diffs?.pages[rows?.pages[active.row]?.url ?? ''], id)?.revertible !==
+					true,
+			},
 			// Only a column of metadata has values to choose among.
 			// (and one whose name the settings can keep: the same limit as a sort's column).
 			// The options of the `layout` column are the files of the layouts directory.
@@ -1017,6 +1263,10 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			}
 			case 'resetWidth': {
 				changeLayout(resetWidth(columnState, id), t('column.widthReset', { name }));
+				break;
+			}
+			case 'revert': {
+				requestRevert({ row: active.row, col: columns.indexOf(id) });
 				break;
 			}
 			case 'kindEnum':
@@ -1188,6 +1438,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					</select>
 				</label>
 			</header>
+			<Legend overridesFile={rows?.overridesFile} git={git} compared={diffs !== null} />
 			<p role="status" className="status">
 				{loading ? t('app.loading') : status}
 			</p>
@@ -1357,6 +1608,8 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 						layouts={layouts}
 						activeCol={active.row === index ? active.col : -1}
 						editing={editing !== null && editing.url === row.url ? editing : null}
+						diff={diffs?.pages[row.url]}
+						overridesFile={rows.overridesFile ?? null}
 						onCommit={commitStable}
 						onCancel={cancelStable}
 						onInvalid={setProblem}
@@ -1396,6 +1649,14 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					onClose={() => setOptionsFor(null)}
 				/>
 			)}
+			<RevertDialog
+				request={reverting}
+				onConfirm={confirmRevert}
+				onCancel={() => {
+					setReverting(null);
+					focusGrid();
+				}}
+			/>
 			<AddKeyDialog
 				dialogRef={dialogRef}
 				onAdd={(name, kind) => {
