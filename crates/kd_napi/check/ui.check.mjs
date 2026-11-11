@@ -9,6 +9,7 @@
  * vitest does not pick it up: it needs the native build.
  */
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -510,6 +511,7 @@ test('the editor tells the port and the directories of the config', () => {
 			open: false,
 			inputDir: path.join(site.root, 'src'),
 			outputDir: path.join(site.root, 'out'),
+			overrides: path.join(site.root, 'pages.overrides.json'),
 		});
 	} finally {
 		native().uiClose(handle);
@@ -588,6 +590,7 @@ test('the server of kamado ui answers with what the core says, told without the 
 		assert.deepEqual(Object.keys(rows).toSorted(), [
 			'columns',
 			'layouts',
+			'overridesFile',
 			'overridesHash',
 			'pages',
 			'total',
@@ -783,6 +786,155 @@ test('the path the screen shows for a page is the path it can send back to move 
 		assert.equal(body.page.inputPath, 'about/chronicle.html');
 		assert.equal(site.read('src/about/chronicle.html'), '---\ntitle: History\n---\n');
 		assert.equal(existsSync(path.join(site.root, 'src/about/history.html')), false);
+	} finally {
+		native().uiClose(handle);
+	}
+});
+
+test('the difference from HEAD reaches the screen as RFC §14.2 says, and a revert writes only the files it has to', async () => {
+	const { createUiApp } = await import(
+		pathToFileURL(path.join(dist, 'ui', 'app.js')).href
+	);
+	const { createHeadDiff } = await import(
+		pathToFileURL(path.join(dist, 'ui', 'head-diff.js')).href
+	);
+	const site = makeSite();
+	const git = (...args) =>
+		execFileSync(
+			'git',
+			['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args],
+			{
+				cwd: site.root,
+				encoding: 'utf8',
+				// What the machine's own configuration says is not part of the check.
+				env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+			},
+		).trim();
+	git('init', '-q', '-b', 'main');
+	writeFileSync(path.join(site.root, '.gitignore'), '.cache\nout\n');
+	git('add', '.');
+	git('commit', '-q', '-m', 'first');
+	const commit = git('rev-parse', 'HEAD');
+	// What changes after the commit: a value, a new key, and a page that is not in it.
+	writeFileSync(
+		path.join(site.root, 'src/about/history.html'),
+		'---\ntitle: Edited\nextra: 1\n---\n',
+	);
+	writeFileSync(path.join(site.root, 'src/new.html'), '---\ntitle: New\n---\n');
+
+	const handle = native().uiOpen(site.config, '{}');
+	const settings = JSON.parse(native().uiServer(handle));
+	const token = 'a-token-for-the-check';
+	const app = createUiApp(
+		{
+			handle,
+			uiPages: (h, q) => native().uiPages(h, q),
+			uiValues: (h, q) => native().uiValues(h, q),
+			uiRefresh: (h) => native().uiRefresh(h),
+			uiEdit: (h, e) => native().uiEdit(h, e),
+		},
+		{
+			uiDir: path.join(site.root, 'no-screen'),
+			token,
+			head: createHeadDiff({ cwd: site.root, core: native(), handle }),
+			overridesFile: 'pages.overrides.json',
+			roots: {
+				rootDir: site.root,
+				inputDir: settings.inputDir,
+				outputDir: settings.outputDir,
+			},
+		},
+	);
+	const post = (url, body) =>
+		app.request(`http://localhost${url}`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token },
+			body: JSON.stringify(body),
+		});
+	try {
+		const listedAnswer = await app.request('http://localhost/api/pages?limit=100');
+		const listed = await listedAnswer.json();
+		assert.equal(listed.overridesFile, 'pages.overrides.json');
+		const urls = listed.pages.map((p) => p.url);
+
+		const answer = await post('/api/diff', { urls });
+		const text = await answer.text();
+		assert.equal(answer.status, 200);
+		assert.ok(!text.includes(site.root), 'an absolute path went to the screen');
+		const diffs = JSON.parse(text);
+		// The fields the screen reads (client/src/types.ts).
+		assert.deepEqual(Object.keys(diffs).toSorted(), [
+			'columns',
+			'head',
+			'pages',
+			'version',
+		]);
+		assert.deepEqual(diffs.head, { oid: commit });
+		const history = diffs.pages['/about/history.html'];
+		assert.deepEqual(history.meta.title, {
+			kind: 'modified',
+			head: 'History',
+			revertible: true,
+			writes: ['inFile'],
+		});
+		assert.deepEqual(history.meta.extra, {
+			kind: 'added',
+			revertible: true,
+			writes: ['inFile'],
+		});
+		// A page that HEAD does not have, and whose differences cannot be put back.
+		const added = diffs.pages['/new.html'];
+		assert.equal(added.url.kind, 'added');
+		assert.equal(added.url.revertible, false);
+		assert.equal(added.inputPath.kind, 'added');
+		assert.equal(diffs.pages['/'], undefined);
+
+		const refused = await post('/api/diff', { urls: [] });
+		assert.equal(refused.status, 400);
+
+		const row = listed.pages.find((p) => p.url === '/about/history.html');
+		const expect = {
+			input: row.hashes.input,
+			sidecar: row.hashes.sidecar,
+			overrides: listed.overridesHash,
+		};
+		// A commit other than the one the screen compared with writes nothing.
+		const moved = await post('/api/revert', {
+			url: row.url,
+			expect,
+			key: 'title',
+			head: 'a'.repeat(40),
+		});
+		assert.equal(moved.status, 409);
+		const movedBody = await moved.json();
+		assert.equal(movedBody.error, 'headMoved');
+		assert.match(site.read('src/about/history.html'), /title: Edited/);
+
+		const reverted = await post('/api/revert', {
+			url: row.url,
+			expect,
+			key: 'title',
+			head: commit,
+		});
+		assert.equal(reverted.status, 200, await reverted.clone().text());
+		assert.equal(
+			site.read('src/about/history.html'),
+			'---\ntitle: History\nextra: 1\n---\n',
+		);
+
+		// A revert is not an edit that a request can describe: what HEAD held is read from git.
+		const forged = await post('/api/edit', {
+			url: row.url,
+			expect,
+			change: { op: 'revert', key: 'title', head: {} },
+		});
+		assert.equal(forged.status, 400);
+
+		// What it was does not differ from HEAD any more.
+		const afterAnswer = await post('/api/diff', { urls: ['/about/history.html'] });
+		const after = await afterAnswer.json();
+		assert.equal(after.pages['/about/history.html'].meta.title, undefined);
+		assert.equal(after.pages['/about/history.html'].meta.extra.kind, 'added');
 	} finally {
 		native().uiClose(handle);
 	}

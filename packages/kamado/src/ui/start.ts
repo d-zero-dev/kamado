@@ -14,7 +14,29 @@ import { openBrowser } from '../server/start.js';
 
 import { createUiApp } from './app.js';
 import { cachedReadGit } from './git.js';
+import { createHeadDiff } from './head-diff.js';
 import { createSettingsStore, defaultSettingsFile } from './settings.js';
+
+/**
+ * A file as the screen names it: relative to a directory, with `/`. A file outside the directory
+ * is named by its own name, so that no path of the machine goes to the screen.
+ * @param root - The directory (the one of the config file)
+ * @param file - The absolute path of the file
+ * @example
+ * ```ts
+ * relativeFile('/site', '/site/data/pages.overrides.json'); // 'data/pages.overrides.json'
+ * relativeFile('/site', '/elsewhere/p.json'); // 'p.json'
+ * ```
+ */
+export function relativeFile(root: string, file: string): string {
+	const relative = path.relative(root, file);
+	return relative === '' ||
+		relative === '..' ||
+		relative.startsWith(`..${path.sep}`) ||
+		path.isAbsolute(relative)
+		? path.basename(file)
+		: relative.split(path.sep).join('/');
+}
 
 /** Options of {@link ui}. */
 export interface UiOptions {
@@ -118,6 +140,11 @@ export async function ui(
 			open: boolean;
 			inputDir: string;
 			outputDir: string;
+			/**
+			 * The file of `pages.overrides`. It is read as absent when the core does not say it: the
+			 * screen then names no such file, and everything else works as it did.
+			 */
+			overrides?: string | null;
 		};
 		const port = options.port ?? dev.port + 1;
 		wanted = port;
@@ -158,6 +185,11 @@ export async function ui(
 				token: randomBytes(32).toString('base64url'),
 				settings,
 				git: cachedReadGit(path.dirname(configPath)),
+				head: createHeadDiff({ cwd: path.dirname(configPath), core, handle }),
+				overridesFile:
+					typeof dev.overrides === 'string'
+						? relativeFile(path.dirname(configPath), dev.overrides)
+						: null,
 				roots: {
 					rootDir: path.dirname(configPath),
 					inputDir: dev.inputDir,
