@@ -41,8 +41,8 @@
  * The output is written to pass the type check of `@d-zero/tsconfig` (strictest) with
  * `@types/react`: the attributes are spelt as React spells them (`dateTime`, `srcSet`),
  * the parameters of the arrow functions of the Pug code are typed `any`, an import that
- * nothing uses is left out, and `<out>/__assets/kamado-jsx.d.ts` declares what the types
- * of React lack (`static` of `<html static>`, `command`, `commandfor`). The helpers that
+ * nothing uses is left out, and `<out>/__assets/kamado-jsx.d.ts` declares Invoker Commands
+ * (`command`, `commandfor`). `<html static>` is typed by `kamado/jsx`. The helpers that
  * do this are in `pug-to-tsx-types.mjs`.
  *
  * An attribute name that the runtime does not write (`@click`, an emoji) is printed as
@@ -1049,12 +1049,17 @@ function importLines(...contexts) {
 		entries.push({ spec, line: `import ${name} from '${spec}';` });
 	for (const [spec, names] of named)
 		entries.push({ spec, line: `import { ${[...names].join(', ')} } from '${spec}';` });
-	// The package ships no props types: the page props are declared where they are used,
-	// after the imports (a declaration before them is an error of `import-x/order`).
+	// PageProps comes from kamado/jsx; a type-only import sits with the other imports
+	// (a declaration before them is an error of `import-x/order`).
+	entries.push({
+		spec: 'kamado/jsx',
+		line: "import type { PageProps } from 'kamado/jsx';",
+	});
 	const head = orderImports(entries);
-	if (head.length > 0) head.push('');
-	head.push('type PageProps = Record<string, any>;');
-	if (contexts.some((ctx) => ctx.usesEach)) head.push('', EACH_OF);
+	if (contexts.some((ctx) => ctx.usesEach)) {
+		if (head.length > 0) head.push('');
+		head.push(EACH_OF);
+	}
 	return head;
 }
 
