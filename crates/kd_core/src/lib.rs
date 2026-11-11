@@ -2485,6 +2485,41 @@ mod tests {
 	}
 
 	#[test]
+	fn a_cached_stylesheet_repeats_the_warning_of_the_build_that_wrote_it() {
+		let (site, _) = style_site("styles-warning-cached");
+		site.write(
+			"src/css/late.css",
+			"a { color : white }\n@import 'base.css';\nb { margin : 0 }\n",
+		);
+		let loaded = site.config(r#", "styles": { "banner": "" }"#);
+		let opts = BuildOptions {
+			incremental: true,
+			jobs: Some(1),
+			..Default::default()
+		};
+		let first = build(&loaded, &opts).unwrap();
+		let first_late: Vec<&String> = first
+			.warnings
+			.iter()
+			.filter(|w| w.contains("late.css"))
+			.collect();
+		assert_eq!(first_late.len(), 1, "{:?}", first.warnings);
+		let second = build(&loaded, &opts).unwrap();
+		let late = second
+			.assets
+			.iter()
+			.find(|a| a.input_path.ends_with("late.css"))
+			.expect("late.css");
+		assert_eq!(late.status, Status::Cached);
+		let second_late: Vec<&String> = second
+			.warnings
+			.iter()
+			.filter(|w| w.contains("late.css"))
+			.collect();
+		assert_eq!(second_late, first_late);
+	}
+
+	#[test]
 	fn a_stylesheet_is_rebuilt_when_an_import_or_the_config_changes() {
 		let (site, loaded) = style_site("styles-incremental");
 		let run = |loaded: &Loaded| {
@@ -3132,7 +3167,7 @@ mod tests {
 	}
 
 	#[test]
-	fn a_page_that_is_not_rebuilt_does_not_repeat_the_warning_of_the_build_that_wrote_it() {
+	fn a_cached_page_repeats_the_warning_of_the_build_that_wrote_it() {
 		let site = Site::new("sjis_warning_cached");
 		site.write(
 			"src/a.html",
@@ -3149,7 +3184,25 @@ mod tests {
 		assert_eq!(first.warnings.len(), 1);
 		let second = build(&loaded, &opts).unwrap();
 		assert_eq!(statuses(&second), [("/a.html", "cached")]);
-		assert_eq!(second.warnings, Vec::<String>::new());
+		assert_eq!(second.warnings, first.warnings);
+	}
+
+	#[test]
+	fn a_cached_page_repeats_a_pipeline_warning_of_the_build_that_wrote_it() {
+		let site = Site::new("format_warning_cached");
+		site.write("src/a.html", "<p title=\"&unknown;\">x</p>");
+		let loaded = site.config(r#", "html": { "onError": "warning", "minify": false }"#);
+		let opts = BuildOptions {
+			incremental: true,
+			jobs: Some(1),
+			..Default::default()
+		};
+		let first = build(&loaded, &opts).unwrap();
+		assert_eq!(first.warnings.len(), 1);
+		assert!(first.warnings[0].starts_with("Transform 'format' failed on "));
+		let second = build(&loaded, &opts).unwrap();
+		assert_eq!(statuses(&second), [("/a.html", "cached")]);
+		assert_eq!(second.warnings, first.warnings);
 	}
 
 	#[test]

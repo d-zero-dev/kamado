@@ -5,13 +5,13 @@ import path from 'node:path';
 import { parseArgs, styleText } from 'node:util';
 
 import { buildFrom } from './build-from.js';
+import { checkCommandArguments } from './cli-arguments.js';
 import { parseJobs } from './jobs.js';
-import { checkPagesArguments, pagesCommand } from './pages-command.js';
+import { pagesCommand } from './pages-command.js';
 import { start } from './server/start.js';
 import { summarize } from './summary.js';
-import { checkUiOnlyFlags } from './ui/arguments.js';
 import { uiCommand } from './ui/command.js';
-import { checkSettingsOnlyFlag, settingsCommand } from './ui/settings-command.js';
+import { settingsCommand } from './ui/settings-command.js';
 import { defaultSettingsFile } from './ui/settings.js';
 
 const USAGE = `Usage:
@@ -113,20 +113,10 @@ async function main(argv: readonly string[]): Promise<number> {
 		console.log(USAGE);
 		return values.help ? 0 : 1;
 	}
-	// `--out` is a flag of `pages` alone; before `pages` took it, `parseArgs` refused it
-	// for every command, and it must not become a flag that is silently ignored.
-	if ((command === 'build' || command === 'server') && values.out !== undefined) {
-		throw new Error(`${command} does not take --out (only pages writes a file)`);
-	}
-	// `--port` and `--open` are flags of `ui` alone: `parseArgs` takes them for every
-	// command, and `build --port 3000` would otherwise be run with the flag silently ignored.
-	// A command that does not exist is said so by the `default` of the switch, not by a flag.
-	if (command !== 'ui' && ['build', 'server', 'pages'].includes(command)) {
-		checkUiOnlyFlags(command, values);
-	}
-	// `--all` is a flag of `ui-settings` alone, and is refused for the others for the same reason.
-	if (['build', 'server', 'pages', 'ui'].includes(command)) {
-		checkSettingsOnlyFlag(command, values);
+	// One allowlist per command: a flag or positional a command does not read is an
+	// error, not ignored (`ui-settings` keeps its own checks; they depend on the subcommand).
+	if (command !== 'ui-settings') {
+		checkCommandArguments(command, rest, values);
 	}
 	switch (command) {
 		case 'build': {
@@ -172,7 +162,6 @@ async function main(argv: readonly string[]): Promise<number> {
 			return 0;
 		}
 		case 'pages': {
-			checkPagesArguments(rest, values);
 			pagesCommand(resolveConfig(values.config), {
 				out: values.out,
 				incremental: values.incremental,

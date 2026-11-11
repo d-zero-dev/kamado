@@ -66,6 +66,20 @@ describe('pages', () => {
 		);
 	});
 
+	test('refuses a key that pages does not take before the core is called', async () => {
+		await expect(
+			pages('/s/kamado.config.jsonc', { targets: ['src/**'] } as never),
+		).rejects.toThrow('unknown option: targets');
+		expect(corePages).not.toHaveBeenCalled();
+	});
+
+	test('refuses a typo of a key before the core is called', async () => {
+		await expect(
+			pages('/s/kamado.config.jsonc', { typo: true } as never),
+		).rejects.toThrow('unknown option: typo');
+		expect(corePages).not.toHaveBeenCalled();
+	});
+
 	test('an error of the core is the error of the call', async () => {
 		corePages.mockImplementation(() => {
 			throw new Error('cannot read pages.overrides /s/missing.json');

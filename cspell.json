@@ -27,6 +27,8 @@
 	],
 	"words": [
 		//
+		// Deliberate typo of `incremental` in unknown-option tests and JSDoc examples.
+		"incrementl",
 		"amet",
 		"ampb",
 		"envx",

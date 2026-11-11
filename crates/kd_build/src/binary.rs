@@ -16,8 +16,12 @@
 //! files:    count, then per file: path(string id), size, sec, nsec,
 //!           kind(0 = missing, 1 = hash follows) [32 hash bytes]
 //! entries:  count, then per entry: output(string id), input(string id),
-//!           env(string id), output size, dep count, dep file ids
+//!           env(string id), output size, dep count, dep file ids,
+//!           warning count, warning string ids, replaced-chars length, UTF-8 bytes
 //! sha-256 of everything before it (32 bytes)
+//!
+//! Replaced characters are written inline (not through the string table) so a
+//! temporary concatenation does not outlive the table's borrows.
 //! ```
 //!
 //! A manifest that does not decode (truncated, flipped bytes, another
@@ -90,8 +94,9 @@ pub fn encode(manifest: &Manifest) -> Option<Vec<u8>> {
 	// Distinct (path id, fingerprint) pairs, in first-use order.
 	let mut file_ids: HashMap<(u64, &Dep), u64> = HashMap::new();
 	let mut files: Vec<(u64, &Dep)> = Vec::new();
-	let mut entries: Vec<(u64, u64, u64, u64, Vec<u64>)> =
-		Vec::with_capacity(manifest.entries.len());
+	// output, input, env, size, deps, warning string ids, replaced chars (owned: not in the table)
+	type Pending = (u64, u64, u64, u64, Vec<u64>, Vec<u64>, String);
+	let mut entries: Vec<Pending> = Vec::with_capacity(manifest.entries.len());
 	for (output, e) in &manifest.entries {
 		let mut deps = Vec::with_capacity(e.deps.len());
 		for (path, dep) in &e.deps {
@@ -102,12 +107,15 @@ pub fn encode(manifest: &Manifest) -> Option<Vec<u8>> {
 			});
 			deps.push(id);
 		}
+		let warnings: Vec<u64> = e.warnings.iter().map(|w| strings.id(w)).collect();
 		entries.push((
 			strings.id(output),
 			strings.id(&e.input_path),
 			strings.id(&e.env),
 			e.output_size,
 			deps,
+			warnings,
+			e.replaced_chars.iter().collect(),
 		));
 	}
 
@@ -133,7 +141,7 @@ pub fn encode(manifest: &Manifest) -> Option<Vec<u8>> {
 		}
 	}
 	put(&mut out, entries.len() as u64);
-	for (output, input, env, size, deps) in &entries {
+	for (output, input, env, size, deps, warnings, replaced) in &entries {
 		put(&mut out, *output);
 		put(&mut out, *input);
 		put(&mut out, *env);
@@ -142,6 +150,12 @@ pub fn encode(manifest: &Manifest) -> Option<Vec<u8>> {
 		for id in deps {
 			put(&mut out, *id);
 		}
+		put(&mut out, warnings.len() as u64);
+		for id in warnings {
+			put(&mut out, *id);
+		}
+		put(&mut out, replaced.len() as u64);
+		out.extend_from_slice(replaced.as_bytes());
 	}
 	let digest = kd_hash::sha256(&out);
 	out.extend_from_slice(&digest);
@@ -302,6 +316,16 @@ pub fn decode(bytes: &[u8]) -> Option<Manifest> {
 			let (path, dep) = files.get(usize::try_from(r.varint()?).ok()?)?;
 			deps.insert((*path).to_owned(), dep.clone());
 		}
+		let warning_count = r.count()?;
+		let mut warnings = Vec::with_capacity(warning_count);
+		for _ in 0..warning_count {
+			warnings.push(string(r.varint()?)?.to_owned());
+		}
+		let replaced_len = usize::try_from(r.varint()?).ok()?;
+		let replaced_chars: Vec<char> = std::str::from_utf8(r.take(replaced_len)?)
+			.ok()?
+			.chars()
+			.collect();
 		entries.insert(
 			output.to_owned(),
 			Entry {
@@ -309,6 +333,8 @@ pub fn decode(bytes: &[u8]) -> Option<Manifest> {
 				env,
 				output_size,
 				deps,
+				warnings,
+				replaced_chars,
 			},
 		);
 	}
@@ -344,6 +370,8 @@ mod tests {
 					env: "e".repeat(64),
 					output_size: p * 10,
 					deps,
+					warnings: Vec::new(),
+					replaced_chars: Vec::new(),
 				},
 			);
 		}

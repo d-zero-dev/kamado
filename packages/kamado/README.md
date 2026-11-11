@@ -53,7 +53,7 @@ kamado --help           (-h)
 - `--config`/`-c`を省略すると、カレントディレクトリの`kamado.config.jsonc`を使う。`--cache-dir`は差分ビルドの manifest や plan cache の置き場を変える（`build`・`server`・`pages`・`ui`）。相対パスは**打った場所（cwd）基準**。
 - `build`は設定の対象を全部出力する。`globs`を渡すとその入力だけ（相対パスは打った場所からのパス。ディレクトリはその中のすべて。無いファイルと、先頭が`!`の否定はエラー。何も選ばなかったものは警告）。`--incremental`は前回から変わっていないものを飛ばす（`--force`で無視）。`--jobs`は並列度（JSX の描画のワーカーと Rust のスレッドの数）で、`auto`（既定）は使える CPU の数から決める。
 - `pages`は、ビルドせずに全ページの一覧を JSON で書き出す（標準出力か`--out`。相対パスは打った場所からのパス）。1 ページが 1 要素で、URL・入出力のパス・`fileSlug`・`filePathStem`・`extension`・階層（`depth`と、親のディレクトリの`parent`）・仮想ページかどうか・マージ後の`meta`を持つ。ディレクトリマップをスプレッドシートに写すためのもの（形は`docs/v3/RFC.md` §14.1）。入力ファイルのない仮想ページ（`pages.overrides`）は`inputPath`と`extension`が`null`で、`outputPath`は書き出されないがあるはずの場所。`globs`と、読まないフラグ（`--force`・`--jobs`・`--skip-unchanged`・`--verbose`）は、渡すとエラー。`--incremental`は plan cache を読んで更新する。端末には、読み始めと終わり（と、計画の警告があれば`warning: ...`）を標準エラーに出す。
-- `server`はリクエストごとに依存ファイルを stat し、変わっていなければ前回の結果を返す。ファイルは書き出さない。ライブリロードはない。変更したコンポーネントはワーカーを作り直して反映する。応えるのは`localhost`・IP アドレス・`devServer.host`・`devServer.allowedHosts`宛ての要求だけで、別のサイトからの要求は`403`（`docs/v3/RFC.md` §12）。`devServer.host`が`localhost`（既定）なら`127.0.0.1`と`::1`の両方で待ち受ける。
+- `server`はリクエストごとに依存ファイルを stat し、変わっていなければ前回の結果を返す。ファイルは書き出さない。ライブリロードはない。変更したコンポーネントはワーカーを作り直して反映する。応えるのは`localhost`・IP アドレス・`devServer.host`・`devServer.allowedHosts`宛ての要求だけで、別のサイトからの要求は`403`（`docs/v3/RFC.md` §12）。`devServer.host`が`localhost`（既定）なら`127.0.0.1`と`::1`の両方で待ち受ける。位置引数と、読まないフラグ（`--force`・`--incremental`・`--jobs`・`--skip-unchanged`・`--out`・`--port`など）は、渡すとエラー。
 - `ui`は、ページの URL とメタ（front matter など）をブラウザの表で編集し、元のファイルへ書き戻す。ページを足す・無くす・仮想ページにすることもできる。ページを表示するものではなく、ビルドも描画もしない（詳しくは下の「`kamado ui`」）。`globs`と、読まないフラグ（`--out`・`--force`・`--jobs`・`--skip-unchanged`・`--incremental`・`--verbose`）は、渡すとエラー。`--port`と`--open`/`--no-open`は`ui`だけのフラグで、ほかのコマンドに渡すとエラー。
 - `ui-settings`は、`kamado ui`の画面が保存した設定を、プロジェクトごとに見る・消す（下の「画面の設定」）。ビルドも描画もしない。`--all`は`ui-settings delete`だけのフラグで、ほかのコマンドに渡すとエラー。
 
@@ -108,9 +108,9 @@ console.log(editor.url);
 await editor.close();
 ```
 
-`ui()`のオプションは`port`・`open`・`cacheDir`・`write`（ログの行の出し先）・`settingsFile`（画面の設定の保存先。既定は上の場所）で、`{ url, close() }`を返す。`close()`は待ち受けをやめる（`build.incremental`のときは、plan cache も書く）。
+`ui()`のオプションは`port`・`open`・`cacheDir`・`write`（ログの行の出し先）・`uiDir`（画面の配布物。既定はパッケージの`dist/ui`）・`settingsFile`（画面の設定の保存先。既定は上の場所）で、`{ url, close() }`を返す。`close()`は待ち受けをやめる（`build.incremental`のときは、plan cache も書く）。
 
-`build()`・`start()`・`pages()`・`ui()`の第 1 引数は、設定ファイルの**絶対パス**（相対パスの基準になるディレクトリが設定ファイルの場所のため）。`pages()`のオプションは`incremental`と`cacheDir`で、`PageMap`（`docs/v3/RFC.md` §14.1）を返す。ファイルには書かない（書くなら`JSON.stringify`して自分で書く）。`build()`のオプションは CLI のフラグと同じ（`incremental`/`force`/`skipUnchanged`/`targets`/`jobs`/`cacheDir`）。`cacheDir`の相対パスは、設定ファイルのディレクトリからのパス（CLI の`--cache-dir`は cwd 基準なので、同じ相対パスでも別のキャッシュを指す。`/`で始まるパスは同じ）。`targets`の相対パスは、設定ファイルのディレクトリからのパス（glob とパスの扱いは CLI と同じ。無いファイルは例外、何も選ばなかったものは`report.warnings`）。`report`は各ページの URL・入出力のパス・状態（`built`/`cached`/…）・メタデータを持つ。
+`build()`・`start()`・`pages()`・`ui()`の第 1 引数は、設定ファイルの**絶対パス**（相対パスの基準になるディレクトリが設定ファイルの場所のため）。取らないオプションのキー（タイプミスを含む）を渡すと`unknown option: <key>`で例外にする。`pages()`のオプションは`incremental`と`cacheDir`で、`PageMap`（`docs/v3/RFC.md` §14.1）を返す。ファイルには書かない（書くなら`JSON.stringify`して自分で書く）。`build()`のオプションは CLI のフラグと同じ（`incremental`/`force`/`skipUnchanged`/`targets`/`jobs`/`cacheDir`）。`cacheDir`の相対パスは、設定ファイルのディレクトリからのパス（CLI の`--cache-dir`は cwd 基準なので、同じ相対パスでも別のキャッシュを指す。`/`で始まるパスは同じ）。`targets`の相対パスは、設定ファイルのディレクトリからのパス（glob とパスの扱いは CLI と同じ。無いファイルは例外、何も選ばなかったものは`report.warnings`）。`report`は各ページの URL・入出力のパス・状態（`built`/`cached`/…）・メタデータを持つ。差分ビルドで`cached`になったページやスタイルの警告は、原因が残っている間は要約に再掲される。
 
 ## 対応プラットフォーム
 

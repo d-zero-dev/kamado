@@ -1,3 +1,4 @@
+import { assertKnownOptions } from './known-options.js';
 import { native } from './native.js';
 
 /**
@@ -19,6 +20,15 @@ export interface PagesOptions {
 	 */
 	readonly cacheDir?: string;
 }
+
+/**
+ * Keys {@link pages} / {@link pagesJson} read. Kept next to {@link PagesOptions} so a new
+ * field is either allowed here or refused as `unknown option`.
+ */
+export const PAGES_OPTION_KEYS = [
+	'incremental',
+	'cacheDir',
+] as const satisfies readonly (keyof PagesOptions)[];
 
 /**
  * One page of the map.
@@ -95,13 +105,15 @@ export interface PageMap {
  * @param configPath - Absolute path of the config file
  * @param options - Plan switches
  * @returns The JSON text of a {@link PageMap}
- * @throws {Error} on a configuration or plan error
+ * @throws {Error} on a configuration or plan error, or when `options` has a key that is not in
+ * {@link PAGES_OPTION_KEYS} (`unknown option: <key>`)
  * @example
  * ```ts
  * const text = pagesJson('/site/kamado.config.jsonc', { incremental: true });
  * ```
  */
 export function pagesJson(configPath: string, options: PagesOptions = {}): string {
+	assertKnownOptions(options, PAGES_OPTION_KEYS);
 	return native().pages(
 		configPath,
 		JSON.stringify({ incremental: options.incremental, cacheDir: options.cacheDir }),
@@ -122,7 +134,8 @@ export function pagesJson(configPath: string, options: PagesOptions = {}): strin
  * @param options - Plan switches
  * @returns The map
  * @throws {Error} on a configuration or plan error (an unreadable `pages.overrides`, a `meta` that
- * cannot be read without running the file, ...)
+ * cannot be read without running the file, ...), or when `options` has a key that is not in
+ * {@link PAGES_OPTION_KEYS} (`unknown option: <key>`)
  * @example
  * ```ts
  * const map = await pages('/site/kamado.config.jsonc', { incremental: true });
