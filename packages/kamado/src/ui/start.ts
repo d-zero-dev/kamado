@@ -8,6 +8,7 @@ import { styleText } from 'node:util';
 
 import { createAdaptorServer } from '@hono/node-server';
 
+import { assertKnownOptions } from '../known-options.js';
 import { native } from '../native.js';
 import { close as closeServer, listen, listenAddresses } from '../server/listen.js';
 import { openBrowser } from '../server/start.js';
@@ -68,6 +69,19 @@ export interface UiOptions {
 	readonly settingsFile?: string;
 }
 
+/**
+ * Keys {@link ui} reads. Kept next to {@link UiOptions} so a new field is either allowed
+ * here or refused as `unknown option`.
+ */
+export const UI_OPTION_KEYS = [
+	'port',
+	'open',
+	'cacheDir',
+	'write',
+	'uiDir',
+	'settingsFile',
+] as const satisfies readonly (keyof UiOptions)[];
+
 /** A running editor. */
 export interface RunningUi {
 	/** Where it listens (the address of the screen). */
@@ -99,8 +113,8 @@ const UI_DIR = path.dirname(fileURLToPath(import.meta.url));
  * @param configPath - Absolute path of `kamado.config.jsonc`
  * @param options - Port, browser and cache options
  * @returns Resolves when the server listens
- * @throws {Error} when the config is invalid, the site cannot be planned, or the port cannot
- * be used
+ * @throws {Error} when the config is invalid, the site cannot be planned, the port cannot be
+ * used, or `options` has a key that is not in {@link UI_OPTION_KEYS} (`unknown option: <key>`)
  * @example
  * ```ts
  * const editor = await ui('/site/kamado.config.jsonc', { open: false });
@@ -112,6 +126,7 @@ export async function ui(
 	configPath: string,
 	options: UiOptions = {},
 ): Promise<RunningUi> {
+	assertKnownOptions(options, UI_OPTION_KEYS);
 	const write = options.write ?? ((text: string) => process.stdout.write(text));
 	const core = native();
 	const handle = core.uiOpen(

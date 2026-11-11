@@ -33,7 +33,7 @@ use kd_jsonc::Value;
 pub mod binary;
 
 /// Bump when the format or the meaning of recorded data changes.
-pub const MANIFEST_VERSION: u64 = 3;
+pub const MANIFEST_VERSION: u64 = 4;
 
 /// Recorded as the hash of a dependency that could not be read.
 pub const MISSING_FILE_HASH: &str = "missing";
@@ -123,6 +123,12 @@ pub struct Entry {
 	pub output_size: u64,
 	/// Every file the compilation read, including the input itself.
 	pub deps: BTreeMap<String, Dep>,
+	/// Warnings of the build that wrote this output: re-emitted when the output is
+	/// `cached` so a cause that is still there is not silent on the next run.
+	pub warnings: Vec<String>,
+	/// Characters that became `?` inside `<script>` or `<style>` under Shift_JIS.
+	/// Kept so a cached page still feeds the aggregated Shift_JIS warning.
+	pub replaced_chars: Vec<char>,
 }
 
 /// Verifying traces keyed by output path.
@@ -238,6 +244,12 @@ impl Manifest {
 						)
 					})
 					.collect();
+				let warnings = e
+					.warnings
+					.iter()
+					.map(|w| Value::String(w.clone()))
+					.collect();
+				let replaced: String = e.replaced_chars.iter().collect();
 				(
 					output.clone(),
 					Value::Object(vec![
@@ -248,6 +260,8 @@ impl Manifest {
 							Value::Number(e.output_size as f64),
 						),
 						("deps".to_string(), Value::Object(deps)),
+						("warnings".to_string(), Value::Array(warnings)),
+						("replacedChars".to_string(), Value::String(replaced)),
 					]),
 				)
 			})
@@ -504,6 +518,8 @@ pub fn check_inputs(
 		env: entry.env.clone(),
 		output_size: entry.output_size,
 		deps,
+		warnings: entry.warnings.clone(),
+		replaced_chars: entry.replaced_chars.clone(),
 	})
 }
 
@@ -569,6 +585,8 @@ mod tests {
 				env: "b".repeat(64),
 				output_size: 456,
 				deps,
+				warnings: vec!["a warning".to_owned()],
+				replaced_chars: vec!['〜'],
 			},
 		);
 		Manifest { entries }
@@ -579,7 +597,7 @@ mod tests {
 		let m = sample();
 		assert_eq!(
 			m.to_json(),
-			r#"{"version":3,"entries":{"/out/index.html":{"inputPath":"/in/index.tsx","env":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","outputSize":456,"deps":{"/in/index.tsx":[123,1700000000,123456789,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"/in/optional.json":[0,0,0,"missing"]}}}}"#
+			r#"{"version":4,"entries":{"/out/index.html":{"inputPath":"/in/index.tsx","env":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","outputSize":456,"deps":{"/in/index.tsx":[123,1700000000,123456789,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"/in/optional.json":[0,0,0,"missing"]},"warnings":["a warning"],"replacedChars":"〜"}}}"#
 		);
 		let root = temp_root("roundtrip");
 		let path = manifest_path(&format!("{root}/nested/cache"));
@@ -667,6 +685,8 @@ mod tests {
 			env: env.to_string(),
 			output_size: fs::metadata(output).map(|m| m.len()).unwrap_or(0),
 			deps: map,
+			warnings: Vec::new(),
+			replaced_chars: Vec::new(),
 		}
 	}
 

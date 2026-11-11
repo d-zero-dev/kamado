@@ -1161,6 +1161,8 @@ impl Serve {
 			env,
 			output_size: out.html.len() as u64,
 			deps,
+			warnings: Vec::new(),
+			replaced_chars: Vec::new(),
 		};
 		st.cache.insert(
 			index,
@@ -1259,6 +1261,8 @@ impl Serve {
 							env,
 							output_size: built.css.len() as u64,
 							deps: built.deps,
+							warnings: Vec::new(),
+							replaced_chars: Vec::new(),
 						},
 					},
 				);
@@ -1341,6 +1345,8 @@ impl Serve {
 						env,
 						output_size: output.code.len() as u64,
 						deps,
+						warnings: Vec::new(),
+						replaced_chars: Vec::new(),
 					},
 				},
 			);

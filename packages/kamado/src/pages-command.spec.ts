@@ -16,7 +16,7 @@ vi.mock('./pages.js', () => ({
 	) => pagesJson(configPath, options),
 }));
 
-const { checkPagesArguments, pagesCommand } = await import('./pages-command.js');
+const { pagesCommand } = await import('./pages-command.js');
 
 /**
  * The text of a map of `count` pages.
@@ -46,51 +46,6 @@ function io() {
 		now: () => clock.shift() ?? 0,
 	};
 }
-
-describe('checkPagesArguments', () => {
-	test('takes no arguments and none of the flags of the other commands', () => {
-		expect(() => {
-			checkPagesArguments([], {});
-		}).not.toThrow();
-		expect(() => {
-			checkPagesArguments([], {
-				force: false,
-				'skip-unchanged': false,
-				verbose: false,
-				jobs: undefined,
-			});
-		}).not.toThrow();
-	});
-
-	test('a glob would be the targets of build: it is refused, not ignored', () => {
-		expect(() => {
-			checkPagesArguments(['src/news/**'], {});
-		}).toThrow('pages takes no arguments (it lists every page of the plan)');
-	});
-
-	test('a flag that pages does not read is refused, naming it', () => {
-		expect(() => {
-			checkPagesArguments([], { force: true });
-		}).toThrow('pages does not take --force');
-		expect(() => {
-			checkPagesArguments([], { jobs: 'auto' });
-		}).toThrow('pages does not take --jobs');
-		expect(() => {
-			checkPagesArguments([], { 'skip-unchanged': true });
-		}).toThrow('pages does not take --skip-unchanged');
-		expect(() => {
-			checkPagesArguments([], { verbose: true });
-		}).toThrow('pages does not take --verbose');
-	});
-
-	test('names every flag it refuses and what it takes', () => {
-		expect(() => {
-			checkPagesArguments([], { force: true, jobs: '2', verbose: true });
-		}).toThrow(
-			'pages does not take --force, --jobs, --verbose (it takes --out, --incremental, --cache-dir and --config)',
-		);
-	});
-});
 
 describe('pagesCommand', () => {
 	beforeEach(() => {

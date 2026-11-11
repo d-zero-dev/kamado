@@ -74,6 +74,15 @@ describe('build', () => {
 		finish.mockReturnValue(REPORT);
 	});
 
+	test('refuses an unknown option before the core is called', async () => {
+		await expect(
+			build('/site/kamado.config.jsonc', {
+				incrementl: true,
+			} as never),
+		).rejects.toThrow('unknown option: incrementl');
+		expect(prepare).not.toHaveBeenCalled();
+	});
+
 	test('passes the config path, the options as JSON and the runtime to the core', async () => {
 		await build('/site/kamado.config.jsonc', {
 			incremental: true,

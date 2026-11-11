@@ -8,6 +8,8 @@ import type { BuildOptions, BuildReport } from './build.js';
 import type { RenderContext } from './props.js';
 import type { Rendered, RenderJob } from './render.js';
 
+import { BUILD_OPTION_KEYS } from './build.js';
+import { assertKnownOptions } from './known-options.js';
 import { native } from './native.js';
 import { renderJobs } from './render.js';
 import { RUNTIME_URL } from './runtime-url.js';
@@ -74,6 +76,7 @@ export async function buildFrom(
 	options: BuildOptions,
 	targetBase: string,
 ): Promise<BuildReport> {
+	assertKnownOptions(options, BUILD_OPTION_KEYS);
 	const core = native();
 	const timing = process.env['KAMADO_TIMING'] === '1';
 	const started = performance.now();

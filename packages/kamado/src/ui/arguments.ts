@@ -1,3 +1,5 @@
+import { checkCommandArguments } from '../cli-arguments.js';
+
 /** The flags as `parseArgs` gives them, which `kamado ui` does not read. */
 export interface UiUnusedFlags {
 	readonly force?: boolean;
@@ -6,6 +8,7 @@ export interface UiUnusedFlags {
 	readonly incremental?: boolean;
 	readonly jobs?: string;
 	readonly out?: string;
+	readonly all?: boolean;
 }
 
 /** The flags only `kamado ui` reads. */
@@ -16,54 +19,28 @@ export interface UiOnlyFlags {
 }
 
 /**
- * Refuses what `ui` does not take: a position argument (it would read as the globs of
- * `build`) and the flags of the other commands (`--force` would not force anything). Said out
- * loud rather than ignored, as `pages` does.
+ * Refuses what `ui` does not take: a position argument and the flags of the other commands.
+ * The allowlist lives in `cli-arguments.ts`.
  * @param positionals - The arguments after the command
  * @param flags - The flags that were given
  * @throws {Error} naming what is not taken
  * @example
  * ```ts
  * checkUiArguments([], { out: 'map.json' });
- * // Error: ui does not take --out (it takes --port, --open, --no-open, --cache-dir and --config)
+ * // Error: ui does not take --out (only pages writes a file)
  * ```
  */
 export function checkUiArguments(
 	positionals: readonly string[],
-	flags: UiUnusedFlags,
+	flags: UiUnusedFlags & UiOnlyFlags,
 ): void {
-	if (positionals.length > 0) {
-		throw new Error('ui takes no arguments (it edits every page of the plan)');
-	}
-	const given: string[] = [];
-	if (flags.out !== undefined) {
-		given.push('--out');
-	}
-	if (flags.force) {
-		given.push('--force');
-	}
-	if (flags.jobs !== undefined) {
-		given.push('--jobs');
-	}
-	if (flags['skip-unchanged']) {
-		given.push('--skip-unchanged');
-	}
-	if (flags.incremental) {
-		given.push('--incremental');
-	}
-	if (flags.verbose) {
-		given.push('--verbose');
-	}
-	if (given.length > 0) {
-		throw new Error(
-			`ui does not take ${given.join(', ')} (it takes --port, --open, --no-open, --cache-dir and --config)`,
-		);
-	}
+	checkCommandArguments('ui', positionals, flags);
 }
 
 /**
- * Refuses `--port`, `--open` and `--no-open` for the commands that have nothing to listen on
- * or to open.
+ * Runs the command allowlist of `cli-arguments` for `command` with no positionals. Named for
+ * the common case of refusing `--port` / `--open` on `build` and the like; any flag the
+ * command does not take is refused the same way.
  * @param command - The command
  * @param flags - The flags that were given
  * @throws {Error} naming the flags
@@ -74,19 +51,7 @@ export function checkUiArguments(
  * ```
  */
 export function checkUiOnlyFlags(command: string, flags: UiOnlyFlags): void {
-	const given: string[] = [];
-	if (flags.port !== undefined) {
-		given.push('--port');
-	}
-	if (flags.open) {
-		given.push('--open');
-	}
-	if (flags['no-open']) {
-		given.push('--no-open');
-	}
-	if (given.length > 0) {
-		throw new Error(`${command} does not take ${given.join(', ')} (only ui does)`);
-	}
+	checkCommandArguments(command, [], flags);
 }
 
 /**

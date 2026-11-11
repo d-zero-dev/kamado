@@ -7,6 +7,7 @@ import { styleText } from 'node:util';
 
 import { createAdaptorServer } from '@hono/node-server';
 
+import { assertKnownOptions } from '../known-options.js';
 import { native } from '../native.js';
 import { RUNTIME_URL } from '../runtime-url.js';
 import { ESBUILD_VERSION, findEsbuildBinary } from '../scripts.js';
@@ -26,6 +27,16 @@ export interface StartOptions {
 	/** Where lines of the log go (default: stdout). */
 	readonly write?: (text: string) => void;
 }
+
+/**
+ * Keys {@link start} reads. Kept next to {@link StartOptions} so a new field is either
+ * allowed here or refused as `unknown option`.
+ */
+export const START_OPTION_KEYS = [
+	'verbose',
+	'cacheDir',
+	'write',
+] as const satisfies readonly (keyof StartOptions)[];
 
 /** A running dev server. */
 export interface RunningServer {
@@ -75,7 +86,8 @@ function formatRequest(log: RequestLog): string {
  * @param configPath - Absolute path of `kamado.config.jsonc`
  * @param options - Logging and cache options
  * @returns Resolves when the server listens
- * @throws {Error} when the config is invalid or the port cannot be used
+ * @throws {Error} when the config is invalid, the port cannot be used, or `options` has a key
+ * that is not in {@link START_OPTION_KEYS} (`unknown option: <key>`)
  * @example
  * ```ts
  * const server = await start('/site/kamado.config.jsonc');
@@ -87,6 +99,7 @@ export async function start(
 	configPath: string,
 	options: StartOptions = {},
 ): Promise<RunningServer> {
+	assertKnownOptions(options, START_OPTION_KEYS);
 	const write = options.write ?? ((text: string) => process.stdout.write(text));
 	const core = native();
 	const open = () =>
