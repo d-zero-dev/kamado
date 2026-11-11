@@ -3,7 +3,7 @@ import type { LocaleSetting } from './i18n/translate.js';
 import type { Position } from './logic/grid.js';
 import type { Reading } from './logic/session.js';
 import type { FieldKind } from './logic/value.js';
-import type { Change, Rows, SettingsPatch, SettingsView } from './types.js';
+import type { Change, GitInfo, Rows, SettingsPatch, SettingsView } from './types.js';
 
 import {
 	startTransition,
@@ -15,7 +15,14 @@ import {
 	useState,
 } from 'react';
 
-import { ApiError, editPage, fetchRows, refreshSite, saveSettings } from './api.js';
+import {
+	ApiError,
+	editPage,
+	fetchGit,
+	fetchRows,
+	refreshSite,
+	saveSettings,
+} from './api.js';
 import { ColumnMenu, type MenuItem } from './column-menu.js';
 import { GridRow } from './grid-row.js';
 import { I18nContext, useI18n } from './i18n/context.js';
@@ -28,11 +35,13 @@ import {
 	inferredKinds,
 	sameKinds,
 } from './logic/columns.js';
+import { gitLabel } from './logic/git-label.js';
 import { nextCell, pageCount, rangeLabel } from './logic/grid.js';
 import {
 	choicesOf,
 	enumKindOf,
 	kindsPatch,
+	optionsFromFiles,
 	selectedOf,
 	withKind,
 	type KindsSettings,
@@ -41,6 +50,7 @@ import {
 	MAX_COLUMN_WIDTH,
 	MIN_COLUMN_WIDTH,
 	columnIds,
+	columnLabel,
 	columnName,
 	layoutOf,
 	moveColumn,
@@ -56,6 +66,7 @@ import {
 	widthOf,
 	type ColumnState,
 } from './logic/layout.js';
+import { pathChangeOf } from './logic/move-path.js';
 import {
 	applyEdited,
 	createQueue,
@@ -178,6 +189,14 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		tRef.current = t;
 	}, [t]);
 	const [rows, setRows] = useState<Rows | null>(null);
+	// The names of the layouts: the `layout` column chooses among them when there are some.
+	const layouts = rows?.layouts ?? null;
+	// The branch and the commit shown in the header; read with the first list and each time
+	// the files are read again (the branch can be switched while the screen is open).
+	const [git, setGit] = useState<GitInfo | null>(null);
+	// Whether the header still has to be asked: it is until an answer came, and again when the
+	// files are read again (a request dropped for the next list leaves it asked for).
+	const gitDue = useRef(true);
 	const rowsRef = useRef<Rows | null>(null);
 	const [pageSize, setPageSize] = useState<number>(settings.project?.pageSize ?? 500);
 	const [sort, setSort] = useState<SortState | null>(settings.project?.sort ?? null);
@@ -301,6 +320,8 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			reading.current = 'busy';
 			try {
 				if (needRefresh.current) {
+					// Asked again with the files: a request dropped for the next list leaves it due.
+					gitDue.current = true;
 					needRefresh.current = false;
 					await refreshSite();
 				}
@@ -328,6 +349,24 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				reading.current = 'ok';
 				loadedAt.current = Date.now();
 				setProblem('');
+				if (gitDue.current) {
+					// Not part of reading the list: a repository that cannot be read shows nothing.
+					fetchGit(controller.signal).then(
+						(info) => {
+							if (!controller.signal.aborted) {
+								// Only an answer counts as read: a request that was dropped (another list was asked
+								// for) or failed is made again with the next list.
+								gitDue.current = false;
+								setGit(info);
+							}
+						},
+						() => {
+							if (!controller.signal.aborted) {
+								setGit(null);
+							}
+						},
+					);
+				}
 				if (!sameSort(sort, savedSort.current)) {
 					// The server took this sort (see `savedSort`).
 					savedSort.current = sort;
@@ -475,7 +514,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					}
 					setProblem('');
 					setStatus(saved);
-					if (change.op === 'moveUrl') {
+					if (change.op === 'moveUrl' || change.op === 'movePath') {
 						pendingFocus.current = result.page.url;
 						reload(true);
 					}
@@ -521,24 +560,43 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			});
 			return;
 		}
+		if (column === 'inputPath') {
+			// A virtual page has no file; any other page's file is moved by naming where it goes.
+			if (row.inputPath === null) {
+				setProblem(t('app.cannotEditHere', { name: column }));
+				return;
+			}
+			setProblem('');
+			setEditing({
+				url: row.url,
+				column,
+				kind: 'text',
+				draft: row.inputPath,
+				label: t('app.pathLabel', { url: row.url }),
+			});
+			return;
+		}
 		if (!column.startsWith('meta:')) {
 			setProblem(t('app.cannotEditHere', { name: column }));
 			return;
 		}
 		const key = columnName(column);
-		const enumKind = enumKindOf(kinds, column);
+		const name = columnLabel(column, t);
+		const enumKind = enumKindOf(kinds, column, layouts);
 		const { cell, kind } = editKindOf(row, key, hints, enumKind);
 		if (cell !== undefined && !cell.editable) {
-			setProblem(t('app.cannotEdit', { key, reason: cell.reason ?? t('app.readOnly') }));
+			setProblem(
+				t('app.cannotEdit', { key: name, reason: cell.reason ?? t('app.readOnly') }),
+			);
 			return;
 		}
 		if (kind === 'boolean') {
 			const value = cell === undefined ? true : cell.value !== true;
-			apply(row.url, { op: 'set', key, value }, t('app.saved', { key }));
+			apply(row.url, { op: 'set', key, value }, t('app.saved', { key: name }));
 			return;
 		}
 		setProblem('');
-		const label = t('app.keyLabel', { key, url: row.url });
+		const label = t('app.keyLabel', { key: name, url: row.url });
 		if (kind === 'enum') {
 			const value = cell?.value;
 			setEditing({
@@ -591,7 +649,8 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		if (row === undefined || column === undefined || !column.startsWith('meta:')) {
 			return undefined;
 		}
-		return editKindOf(row, columnName(column), hints, enumKindOf(kinds, column)).kind;
+		return editKindOf(row, columnName(column), hints, enumKindOf(kinds, column, layouts))
+			.kind;
 	};
 
 	const onCommit = (draft: string) => {
@@ -613,6 +672,13 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			}
 			return;
 		}
+		if (at.column === 'inputPath') {
+			const change = pathChangeOf(row, draft);
+			if (change !== null) {
+				apply(row.url, change, t('app.movedPath', { path: draft }));
+			}
+			return;
+		}
 		const key = columnName(at.column);
 		const parsed = parseDraft(at.kind, draft);
 		if (!parsed.ok) {
@@ -622,7 +688,11 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		if (!shouldWrite(cell ?? null, draft, at.draft, parsed.value)) {
 			return;
 		}
-		apply(row.url, { op: 'set', key, value: parsed.value }, t('app.saved', { key }));
+		apply(
+			row.url,
+			{ op: 'set', key, value: parsed.value },
+			t('app.saved', { key: columnLabel(at.column, t) }),
+		);
 	};
 
 	const onCancel = () => {
@@ -682,11 +752,15 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					return;
 				}
 				event.preventDefault();
+				const name = columnLabel(`meta:${key}`, t);
 				if (cell.editable) {
-					apply(row.url, { op: 'delete', key }, t('app.removed', { key }));
+					apply(row.url, { op: 'delete', key }, t('app.removed', { key: name }));
 				} else {
 					setProblem(
-						t('app.cannotRemove', { key, reason: cell.reason ?? t('app.readOnly') }),
+						t('app.cannotRemove', {
+							key: name,
+							reason: cell.reason ?? t('app.readOnly'),
+						}),
 					);
 				}
 			}
@@ -836,7 +910,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	 */
 	const movedSaid = (next: ColumnState, id: string) =>
 		t('column.movedTo', {
-			name: columnName(id),
+			name: columnLabel(id, t),
 			position: positionOf(layoutOf(known, next), id) + 1,
 			count: colCount,
 		});
@@ -848,7 +922,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	 */
 	const widthSaid = (next: ColumnState, id: string) =>
 		t('column.width', {
-			name: columnName(id),
+			name: columnLabel(id, t),
 			width: widthOf(layoutOf(known, next), id),
 		});
 
@@ -885,7 +959,8 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			},
 			// Only a column of metadata has values to choose among.
 			// (and one whose name the settings can keep: the same limit as a sort's column).
-			...(id.startsWith('meta:') && canSort(id)
+			// The options of the `layout` column are the files of the layouts directory.
+			...(id.startsWith('meta:') && canSort(id) && !optionsFromFiles(id, layouts)
 				? enumKindOf(kinds, id) === undefined
 					? [{ id: 'kindEnum', label: t('column.kindChoose') }]
 					: [
@@ -902,7 +977,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	 * @param action - The id of the entry
 	 */
 	const runMenu = (id: string, action: string) => {
-		const name = columnName(id);
+		const name = columnLabel(id, t);
 		switch (action) {
 			case 'pin': {
 				changeLayout(pinColumn(columnState, known, id), t('column.pinned', { name }));
@@ -1044,6 +1119,12 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		<div className="app">
 			<header className="bar">
 				<h1>kamado ui</h1>
+				{git !== null && (
+					<span className="git" title={gitLabel(git)}>
+						<span className="sr-only">{t('app.git')}: </span>
+						{gitLabel(git)}
+					</span>
+				)}
 				<label>
 					{t('app.search')}
 					<input
@@ -1159,7 +1240,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					className="row head"
 					onKeyDown={onHeaderKeyDown}>
 					{columns.map((id, col) => {
-						const name = columnName(id);
+						const name = columnLabel(id, t);
 						const direction = ariaSortOf(sort, id);
 						const isPinned = col < pinnedCount;
 						// A column goes only to a place of its own group: the pinned ones among
@@ -1273,6 +1354,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 						pinnedCount={pinnedCount}
 						addedKinds={hints}
 						kinds={kinds}
+						layouts={layouts}
 						activeCol={active.row === index ? active.col : -1}
 						editing={editing !== null && editing.url === row.url ? editing : null}
 						onCommit={commitStable}
@@ -1283,7 +1365,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			</div>
 			{menu !== null && (
 				<ColumnMenu
-					label={t('column.menu', { name: columnName(menu.id) })}
+					label={t('column.menu', { name: columnLabel(menu.id, t) })}
 					anchor={menu.anchor}
 					items={menuItems(menu.id)}
 					onChoose={(action) => {
@@ -1306,7 +1388,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 						changeKinds(
 							withKind(kinds, optionsFor, options),
 							t('column.kindSet', {
-								name: columnName(optionsFor),
+								name: columnLabel(optionsFor, t),
 								count: options.length,
 							}),
 						)

@@ -17,7 +17,7 @@ import { parseDraft, toText } from './logic/value.js';
 export interface Editing {
 	/** The page the cell is of, by its URL (its place in the list can change under the edit). */
 	readonly url: string;
-	/** The identifier of the column (`url`, or `meta:<key>`): the column can move under the edit. */
+	/** The identifier of the column (`url`, `inputPath`, or `meta:<key>`): the column can move under the edit. */
 	readonly column: string;
 	readonly kind: FieldKind;
 	readonly draft: string;
@@ -204,6 +204,8 @@ interface RowProps {
 	readonly addedKinds: ReadonlyMap<string, FieldKind>;
 	/** The columns that are an enum. */
 	readonly kinds: KindsSettings | undefined;
+	/** The names of the layouts, when the site has a layouts directory (the `layout` column then chooses among them). */
+	readonly layouts: readonly string[] | null | undefined;
 	/** The column that has the focus in this row, or -1 when the focus is in another row. */
 	readonly activeCol: number;
 	/** The cell being edited, when it is in this row. */
@@ -220,6 +222,7 @@ interface RowProps {
  * @param column - The identifier of the column
  * @param addedKinds - The kinds of keys added on the screen, and of keys of booleans
  * @param kinds - The columns that are an enum
+ * @param layouts - The names of the layouts, if the site has a layouts directory
  * @param t - Says the words of the cell in the language of the screen
  */
 function describe(
@@ -227,6 +230,7 @@ function describe(
 	column: string,
 	addedKinds: ReadonlyMap<string, FieldKind>,
 	kinds: KindsSettings | undefined,
+	layouts: readonly string[] | null | undefined,
 	t: Translate,
 ): {
 	text: string;
@@ -243,10 +247,20 @@ function describe(
 		return { text: row.virtual ? t('row.virtual') : '', readOnly: true, note: undefined };
 	}
 	if (column === 'inputPath') {
-		return { text: row.inputPath ?? '', readOnly: true, note: undefined };
+		// A virtual page has no file to move.
+		return {
+			text: row.inputPath ?? '',
+			readOnly: row.inputPath === null,
+			note: undefined,
+		};
 	}
 	const key = columnName(column);
-	const { cell, kind } = editKindOf(row, key, addedKinds, enumKindOf(kinds, column));
+	const { cell, kind } = editKindOf(
+		row,
+		key,
+		addedKinds,
+		enumKindOf(kinds, column, layouts),
+	);
 	// A boolean is drawn as a check box, and an enum column of booleans is a choice (text).
 	const checked = kind === 'boolean' ? cell?.value === true : undefined;
 	if (cell === undefined) {
@@ -281,6 +295,7 @@ export const GridRow = memo(function GridRow({
 	pinnedCount,
 	addedKinds,
 	kinds,
+	layouts,
 	activeCol,
 	editing,
 	onCommit,
@@ -295,6 +310,7 @@ export const GridRow = memo(function GridRow({
 			column,
 			addedKinds,
 			kinds,
+			layouts,
 			t,
 		);
 		const isEditing = editing !== null && editing.column === column;

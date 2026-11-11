@@ -37,6 +37,11 @@ export interface Rows {
 	readonly total: number;
 	readonly columns: readonly string[];
 	readonly overridesHash: string | null;
+	/**
+	 * The names of the layouts in `pages.layouts.dir`; `null` when the site has no such setting.
+	 * The core always says it. A list without it (a value made by hand) is read as `null`.
+	 */
+	readonly layouts?: readonly string[] | null;
 	readonly pages: readonly Row[];
 	readonly warnings: readonly string[];
 }
@@ -45,7 +50,16 @@ export interface Rows {
 export type Change =
 	| { readonly op: 'set'; readonly key: string; readonly value: unknown }
 	| { readonly op: 'delete'; readonly key: string }
-	| { readonly op: 'moveUrl'; readonly url: string };
+	| { readonly op: 'moveUrl'; readonly url: string }
+	| { readonly op: 'movePath'; readonly path: string };
+
+/** What `GET /api/git` answers: the branch and the commit of the site's repository. */
+export interface GitInfo {
+	/** `null` for a detached HEAD. */
+	readonly branch: string | null;
+	/** The short commit hash. */
+	readonly sha: string;
+}
 
 /** What `GET /api/settings` answers: the settings of the screen (RFC section 14.2). */
 export interface SettingsView {

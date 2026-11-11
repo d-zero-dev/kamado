@@ -229,20 +229,49 @@ function setOwn(target: Record<string, EnumKind>, key: string, value: EnumKind):
 	});
 }
 
+/** The column of the layout of a page. */
+const LAYOUT_COLUMN = 'meta:layout';
+
 /**
- * The kind of a column, when it is an enum.
+ * Whether the options of a column are the files in `pages.layouts.dir` and not something a
+ * person sets: the `layout` column, when the site has a layouts directory.
+ * @param id - The identifier of the column
+ * @param layouts - The names of the layouts (`null` or `undefined` when the site has no
+ * layouts directory)
+ * @example
+ * ```ts
+ * optionsFromFiles('meta:layout', ['wide']); // true
+ * optionsFromFiles('meta:layout', null); // false
+ * ```
+ */
+export function optionsFromFiles(
+	id: string,
+	layouts?: readonly string[] | null,
+): boolean {
+	return id === LAYOUT_COLUMN && layouts !== null && layouts !== undefined;
+}
+
+/**
+ * The kind of a column, when it is an enum. The `layout` column of a site that has a layouts
+ * directory is an enum of the names of the files there, whatever the settings keep.
  * @param kinds - The kinds of the settings (or `undefined` when there are none)
  * @param id - The identifier of the column
+ * @param layouts - The names of the layouts, when the site has a layouts directory
  * @example
  * ```ts
  * enumKindOf({ 'meta:layout': { type: 'enum', options: ['wide'] } }, 'meta:layout');
  * // { type: 'enum', options: ['wide'] }
+ * enumKindOf(undefined, 'meta:layout', ['sub']); // { type: 'enum', options: ['sub'] }
  * ```
  */
 export function enumKindOf(
 	kinds: KindsSettings | undefined,
 	id: string,
+	layouts?: readonly string[] | null,
 ): EnumKind | undefined {
+	if (optionsFromFiles(id, layouts)) {
+		return { type: 'enum', options: layouts ?? [] };
+	}
 	return kinds !== undefined && Object.hasOwn(kinds, id) ? kinds[id] : undefined;
 }
 
