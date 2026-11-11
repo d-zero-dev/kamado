@@ -1,10 +1,11 @@
 /**
  * The HTTP side of `kamado ui` (RFC section 14.2). The core edits the files; this module is
  * the door the browser comes in by: the page of the screen (`GET /`), its files
- * (`GET /assets/<name>`), and four calls (`GET /api/pages`, `GET /api/values`,
+ * (`GET /assets/<name>`), four calls (`GET /api/pages`, `GET /api/values`,
  * `POST /api/refresh`, `POST /api/edit`) that pass JSON to the editor of the core and its
- * answer back, and the
- * settings the screen keeps between runs (`GET` and `PUT /api/settings`, see `settings.ts`).
+ * answer back, the branch and commit of the site's repository (`GET /api/git`, see
+ * `git.ts`), and the settings the screen keeps between runs (`GET` and `PUT /api/settings`,
+ * see `settings.ts`).
  *
  * Why a token for every call that is not a GET: the screen writes the source files of the
  * project, and a page of another site can make a browser send a request to `localhost`. The
@@ -15,6 +16,7 @@
  *
  * Why only the loopback: there is no `--host`. What is edited is the source of the site.
  */
+import type { GitInfo } from './git.js';
 import type { Roots } from './paths.js';
 import type { native } from '../native.js';
 import type { Hono as HonoApp } from 'hono';
@@ -72,6 +74,12 @@ export interface UiAppOptions {
 	 * routes do not exist.
 	 */
 	readonly settings?: SettingsStore;
+	/**
+	 * Reads the branch and the commit of the site's repository (`GET /api/git`), asked for at each
+	 * request: the branch can be switched while the screen is open (the reader may remember an
+	 * answer for a moment, see `cachedReadGit`). Without it the answer is `null`.
+	 */
+	readonly git?: () => Promise<GitInfo | null>;
 }
 
 /** A row, as far as this module reads it. */
@@ -320,6 +328,17 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 			},
 			roots,
 		);
+	});
+
+	app.get('/api/git', async (ctx) => {
+		// Not a failure of the editor when it cannot be told: the header just shows nothing.
+		let info: GitInfo | null = null;
+		try {
+			info = (await options.git?.()) ?? null;
+		} catch {
+			info = null;
+		}
+		return ctx.json(info);
 	});
 
 	app.get('/api/values', (ctx) => {

@@ -57,6 +57,16 @@ body {
 	font-size: 1.1rem;
 }
 
+.bar .git {
+	max-width: 24rem;
+	overflow: hidden;
+	font-family: ui-monospace, monospace;
+	font-size: 0.8rem;
+	color: var(--muted);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .bar label {
 	display: grid;
 	gap: 0.15rem;

@@ -66,8 +66,10 @@ export interface Native {
 	 */
 	uiOpen(configPath: string, optionsJson: string): string;
 	/**
-	 * A page of rows: `queryJson` is `{ offset, limit, q? }`; the result is JSON (`version`,
-	 * `total`, `columns`, `overridesHash`, `pages`, `warnings`).
+	 * A page of rows: `queryJson` is `{ offset, limit, q?, sort? }`; the result is JSON
+	 * (`version`, `total`, `columns`, `layouts`, `overridesHash`, `pages`, `warnings`).
+	 * `layouts` is the names of the files in `pages.layouts.dir` (`null` when that is not set,
+	 * `[]` when the directory is not there), as read when the handle was opened or refreshed.
 	 */
 	uiPages(handle: string, queryJson: string): string;
 	/**
@@ -76,11 +78,16 @@ export interface Native {
 	 * first). A request that is not one throws.
 	 */
 	uiValues(handle: string, queryJson: string): string;
-	/** Plans the site again; the result is `{ version }`. */
+	/**
+	 * Plans the site again and reads `pages.layouts.dir` again; the result is `{ version }`. A
+	 * layouts directory that cannot be read throws, and the handle stays as it was.
+	 */
 	uiRefresh(handle: string): string;
 	/**
-	 * Makes one edit (`{ url, expect, change }`); the result is JSON, `{ ok: true, ... }` or
-	 * `{ ok: false, code, message, current? }`. A request that is not one throws.
+	 * Makes one edit (`{ url, expect, change }`, where `change.op` is `set`, `delete`, `moveUrl`
+	 * or `movePath`; `movePath` carries `path`, relative to `dir.input`); the result is JSON,
+	 * `{ ok: true, ... }` or `{ ok: false, code, message, current? }`. A move removes the
+	 * directories it leaves empty. A request that is not one throws.
 	 */
 	uiEdit(handle: string, editJson: string): string;
 	/**

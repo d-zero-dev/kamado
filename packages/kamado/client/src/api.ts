@@ -2,6 +2,7 @@ import type { SortState } from './logic/sort.js';
 import type {
 	Change,
 	Edited,
+	GitInfo,
 	Row,
 	Rows,
 	SettingsPatch,
@@ -115,6 +116,18 @@ export function fetchValues(
 ): Promise<Values> {
 	const query = new URLSearchParams({ key: column, limit: String(limit) });
 	return call<Values>(`/api/values?${query.toString()}`, { signal });
+}
+
+/**
+ * The branch and the commit of the site's repository, or `null` when there is none to show.
+ * @param signal - To drop an answer that is not wanted any more
+ * @example
+ * ```ts
+ * await fetchGit(); // { branch: 'main', sha: '51df987' }
+ * ```
+ */
+export function fetchGit(signal?: AbortSignal): Promise<GitInfo | null> {
+	return call<GitInfo | null>('/api/git', { signal });
 }
 
 /**

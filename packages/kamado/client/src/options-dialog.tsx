@@ -12,7 +12,7 @@ import {
 	mergeOptions,
 	optionsProblem,
 } from './logic/kinds.js';
-import { columnName } from './logic/layout.js';
+import { columnLabel } from './logic/layout.js';
 
 interface OptionsDialogProps {
 	/** The identifier of the column (`meta:<key>`). */
@@ -166,7 +166,7 @@ export function OptionsDialog({
 		dialog.current?.close();
 	};
 
-	const name = columnName(column);
+	const name = columnLabel(column, t);
 	return (
 		<dialog
 			ref={dialog}

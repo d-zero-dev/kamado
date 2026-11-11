@@ -9,7 +9,7 @@
  * vitest does not pick it up: it needs the native build.
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -315,6 +315,78 @@ test('a moved URL moves the files, and refreshing reads what changed outside', (
 	assert.throws(() => native().uiPages(handle, query), /no editor/);
 });
 
+test('a moved path moves the files, removes the directory it empties, and layouts are listed', () => {
+	const root = mkdtempSync(path.join(tmpdir(), 'kd-ui-'));
+	const write = (rel, text) => {
+		mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+		writeFileSync(path.join(root, rel), text);
+	};
+	write(
+		'kamado.config.jsonc',
+		JSON.stringify({
+			dir: { input: 'src', output: 'out' },
+			build: { cacheDir: '.cache' },
+			pages: { layouts: { dir: 'layouts' } },
+		}),
+	);
+	write('src/customer/send/index.html', '---\ntitle: Send\n---\n');
+	write('layouts/sub.tsx', 'export default () => null;\n');
+	write('layouts/sub-with-side.jsx', 'export default () => null;\n');
+	write('layouts/readme.md', 'not a layout');
+	const handle = native().uiOpen(path.join(root, 'kamado.config.jsonc'), '{}');
+	try {
+		let rows = JSON.parse(native().uiPages(handle, query));
+		// the names of the files, without the extension, in the order of their bytes
+		assert.deepEqual(rows.layouts, ['sub', 'sub-with-side']);
+		const send = rows.pages.find((p) => p.url === '/customer/send/');
+		const answer = JSON.parse(
+			native().uiEdit(
+				handle,
+				JSON.stringify({
+					url: '/customer/send/',
+					expect: expectOf(rows, send),
+					change: { op: 'movePath', path: 'customer/sending/' },
+				}),
+			),
+		);
+		assert.equal(answer.ok, true, JSON.stringify(answer));
+		assert.equal(answer.page.url, '/customer/sending/');
+		assert.equal(
+			readFileSync(path.join(root, 'src/customer/sending/index.html'), 'utf8'),
+			'---\ntitle: Send\n---\n',
+		);
+		// the directory it left is gone; the input directory is not
+		assert.equal(existsSync(path.join(root, 'src/customer/send')), false);
+		assert.equal(existsSync(path.join(root, 'src/customer')), true);
+
+		// a layout that is added shows after the list is read again, and not before
+		write('layouts/new-one.tsx', 'export default () => null;\n');
+		rows = JSON.parse(native().uiPages(handle, query));
+		assert.deepEqual(rows.layouts, ['sub', 'sub-with-side']);
+		native().uiRefresh(handle);
+		rows = JSON.parse(native().uiPages(handle, query));
+		assert.deepEqual(rows.layouts, ['new-one', 'sub', 'sub-with-side']);
+
+		// a path out of the input directory is refused, and nothing is written
+		const here = rows.pages.find((p) => p.url === '/customer/sending/');
+		const refused = JSON.parse(
+			native().uiEdit(
+				handle,
+				JSON.stringify({
+					url: '/customer/sending/',
+					expect: expectOf(rows, here),
+					change: { op: 'movePath', path: '../escaped.html' },
+				}),
+			),
+		);
+		assert.equal(refused.ok, false);
+		assert.equal(refused.code, 'invalid');
+		assert.equal(existsSync(path.join(root, 'escaped.html')), false);
+	} finally {
+		native().uiClose(handle);
+	}
+});
+
 test('a module, a sidecar, a deleted key and a key that makes the URL', () => {
 	const root = mkdtempSync(path.join(tmpdir(), 'kd-ui-'));
 	const write = (rel, text) => {
@@ -515,6 +587,7 @@ test('the server of kamado ui answers with what the core says, told without the 
 		// The fields the screen reads (client/src/types.ts) are the fields of the answer.
 		assert.deepEqual(Object.keys(rows).toSorted(), [
 			'columns',
+			'layouts',
 			'overridesHash',
 			'pages',
 			'total',
@@ -651,5 +724,66 @@ test('the dev server finds a page the editor moved, and no longer finds it at it
 	} finally {
 		native().serveClose(server);
 		native().uiClose(editor);
+	}
+});
+
+test('the path the screen shows for a page is the path it can send back to move the file', async () => {
+	const { createUiApp } = await import(
+		pathToFileURL(path.join(dist, 'ui', 'app.js')).href
+	);
+	const site = makeSite();
+	const handle = native().uiOpen(site.config, '{}');
+	const settings = JSON.parse(native().uiServer(handle));
+	const token = 'a-token-for-the-check';
+	const app = createUiApp(
+		{
+			handle,
+			uiPages: (h, q) => native().uiPages(h, q),
+			uiValues: (h, q) => native().uiValues(h, q),
+			uiRefresh: (h) => native().uiRefresh(h),
+			uiEdit: (h, e) => native().uiEdit(h, e),
+		},
+		{
+			uiDir: path.join(site.root, 'no-screen'),
+			token,
+			roots: {
+				rootDir: site.root,
+				inputDir: settings.inputDir,
+				outputDir: settings.outputDir,
+			},
+		},
+	);
+	try {
+		const listed = await app.request('http://localhost/api/pages?limit=100');
+		const rows = await listed.json();
+		const history = rows.pages.find((p) => p.url === '/about/history.html');
+		// what the screen shows is relative to the input directory
+		assert.equal(history.inputPath, 'about/history.html');
+		const moved = await app.request('http://localhost/api/edit', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token },
+			body: JSON.stringify({
+				url: history.url,
+				expect: {
+					input: history.hashes.input,
+					sidecar: history.hashes.sidecar,
+					overrides: rows.overridesHash,
+				},
+				// the text of the cell with its file name changed, as it is typed
+				change: {
+					op: 'movePath',
+					path: history.inputPath.replace('history', 'chronicle'),
+				},
+			}),
+		});
+		const body = await moved.json();
+		assert.equal(moved.status, 200, JSON.stringify(body));
+		// it is the file beside the old one, and not one below the input directory again
+		assert.equal(body.page.url, '/about/chronicle.html');
+		assert.equal(body.page.inputPath, 'about/chronicle.html');
+		assert.equal(site.read('src/about/chronicle.html'), '---\ntitle: History\n---\n');
+		assert.equal(existsSync(path.join(site.root, 'src/about/history.html')), false);
+	} finally {
+		native().uiClose(handle);
 	}
 });

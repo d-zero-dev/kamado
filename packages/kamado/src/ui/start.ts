@@ -13,6 +13,7 @@ import { close as closeServer, listen, listenAddresses } from '../server/listen.
 import { openBrowser } from '../server/start.js';
 
 import { createUiApp } from './app.js';
+import { cachedReadGit } from './git.js';
 import { createSettingsStore, defaultSettingsFile } from './settings.js';
 
 /** Options of {@link ui}. */
@@ -156,6 +157,7 @@ export async function ui(
 				uiDir: options.uiDir ?? UI_DIR,
 				token: randomBytes(32).toString('base64url'),
 				settings,
+				git: cachedReadGit(path.dirname(configPath)),
 				roots: {
 					rootDir: path.dirname(configPath),
 					inputDir: dev.inputDir,

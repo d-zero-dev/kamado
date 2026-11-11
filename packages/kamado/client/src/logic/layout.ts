@@ -8,6 +8,8 @@
  * A column is named by its identifier, as the server and the settings name it: `url`,
  * `virtual`, `inputPath`, or `meta:<key>` (a key called `url` is not the URL).
  */
+import type { Translate } from '../i18n/translate.js';
+
 import { metaColumns } from './columns.js';
 import { canSort, columnKey } from './sort.js';
 
@@ -130,6 +132,37 @@ export function columnIds(keys: readonly string[]): string[] {
  */
 export function columnName(id: string): string {
 	return id.startsWith('meta:') ? id.slice('meta:'.length) : id;
+}
+
+/**
+ * Whether a column of metadata has the name of a fixed column (a key called `url`, `virtual`
+ * or `inputPath`), so that the two cannot be told apart by their names.
+ * @param id - The identifier of the column
+ * @example
+ * ```ts
+ * clashesWithFixedColumn('meta:url'); // true
+ * clashesWithFixedColumn('meta:title'); // false
+ * ```
+ */
+export function clashesWithFixedColumn(id: string): boolean {
+	return id.startsWith('meta:') && BUILTIN.includes(columnName(id));
+}
+
+/**
+ * The name the screen shows for a column (the header, the menu, what is said of it): the
+ * key for a column of metadata, with a mark when a fixed column has the same name. What is
+ * written is still the key: this is for the eyes and the ears only.
+ * @param id - The identifier of the column
+ * @param t - Says the mark in the language of the screen
+ * @example
+ * ```ts
+ * columnLabel('meta:url', english); // 'url (meta)'
+ * columnLabel('url', english); // 'url'
+ * ```
+ */
+export function columnLabel(id: string, t: Translate): string {
+	const name = columnName(id);
+	return clashesWithFixedColumn(id) ? t('column.metaName', { name }) : name;
 }
 
 /**
