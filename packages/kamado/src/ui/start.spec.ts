@@ -66,6 +66,13 @@ async function start(options: Parameters<typeof ui>[1] = {}) {
 }
 
 describe('ui', () => {
+	test('refuses an unknown option before the core is called', async () => {
+		await expect(
+			ui('/s/kamado.config.jsonc', { port: 0, typo: true } as never),
+		).rejects.toThrow('unknown option: typo');
+		expect(core.uiOpen).not.toHaveBeenCalled();
+	});
+
 	test('serves the screen and the calls at the url it returns', async () => {
 		const { editor } = await start();
 		expect(editor.url).toMatch(/^http:\/\/localhost:\d+\/$/);

@@ -26,55 +26,6 @@ export interface PagesCommandOptions extends PagesOptions {
 	readonly out?: string;
 }
 
-/** The flags of the other commands, as `parseArgs` gives them, which `pages` does not read. */
-export interface PagesUnusedFlags {
-	readonly force?: boolean;
-	readonly 'skip-unchanged'?: boolean;
-	readonly verbose?: boolean;
-	readonly jobs?: string;
-}
-
-/**
- * Refuses what `pages` does not take: a position argument (it would read as the globs of
- * `build`, and the whole list would come back without a word) and the flags of the other
- * commands (`--force` would not force anything). Said out loud rather than ignored, as a typo
- * in the config is.
- * @param positionals - The arguments after the command
- * @param flags - The flags that were given
- * @throws {Error} naming what is not taken
- * @example
- * ```ts
- * checkPagesArguments([], { force: true });
- * // Error: pages does not take --force (it takes --out, --incremental, --cache-dir and --config)
- * ```
- */
-export function checkPagesArguments(
-	positionals: readonly string[],
-	flags: PagesUnusedFlags,
-): void {
-	if (positionals.length > 0) {
-		throw new Error('pages takes no arguments (it lists every page of the plan)');
-	}
-	const given: string[] = [];
-	if (flags.force) {
-		given.push('--force');
-	}
-	if (flags.jobs !== undefined) {
-		given.push('--jobs');
-	}
-	if (flags['skip-unchanged']) {
-		given.push('--skip-unchanged');
-	}
-	if (flags.verbose) {
-		given.push('--verbose');
-	}
-	if (given.length > 0) {
-		throw new Error(
-			`pages does not take ${given.join(', ')} (it takes --out, --incremental, --cache-dir and --config)`,
-		);
-	}
-}
-
 /**
  * The process's streams and clock, for the command line.
  */

@@ -49,26 +49,6 @@ export interface SettingsCommandEnvironment {
 }
 
 /**
- * Refuses `--all` for the commands that have nothing to remove.
- * @param command - The command
- * @param flags - The flags that were given
- * @throws {Error} naming the flag
- * @example
- * ```ts
- * checkSettingsOnlyFlag('build', { all: true });
- * // Error: build does not take --all (only ui-settings delete does)
- * ```
- */
-export function checkSettingsOnlyFlag(
-	command: string,
-	flags: Pick<SettingsCommandFlags, 'all'>,
-): void {
-	if (flags.all) {
-		throw new Error(`${command} does not take --all (only ui-settings delete does)`);
-	}
-}
-
-/**
  * Refuses the flags the command does not read.
  * @param flags - The flags that were given
  * @throws {Error} naming them
@@ -249,3 +229,5 @@ export async function settingsCommand(
 		...(warning === null ? [] : [`warning: ${warning}`]),
 	].join('\n');
 }
+
+export { checkSettingsOnlyFlag } from '../cli-arguments.js';

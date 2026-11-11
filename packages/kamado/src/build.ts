@@ -41,6 +41,24 @@ export interface BuildOptions {
 	readonly onProgress?: (done: number, total: number) => void;
 }
 
+/**
+ * Keys {@link build} / {@link buildFrom} read. Kept next to {@link BuildOptions} so a new
+ * field is either allowed here or refused as `unknown option`.
+ * @example
+ * ```ts
+ * assertKnownOptions({ incremental: true }, BUILD_OPTION_KEYS);
+ * ```
+ */
+export const BUILD_OPTION_KEYS = [
+	'incremental',
+	'force',
+	'skipUnchanged',
+	'targets',
+	'jobs',
+	'cacheDir',
+	'onProgress',
+] as const satisfies readonly (keyof BuildOptions)[];
+
 export type PageStatus = 'built' | 'cached' | 'unchanged' | 'skipped' | 'virtual';
 
 export interface PageResult {
@@ -79,7 +97,8 @@ export interface BuildReport {
  * @param configPath - Absolute path of the config file
  * @param options - Build switches
  * @returns The build report
- * @throws {Error} when an entry of `targets` is a path that does not exist or a negated glob
+ * @throws {Error} when an entry of `targets` is a path that does not exist or a negated glob, or
+ * when `options` has a key that is not in {@link BUILD_OPTION_KEYS} (`unknown option: <key>`)
  * @example
  * ```ts
  * const report = await build('/site/kamado.config.jsonc', { incremental: true });
