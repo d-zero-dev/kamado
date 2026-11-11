@@ -1,0 +1,3422 @@
+[
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": "v",
+		"expected": "{\"a\":1,\"b\":[1,2,\"v\"],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": "日本語",
+		"expected": "{\"a\":1,\"b\":[1,2,\"日本語\"],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "{\"a\":1,\"b\":[1,2,\"with \\\"quote\\\" and \\\\ and\\nnewline\"],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": 7,
+		"expected": "{\"a\":1,\"b\":[1,2,7],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": -3,
+		"expected": "{\"a\":1,\"b\":[1,2,-3],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": 1.5,
+		"expected": "{\"a\":1,\"b\":[1,2,1.5],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": -0.25,
+		"expected": "{\"a\":1,\"b\":[1,2,-0.25],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": 1e+21,
+		"expected": "{\"a\":1,\"b\":[1,2,1e+21],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": 1e-7,
+		"expected": "{\"a\":1,\"b\":[1,2,1e-7],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": true,
+		"expected": "{\"a\":1,\"b\":[1,2,true],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": false,
+		"expected": "{\"a\":1,\"b\":[1,2,false],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": null,
+		"expected": "{\"a\":1,\"b\":[1,2,null],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "{\"a\":1,\"b\":[1,2,[1,\"two\",null]],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "{\"a\":1,\"b\":[1,2,{\"k\":\"v\",\"n\":{\"m\":1}}],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": [],
+		"expected": "{\"a\":1,\"b\":[1,2,[]],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": {},
+		"expected": "{\"a\":1,\"b\":[1,2,{}],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{ \"a\": 1, \"b\": [1, 2], \"c\": { \"d\": null } }",
+		"op": "deleteElement",
+		"path": [
+			"b"
+		],
+		"index": 0,
+		"expected": "{\"a\":1,\"b\":[2],\"c\":{\"d\":null}}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": "v",
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,\"v\"]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": "日本語",
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,\"日本語\"]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,\"with \\\"quote\\\" and \\\\ and\\nnewline\"]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": 7,
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,7]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": -3,
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,-3]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": 1.5,
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,1.5]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": -0.25,
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,-0.25]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": 1e+21,
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,1e+21]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": 1e-7,
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,1e-7]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": true,
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,true]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": false,
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,false]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": null,
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,null]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,[1,\"two\",null]]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,{\"k\":\"v\",\"n\":{\"m\":1}}]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": [],
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,[]]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "push",
+		"path": [
+			"o",
+			"y"
+		],
+		"value": {},
+		"expected": "{\"o\":{\"x\":1,\"y\":[1,2,{}]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "deleteElement",
+		"path": [
+			"o",
+			"y"
+		],
+		"index": 0,
+		"expected": "{\"o\":{\"x\":1,\"y\":[2]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"o\": {\n\t\t\"x\": 1,\n\t\t\"y\": [\n\t\t\t1,\n\t\t\t2\n\t\t]\n\t},\n\t\"z\": true\n}\n",
+		"op": "deleteElement",
+		"path": [
+			"o",
+			"y"
+		],
+		"index": 1,
+		"expected": "{\"o\":{\"x\":1,\"y\":[1]},\"z\":true}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": "v",
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},\"v\"]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": "日本語",
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},\"日本語\"]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},\"with \\\"quote\\\" and \\\\ and\\nnewline\"]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 7,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},7]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": -3,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},-3]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 1.5,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},1.5]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": -0.25,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},-0.25]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 1e+21,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},1e+21]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 1e-7,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},1e-7]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": true,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},true]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": false,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},false]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": null,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},null]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},[1,\"two\",null]]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},{\"k\":\"v\",\"n\":{\"m\":1}}]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": [],
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},[]]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": {},
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},{}]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "deleteElement",
+		"path": [
+			"pages"
+		],
+		"index": 0,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/b/\",\"virtual\":true}]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"meta\": { \"t\": 1 } },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n",
+		"op": "deleteElement",
+		"path": [
+			"pages"
+		],
+		"index": 1,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}}]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": "v",
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},\"v\"]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": "日本語",
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},\"日本語\"]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},\"with \\\"quote\\\" and \\\\ and\\nnewline\"]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 7,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},7]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": -3,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},-3]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 1.5,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},1.5]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": -0.25,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},-0.25]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 1e+21,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},1e+21]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 1e-7,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},1e-7]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": true,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},true]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": false,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},false]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": null,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},null]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},[1,\"two\",null]]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},{\"k\":\"v\",\"n\":{\"m\":1}}]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": [],
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},[]]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": {},
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"},{}]}"
+	},
+	{
+		"text": "{\"version\":1,\"pages\":[{\"url\":\"/a/\"}]}",
+		"op": "deleteElement",
+		"path": [
+			"pages"
+		],
+		"index": 0,
+		"expected": "{\"version\":1,\"pages\":[]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": "v",
+		"expected": "{\"a\":{},\"b\":[\"v\"]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": "日本語",
+		"expected": "{\"a\":{},\"b\":[\"日本語\"]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "{\"a\":{},\"b\":[\"with \\\"quote\\\" and \\\\ and\\nnewline\"]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": 7,
+		"expected": "{\"a\":{},\"b\":[7]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": -3,
+		"expected": "{\"a\":{},\"b\":[-3]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": 1.5,
+		"expected": "{\"a\":{},\"b\":[1.5]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": -0.25,
+		"expected": "{\"a\":{},\"b\":[-0.25]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": 1e+21,
+		"expected": "{\"a\":{},\"b\":[1e+21]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": 1e-7,
+		"expected": "{\"a\":{},\"b\":[1e-7]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": true,
+		"expected": "{\"a\":{},\"b\":[true]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": false,
+		"expected": "{\"a\":{},\"b\":[false]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": null,
+		"expected": "{\"a\":{},\"b\":[null]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "{\"a\":{},\"b\":[[1,\"two\",null]]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "{\"a\":{},\"b\":[{\"k\":\"v\",\"n\":{\"m\":1}}]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": [],
+		"expected": "{\"a\":{},\"b\":[[]]}"
+	},
+	{
+		"text": "{\"a\":{},\"b\":[]}",
+		"op": "push",
+		"path": [
+			"b"
+		],
+		"value": {},
+		"expected": "{\"a\":{},\"b\":[{}]}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": "v",
+		"expected": "{\"a\":[\"v\"],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": "日本語",
+		"expected": "{\"a\":[\"日本語\"],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "{\"a\":[\"with \\\"quote\\\" and \\\\ and\\nnewline\"],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": 7,
+		"expected": "{\"a\":[7],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": -3,
+		"expected": "{\"a\":[-3],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": 1.5,
+		"expected": "{\"a\":[1.5],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": -0.25,
+		"expected": "{\"a\":[-0.25],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": 1e+21,
+		"expected": "{\"a\":[1e+21],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": 1e-7,
+		"expected": "{\"a\":[1e-7],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": true,
+		"expected": "{\"a\":[true],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": false,
+		"expected": "{\"a\":[false],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": null,
+		"expected": "{\"a\":[null],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "{\"a\":[[1,\"two\",null]],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "{\"a\":[{\"k\":\"v\",\"n\":{\"m\":1}}],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": [],
+		"expected": "{\"a\":[[]],\"b\":{}}"
+	},
+	{
+		"text": "{\n\t\"a\": [\n\t],\n\t\"b\": {\n\t}\n}\n",
+		"op": "push",
+		"path": [
+			"a"
+		],
+		"value": {},
+		"expected": "{\"a\":[{}],\"b\":{}}"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": "v",
+		"expected": "[\"v\"]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": "日本語",
+		"expected": "[\"日本語\"]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[\"with \\\"quote\\\" and \\\\ and\\nnewline\"]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": 7,
+		"expected": "[7]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": -3,
+		"expected": "[-3]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": 1.5,
+		"expected": "[1.5]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": -0.25,
+		"expected": "[-0.25]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": 1e+21,
+		"expected": "[1e+21]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": 1e-7,
+		"expected": "[1e-7]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": true,
+		"expected": "[true]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": false,
+		"expected": "[false]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": null,
+		"expected": "[null]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[[1,\"two\",null]]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[{\"k\":\"v\",\"n\":{\"m\":1}}]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": [],
+		"expected": "[[]]"
+	},
+	{
+		"text": "[]",
+		"op": "push",
+		"path": [],
+		"value": {},
+		"expected": "[{}]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": "v",
+		"expected": "[1,\"v\"]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": "日本語",
+		"expected": "[1,\"日本語\"]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[1,\"with \\\"quote\\\" and \\\\ and\\nnewline\"]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": 7,
+		"expected": "[1,7]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": -3,
+		"expected": "[1,-3]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": 1.5,
+		"expected": "[1,1.5]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": -0.25,
+		"expected": "[1,-0.25]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": 1e+21,
+		"expected": "[1,1e+21]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": 1e-7,
+		"expected": "[1,1e-7]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": true,
+		"expected": "[1,true]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": false,
+		"expected": "[1,false]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": null,
+		"expected": "[1,null]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[1,[1,\"two\",null]]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[1,{\"k\":\"v\",\"n\":{\"m\":1}}]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": [],
+		"expected": "[1,[]]"
+	},
+	{
+		"text": "[1]",
+		"op": "push",
+		"path": [],
+		"value": {},
+		"expected": "[1,{}]"
+	},
+	{
+		"text": "[1]",
+		"op": "deleteElement",
+		"path": [],
+		"index": 0,
+		"expected": "[]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": "v",
+		"expected": "[1,2,3,\"v\"]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": "日本語",
+		"expected": "[1,2,3,\"日本語\"]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[1,2,3,\"with \\\"quote\\\" and \\\\ and\\nnewline\"]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": 7,
+		"expected": "[1,2,3,7]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": -3,
+		"expected": "[1,2,3,-3]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": 1.5,
+		"expected": "[1,2,3,1.5]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": -0.25,
+		"expected": "[1,2,3,-0.25]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": 1e+21,
+		"expected": "[1,2,3,1e+21]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": 1e-7,
+		"expected": "[1,2,3,1e-7]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": true,
+		"expected": "[1,2,3,true]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": false,
+		"expected": "[1,2,3,false]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": null,
+		"expected": "[1,2,3,null]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[1,2,3,[1,\"two\",null]]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[1,2,3,{\"k\":\"v\",\"n\":{\"m\":1}}]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": [],
+		"expected": "[1,2,3,[]]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "push",
+		"path": [],
+		"value": {},
+		"expected": "[1,2,3,{}]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "deleteElement",
+		"path": [],
+		"index": 0,
+		"expected": "[2,3]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "deleteElement",
+		"path": [],
+		"index": 1,
+		"expected": "[1,3]"
+	},
+	{
+		"text": "[ 1, 2, 3 ]",
+		"op": "deleteElement",
+		"path": [],
+		"index": 2,
+		"expected": "[1,2]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "v",
+		"expected": "[1,2,\"v\"]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "日本語",
+		"expected": "[1,2,\"日本語\"]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[1,2,\"with \\\"quote\\\" and \\\\ and\\nnewline\"]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 7,
+		"expected": "[1,2,7]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": -3,
+		"expected": "[1,2,-3]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1.5,
+		"expected": "[1,2,1.5]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": -0.25,
+		"expected": "[1,2,-0.25]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1e+21,
+		"expected": "[1,2,1e+21]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1e-7,
+		"expected": "[1,2,1e-7]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": true,
+		"expected": "[1,2,true]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": false,
+		"expected": "[1,2,false]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": null,
+		"expected": "[1,2,null]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[1,2,[1,\"two\",null]]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[1,2,{\"k\":\"v\",\"n\":{\"m\":1}}]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": [],
+		"expected": "[1,2,[]]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": {},
+		"expected": "[1,2,{}]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "deleteElement",
+		"path": [],
+		"index": 0,
+		"expected": "[2]"
+	},
+	{
+		"text": "[\n\t1,\n\t2\n]\n",
+		"op": "deleteElement",
+		"path": [],
+		"index": 1,
+		"expected": "[1]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "v",
+		"expected": "[1,2,\"v\"]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "日本語",
+		"expected": "[1,2,\"日本語\"]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[1,2,\"with \\\"quote\\\" and \\\\ and\\nnewline\"]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 7,
+		"expected": "[1,2,7]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": -3,
+		"expected": "[1,2,-3]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1.5,
+		"expected": "[1,2,1.5]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": -0.25,
+		"expected": "[1,2,-0.25]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1e+21,
+		"expected": "[1,2,1e+21]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1e-7,
+		"expected": "[1,2,1e-7]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": true,
+		"expected": "[1,2,true]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": false,
+		"expected": "[1,2,false]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": null,
+		"expected": "[1,2,null]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[1,2,[1,\"two\",null]]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[1,2,{\"k\":\"v\",\"n\":{\"m\":1}}]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": [],
+		"expected": "[1,2,[]]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "push",
+		"path": [],
+		"value": {},
+		"expected": "[1,2,{}]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "deleteElement",
+		"path": [],
+		"index": 0,
+		"expected": "[2]"
+	},
+	{
+		"text": "[\n  1,\n  2,\n]\n",
+		"op": "deleteElement",
+		"path": [],
+		"index": 1,
+		"expected": "[1]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "v",
+		"expected": "[1,2,\"v\"]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "日本語",
+		"expected": "[1,2,\"日本語\"]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[1,2,\"with \\\"quote\\\" and \\\\ and\\nnewline\"]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 7,
+		"expected": "[1,2,7]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": -3,
+		"expected": "[1,2,-3]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1.5,
+		"expected": "[1,2,1.5]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": -0.25,
+		"expected": "[1,2,-0.25]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1e+21,
+		"expected": "[1,2,1e+21]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1e-7,
+		"expected": "[1,2,1e-7]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": true,
+		"expected": "[1,2,true]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": false,
+		"expected": "[1,2,false]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": null,
+		"expected": "[1,2,null]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[1,2,[1,\"two\",null]]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[1,2,{\"k\":\"v\",\"n\":{\"m\":1}}]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": [],
+		"expected": "[1,2,[]]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "push",
+		"path": [],
+		"value": {},
+		"expected": "[1,2,{}]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "deleteElement",
+		"path": [],
+		"index": 0,
+		"expected": "[2]"
+	},
+	{
+		"text": "// head\n[\n\t// a\n\t1, // one\n\t/* b */ 2\n]\n",
+		"op": "deleteElement",
+		"path": [],
+		"index": 1,
+		"expected": "[1]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": "v",
+		"expected": "[1,2,\"v\"]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": "日本語",
+		"expected": "[1,2,\"日本語\"]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[1,2,\"with \\\"quote\\\" and \\\\ and\\nnewline\"]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": 7,
+		"expected": "[1,2,7]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": -3,
+		"expected": "[1,2,-3]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": 1.5,
+		"expected": "[1,2,1.5]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": -0.25,
+		"expected": "[1,2,-0.25]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": 1e+21,
+		"expected": "[1,2,1e+21]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": 1e-7,
+		"expected": "[1,2,1e-7]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": true,
+		"expected": "[1,2,true]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": false,
+		"expected": "[1,2,false]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": null,
+		"expected": "[1,2,null]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[1,2,[1,\"two\",null]]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[1,2,{\"k\":\"v\",\"n\":{\"m\":1}}]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": [],
+		"expected": "[1,2,[]]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "push",
+		"path": [],
+		"value": {},
+		"expected": "[1,2,{}]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "deleteElement",
+		"path": [],
+		"index": 0,
+		"expected": "[2]"
+	},
+	{
+		"text": "[\r\n\t1,\r\n\t2\r\n]\r\n",
+		"op": "deleteElement",
+		"path": [],
+		"index": 1,
+		"expected": "[1]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "v",
+		"expected": "[\"v\"]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "日本語",
+		"expected": "[\"日本語\"]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[\"with \\\"quote\\\" and \\\\ and\\nnewline\"]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 7,
+		"expected": "[7]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": -3,
+		"expected": "[-3]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1.5,
+		"expected": "[1.5]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": -0.25,
+		"expected": "[-0.25]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1e+21,
+		"expected": "[1e+21]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1e-7,
+		"expected": "[1e-7]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": true,
+		"expected": "[true]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": false,
+		"expected": "[false]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": null,
+		"expected": "[null]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[[1,\"two\",null]]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[{\"k\":\"v\",\"n\":{\"m\":1}}]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": [],
+		"expected": "[[]]"
+	},
+	{
+		"text": "[\n]\n",
+		"op": "push",
+		"path": [],
+		"value": {},
+		"expected": "[{}]"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": "v",
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},\"v\"]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": "日本語",
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},\"日本語\"]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},\"with \\\"quote\\\" and \\\\ and\\nnewline\"]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 7,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},7]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": -3,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},-3]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 1.5,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},1.5]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": -0.25,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},-0.25]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 1e+21,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},1e+21]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 1e-7,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},1e-7]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": true,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},true]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": false,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},false]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": null,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},null]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},[1,\"two\",null]]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},{\"k\":\"v\",\"n\":{\"m\":1}}]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": [],
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},[]]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": {},
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}},{\"url\":\"/b/\",\"virtual\":true},{}]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "deleteElement",
+		"path": [
+			"pages"
+		],
+		"index": 0,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/b/\",\"virtual\":true}]}"
+	},
+	{
+		"text": "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{\n\t\t\t\"url\": \"/a/\",\n\t\t\t\"meta\": { \"t\": 1 }\n\t\t}, // a\n\t\t{\n\t\t\t\"url\": \"/b/\",\n\t\t\t\"virtual\": true\n\t\t}\n\t]\n}\n",
+		"op": "deleteElement",
+		"path": [
+			"pages"
+		],
+		"index": 1,
+		"expected": "{\"version\":1,\"pages\":[{\"url\":\"/a/\",\"meta\":{\"t\":1}}]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": "v",
+		"expected": "{\"version\":1,\"pages\":[\"v\"]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": "日本語",
+		"expected": "{\"version\":1,\"pages\":[\"日本語\"]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "{\"version\":1,\"pages\":[\"with \\\"quote\\\" and \\\\ and\\nnewline\"]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 7,
+		"expected": "{\"version\":1,\"pages\":[7]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": -3,
+		"expected": "{\"version\":1,\"pages\":[-3]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 1.5,
+		"expected": "{\"version\":1,\"pages\":[1.5]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": -0.25,
+		"expected": "{\"version\":1,\"pages\":[-0.25]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 1e+21,
+		"expected": "{\"version\":1,\"pages\":[1e+21]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": 1e-7,
+		"expected": "{\"version\":1,\"pages\":[1e-7]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": true,
+		"expected": "{\"version\":1,\"pages\":[true]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": false,
+		"expected": "{\"version\":1,\"pages\":[false]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": null,
+		"expected": "{\"version\":1,\"pages\":[null]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "{\"version\":1,\"pages\":[[1,\"two\",null]]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "{\"version\":1,\"pages\":[{\"k\":\"v\",\"n\":{\"m\":1}}]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": [],
+		"expected": "{\"version\":1,\"pages\":[[]]}"
+	},
+	{
+		"text": "{ \"version\": 1, \"pages\": [] }",
+		"op": "push",
+		"path": [
+			"pages"
+		],
+		"value": {},
+		"expected": "{\"version\":1,\"pages\":[{}]}"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": "v",
+		"expected": "[1,\"v\"]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": "日本語",
+		"expected": "[1,\"日本語\"]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[1,\"with \\\"quote\\\" and \\\\ and\\nnewline\"]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": 7,
+		"expected": "[1,7]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": -3,
+		"expected": "[1,-3]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": 1.5,
+		"expected": "[1,1.5]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": -0.25,
+		"expected": "[1,-0.25]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": 1e+21,
+		"expected": "[1,1e+21]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": 1e-7,
+		"expected": "[1,1e-7]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": true,
+		"expected": "[1,true]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": false,
+		"expected": "[1,false]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": null,
+		"expected": "[1,null]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[1,[1,\"two\",null]]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[1,{\"k\":\"v\",\"n\":{\"m\":1}}]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": [],
+		"expected": "[1,[]]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "push",
+		"path": [],
+		"value": {},
+		"expected": "[1,{}]"
+	},
+	{
+		"text": "[ 1 /* tail */ ]",
+		"op": "deleteElement",
+		"path": [],
+		"index": 0,
+		"expected": "[]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "v",
+		"expected": "[1,\"v\"]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "日本語",
+		"expected": "[1,\"日本語\"]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[1,\"with \\\"quote\\\" and \\\\ and\\nnewline\"]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 7,
+		"expected": "[1,7]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": -3,
+		"expected": "[1,-3]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1.5,
+		"expected": "[1,1.5]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": -0.25,
+		"expected": "[1,-0.25]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1e+21,
+		"expected": "[1,1e+21]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": 1e-7,
+		"expected": "[1,1e-7]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": true,
+		"expected": "[1,true]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": false,
+		"expected": "[1,false]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": null,
+		"expected": "[1,null]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[1,[1,\"two\",null]]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[1,{\"k\":\"v\",\"n\":{\"m\":1}}]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": [],
+		"expected": "[1,[]]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "push",
+		"path": [],
+		"value": {},
+		"expected": "[1,{}]"
+	},
+	{
+		"text": "[\n\t1 // last, no comma\n]\n",
+		"op": "deleteElement",
+		"path": [],
+		"index": 0,
+		"expected": "[]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": "v",
+		"expected": "[[1,2],[],[[3]],\"v\"]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": "日本語",
+		"expected": "[[1,2],[],[[3]],\"日本語\"]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[[1,2],[],[[3]],\"with \\\"quote\\\" and \\\\ and\\nnewline\"]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": 7,
+		"expected": "[[1,2],[],[[3]],7]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": -3,
+		"expected": "[[1,2],[],[[3]],-3]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": 1.5,
+		"expected": "[[1,2],[],[[3]],1.5]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": -0.25,
+		"expected": "[[1,2],[],[[3]],-0.25]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": 1e+21,
+		"expected": "[[1,2],[],[[3]],1e+21]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": 1e-7,
+		"expected": "[[1,2],[],[[3]],1e-7]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": true,
+		"expected": "[[1,2],[],[[3]],true]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": false,
+		"expected": "[[1,2],[],[[3]],false]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": null,
+		"expected": "[[1,2],[],[[3]],null]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[[1,2],[],[[3]],[1,\"two\",null]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[[1,2],[],[[3]],{\"k\":\"v\",\"n\":{\"m\":1}}]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": [],
+		"expected": "[[1,2],[],[[3]],[]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [],
+		"value": {},
+		"expected": "[[1,2],[],[[3]],{}]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "deleteElement",
+		"path": [],
+		"index": 0,
+		"expected": "[[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "deleteElement",
+		"path": [],
+		"index": 1,
+		"expected": "[[1,2],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "deleteElement",
+		"path": [],
+		"index": 2,
+		"expected": "[[1,2],[]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": "v",
+		"expected": "[[1,2,\"v\"],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": "日本語",
+		"expected": "[[1,2,\"日本語\"],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[[1,2,\"with \\\"quote\\\" and \\\\ and\\nnewline\"],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": 7,
+		"expected": "[[1,2,7],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": -3,
+		"expected": "[[1,2,-3],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": 1.5,
+		"expected": "[[1,2,1.5],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": -0.25,
+		"expected": "[[1,2,-0.25],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": 1e+21,
+		"expected": "[[1,2,1e+21],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": 1e-7,
+		"expected": "[[1,2,1e-7],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": true,
+		"expected": "[[1,2,true],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": false,
+		"expected": "[[1,2,false],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": null,
+		"expected": "[[1,2,null],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[[1,2,[1,\"two\",null]],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[[1,2,{\"k\":\"v\",\"n\":{\"m\":1}}],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": [],
+		"expected": "[[1,2,[]],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			0
+		],
+		"value": {},
+		"expected": "[[1,2,{}],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "deleteElement",
+		"path": [
+			0
+		],
+		"index": 0,
+		"expected": "[[2],[],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": "v",
+		"expected": "[[1,2],[\"v\"],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": "日本語",
+		"expected": "[[1,2],[\"日本語\"],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[[1,2],[\"with \\\"quote\\\" and \\\\ and\\nnewline\"],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": 7,
+		"expected": "[[1,2],[7],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": -3,
+		"expected": "[[1,2],[-3],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": 1.5,
+		"expected": "[[1,2],[1.5],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": -0.25,
+		"expected": "[[1,2],[-0.25],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": 1e+21,
+		"expected": "[[1,2],[1e+21],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": 1e-7,
+		"expected": "[[1,2],[1e-7],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": true,
+		"expected": "[[1,2],[true],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": false,
+		"expected": "[[1,2],[false],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": null,
+		"expected": "[[1,2],[null],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[[1,2],[[1,\"two\",null]],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[[1,2],[{\"k\":\"v\",\"n\":{\"m\":1}}],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": [],
+		"expected": "[[1,2],[[]],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			1
+		],
+		"value": {},
+		"expected": "[[1,2],[{}],[[3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": "v",
+		"expected": "[[1,2],[],[[3],\"v\"]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": "日本語",
+		"expected": "[[1,2],[],[[3],\"日本語\"]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[[1,2],[],[[3],\"with \\\"quote\\\" and \\\\ and\\nnewline\"]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": 7,
+		"expected": "[[1,2],[],[[3],7]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": -3,
+		"expected": "[[1,2],[],[[3],-3]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": 1.5,
+		"expected": "[[1,2],[],[[3],1.5]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": -0.25,
+		"expected": "[[1,2],[],[[3],-0.25]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": 1e+21,
+		"expected": "[[1,2],[],[[3],1e+21]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": 1e-7,
+		"expected": "[[1,2],[],[[3],1e-7]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": true,
+		"expected": "[[1,2],[],[[3],true]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": false,
+		"expected": "[[1,2],[],[[3],false]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": null,
+		"expected": "[[1,2],[],[[3],null]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[[1,2],[],[[3],[1,\"two\",null]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[[1,2],[],[[3],{\"k\":\"v\",\"n\":{\"m\":1}}]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": [],
+		"expected": "[[1,2],[],[[3],[]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2
+		],
+		"value": {},
+		"expected": "[[1,2],[],[[3],{}]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "deleteElement",
+		"path": [
+			2
+		],
+		"index": 0,
+		"expected": "[[1,2],[],[]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": "v",
+		"expected": "[[1,2],[],[[3,\"v\"]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": "日本語",
+		"expected": "[[1,2],[],[[3,\"日本語\"]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": "with \"quote\" and \\ and\nnewline",
+		"expected": "[[1,2],[],[[3,\"with \\\"quote\\\" and \\\\ and\\nnewline\"]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": 7,
+		"expected": "[[1,2],[],[[3,7]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": -3,
+		"expected": "[[1,2],[],[[3,-3]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": 1.5,
+		"expected": "[[1,2],[],[[3,1.5]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": -0.25,
+		"expected": "[[1,2],[],[[3,-0.25]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": 1e+21,
+		"expected": "[[1,2],[],[[3,1e+21]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": 1e-7,
+		"expected": "[[1,2],[],[[3,1e-7]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": true,
+		"expected": "[[1,2],[],[[3,true]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": false,
+		"expected": "[[1,2],[],[[3,false]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": null,
+		"expected": "[[1,2],[],[[3,null]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": [
+			1,
+			"two",
+			null
+		],
+		"expected": "[[1,2],[],[[3,[1,\"two\",null]]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": {
+			"k": "v",
+			"n": {
+				"m": 1
+			}
+		},
+		"expected": "[[1,2],[],[[3,{\"k\":\"v\",\"n\":{\"m\":1}}]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": [],
+		"expected": "[[1,2],[],[[3,[]]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "push",
+		"path": [
+			2,
+			0
+		],
+		"value": {},
+		"expected": "[[1,2],[],[[3,{}]]]"
+	},
+	{
+		"text": "[[1, 2], [], [[3]]]",
+		"op": "deleteElement",
+		"path": [
+			2,
+			0
+		],
+		"index": 0,
+		"expected": "[[1,2],[],[[]]]"
+	}
+]

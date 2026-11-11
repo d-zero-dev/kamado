@@ -17,7 +17,11 @@
 //! other tools, so "the same bytes everywhere else" is the contract, and no
 //! style of ours would match all of them.
 //!
-//! A value that is written (`set_member`) is compact JSON, wherever it goes.
+//! A value that is written (`set_member`, `push_element`) is compact JSON, wherever it goes.
+//!
+//! The items of an array are laid out by the same rules as the members of an object
+//! (`push_element` adds after the last item, `delete_element` removes one with its comma):
+//! `pages.overrides` is an array of entries, and a page that is added or removed is one item.
 
 use std::fmt;
 
@@ -524,6 +528,84 @@ fn delete_member_in(
 	Ok(remove_entry(text, &lay, idx))
 }
 
+/// Adds `value` as the last item of the array at `path`, in the layout the array already uses
+/// (one line per item or inline, the indentation, a trailing comma or none). An empty array
+/// that is written on one line gets the item on that line; one that spans lines gets it on a
+/// line of its own, one level deeper than the array.
+///
+/// # Errors
+///
+/// [`EditError`] if the text is not valid, or `path` does not lead to an array.
+///
+/// # Example
+///
+/// ```
+/// use kd_jsonc::edit::{Seg, push_element};
+/// let text = "{\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\" }\n\t]\n}\n";
+/// let entry = kd_jsonc::parse(r#"{"url":"/b/","virtual":true}"#).unwrap();
+/// assert_eq!(
+///     push_element(text, &[Seg::Key("pages")], &entry).unwrap(),
+///     "{\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\" },\n\t\t{\"url\":\"/b/\",\"virtual\":true}\n\t]\n}\n"
+/// );
+/// ```
+pub fn push_element(text: &str, path: &[Seg<'_>], value: &Value) -> Result<String, EditError> {
+	push_element_in(text, path, value, true)
+}
+
+fn push_element_in(
+	text: &str,
+	path: &[Seg<'_>],
+	value: &Value,
+	validate: bool,
+) -> Result<String, EditError> {
+	let lay = locate(text, path, validate)?;
+	if lay.object {
+		return Err(EditError::NotAContainer(path_text(path)));
+	}
+	Ok(insert_entry(text, &lay, "", &value.to_json()))
+}
+
+/// Removes the item `index` of the array at `path`, with its comma and the lines it sat on
+/// (and a `//` comment at the end of its last line).
+///
+/// # Errors
+///
+/// [`EditError::NoSuchPath`] if the array has no such item; the others as for
+/// [`push_element`].
+///
+/// # Example
+///
+/// ```
+/// use kd_jsonc::edit::{Seg, delete_element};
+/// let text = "{\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\" },\n\t\t{ \"url\": \"/b/\" }\n\t]\n}\n";
+/// assert_eq!(
+///     delete_element(text, &[Seg::Key("pages")], 1).unwrap(),
+///     "{\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\" }\n\t]\n}\n"
+/// );
+/// ```
+pub fn delete_element(text: &str, path: &[Seg<'_>], index: usize) -> Result<String, EditError> {
+	delete_element_in(text, path, index, true)
+}
+
+fn delete_element_in(
+	text: &str,
+	path: &[Seg<'_>],
+	index: usize,
+	validate: bool,
+) -> Result<String, EditError> {
+	let lay = locate(text, path, validate)?;
+	if lay.object {
+		return Err(EditError::NotAContainer(path_text(path)));
+	}
+	if index >= lay.entries.len() {
+		return Err(EditError::NoSuchPath(format!(
+			"{}[{index}]",
+			path_text(path)
+		)));
+	}
+	Ok(remove_entry(text, &lay, index))
+}
+
 fn remove_entry(text: &str, lay: &Layout, idx: usize) -> String {
 	let e = &lay.entries[idx];
 	let after = e.comma.map_or(e.value_end, |c| c + 1);
@@ -678,6 +760,24 @@ impl Trusted<'_> {
 	/// As for [`delete_member`].
 	pub fn delete_member(&self, path: &[Seg<'_>], key: &str) -> Result<String, EditError> {
 		delete_member_in(self.0, path, key, false)
+	}
+
+	/// [`push_element`] without the validation.
+	///
+	/// # Errors
+	///
+	/// As for [`push_element`].
+	pub fn push_element(&self, path: &[Seg<'_>], value: &Value) -> Result<String, EditError> {
+		push_element_in(self.0, path, value, false)
+	}
+
+	/// [`delete_element`] without the validation.
+	///
+	/// # Errors
+	///
+	/// As for [`delete_element`].
+	pub fn delete_element(&self, path: &[Seg<'_>], index: usize) -> Result<String, EditError> {
+		delete_element_in(self.0, path, index, false)
 	}
 
 	/// The byte range of the value at `path`: an object member or an array item.
@@ -1003,6 +1103,131 @@ mod tests {
 		assert_eq!(
 			trusted(text).value_range(&[Seg::Key("pages"), Seg::Index(9)]),
 			Err(EditError::NoSuchPath("$.pages[9]".to_string()))
+		);
+	}
+
+	#[test]
+	fn pushing_follows_the_layout_of_a_multiline_array() {
+		let text =
+			"{\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\" },\n\t\t{ \"url\": \"/b/\" }\n\t]\n}\n";
+		let entry = parse(r#"{"url":"/c/","virtual":true}"#).unwrap();
+		assert_eq!(
+			push_element(text, &[Seg::Key("pages")], &entry).unwrap(),
+			"{\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\" },\n\t\t{ \"url\": \"/b/\" },\n\t\t{\"url\":\"/c/\",\"virtual\":true}\n\t]\n}\n"
+		);
+	}
+
+	#[test]
+	fn pushing_keeps_a_trailing_comma_style_and_goes_after_a_line_comment() {
+		let text = "[\n  1,\n  2, // two\n]\n";
+		assert_eq!(
+			push_element(text, &[], &n(3.0)).unwrap(),
+			"[\n  1,\n  2, // two\n  3,\n]\n"
+		);
+		let text = "[\n  1,\n  2 // two\n]\n";
+		assert_eq!(
+			push_element(text, &[], &n(3.0)).unwrap(),
+			"[\n  1,\n  2, // two\n  3\n]\n"
+		);
+	}
+
+	#[test]
+	fn pushing_to_an_inline_array_keeps_its_spacing() {
+		assert_eq!(push_element("[1,2]", &[], &n(3.0)).unwrap(), "[1,2,3]");
+		assert_eq!(
+			push_element("[ 1, 2 ]", &[], &n(3.0)).unwrap(),
+			"[ 1, 2, 3 ]"
+		);
+	}
+
+	#[test]
+	fn pushing_to_an_empty_array() {
+		assert_eq!(push_element("[]", &[], &n(1.0)).unwrap(), "[1]");
+		assert_eq!(
+			push_element("{\n\t\"pages\": [\n\t]\n}\n", &[Seg::Key("pages")], &n(1.0)).unwrap(),
+			"{\n\t\"pages\": [\n\t\t1\n\t]\n}\n"
+		);
+		assert_eq!(
+			push_element(
+				"{\r\n  \"pages\": [\r\n  ]\r\n}\r\n",
+				&[Seg::Key("pages")],
+				&n(1.0)
+			)
+			.unwrap(),
+			"{\r\n  \"pages\": [\r\n    1\r\n  ]\r\n}\r\n"
+		);
+	}
+
+	#[test]
+	fn pushing_to_what_is_not_an_array_is_an_error() {
+		assert_eq!(
+			push_element(r#"{"pages":{}}"#, &[Seg::Key("pages")], &n(1.0)).unwrap_err(),
+			EditError::NotAContainer("$.pages".to_string())
+		);
+		assert_eq!(
+			push_element(r#"{"pages":1}"#, &[Seg::Key("pages")], &n(1.0)).unwrap_err(),
+			EditError::NotAContainer("$.pages".to_string())
+		);
+		assert!(matches!(
+			push_element("[1,", &[], &n(1.0)).unwrap_err(),
+			EditError::Parse(_)
+		));
+	}
+
+	#[test]
+	fn deleting_an_item_removes_its_lines_and_comma() {
+		let text = "[\n\t{ \"url\": \"/a/\" },\n\t{\n\t\t\"url\": \"/b/\"\n\t}, // b\n\t{ \"url\": \"/c/\" }\n]\n";
+		assert_eq!(
+			delete_element(text, &[], 1).unwrap(),
+			"[\n\t{ \"url\": \"/a/\" },\n\t{ \"url\": \"/c/\" }\n]\n"
+		);
+		assert_eq!(
+			delete_element(text, &[], 2).unwrap(),
+			"[\n\t{ \"url\": \"/a/\" },\n\t{\n\t\t\"url\": \"/b/\"\n\t} // b\n]\n"
+		);
+		assert_eq!(delete_element("[1,2,3]", &[], 0).unwrap(), "[2,3]");
+		assert_eq!(delete_element("[ 1, 2 ]", &[], 1).unwrap(), "[ 1 ]");
+	}
+
+	#[test]
+	fn deleting_the_only_item_leaves_an_empty_array() {
+		assert_eq!(delete_element("[ 1 ]", &[], 0).unwrap(), "[]");
+		assert_eq!(
+			delete_element(
+				"{\n\t\"pages\": [\n\t\t1\n\t]\n}\n",
+				&[Seg::Key("pages")],
+				0
+			)
+			.unwrap(),
+			"{\n\t\"pages\": []\n}\n"
+		);
+	}
+
+	#[test]
+	fn deleting_an_item_that_is_not_there_is_an_error() {
+		assert_eq!(
+			delete_element("[1]", &[], 1).unwrap_err(),
+			EditError::NoSuchPath("$[1]".to_string())
+		);
+		assert_eq!(
+			delete_element(r#"{"a":1}"#, &[], 0).unwrap_err(),
+			EditError::NotAContainer("$".to_string())
+		);
+	}
+
+	#[test]
+	fn items_are_pushed_and_deleted_in_trusted_text_and_read_back_as_intended() {
+		let text = r#"{ "version": 1, "pages": [ { "url": "/a/" }, { "url": "/b/" } ] }"#;
+		let path = [Seg::Key("pages")];
+		let pushed = trusted(text).push_element(&path, &s("x")).unwrap();
+		assert_eq!(
+			parse(&pushed).unwrap(),
+			parse(r#"{"version":1,"pages":[{"url":"/a/"},{"url":"/b/"},"x"]}"#).unwrap()
+		);
+		let deleted = trusted(text).delete_element(&path, 0).unwrap();
+		assert_eq!(
+			parse(&deleted).unwrap(),
+			parse(r#"{"version":1,"pages":[{"url":"/b/"}]}"#).unwrap()
 		);
 	}
 
