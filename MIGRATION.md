@@ -51,7 +51,7 @@ Every compiler that was a bare callable in v1 is now a factory returning a calla
 - import { scriptCompiler } from '@kamado-io/script-compiler';
 + import { createScriptCompiler } from '@kamado-io/script-compiler';
 - import { createCompileHooks } from '@kamado-io/pug-compiler';
-+ import { createCompileHooks } from '@kamado-io/pug-compiler';   // name unchanged, signature is now curried (see 4)
++ import { createCompileHooks } from '@kamado-io/pug-compiler';   // name and signature unchanged: still `createCompileHooks(options)` (see 4)
 ```
 
 ### 2b. Call sites (see also section 3 for the surrounding `compilers:` shape)
@@ -99,19 +99,18 @@ File: `kamado.config.ts` (or wherever `Config`/`UserConfig` is declared)
 
 ---
 
-## 4. `createCompileHooks` is now curried (pug-compiler)
+## 4. `createCompileHooks` is not curried (pug-compiler)
 
-Same curry pattern as section 2 — `createCompileHooks<M>()` pins the metadata type, the second call infers options.
-
-```diff
-- compileHooks: createCompileHooks({ basedir: '/...' }),
-+ compileHooks: createCompileHooks()({ basedir: '/...' }),
-```
-
-If you parameterize `MetaData` (see section 8), insert it on the factory:
+Unlike the compilers in section 2, `createCompileHooks` keeps its single-call form in the published `@kamado-io/pug-compiler`: `createCompileHooks(options)`. Do not write `createCompileHooks()({ ... })`: the options would be dropped and the compile stops with `the "basedir" option is required to use includes and extends with "absolute" paths`.
 
 ```ts
-compileHooks: createCompileHooks<MyMeta>()({ basedir: '/...' }),
+compileHooks: createCompileHooks({ basedir: '/...' }),
+```
+
+If you parameterize `MetaData` (see section 8), pin it on the same call:
+
+```ts
+compileHooks: createCompileHooks<MyMeta>({ basedir: '/...' }),
 ```
 
 ---
@@ -162,6 +161,20 @@ Notes:
 - The hook's third argument changed: v1 `(elements, window, isServe, context)` → v2 `(elements, window, ctx)` where `ctx` is `ManipulateDOMHookContext<M>` (carries `isServe` and the rest as named fields, plus `baseURL` and `getHref`).
 - `beforeSerialize` has no direct equivalent; the equivalent is a custom `Transform` placed before `manipulateDOM` in the pipeline (write a `{ name, transform }` object).
 - `imageSizes: true | false | ImageSizesOptions` moved into `manipulateDOM({ imageSizes })`.
+- **Order**: `manipulateDOM` runs `hook` **before** `imageSizes`. v1 ran `afterSerialize` after the image sizes were set, so a hook that undid or changed the `width`/`height` attributes has no effect when moved as is (the sizes are set afterwards). Split it into two stages so the hook runs last:
+
+```ts
+transforms: (defaults) => [
+	manipulateDOM({ imageSizes: true }),
+	manipulateDOM({
+		imageSizes: false,
+		hook: async (elements, window, ctx) => {
+			// runs after the image sizes are set, as v1's afterSerialize did
+		},
+	}),
+	...defaults.slice(1),
+],
+```
 
 ---
 
@@ -229,7 +242,7 @@ const abs = ctx.baseURL ? new URL(el.getAttribute('src') ?? '', ctx.baseURL).hre
 
 ## 8. Generic `MetaData` parameter (`<M extends MetaData>`)
 
-v2 propagates a generic `M extends MetaData` through `Config`, `Context`, `PageCompilerOptions`, navigation/breadcrumb structures, and hook contexts. **This is the reason every compiler factory in sections 2–4 is curried** — pinning `M` requires a separate call from the options so TypeScript can infer the latter independently.
+v2 propagates a generic `M extends MetaData` through `Config`, `Context`, `PageCompilerOptions`, navigation/breadcrumb structures, and hook contexts. **This is the reason every compiler factory in sections 2–3 is curried** — pinning `M` requires a separate call from the options so TypeScript can infer the latter independently.
 
 If you have not customized frontmatter, no edit is required — defaults flow through.
 
@@ -248,7 +261,7 @@ createPageCompiler<MyMeta>()({
 	filterNavigationNode: (node) => !node.meta.noindex,
 });
 
-createCompileHooks<MyMeta>()({ basedir: '/...' });
+createCompileHooks<MyMeta>({ basedir: '/...' });
 
 defineConfig<MyMeta>({/* ... */});
 ```
@@ -402,7 +415,7 @@ The published v1.3.0 tags are immutable; rollback by version pin alone is safe.
 1. [ ] Update versions in `package.json` (section 1)
 2. [ ] Replace bare compiler constants with curried factories (section 2)
 3. [ ] Convert `compilers:` array to callback (section 3)
-4. [ ] Curry `createCompileHooks` (section 4)
+4. [ ] Keep `createCompileHooks(options)` as it is: it is not curried (section 4)
 5. [ ] Move `afterSerialize`/`beforeSerialize` into `manipulateDOM` transform (section 5)
 6. [ ] Replace lib.dom hook types with `DomElement`/`DomWindow` (section 6)
 7. [ ] Remove `manipulateDOM({ host })`/`domSerialize({ url })`; switch URL resolution to `ctx.getHref`/`ctx.baseURL` (section 7)
