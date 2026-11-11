@@ -405,9 +405,9 @@ pub fn is_name_char(c: char) -> bool {
 	if c.is_ascii() {
 		return c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_');
 	}
+	// `.`, `-` and `_` are ASCII, so only the ranges remain.
 	let cp = c as u32;
-	matches!(c, '.' | '-' | '_')
-		|| in_ranges(&LETTER, cp)
+	in_ranges(&LETTER, cp)
 		|| in_ranges(&DIGIT, cp)
 		|| in_ranges(&COMBINING_CHAR, cp)
 		|| in_ranges(&EXTENDER, cp)
