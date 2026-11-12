@@ -81,6 +81,41 @@ const MAX_SYNC_BODY = 16 * 1024;
 /** Where the page of the screen has the token (replaced when the page is served). */
 export const TOKEN_PLACEHOLDER = '__KAMADO_TOKEN__';
 
+/**
+ * Where the page of the screen has the column defaults of the config (`ui.defaultKeyOrder` and
+ * `ui.defaultFixedKeys`), as JSON in an attribute (replaced when the page is served).
+ */
+export const COLUMN_DEFAULTS_PLACEHOLDER = '__KAMADO_COLUMN_DEFAULTS__';
+
+/**
+ * The layout of the columns the config gives the screen until a person sets one (RFC section
+ * 14.2). A field is left out when the config does not write it. The screen reads the same shape
+ * (`ColumnDefaults` of `client/src/logic/layout.ts`, which cannot import this module).
+ */
+export interface ColumnDefaults {
+	/** `ui.defaultKeyOrder`: the identifiers of the columns, in order. */
+	readonly order?: readonly string[];
+	/** `ui.defaultFixedKeys`: the identifiers of the pinned columns, in order. */
+	readonly pinned?: readonly string[];
+}
+
+const PLACEHOLDERS = new RegExp(
+	`${TOKEN_PLACEHOLDER}|${COLUMN_DEFAULTS_PLACEHOLDER}`,
+	'g',
+);
+
+/**
+ * Text that is safe as the value of a double-quoted HTML attribute.
+ * @param text - The text
+ */
+function escapeAttribute(text: string): string {
+	return text
+		.replaceAll('&', '&amp;')
+		.replaceAll('"', '&quot;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;');
+}
+
 /** Options of {@link createUiApp}. */
 export interface UiAppOptions {
 	/** The directory of the built screen (`index.html` and `assets/`). */
@@ -111,6 +146,13 @@ export interface UiAppOptions {
 	 * file, with `/` (no absolute path goes to the screen). `null` or absent when the site has none.
 	 */
 	readonly overridesFile?: string | null;
+	/**
+	 * The layout of the columns the config gives (`ui.defaultKeyOrder`, `ui.defaultFixedKeys`),
+	 * put in the page when it is served: the config is read once when the server starts, and the
+	 * screen has it before it has asked for anything, so it is there even when its settings could
+	 * not be read. Absent, or without a field, when the config does not write it.
+	 */
+	readonly columnDefaults?: ColumnDefaults;
 	/**
 	 * The sync the screen runs (`/api/sync...`). Without it the routes do not exist.
 	 */
@@ -240,6 +282,7 @@ function sortFromQuery(
 export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 	const app = new Hono();
 	const { roots } = options;
+	const columnDefaults = escapeAttribute(JSON.stringify(options.columnDefaults ?? {}));
 	// The site's `allowedHosts` are not carried over: the editor answers on the loopback
 	// names only, whatever the dev server of the site is told to serve.
 	setGuard(app, { host: 'localhost', allowedHosts: [], proxy: {} });
@@ -293,7 +336,13 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 			'Content-Security-Policy',
 			"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 		);
-		return ctx.html(html.replaceAll(TOKEN_PLACEHOLDER, options.token));
+		// One pass, so that a placeholder inside what is put in (a key of a column may be anything) is
+		// not replaced again, and a function so that `$&` in it is not read as a pattern.
+		return ctx.html(
+			html.replaceAll(PLACEHOLDERS, (found) =>
+				found === TOKEN_PLACEHOLDER ? options.token : columnDefaults,
+			),
+		);
 	});
 
 	app.use('/assets/*', etag());

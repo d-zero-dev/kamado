@@ -45,6 +45,7 @@ import { GridRow } from './grid-row.js';
 import { I18nContext, useI18n } from './i18n/context.js';
 import { resolveLanguage, translator } from './i18n/translate.js';
 import { Legend } from './legend.js';
+import { DEFAULT_PAGE_SIZE, resetOf } from './logic/column-defaults.js';
 import {
 	cellOf,
 	columnHoldsArrays,
@@ -92,6 +93,7 @@ import {
 	stateOf,
 	unpinColumn,
 	widthOf,
+	type ColumnDefaults,
 	type ColumnState,
 } from './logic/layout.js';
 import { movesPage, pageOfLocated } from './logic/order.js';
@@ -126,6 +128,7 @@ import { operationLabel } from './logic/sync.js';
 import { FIELD_KINDS, defaultOf, draftOf, parseDraft } from './logic/value.js';
 import { OptionsDialog } from './options-dialog.js';
 import { PageDialog } from './page-dialog.js';
+import { ResetDialog } from './reset-dialog.js';
 import { RevertDialog } from './revert-dialog.js';
 import { SyncDialog, type SyncEnd } from './sync-dialog.js';
 import { useCommands } from './use-commands.js';
@@ -172,6 +175,12 @@ export interface AppProps {
 	readonly settings: SettingsView;
 	/** Set when the settings could not be read: the defaults are in `settings`. */
 	readonly settingsUnreadable: boolean;
+	/**
+	 * The layout of the columns the config gives (`ui.defaultKeyOrder`, `ui.defaultFixedKeys`),
+	 * which is what the columns are laid out by until the person sets one. It comes from the page
+	 * and not from the settings, so it is here when the settings could not be read.
+	 */
+	readonly columnDefaults?: ColumnDefaults;
 }
 
 /**
@@ -189,8 +198,9 @@ type SettingsNote =
  * @param props - The settings the screen starts with
  * @param props.settings - What was read from the server
  * @param props.settingsUnreadable - Whether there are only the defaults because they could not be read
+ * @param props.columnDefaults - The layout of the columns the config gives
  */
-export function App({ settings, settingsUnreadable }: AppProps) {
+export function App({ settings, settingsUnreadable, columnDefaults }: AppProps) {
 	const [locale, setLocale] = useState<LocaleSetting>(settings.global.locale);
 	const language = resolveLanguage(locale, navigator.languages);
 	const i18n = useMemo(() => ({ language, t: translator(language) }), [language]);
@@ -202,6 +212,7 @@ export function App({ settings, settingsUnreadable }: AppProps) {
 			<Screen
 				settings={settings}
 				settingsUnreadable={settingsUnreadable}
+				columnDefaults={columnDefaults}
 				locale={locale}
 				onLocale={setLocale}
 			/>
@@ -219,10 +230,17 @@ interface ScreenProps extends AppProps {
  * @param props - What the screen starts with, and the language setting
  * @param props.settings - What was read from the server
  * @param props.settingsUnreadable - Whether the settings could not be read
+ * @param props.columnDefaults - The layout of the columns the config gives
  * @param props.locale - The language setting
  * @param props.onLocale - Called with the language the person chose
  */
-function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps) {
+function Screen({
+	settings,
+	settingsUnreadable,
+	columnDefaults,
+	locale,
+	onLocale,
+}: ScreenProps) {
 	const { t, language } = useI18n();
 	// The effects and the queued edits say things too: they read the translator of the latest
 	// render, so that a change of language does not read the list again.
@@ -273,7 +291,9 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	// Counts the reads of the list: the marks asked for before a read that came later are not used.
 	const diffGeneration = useRef(0);
 	const rowsRef = useRef<Rows | null>(null);
-	const [pageSize, setPageSize] = useState<number>(settings.project?.pageSize ?? 500);
+	const [pageSize, setPageSize] = useState<number>(
+		settings.project?.pageSize ?? DEFAULT_PAGE_SIZE,
+	);
 	const [sort, setSort] = useState<SortState | null>(settings.project?.sort ?? null);
 	// The sort the settings file holds. It is saved when the list was read in that order and not
 	// when the header is clicked: a sort the server refuses would be kept, and asked for again
@@ -282,8 +302,10 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	// The column whose header button is the stop of Tab of the row of headers.
 	const [headerStop, setHeaderStop] = useState<string | null>(null);
 	const [columnState, setColumnState] = useState<ColumnState>(() =>
-		stateOf(settings.project?.columns),
+		stateOf(settings.project?.columns, columnDefaults),
 	);
+	// Whether the question of putting the settings of this project back to the defaults is open.
+	const [resetting, setResetting] = useState(false);
 	// The width a column has while its edge is being dragged: kept apart from `columnState` so that
 	// it is saved once, when the drag ends.
 	const [liveWidth, setLiveWidth] = useState<{ id: string; width: number } | null>(null);
@@ -694,10 +716,14 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	}, [hints]);
 	// Which columns are shown, in what order, and how many are pinned. Not a function of the
 	// widths: the rows are drawn again only when this changes, not while a column is dragged.
-	const { order, pinned } = columnState;
+	const { order, pinned, defaultOrder, defaultPinned } = columnState;
 	const arrangement = useMemo(
-		() => layoutOf(known, { order, pinned, widths: {} }),
-		[known, order, pinned],
+		() =>
+			layoutOf(
+				known,
+				stateOf({ order, pinned }, { order: defaultOrder, pinned: defaultPinned }),
+			),
+		[known, order, pinned, defaultOrder, defaultPinned],
 	);
 	const columns = arrangement.shown;
 	const pinnedCount = arrangement.pinnedCount;
@@ -974,6 +1000,27 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 
 	const remember = (patch: SettingsPatch) => {
 		void saver(patch);
+	};
+
+	/**
+	 * Puts everything this project keeps back to the defaults (the layout of the columns, the order
+	 * of the rows, the rows per page, the kinds of the columns): the screen is what a person who has
+	 * set nothing sees, with the layout the config gives, and the settings are saved so, in one
+	 * change. The sort is let go here and not by the list that is read next (see `savedSort`), as
+	 * it is saved with the rest.
+	 */
+	const confirmReset = () => {
+		const reset = resetOf(columnDefaults);
+		setResetting(false);
+		focusGrid();
+		setColumnState(reset.columnState);
+		setKinds(reset.kinds);
+		setPageSize(reset.pageSize);
+		setSort(reset.sort);
+		savedSort.current = reset.sort;
+		go(0);
+		remember(reset.patch);
+		setStatus(t('reset.done'));
 	};
 
 	/**
@@ -2046,8 +2093,21 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			</div>
 			{/* What the marks of the table mean is under it: the tools are above, and the rows start
 			    right below them. */}
-			<footer className="foot" aria-label={t('app.legend')}>
-				<Legend overridesFile={rows?.overridesFile} git={git} compared={diffs !== null} />
+			<footer className="foot">
+				{/* The name says what the region holds: the legend, and not the button beside it. */}
+				<section className="foot-legend" aria-label={t('app.legend')}>
+					<Legend
+						overridesFile={rows?.overridesFile}
+						git={git}
+						compared={diffs !== null}
+					/>
+				</section>
+				<button
+					type="button"
+					className="reset-settings"
+					onClick={() => setResetting(true)}>
+					{t('reset.button')}
+				</button>
 			</footer>
 			{menu !== null && (
 				<ColumnMenu
@@ -2115,6 +2175,14 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					onClose={() => setOptionsFor(null)}
 				/>
 			)}
+			<ResetDialog
+				open={resetting}
+				onConfirm={confirmReset}
+				onCancel={() => {
+					setResetting(false);
+					focusGrid();
+				}}
+			/>
 			<RevertDialog
 				request={reverting}
 				onConfirm={confirmRevert}

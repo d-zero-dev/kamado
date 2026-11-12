@@ -389,6 +389,20 @@ button.diff-mark:focus-visible::after {
    rest), so the rows do not move when a line of it comes or goes. */
 .foot {
 	flex: none;
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 0.5rem 1.25rem;
+}
+
+.foot-legend {
+	flex: 1 1 auto;
+}
+
+.reset-settings {
+	flex: none;
+	margin-top: 0.25rem;
+	font-size: 0.8rem;
 }
 
 .legend {

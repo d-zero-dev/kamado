@@ -3,7 +3,7 @@ import type { SettingsView } from './types.js';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { fetchSettings } from './api.js';
+import { columnDefaults, fetchSettings } from './api.js';
 import { App } from './app.js';
 
 import './style.css';
@@ -33,6 +33,10 @@ try {
 
 createRoot(root).render(
 	<StrictMode>
-		<App settings={settings} settingsUnreadable={settingsUnreadable} />
+		<App
+			settings={settings}
+			settingsUnreadable={settingsUnreadable}
+			columnDefaults={columnDefaults()}
+		/>
 	</StrictMode>,
 );

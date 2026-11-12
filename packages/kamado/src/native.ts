@@ -156,9 +156,11 @@ export interface Native {
 	uiSyncLocked(handle: string, queryJson: string): string;
 	/**
 	 * What the config says that the command serving the editor needs: the result is
-	 * `{ port, open, inputDir, outputDir, overrides, syncFunctions }` (`devServer.port`,
-	 * `devServer.open`, `dir.*`, the absolute path of `pages.overrides` or `null`, and the operations of
-	 * `ui.syncFunctions`, each `{ name, label, script }` with the label as written and the script absolute).
+	 * `{ port, open, inputDir, outputDir, overrides, syncFunctions, defaultKeyOrder, defaultFixedKeys }`
+	 * (`devServer.port`, `devServer.open`, `dir.*`, the absolute path of `pages.overrides` or `null`, the
+	 * operations of `ui.syncFunctions`, each `{ name, label, script }` with the label as written and the
+	 * script absolute, and `ui.defaultKeyOrder` and `ui.defaultFixedKeys` as arrays of column identifiers
+	 * as written, or `null` when the config does not write them).
 	 */
 	uiServer(handle: string): string;
 	/** Forgets an editor; the result is `{ warning }`. */

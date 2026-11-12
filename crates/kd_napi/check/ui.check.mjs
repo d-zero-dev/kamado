@@ -532,6 +532,7 @@ test('the editor tells the port and the directories of the config', () => {
 	const handle = native().uiOpen(site.config, '{}');
 	try {
 		// Behavior change: uiServer also tells syncFunctions (none here)
+		// Behavior change: uiServer also tells defaultKeyOrder and defaultFixedKeys (null: the config writes neither)
 		assert.deepEqual(JSON.parse(native().uiServer(handle)), {
 			port: 3000,
 			open: false,
@@ -539,7 +540,17 @@ test('the editor tells the port and the directories of the config', () => {
 			outputDir: path.join(site.root, 'out'),
 			overrides: path.join(site.root, 'pages.overrides.json'),
 			syncFunctions: [],
+			defaultKeyOrder: null,
+			defaultFixedKeys: null,
 		});
+		// assert.deepEqual(JSON.parse(native().uiServer(handle)), { // previous
+		// 	port: 3000, // previous
+		// 	open: false, // previous
+		// 	inputDir: path.join(site.root, 'src'), // previous
+		// 	outputDir: path.join(site.root, 'out'), // previous
+		// 	overrides: path.join(site.root, 'pages.overrides.json'), // previous
+		// 	syncFunctions: [], // previous
+		// }); // previous
 		// assert.deepEqual(JSON.parse(native().uiServer(handle)), { // previous
 		// 	port: 3000, // previous
 		// 	open: false, // previous
@@ -551,6 +562,85 @@ test('the editor tells the port and the directories of the config', () => {
 		native().uiClose(handle);
 	}
 	assert.throws(() => native().uiServer(handle), /no editor/);
+});
+
+test('ui.defaultKeyOrder and ui.defaultFixedKeys of the config reach the command as written, and the page of the screen carries them', async () => {
+	// The command itself, over the screen that was built: what `start.ts` makes of what the core
+	// tells is what the page carries.
+	const { ui } = await import(pathToFileURL(path.join(dist, 'ui', 'start.js')).href);
+	// Every column the server takes in the settings of the screen is one the config takes: a
+	// column added to one and not to the other is found here.
+	const { BUILTIN_COLUMNS } = await import(
+		pathToFileURL(path.join(dist, 'ui', 'settings.js')).href
+	);
+	const site = makeSite();
+	const order = [...BUILTIN_COLUMNS, 'meta:title', 'meta:url', 'meta:no page has this'];
+	writeFileSync(
+		site.config,
+		JSON.stringify({
+			dir: { input: 'src', output: 'out' },
+			build: { cacheDir: '.cache' },
+			pages: { overrides: 'pages.overrides.json' },
+			ui: { defaultKeyOrder: order, defaultFixedKeys: [] },
+		}),
+	);
+	const handle = native().uiOpen(site.config, '{}');
+	try {
+		const settings = JSON.parse(native().uiServer(handle));
+		assert.deepEqual(settings.defaultKeyOrder, order);
+		// `[]` is written (no column is pinned), which is not the same as not written.
+		assert.deepEqual(settings.defaultFixedKeys, []);
+		// The defaults are not in the answer of the list: they are the screen's, from its page.
+		const list = JSON.parse(native().uiPages(handle, '{"offset":0,"limit":1}'));
+		assert.equal('defaultKeyOrder' in list, false);
+	} finally {
+		native().uiClose(handle);
+	}
+	const editor = await ui(site.config, {
+		port: 0,
+		open: false,
+		settingsFile: path.join(site.root, 'ui-settings.json'),
+		write: () => {},
+	});
+	try {
+		const response = await fetch(editor.url);
+		const html = await response.text();
+		const raw = /name="kamado-column-defaults" content="([^"]*)"/.exec(html)?.[1];
+		assert.ok(raw !== undefined, 'the page of the screen has no column defaults');
+		assert.deepEqual(JSON.parse(raw.replaceAll('&quot;', '"').replaceAll('&amp;', '&')), {
+			order,
+			pinned: [],
+		});
+	} finally {
+		await editor.close();
+	}
+});
+
+test('a config that names a column the screen does not have is refused when it is read, with the columns it has', async () => {
+	const site = makeSite();
+	writeFileSync(
+		site.config,
+		JSON.stringify({
+			dir: { input: 'src', output: 'out' },
+			ui: { defaultFixedKeys: ['title'] },
+		}),
+	);
+	assert.throws(() => native().uiOpen(site.config, '{}'), /ui\.defaultFixedKeys\[0\]/);
+	// The columns the config takes are those the settings of the screen take, both ways: one that
+	// the screen has and the config lacks makes its own list fail above, and one that only the
+	// config has is found here.
+	const { BUILTIN_COLUMNS } = await import(
+		pathToFileURL(path.join(dist, 'ui', 'settings.js')).href
+	);
+	let message = '';
+	try {
+		native().uiOpen(site.config, '{}');
+	} catch (error) {
+		message = error.message;
+	}
+	const named = /expected a column: (.+) or meta:<key>/.exec(message)?.[1];
+	assert.ok(named !== undefined, message);
+	assert.deepEqual(named.split(', ').toSorted(), [...BUILTIN_COLUMNS].toSorted());
 });
 
 test('the editor tells the devServer of the config and the directories as absolute paths', () => {

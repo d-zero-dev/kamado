@@ -305,7 +305,9 @@ export type ReadResult =
 
 const VERSION = 1;
 const DEFAULT_GLOBAL: GlobalSettings = { locale: 'auto' };
-const DEFAULT_PAGE_SIZE = 500;
+// The screen holds the same number (`DEFAULT_PAGE_SIZE` of `client/src/logic/column-defaults.ts`,
+// which cannot import this module): a change is made in both.
+export const DEFAULT_PAGE_SIZE = 500;
 /** A lock that is older than this was left by a process that died. */
 const STALE_LOCK_MS = 10_000;
 const LOCK_WAIT_MS = 20;

@@ -68,14 +68,29 @@ const BUILTIN_WIDTHS: Readonly<Record<string, number>> = {
 const META_WIDTH = 224;
 
 /**
- * What the screen holds of the layout. A field is `undefined` when the person has not set it:
- * the default order, and the default pinned columns.
+ * What the screen holds of the layout. `order` and `pinned` are `undefined` when the person has
+ * not set them: the layout is then the one the config gives (`defaultOrder` and `defaultPinned`),
+ * and when the config gives none either, the default order and the URL pinned.
  */
 export interface ColumnState {
 	readonly order: readonly string[] | undefined;
 	readonly pinned: readonly string[] | undefined;
 	/** Widths in pixels of the columns that are not the default width. */
 	readonly widths: Readonly<Record<string, number>>;
+	/** `ui.defaultKeyOrder` of the config, as written; left out when the config has none. */
+	readonly defaultOrder?: readonly string[];
+	/** `ui.defaultFixedKeys` of the config, as written; left out when the config has none. */
+	readonly defaultPinned?: readonly string[];
+}
+
+/**
+ * The layout the config gives the screen until a person sets one (`ui.defaultKeyOrder` and
+ * `ui.defaultFixedKeys`). A field is left out when the config does not write it. The server
+ * writes the same shape into the page (`ColumnDefaults` of `src/ui/app.ts`).
+ */
+export interface ColumnDefaults {
+	readonly order?: readonly string[];
+	readonly pinned?: readonly string[];
 }
 
 /** The layout as the settings keep it (`columns` of the project settings). */
@@ -109,19 +124,45 @@ export function emptyLayout(): ColumnState {
 }
 
 /**
- * The state the settings describe.
+ * The state the settings describe. What the settings do not set, field by field, is what the
+ * config gives; what the config does not give either is the default of the screen.
  * @param settings - `columns` of the project settings, if it has any
+ * @param defaults - The layout the config gives, if it gives any
  * @example
  * ```ts
  * stateOf({ pinned: [] }); // { order: undefined, pinned: [], widths: {} }
+ * stateOf(undefined, { pinned: ['url', 'meta:title'] }).defaultPinned; // ['url', 'meta:title']
  * ```
  */
-export function stateOf(settings?: ColumnSettings): ColumnState {
+export function stateOf(
+	settings?: ColumnSettings,
+	defaults?: ColumnDefaults,
+): ColumnState {
 	return {
 		order: settings?.order,
 		pinned: settings?.pinned,
 		widths: settings?.widths ?? {},
+		...(defaults?.order === undefined ? {} : { defaultOrder: defaults.order }),
+		...(defaults?.pinned === undefined ? {} : { defaultPinned: defaults.pinned }),
 	};
+}
+
+/**
+ * The pinned columns the layout holds now, before the columns there are are looked at: what the
+ * person set, or else what the config gives.
+ * @param state - The state
+ */
+function heldPinned(state: ColumnState): readonly string[] | undefined {
+	return state.pinned ?? state.defaultPinned;
+}
+
+/**
+ * The order the layout holds now, before the columns there are are looked at: what the person
+ * set, or else what the config gives.
+ * @param state - The state
+ */
+function heldOrder(state: ColumnState): readonly string[] | undefined {
+	return state.order ?? state.defaultOrder;
 }
 
 /**
@@ -215,13 +256,13 @@ function existing(list: readonly string[], known: ReadonlySet<string>): string[]
 }
 
 /**
- * The columns that are pinned, in the order they were pinned: the default when the person has
- * pinned none yet, and only those that are there.
+ * The columns that are pinned, in the order they were pinned: the config's when the person has
+ * pinned none yet, and the URL when the config gives none either, and only those that are there.
  * @param state - The state
  * @param known - The columns there are
  */
 function pinnedOf(state: ColumnState, known: readonly string[]): string[] {
-	return existing(state.pinned ?? DEFAULT_PINNED, new Set(known));
+	return existing(heldPinned(state) ?? DEFAULT_PINNED, new Set(known));
 }
 
 /**
@@ -232,7 +273,7 @@ function pinnedOf(state: ColumnState, known: readonly string[]): string[] {
  * @param known - The columns there are, in the default order
  */
 function fullOrder(state: ColumnState, known: readonly string[]): string[] {
-	const named = existing(state.order ?? [], new Set(known));
+	const named = existing(heldOrder(state) ?? [], new Set(known));
 	const seen = new Set(named);
 	return [...named, ...known.filter((id) => !seen.has(id))];
 }
@@ -335,7 +376,7 @@ export function pinColumn(
 	if (pinned.includes(id) || !known.includes(id)) {
 		return state;
 	}
-	return { ...state, pinned: [...pinned, id, ...absent(state.pinned, known)] };
+	return { ...state, pinned: [...pinned, id, ...absent(heldPinned(state), known)] };
 }
 
 /**
@@ -359,7 +400,7 @@ export function unpinColumn(
 	}
 	return {
 		...state,
-		pinned: [...pinned.filter((p) => p !== id), ...absent(state.pinned, known)],
+		pinned: [...pinned.filter((p) => p !== id), ...absent(heldPinned(state), known)],
 	};
 }
 
@@ -380,14 +421,14 @@ function withGroup(
 	next: readonly string[],
 ): ColumnState {
 	if (group === 'pinned') {
-		return { ...state, pinned: [...next, ...absent(state.pinned, known)] };
+		return { ...state, pinned: [...next, ...absent(heldPinned(state), known)] };
 	}
 	const taken = new Set(pinnedOf(state, known));
 	const queue = [...next];
 	const order = fullOrder(state, known).map((id) =>
 		taken.has(id) ? id : (queue.shift() ?? id),
 	);
-	return { ...state, order: [...order, ...absent(state.order, known)] };
+	return { ...state, order: [...order, ...absent(heldOrder(state), known)] };
 }
 
 /**
@@ -540,8 +581,8 @@ export function settingsOf(state: ColumnState, known: readonly string[]): Column
 		// in the default order.
 		...(state.order === undefined
 			? {}
-			: { order: list(fullOrder(state, known), state.order) }),
-		pinned: list(pinnedOf(state, known), state.pinned),
+			: { order: list(fullOrder(state, known), heldOrder(state)) }),
+		pinned: list(pinnedOf(state, known), heldPinned(state)),
 		widths: Object.fromEntries(
 			Object.entries(state.widths)
 				.filter(([id]) => isColumnId(id))
