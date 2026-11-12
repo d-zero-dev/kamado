@@ -285,6 +285,34 @@
 							"description": { "$ref": "#/definitions/label" }
 						}
 					}
+				},
+				"syncFunctions": {
+					"description": "The operations of the sync button of kamado ui, and of kamado sync. Each runs a script of the project that returns every page the site should have; kamado finds the difference from the pages now and applies it to the files of the local repository after a confirmation. Only a sync reads and runs them: the build, the dev server and kamado ui itself do not run a script.",
+					"type": "array",
+					"items": {
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["name", "label", "script"],
+						"properties": {
+							"name": {
+								"description": "What `kamado sync <name>` and the screen call the operation by. Not empty, and different for each operation; any character is allowed (the command looks at the names before it takes its argument for a path).",
+								"type": "string",
+								"minLength": 1
+							},
+							"label": {
+								"description": "The name of the operation on the screen: a text, or a text per language (the keys are languages such as \"en\" and \"ja\"). Looked for in the language of the screen, then in \"en\", then the name is shown. Required, and not null.",
+								"oneOf": [
+									{ "type": "string" },
+									{ "type": "object", "additionalProperties": { "type": "string" } }
+								]
+							},
+							"script": {
+								"description": "The ES module of the script, relative to the directory of this file. Its default export is a function `(pages, ctx) => result`, which Node imports as it is.",
+								"type": "string",
+								"minLength": 1
+							}
+						}
+					}
 				}
 			}
 		}
