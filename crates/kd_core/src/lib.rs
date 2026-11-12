@@ -19,6 +19,8 @@ mod data;
 mod html;
 mod jsx;
 mod minifiers;
+mod natural;
+mod nav_order;
 mod page_map;
 pub mod parallel;
 mod plan_cache;
@@ -599,7 +601,7 @@ pub(crate) fn plan_with_overrides(
 			}
 			// The page the URL would be. A URL written another way than the page's own
 			// (`/a/index.html` for `/a/`) is an error rather than read as that page: the
-			// entries are matched, ordered and told apart by the string as written.
+			// entries are matched and told apart by the string as written.
 			let rel = kd_site::url_to_local_path(url, &config.pages.output_extension);
 			let file = kd_site::page_file(
 				&format!("{}/{rel}", config.dir.input.trim_end_matches('/')),
@@ -634,17 +636,10 @@ pub(crate) fn plan_with_overrides(
 				lastmod: o.lastmod.clone(),
 			});
 		}
-		// The file lists the pages in the order they are shown in (navigation,
-		// `pages`): its pages come first in its order, the others follow. The
-		// sort is stable.
-		let rank: std::collections::HashMap<&str, usize> = overrides
-			.order
-			.iter()
-			.enumerate()
-			.map(|(i, u)| (u.as_str(), i))
-			.collect();
-		pages.sort_by_cached_key(|p| rank.get(p.file.url.as_str()).copied().unwrap_or(usize::MAX));
 	}
+	// The order the pages are shown in (navigation, `pages`) is the one their `order` and
+	// URLs make (RFC §6), whether or not there is a `pages.overrides`.
+	let pages = nav_order::arrange(pages);
 	let changed =
 		!all_hit && (misses > 0 || cache.is_none_or(|c| c.pages.len() != learned.pages.len()));
 	Ok((
@@ -1104,8 +1099,10 @@ mod tests {
 		let loaded = site.config(r#", "pages": { "overrides": "pages.json" }"#);
 		let plan = plan(&loaded.config).unwrap();
 		let urls: Vec<&str> = plan.pages.iter().map(|p| p.file.url.as_str()).collect();
-		// The pages of the file come first, in its order.
-		assert_eq!(urls, ["/about/", "/service/", "/"]);
+		// The entries of the file do not place the pages.
+		// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the order of `pages` is the one `order` and the URLs make, a page before what hangs from it, the children in the natural order of their URLs
+		assert_eq!(urls, ["/", "/about/", "/service/"]);
+		// assert_eq!(urls, ["/about/", "/service/", "/"]); // previous
 
 		let home = plan.pages.iter().find(|p| p.file.url == "/").unwrap();
 		assert_eq!(
@@ -1311,8 +1308,10 @@ mod tests {
 		let loaded = site.config(r#", "pages": { "overrides": "pages.json" }"#);
 		let plan = super::plan(&loaded.config).unwrap();
 		let urls: Vec<&str> = plan.pages.iter().map(|p| p.file.url.as_str()).collect();
-		// The order of the file is kept: every entry matched its page by the string.
-		assert_eq!(urls, ["/b.html", "/a/", "/"]);
+		// Every entry matched its page by the string.
+		// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the order of `pages` is the one `order` and the URLs make, a page before what hangs from it, the children in the natural order of their URLs
+		assert_eq!(urls, ["/", "/a/", "/b.html"]);
+		// assert_eq!(urls, ["/b.html", "/a/", "/"]); // previous
 
 		// Without an output extension a file has none in its URL either.
 		site.write(
@@ -1784,10 +1783,15 @@ mod tests {
 			},
 		)
 		.unwrap();
+		// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the order of `pages` is the one `order` and the URLs make, a page before what hangs from it, the children in the natural order of their URLs
 		assert_eq!(
 			statuses(&report),
-			[("/v/", "virtual"), ("/a.html", "built")]
+			[("/a.html", "built"), ("/v/", "virtual")]
 		);
+		// assert_eq!(
+		// 	statuses(&report),
+		// 	[("/v/", "virtual"), ("/a.html", "built")]
+		// ); // previous
 		assert!(!std::path::Path::new(&format!("{}/out/v/index.html", site.root)).exists());
 	}
 
@@ -1907,7 +1911,9 @@ mod tests {
 			})
 			.collect();
 		// `plain.html` has no layout and is not rendered by JavaScript.
-		assert_eq!(jobs, [("/about.html", false, true), ("/", true, true)]);
+		// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the order of `pages` is the one `order` and the URLs make, a page before what hangs from it, the children in the natural order of their URLs
+		assert_eq!(jobs, [("/", true, true), ("/about.html", false, true)]);
+		// assert_eq!(jobs, [("/about.html", false, true), ("/", true, true)]); // previous
 		let compiled = format!("{}/node_modules/.cache/kamado/jsx", site.root);
 		// A page of a build is a function in a chunk, not a file of its own; the
 		// components it imports are files.
@@ -1946,7 +1952,7 @@ mod tests {
 	#[test]
 	fn the_list_of_pages_is_what_the_pages_of_the_jsx_context_hold() {
 		// The list says it is what a JSX page sees: the same pages, in the same order
-		// (`pages.overrides` first, in its order), with the same merged `meta`.
+		// (the one `order` and the URLs make), with the same merged `meta`.
 		let (site, _) = jsx_site("page_list");
 		site.write(
 			"pages.json",
@@ -1980,7 +1986,9 @@ mod tests {
 				.collect()
 		};
 		assert_eq!(urls(listed), urls(seen));
-		assert_eq!(urls(listed), ["/about.html", "/ext/", "/", "/plain.html"]);
+		// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the order of `pages` is the one `order` and the URLs make, a page before what hangs from it, the children in the natural order of their URLs
+		assert_eq!(urls(listed), ["/", "/about.html", "/ext/", "/plain.html"]);
+		// assert_eq!(urls(listed), ["/about.html", "/ext/", "/", "/plain.html"]); // previous
 		for (entry, page) in listed.iter().zip(seen) {
 			let url = page.get("url").and_then(Value::as_str).unwrap();
 			let is_virtual = entry.get("virtual").and_then(Value::as_bool).unwrap();
@@ -2120,14 +2128,23 @@ mod tests {
 		let report = second
 			.finish_with_reads(rendered, Vec::new(), reads)
 			.unwrap();
+		// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the order of `pages` is the one `order` and the URLs make, a page before what hangs from it, the children in the natural order of their URLs
 		assert_eq!(
 			statuses(&report),
 			[
-				("/about.html", "built"),
 				("/", "cached"),
+				("/about.html", "built"),
 				("/plain.html", "cached")
 			]
 		);
+		// assert_eq!(
+		// 	statuses(&report),
+		// 	[
+		// 		("/about.html", "built"),
+		// 		("/", "cached"),
+		// 		("/plain.html", "cached")
+		// 	]
+		// ); // previous
 
 		// `--verbose` says which key made it stale.
 		assert_eq!(
@@ -2168,14 +2185,23 @@ mod tests {
 			.map(|j| (j.page, "<html><body><p>box</p></body></html>".to_owned()))
 			.collect();
 		let report = prepared.finish(rendered, Vec::new()).unwrap();
+		// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the order of `pages` is the one `order` and the URLs make, a page before what hangs from it, the children in the natural order of their URLs
 		assert_eq!(
 			statuses(&report),
 			[
-				("/about.html", "built"),
 				("/", "built"),
+				("/about.html", "built"),
 				("/plain.html", "built")
 			]
 		);
+		// assert_eq!(
+		// 	statuses(&report),
+		// 	[
+		// 		("/about.html", "built"),
+		// 		("/", "built"),
+		// 		("/plain.html", "built")
+		// 	]
+		// ); // previous
 		assert!(
 			site.read("out/index.html")
 				.starts_with("<!DOCTYPE html>\n<html>")
@@ -2196,14 +2222,23 @@ mod tests {
 		let again = prepare_incremental(&loaded);
 		assert!(again.jobs().is_empty());
 		let report = again.finish(Vec::new(), Vec::new()).unwrap();
+		// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the root is first, whatever the file lists
 		assert_eq!(
 			statuses(&report),
 			[
-				("/about.html", "cached"),
 				("/", "cached"),
+				("/about.html", "cached"),
 				("/plain.html", "cached")
 			]
 		);
+		// assert_eq!(
+		// 	statuses(&report),
+		// 	[
+		// 		("/about.html", "cached"),
+		// 		("/", "cached"),
+		// 		("/plain.html", "cached")
+		// 	]
+		// ); // previous
 	}
 
 	#[test]
@@ -3685,7 +3720,9 @@ mod tests {
 			"pages.json",
 			r#"{ "version": 1, "pages": [ { "url": "/plain.html" }, { "url": "/about.html" } ] }"#,
 		);
-		assert_eq!(rebuild(), 2);
+		// Behavior change: the entries of `pages.overrides` in another order list the same pages in the same order (RFC section 6), so nothing is built again
+		assert_eq!(rebuild(), 0);
+		// assert_eq!(rebuild(), 2); // previous
 		assert_eq!(rebuild(), 0);
 	}
 

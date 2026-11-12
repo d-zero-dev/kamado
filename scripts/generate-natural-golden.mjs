@@ -1,7 +1,7 @@
 /**
  * Writes `crates/kd_core/tests/natural_golden.tsv`: how `numericalComparator` and
  * `pathComparator` of `@d-zero/shared` (`src/sort/`) order two strings, for the natural order
- * of the sort of `kamado ui` (RFC §14.2). The Rust port is `crates/kd_core/src/ui/natural.rs`,
+ * of the sort of `kamado ui` (RFC §14.2). The Rust port is `crates/kd_core/src/natural.rs`,
  * whose test reads the file.
  *
  * What is compared is the result for a PAIR of values (`-1`, `0` or `1`), not the order of a
