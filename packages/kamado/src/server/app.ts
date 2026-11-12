@@ -4,12 +4,12 @@
  * round trips the core asks for: rendering a page in the worker, building a
  * script with esbuild.
  */
+import type { ExecutedData } from '../data-files.js';
 import type { RenderContext } from '../props.js';
 import type { RenderJob } from '../render.js';
 import type { ScriptRequest } from '../scripts.js';
 import type { ContextUpdate } from './context-update.js';
 import type { ProxyRule } from './proxy.js';
-import type { ExecutedData } from '../data-files.js';
 
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
