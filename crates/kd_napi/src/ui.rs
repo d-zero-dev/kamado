@@ -4,7 +4,8 @@
 //!
 //! Every answer is JSON: the rows (`uiPages`), the values of a key (`uiValues`), `{ "version" }`
 //! (`uiRefresh`), the result of an
-//! edit (`uiEdit`; an edit that is refused is a result with `"ok": false`, not an error) and
+//! edit (`uiEdit`, and `uiEditBatch` for several made as one; an edit that is refused is a
+//! result with `"ok": false`, not an error) and
 //! `{ "warning" }` (`uiClose`). A request that is not one, a site that cannot be planned and
 //! a handle that is not open are errors.
 //!
@@ -90,6 +91,11 @@ pub(crate) fn diff(handle: &str, query_json: &str) -> Result<String, String> {
 /// Makes one edit.
 pub(crate) fn edit(handle: &str, edit_json: &str) -> Result<String, String> {
 	with(handle, |ui| ui.edit(edit_json))
+}
+
+/// Makes the edits of a batch as one: all of them, or none.
+pub(crate) fn edit_batch(handle: &str, batch_json: &str) -> Result<String, String> {
+	with(handle, |ui| ui.edit_batch(batch_json))
 }
 
 /// The port and the browser setting of `devServer`, and the input and output directories:

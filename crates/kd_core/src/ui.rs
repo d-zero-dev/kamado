@@ -24,7 +24,9 @@ use crate::plan_cache::{CachedPage, PlanCache};
 use crate::session::PlanSettings;
 use crate::{BuildOptions, Loaded, Page, PageKind, Plan};
 
+mod batch;
 mod diff;
+mod moves;
 mod natural;
 
 /// What the editor shows for a key whose value comes from the URL.
@@ -164,6 +166,21 @@ pub struct Ui {
 	/// The files the last edit set aside to remove and could not remove (with the reason): the
 	/// answer to that edit says them as a warning. Emptied when the next edit begins.
 	left_behind: Vec<String>,
+	/// What the commits of the batch being made have done so far (see `edit_batch`); `None` when
+	/// no batch is being made.
+	batch: Option<Journal>,
+	/// The page files the input directory has, kept up to date from what the commits of the
+	/// batch being made did, so that planning again after each of them does not walk the
+	/// directory again (see `FoundFiles`). `None` when no batch is being made.
+	found: Option<batch::FoundFiles>,
+	/// Where the pages are by their paths, kept for the batch being made (see `patch_plan`).
+	index: Option<batch::PlanIndex>,
+	/// The URLs whose entries in `pages.overrides` the edits of the batch changed since the
+	/// plan was last brought up to date (see `patch_plan`).
+	touched: BTreeSet<String>,
+	/// How many times the site was planned again from its files since the handle was opened (the
+	/// tests of a batch count them: a batch of many edits plans it once, at the end).
+	plans: u64,
 }
 
 fn hash_hex(bytes: &[u8]) -> String {
@@ -550,6 +567,66 @@ fn edit_sidecar_text(path: &str, text: &str, change: &KeyChange) -> F<String> {
 	Ok(edited)
 }
 
+/// The text of one entry of `pages.overrides` (`entry`: the entry on its own, as the file has
+/// it) once `change` is made to a key of its `meta`; `expected` is what the entry reads as,
+/// and is changed the same way. The one place that says how a key is set or deleted in an entry,
+/// for the edit of one key and for the keys of a batch, which make the same change to many.
+fn change_entry(
+	path: &str,
+	url: &str,
+	entry: &str,
+	change: &KeyChange,
+	expected: &mut Value,
+) -> F<String> {
+	use kd_jsonc::edit::{EditError as E, trusted};
+	let overrides_fail = |e: E| Fail {
+		code: "invalid",
+		message: format!("{path}: {e}"),
+	};
+	let meta_path = [Seg::Key("meta")];
+	let edited = match change {
+		KeyChange::Set(k, v) => match trusted(entry).set_member(&meta_path, k, v) {
+			Ok(text) => text,
+			// The entry has no `meta` yet, or a `meta` that is `null` (which the plan reads
+			// as none): the key is the first of a new one.
+			Err(E::NoSuchPath(_) | E::NotAContainer(_)) => {
+				let meta = Value::Object(vec![(k.clone(), v.clone())]);
+				trusted(entry)
+					.set_member(&[], "meta", &meta)
+					.map_err(overrides_fail)?
+			}
+			Err(e) => return Err(overrides_fail(e)),
+		},
+		KeyChange::Delete(k) => match trusted(entry).delete_member(&meta_path, k) {
+			Ok(text) => text,
+			Err(E::NoSuchPath(_) | E::NoSuchKey(_)) => {
+				return fail("invalid", format!("{url} has no key {k:?} in {path}"));
+			}
+			Err(e) => return Err(overrides_fail(e)),
+		},
+	};
+	if let Value::Object(members) = expected {
+		match members.iter_mut().find(|(k, _)| k == "meta") {
+			Some((_, Value::Object(meta))) => *meta = change.apply(meta),
+			// a `meta` that is `null` is replaced by the one the key makes
+			Some((_, slot)) => {
+				if let KeyChange::Set(k, v) = change {
+					*slot = Value::Object(vec![(k.clone(), v.clone())]);
+				}
+			}
+			None => {
+				if let KeyChange::Set(k, v) = change {
+					members.push((
+						"meta".to_string(),
+						Value::Object(vec![(k.clone(), v.clone())]),
+					));
+				}
+			}
+		}
+	}
+	Ok(edited)
+}
+
 /// Edits the entry of `url` in the text of `pages.overrides`: `change` is made to its `meta`,
 /// and its `url` becomes `new_url` if that is given. `before` is what `text` reads as, so
 /// `text` is known to be valid and is not parsed again (the file can be megabytes): what is
@@ -581,47 +658,14 @@ fn edit_overrides_text(
 	})?;
 	let mut edited = text.to_string();
 	if let Some(change) = change {
-		let meta_path = [Seg::Key("pages"), Seg::Index(idx), Seg::Key("meta")];
-		match change {
-			KeyChange::Set(k, v) => match trusted(&edited).set_member(&meta_path, k, v) {
-				Ok(text) => edited = text,
-				// The entry has no `meta` yet, or a `meta` that is `null` (which the plan reads
-				// as none): the key is the first of a new one.
-				Err(E::NoSuchPath(_) | E::NotAContainer(_)) => {
-					let meta = Value::Object(vec![(k.clone(), v.clone())]);
-					edited = trusted(&edited)
-						.set_member(&entry_path, "meta", &meta)
-						.map_err(overrides_fail)?;
-				}
-				Err(e) => return Err(overrides_fail(e)),
-			},
-			KeyChange::Delete(k) => match trusted(&edited).delete_member(&meta_path, k) {
-				Ok(text) => edited = text,
-				Err(E::NoSuchPath(_) | E::NoSuchKey(_)) => {
-					return fail("invalid", format!("{url} has no key {k:?} in {path}"));
-				}
-				Err(e) => return Err(overrides_fail(e)),
-			},
-		}
-		if let Value::Object(members) = &mut expected {
-			match members.iter_mut().find(|(k, _)| k == "meta") {
-				Some((_, Value::Object(meta))) => *meta = change.apply(meta),
-				// a `meta` that is `null` is replaced by the one the key makes
-				Some((_, slot)) => {
-					if let KeyChange::Set(k, v) = change {
-						*slot = Value::Object(vec![(k.clone(), v.clone())]);
-					}
-				}
-				None => {
-					if let KeyChange::Set(k, v) = change {
-						members.push((
-							"meta".to_string(),
-							Value::Object(vec![(k.clone(), v.clone())]),
-						));
-					}
-				}
-			}
-		}
+		let entry = change_entry(
+			path,
+			url,
+			&text[entry_start..entry_end],
+			change,
+			&mut expected,
+		)?;
+		edited = format!("{}{entry}{}", &text[..entry_start], &text[entry_end..]);
 	}
 	if let Some(new_url) = new_url {
 		if before.by_url.contains_key(new_url) {
@@ -658,6 +702,79 @@ fn edit_overrides_text(
 		);
 	}
 	Ok(edited)
+}
+
+/// A change to the entries of `pages.overrides`, as the model of the file (what it reads as)
+/// has it.
+enum EntryChange<'a> {
+	/// An entry after the last.
+	Add(kd_site::meta::Override),
+	Remove(&'a str),
+	Change(EntryEdit<'a>),
+	/// The entry of `old` with the URL `new`, in the same place.
+	Rename {
+		old: &'a str,
+		new: &'a str,
+	},
+}
+
+/// The entry of `url` made virtual or not, with the keys `add` set in its `meta` and the keys
+/// `take` taken out of it.
+struct EntryEdit<'a> {
+	url: &'a str,
+	is_virtual: bool,
+	add: &'a Meta,
+	take: &'a [String],
+}
+
+impl EntryChange<'_> {
+	/// The URLs whose entries this changes.
+	fn urls(&self) -> Vec<&str> {
+		match self {
+			EntryChange::Add(entry) => vec![entry.url.as_str()],
+			EntryChange::Remove(url) => vec![url],
+			EntryChange::Change(edit) => vec![edit.url],
+			EntryChange::Rename { old, new } => vec![old, new],
+		}
+	}
+}
+
+/// What `pages.overrides` reads as once `change` is made to it. The one place that says so,
+/// for the model that is checked against the file that was written (a single edit) and for the
+/// model that is kept up to date by hand while a batch is made.
+fn model_after(model: &mut Overrides, change: &EntryChange<'_>) {
+	match change {
+		EntryChange::Add(entry) => {
+			model.order.push(entry.url.clone());
+			model.by_url.insert(entry.url.clone(), entry.clone());
+		}
+		EntryChange::Remove(url) => {
+			if let Some(idx) = model.order.iter().position(|u| u == url) {
+				model.order.remove(idx);
+			}
+			model.by_url.remove(*url);
+		}
+		EntryChange::Change(edit) => {
+			if let Some(entry) = model.by_url.get_mut(edit.url) {
+				entry.is_virtual = edit.is_virtual;
+				for (key, value) in edit.add.iter() {
+					entry.meta = KeyChange::Set(key.clone(), value.clone()).apply(&entry.meta);
+				}
+				for key in edit.take {
+					entry.meta.retain(|(k, _)| k != key);
+				}
+			}
+		}
+		EntryChange::Rename { old, new } => {
+			if let Some(mut entry) = model.by_url.remove(*old) {
+				entry.url = (*new).to_string();
+				model.by_url.insert((*new).to_string(), entry);
+			}
+			if let Some(idx) = model.order.iter().position(|u| u == old) {
+				model.order[idx] = (*new).to_string();
+			}
+		}
+	}
 }
 
 /// The entry of a page as it is written when it is added to `pages.overrides`: the members a
@@ -704,11 +821,16 @@ fn overrides_edit_fail(path: &str, e: &kd_jsonc::edit::EditError) -> Fail {
 
 /// The text of `pages.overrides` with `entry` added after its last entry. `before` is what
 /// `text` reads as.
+///
+/// With `verify` the text is read back and has to read as the model says (the text of a single
+/// edit); without, the caller keeps the model (see `Ui::follow_entries`) and the text is read
+/// back once, when the batch it is part of is made.
 fn add_overrides_entry(
 	path: &str,
 	text: &str,
 	before: &Overrides,
 	entry: kd_site::meta::Override,
+	verify: bool,
 ) -> F<String> {
 	if before.by_url.contains_key(&entry.url) {
 		return fail(
@@ -719,23 +841,33 @@ fn add_overrides_entry(
 	let edited = kd_jsonc::edit::trusted(text)
 		.push_element(&[Seg::Key("pages")], &overrides_entry_value(&entry))
 		.map_err(|e| overrides_edit_fail(path, &e))?;
+	if !verify {
+		return Ok(edited);
+	}
 	let mut expected = before.clone();
-	expected.order.push(entry.url.clone());
-	expected.by_url.insert(entry.url.clone(), entry);
+	model_after(&mut expected, &EntryChange::Add(entry));
 	checked_overrides(path, edited, &expected)
 }
 
 /// The text of `pages.overrides` without the entry of `url`. `before` is what `text` reads as.
-fn remove_overrides_entry(path: &str, text: &str, before: &Overrides, url: &str) -> F<String> {
+fn remove_overrides_entry(
+	path: &str,
+	text: &str,
+	before: &Overrides,
+	url: &str,
+	verify: bool,
+) -> F<String> {
 	let Some(idx) = before.order.iter().position(|u| u == url) else {
 		return fail("invalid", format!("{path} has no entry for {url}"));
 	};
 	let edited = kd_jsonc::edit::trusted(text)
 		.delete_element(&[Seg::Key("pages")], idx)
 		.map_err(|e| overrides_edit_fail(path, &e))?;
+	if !verify {
+		return Ok(edited);
+	}
 	let mut expected = before.clone();
-	expected.order.remove(idx);
-	expected.by_url.remove(url);
+	model_after(&mut expected, &EntryChange::Remove(url));
 	checked_overrides(path, edited, &expected)
 }
 
@@ -747,20 +879,24 @@ fn change_overrides_entry(
 	path: &str,
 	text: &str,
 	before: &Overrides,
-	url: &str,
-	is_virtual: bool,
-	add: &Meta,
-	take: &[String],
+	edit: &EntryEdit<'_>,
+	verify: bool,
 ) -> F<String> {
 	use kd_jsonc::edit::{EditError as E, trusted};
+	let EntryEdit {
+		url,
+		is_virtual,
+		add,
+		take,
+	} = *edit;
 	let Some(idx) = before.order.iter().position(|u| u == url) else {
 		return fail("invalid", format!("{path} has no entry for {url}"));
 	};
 	let bad = |e: E| overrides_edit_fail(path, &e);
-	let mut expected = before.clone();
-	let Some(entry) = expected.by_url.get_mut(url) else {
+	if !before.by_url.contains_key(url) {
 		return fail("invalid", format!("{path} has no entry for {url}"));
-	};
+	}
+	let mut meta_now = before.by_url[url].meta.clone();
 	// The entry is found once and edited as a text of its own: each key is then a walk over
 	// the entry and not over the file, which is megabytes on a site of a hundred thousand
 	// pages.
@@ -778,7 +914,6 @@ fn change_overrides_entry(
 			.delete_member(&[], "virtual")
 			.map_err(bad)?
 	};
-	entry.is_virtual = is_virtual;
 	for (key, value) in add {
 		edited = match trusted(&edited).set_member(&meta_path, key, value) {
 			Ok(edited) => edited,
@@ -792,18 +927,23 @@ fn change_overrides_entry(
 				.map_err(bad)?,
 			Err(e) => return Err(bad(e)),
 		};
-		entry.meta = KeyChange::Set(key.clone(), value.clone()).apply(&entry.meta);
+		meta_now = KeyChange::Set(key.clone(), value.clone()).apply(&meta_now);
 	}
 	for key in take {
 		edited = trusted(&edited)
 			.delete_member(&meta_path, key)
 			.map_err(bad)?;
-		entry.meta.retain(|(k, _)| k != key);
+		meta_now.retain(|(k, _)| k != key);
 	}
-	if !take.is_empty() && entry.meta.is_empty() {
+	if !take.is_empty() && meta_now.is_empty() {
 		edited = trusted(&edited).delete_member(&[], "meta").map_err(bad)?;
 	}
 	let whole = format!("{}{edited}{}", &text[..start], &text[end..]);
+	if !verify {
+		return Ok(whole);
+	}
+	let mut expected = before.clone();
+	model_after(&mut expected, &EntryChange::Change(EntryEdit { ..*edit }));
 	checked_overrides(path, whole, &expected)
 }
 
@@ -917,34 +1057,91 @@ fn rewrite_relative_imports(from_path: &str, to_path: &str, text: &str) -> F<Opt
 	Ok(Some(out))
 }
 
-/// Puts back what a failed [`Txn::commit`] had done: the files written get what they held (a
-/// file that was not there is removed), the files moved go back, and the directories made for
-/// them are removed. Returns what could not be put back, each with the reason.
-fn put_back(
-	renamed: &[(String, String)],
-	written: &[(String, Option<Vec<u8>>)],
-	made: &[String],
-) -> Vec<String> {
-	let mut stuck: Vec<String> = Vec::new();
-	for (path, old) in written.iter().rev() {
-		let done = match old {
-			Some(old) => fs::write(path, old),
-			None => fs::remove_file(path),
-		};
-		if let Err(e) = done {
-			stuck.push(format!("{path}: {e}"));
+/// One change a [`Txn::commit`] made to the file system, in the order it was made.
+enum Event {
+	/// A file or a directory moved from the first name to the second.
+	Rename(String, String),
+	/// A file written, with what it held before (`None`: there was no such file).
+	Write(String, Option<Vec<u8>>),
+	/// Directories made for a move or a write, to be removed (those that are empty) if it is
+	/// put back.
+	MadeDirs(Vec<String>),
+}
+
+/// What changes made together have done, so that all of them can be put back. A single edit
+/// keeps one for the length of its [`Txn::commit`]; a batch of edits (RFC §14.2) keeps one for
+/// all its commits, and puts all of them back if any fails.
+#[derive(Default)]
+struct Journal {
+	events: Vec<Event>,
+	/// The names the files to remove were set aside under, until the changes are made.
+	aside: Vec<String>,
+	/// The places the moves and the removals left, whose empty directories are removed once
+	/// the changes are made (with the input directory they stop at).
+	pruned: Vec<(String, String)>,
+	/// The file whose writes are held back (see `deferred`), when a batch is being made.
+	defer: Option<String>,
+	/// What the commits wrote to the file `defer` names, not written yet: a batch that changes
+	/// many entries of `pages.overrides` writes it once, where one edit after another would
+	/// read, edit, check and write the whole file each time. The handle's copy is what the
+	/// edits read meanwhile (see `Ui::overrides_expected`); the file is written by
+	/// `Ui::flush_overrides`, and what was not written is not there to put back.
+	deferred: Option<String>,
+}
+
+impl Journal {
+	/// Puts back what the events had done, last first: the files written get what they held
+	/// (a file that was not there is removed), the files moved go back, and the directories
+	/// made for them are removed. Returns what could not be put back, each with the reason.
+	fn put_back(&mut self) -> Vec<String> {
+		let mut stuck: Vec<String> = Vec::new();
+		for event in self.events.drain(..).rev() {
+			match event {
+				Event::Write(path, old) => {
+					let done = match old {
+						Some(old) => fs::write(&path, old),
+						None => fs::remove_file(&path),
+					};
+					if let Err(e) = done {
+						stuck.push(format!("{path}: {e}"));
+					}
+				}
+				Event::Rename(from, to) => {
+					if let Err(e) = fs::rename(&to, &from) {
+						stuck.push(format!("{to}: {e}"));
+					}
+				}
+				Event::MadeDirs(dirs) => {
+					for dir in dirs {
+						// A directory that is not empty now holds something that is not ours: it
+						// stays.
+						let _ = fs::remove_dir(&dir);
+					}
+				}
+			}
 		}
+		self.aside.clear();
+		self.pruned.clear();
+		self.deferred = None;
+		stuck
 	}
-	for (from, to) in renamed.iter().rev() {
-		if let Err(e) = fs::rename(to, from) {
-			stuck.push(format!("{to}: {e}"));
+
+	/// Everything is made: the files that were set aside go for good (what cannot be removed
+	/// is returned, with the reason, and stays where it is), and the directories the moves and
+	/// the removals left empty are removed.
+	fn finish(&mut self) -> Vec<String> {
+		let mut left: Vec<String> = Vec::new();
+		for hold in self.aside.drain(..) {
+			if let Err(e) = fs::remove_file(&hold) {
+				left.push(format!("{hold} ({e})"));
+			}
 		}
+		for (from, root) in self.pruned.drain(..) {
+			prune_empty_dirs(&from, &root);
+		}
+		self.events.clear();
+		left
 	}
-	for dir in made {
-		// A directory that is not empty now holds something that is not ours: it stays.
-		let _ = fs::remove_dir(dir);
-	}
-	stuck
 }
 
 /// The name a file that is to be removed has until the other changes are made: in the same
@@ -1002,16 +1199,27 @@ impl Txn {
 	/// the reason), so that the answer to the edit says it: an edit that is made and leaves a
 	/// file behind is a success with a warning, not a failure.
 	fn commit(self) -> F<Vec<String>> {
-		let mut renamed: Vec<(String, String)> = Vec::new();
-		// What each file held before it was written (`None`: there was no such file).
-		let mut written: Vec<(String, Option<Vec<u8>>)> = Vec::new();
-		let mut made: Vec<String> = Vec::new();
-		let undo = |renamed: &[(String, String)],
-		            written: &[(String, Option<Vec<u8>>)],
-		            made: &[String],
-		            failed: Fail|
-		 -> Fail {
-			let stuck = put_back(renamed, written, made);
+		self.commit_with(None)
+	}
+
+	/// [`Txn::commit`] on its own, or, with a `batch` journal, as one of the commits of a batch.
+	///
+	/// With a `batch` journal the changes are recorded in it and nothing is put back or finished
+	/// here: the batch puts back all its commits when one fails, and finishes them all when the
+	/// last is made. The answer is then empty.
+	fn commit_with(self, batch: Option<&mut Journal>) -> F<Vec<String>> {
+		let shared = batch.is_some();
+		let mut local = Journal::default();
+		let journal = match batch {
+			Some(journal) => journal,
+			None => &mut local,
+		};
+		// What went wrong, with what could not be put back when this commit is on its own.
+		let undo = |journal: &mut Journal, failed: Fail| -> Fail {
+			if shared {
+				return failed;
+			}
+			let stuck = journal.put_back();
 			if stuck.is_empty() {
 				failed
 			} else {
@@ -1028,55 +1236,55 @@ impl Txn {
 		for (from, to) in &self.renames {
 			if let Some(parent) = std::path::Path::new(to).parent() {
 				let new_dirs = missing_dirs(parent);
-				if let Err(e) = fs::create_dir_all(parent) {
-					made.extend(new_dirs);
-					return Err(undo(&renamed, &written, &made, io_fail(to, &e)));
+				let made = fs::create_dir_all(parent);
+				if !new_dirs.is_empty() {
+					journal.events.push(Event::MadeDirs(new_dirs));
 				}
-				made.extend(new_dirs);
+				if let Err(e) = made {
+					return Err(undo(journal, io_fail(to, &e)));
+				}
 			}
 			if let Err(e) = fs::rename(from, to) {
-				return Err(undo(&renamed, &written, &made, io_fail(from, &e)));
+				return Err(undo(journal, io_fail(from, &e)));
 			}
-			renamed.push((from.clone(), to.clone()));
+			journal.events.push(Event::Rename(from.clone(), to.clone()));
 		}
-		let mut aside: Vec<String> = Vec::new();
 		for path in &self.removes {
 			let hold = set_aside_name(path);
 			if let Err(e) = fs::rename(path, &hold) {
-				return Err(undo(&renamed, &written, &made, io_fail(path, &e)));
+				return Err(undo(journal, io_fail(path, &e)));
 			}
-			renamed.push((path.clone(), hold.clone()));
-			aside.push(hold);
+			journal
+				.events
+				.push(Event::Rename(path.clone(), hold.clone()));
+			journal.aside.push(hold);
 		}
 		for (path, text) in &self.writes {
+			if shared && journal.defer.as_deref() == Some(path.as_str()) {
+				journal.deferred = Some(text.clone());
+				continue;
+			}
 			// A file that is new can be in a directory that is new.
 			if let Some(parent) = std::path::Path::new(path).parent() {
 				let new_dirs = missing_dirs(parent);
 				if !new_dirs.is_empty() {
 					let created = fs::create_dir_all(parent);
-					made.extend(new_dirs);
+					journal.events.push(Event::MadeDirs(new_dirs));
 					if let Err(e) = created {
-						return Err(undo(&renamed, &written, &made, io_fail(path, &e)));
+						return Err(undo(journal, io_fail(path, &e)));
 					}
 				}
 			}
 			let old = match fs::read(path) {
 				Ok(bytes) => Some(bytes),
 				Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-				Err(e) => return Err(undo(&renamed, &written, &made, io_fail(path, &e))),
+				Err(e) => return Err(undo(journal, io_fail(path, &e))),
 			};
 			// Recorded before the write, so that a write that fails half way (the file is
 			// truncated first) is undone too.
-			written.push((path.clone(), old));
+			journal.events.push(Event::Write(path.clone(), old));
 			if let Err(e) = fs::write(path, text) {
-				return Err(undo(&renamed, &written, &made, io_fail(path, &e)));
-			}
-		}
-		// Everything is made: what was set aside goes for good (see above for one that stays).
-		let mut left: Vec<String> = Vec::new();
-		for hold in &aside {
-			if let Err(e) = fs::remove_file(hold) {
-				left.push(format!("{hold} ({e})"));
+				return Err(undo(journal, io_fail(path, &e)));
 			}
 		}
 		// Everything is made, so nothing is put back: what was left empty can go.
@@ -1087,10 +1295,14 @@ impl Txn {
 				.map(|(from, _)| from)
 				.chain(&self.removes)
 			{
-				prune_empty_dirs(from, root);
+				journal.pruned.push((from.clone(), root.clone()));
 			}
 		}
-		Ok(left)
+		if shared {
+			return Ok(Vec::new());
+		}
+		// Everything is made: what was set aside goes for good (see above for one that stays).
+		Ok(journal.finish())
 	}
 }
 
@@ -1401,6 +1613,11 @@ impl Ui {
 			sort_cache: None,
 			head: diff::HeadCache::default(),
 			left_behind: Vec::new(),
+			batch: None,
+			found: None,
+			index: None,
+			touched: BTreeSet::new(),
+			plans: 0,
 		};
 		ui.layouts = read_layouts(&ui.loaded.config)?;
 		ui.plan_again(on_disk)?;
@@ -1411,6 +1628,7 @@ impl Ui {
 	/// handle has none of its own yet. If the site cannot be read, nothing of the handle
 	/// changes.
 	fn plan_again(&mut self, disk: Option<PlanCache>) -> Result<(), String> {
+		self.plans += 1;
 		let overrides = match &self.loaded.config.pages.overrides {
 			Some(path) => {
 				let text = fs::read_to_string(path)
@@ -1430,7 +1648,8 @@ impl Ui {
 			None if !self.cache.pages.is_empty() => Some(&self.cache),
 			None => None,
 		};
-		let (mut plan, learned) = crate::plan_cached(&self.loaded.config, self.jobs, known, None)?;
+		let found = self.found.as_ref().map(batch::FoundFiles::list);
+		let (mut plan, learned) = crate::plan_cached(&self.loaded.config, self.jobs, known, found)?;
 		// The editor never builds a page, and the text of every HTML page and the source of
 		// every TSX page is megabytes on a big site: it is not kept.
 		for page in &mut plan.pages {
@@ -1465,6 +1684,9 @@ impl Ui {
 			.map(|(i, p)| (p.file.url.clone(), i))
 			.collect();
 		self.reindex_columns();
+		if self.index.is_some() {
+			self.index = Some(batch::PlanIndex::of(&self.plan));
+		}
 	}
 
 	/// The keys of the metadata of all pages, but the one that sets the URL.
@@ -1564,16 +1786,20 @@ impl Ui {
 
 	/// Where the value of `key` of the page `i` was set.
 	fn origin_of(&self, i: usize, key: &str) -> Origin {
-		let page = &self.plan.pages[i];
-		if page.is_virtual {
-			return Origin::Overrides;
-		}
 		let in_overrides = self
 			.overrides
 			.as_ref()
-			.and_then(|o| o.parsed.by_url.get(&page.file.url))
+			.and_then(|o| o.parsed.by_url.get(&self.plan.pages[i].file.url))
 			.is_some_and(|o| o.meta.iter().any(|(k, _)| k == key));
-		if in_overrides {
+		self.origin_given(i, key, in_overrides)
+	}
+
+	/// The file the value of `key` of the page `i` comes from, given whether `pages.overrides`
+	/// has it for the page (the answer of the model the caller reads: the handle's, or the one a
+	/// batch keeps by hand while it is made).
+	fn origin_given(&self, i: usize, key: &str, in_overrides: bool) -> Origin {
+		let page = &self.plan.pages[i];
+		if page.is_virtual || in_overrides {
 			return Origin::Overrides;
 		}
 		let in_sidecar = self
@@ -2105,6 +2331,32 @@ impl Ui {
 		Value::Object(members).to_json()
 	}
 
+	/// Makes the change of an edit on the page at `url` (a page that is made has none yet), with
+	/// `expect`: the part of an edit that is the same for one edit and for each of a batch.
+	/// `revert` is not made here (it needs what HEAD holds, which [`Ui::edit`] asks for first).
+	fn run_change(&mut self, url: &str, change: &Change, expect: &Value) -> F<Done> {
+		// A page that is made is the one edit that is not of a page that is there.
+		match (change, self.by_url.get(url).copied()) {
+			(Change::Create { url, path }, _) => self
+				.create(url.as_deref(), path.as_deref(), expect)
+				.map(Done::Page),
+			(_, None) => fail("notFound", format!("there is no page with the URL {url}")),
+			(Change::Key(change), Some(i)) => self.edit_key(i, expect, change).map(Done::Page),
+			(Change::MoveUrl(new_url), Some(i)) => {
+				self.move_url(i, expect, new_url).map(Done::Page)
+			}
+			(Change::MovePath(path), Some(i)) => self.move_path(i, expect, path).map(Done::Page),
+			(Change::Revert { key, head }, Some(i)) => {
+				self.revert(i, expect, key.as_deref(), head).map(Done::Page)
+			}
+			(Change::Virtualize, Some(i)) => self.virtualize(i, expect).map(Done::Page),
+			(Change::Materialize(path), Some(i)) => {
+				self.materialize(i, expect, path.as_deref()).map(Done::Page)
+			}
+			(Change::DeletePage, Some(i)) => self.delete_page(i, expect).map(|()| Done::Gone),
+		}
+	}
+
 	fn fail_json(&mut self, fail: &Fail, current: Option<usize>) -> String {
 		let mut members = vec![
 			("ok".to_owned(), Value::Bool(false)),
@@ -2146,41 +2398,15 @@ impl Ui {
 		let edit = parse_edit(edit_json)?;
 		let version = self.version;
 		self.left_behind.clear();
-		// A page that is made is the one edit that is not of a page that is there.
-		let result = match (&edit.change, self.by_url.get(&edit.url).copied()) {
-			(Change::Create { url, path }, _) => self
-				.create(url.as_deref(), path.as_deref(), &edit.expect)
-				.map(Done::Page),
-			(_, None) => {
-				let f = Fail {
-					code: "notFound",
-					message: format!("there is no page with the URL {}", edit.url),
-				};
-				return Ok(self.fail_json(&f, None));
+		if let (Change::Revert { head, .. }, Some(i)) =
+			(&edit.change, self.by_url.get(&edit.url).copied())
+		{
+			let need = self.revert_needs(i, head);
+			if !need.is_empty() {
+				return Ok(Ui::need_json(need));
 			}
-			(Change::Key(change), Some(i)) => {
-				self.edit_key(i, &edit.expect, change).map(Done::Page)
-			}
-			(Change::MoveUrl(new_url), Some(i)) => {
-				self.move_url(i, &edit.expect, new_url).map(Done::Page)
-			}
-			(Change::MovePath(path), Some(i)) => {
-				self.move_path(i, &edit.expect, path).map(Done::Page)
-			}
-			(Change::Revert { key, head }, Some(i)) => {
-				let need = self.revert_needs(i, head);
-				if !need.is_empty() {
-					return Ok(Ui::need_json(need));
-				}
-				self.revert(i, &edit.expect, key.as_deref(), head)
-					.map(Done::Page)
-			}
-			(Change::Virtualize, Some(i)) => self.virtualize(i, &edit.expect).map(Done::Page),
-			(Change::Materialize(path), Some(i)) => self
-				.materialize(i, &edit.expect, path.as_deref())
-				.map(Done::Page),
-			(Change::DeletePage, Some(i)) => self.delete_page(i, &edit.expect).map(|()| Done::Gone),
-		};
+		}
+		let result = self.run_change(&edit.url, &edit.change, &edit.expect);
 		match result {
 			Ok(done) => {
 				// Planning the site again counts a version of its own: the edit is one.
@@ -2231,28 +2457,46 @@ impl Ui {
 		}
 	}
 
-	/// Sets or deletes one key of the metadata of the page `i`, in the file it comes from.
-	fn edit_key(&mut self, i: usize, expect: &Value, change: &KeyChange) -> F<String> {
+	/// The file a change of a key of the page `i` is made in (RFC §14.2): where the key is, and
+	/// for a key the page has not, the page file (the entry of `pages.overrides` for a virtual
+	/// page). `exists` is whether the page has the key now and `in_overrides` whether the entry
+	/// of the page has it: what the edit reads of the handle, and what a batch keeps by hand.
+	/// The one place that says so, for an edit and for each key of a batch.
+	fn key_origin(
+		&self,
+		i: usize,
+		change: &KeyChange,
+		exists: bool,
+		in_overrides: bool,
+	) -> F<Origin> {
 		let key = change.key();
 		if Some(key) == self.output_path_field() {
 			return fail("notEditable", URL_KEY_REASON);
 		}
+		if exists {
+			return Ok(self.origin_given(i, key, in_overrides));
+		}
+		match change {
+			KeyChange::Delete(_) => fail("invalid", format!("the page has no key {key:?}")),
+			KeyChange::Set(..) if self.plan.pages[i].is_virtual => Ok(Origin::Overrides),
+			KeyChange::Set(..) => Ok(Origin::InFile),
+		}
+	}
+
+	/// Sets or deletes one key of the metadata of the page `i`, in the file it comes from.
+	fn edit_key(&mut self, i: usize, expect: &Value, change: &KeyChange) -> F<String> {
+		let key = change.key();
 		let exists = self.plan.pages[i].meta.iter().any(|(k, _)| k == key);
-		let origin = if exists {
-			self.origin_of(i, key)
-		} else {
-			match change {
-				KeyChange::Delete(_) => {
-					return fail("invalid", format!("the page has no key {key:?}"));
-				}
-				KeyChange::Set(..) if self.plan.pages[i].is_virtual => Origin::Overrides,
-				KeyChange::Set(..) => Origin::InFile,
-			}
-		};
+		let in_overrides = self
+			.overrides
+			.as_ref()
+			.and_then(|o| o.parsed.by_url.get(&self.plan.pages[i].file.url))
+			.is_some_and(|o| o.meta.iter().any(|(k, _)| k == key));
+		let origin = self.key_origin(i, change, exists, in_overrides)?;
 		let url = self.plan.pages[i].file.url.clone();
 		let mut txn = self.key_txn(i, expect, change, origin)?;
 		let overrides_after = txn.overrides_after.take();
-		txn.commit()?;
+		txn.commit_with(self.batch.as_mut())?;
 		if let Err(e) = self.after_key_edit(i, change, overrides_after) {
 			// The file is written, so the edit is made; what this handle knows is not what
 			// the files hold, and the site is read again to make it so.
@@ -2449,6 +2693,21 @@ impl Ui {
 				self.left_behind.join("; ")
 			)
 		};
+		if let (Some(found), Some(journal)) = (&mut self.found, &self.batch) {
+			let changed = found.follow(&journal.events);
+			// What the commit held back of `pages.overrides` is what the handle reads from now on.
+			if let (Some(text), Some(o)) = (&journal.deferred, &mut self.overrides) {
+				o.text.clone_from(text);
+			}
+			// The plan is kept up to date by hand (see `patch_plan`); if that cannot be done, it is
+			// made again, from the list of the files, and from `pages.overrides` as the file has it.
+			if self.patch_plan(&changed) {
+				self.touched.clear();
+				return Ok(());
+			}
+			self.flush_overrides()?;
+			self.touched.clear();
+		}
 		self.plan_again(None).map_err(|message| Fail {
 			code: "io",
 			message: format!(
@@ -2644,8 +2903,37 @@ impl Ui {
 				format!("the site has no pages.overrides file, and {why}"),
 			);
 		};
+		if self.in_overrides_session() {
+			return Ok((o, o.text.clone()));
+		}
 		let text = read_expected(expect, "overrides", &o.path)?;
 		Ok((o, text))
+	}
+
+	/// Whether the edits of a batch are being made, with `pages.overrides` held in the handle
+	/// (see [`Journal::deferred`]): they read its text and its model, not the file, and change the
+	/// model by hand.
+	fn in_overrides_session(&self) -> bool {
+		self.batch.as_ref().is_some_and(|j| j.defer.is_some())
+	}
+
+	/// In a batch: the model of `pages.overrides` takes the changes (the text is the one the
+	/// commit held back), and the URLs they touch are told to `patch_plan`. Outside a batch it
+	/// does nothing: the file is read again after the edit.
+	fn follow_entries(&mut self, changes: &[EntryChange<'_>]) {
+		if !self.in_overrides_session() {
+			return;
+		}
+		if let Some(o) = &mut self.overrides {
+			for change in changes {
+				model_after(&mut o.parsed, change);
+			}
+		}
+		for change in changes {
+			for url in change.urls() {
+				self.touched.insert(url.to_string());
+			}
+		}
 	}
 
 	/// Makes a page that is not there (RFC §14.2). With `path`, a page file at that path, with
@@ -2691,15 +2979,23 @@ impl Ui {
 					meta: Vec::new(),
 					lastmod: None,
 				};
-				let edited = add_overrides_entry(&o.path, &text, &before, entry)?;
-				txn.writes.push((o.path.clone(), edited));
+				let path = o.path.clone();
+				let edited = add_overrides_entry(
+					&path,
+					&text,
+					&before,
+					entry.clone(),
+					!self.in_overrides_session(),
+				)?;
+				self.follow_entries(&[EntryChange::Add(entry)]);
+				txn.writes.push((path, edited));
 				url.to_string()
 			}
 			(None, None) => {
 				return fail("invalid", "a new page needs a URL or the path of its file");
 			}
 		};
-		txn.commit()?;
+		txn.commit_with(self.batch.as_mut())?;
 		self.plan_after_files_changed()?;
 		Ok(new_url)
 	}
@@ -2770,35 +3066,47 @@ impl Ui {
 		let field = self.output_path_field();
 		let mut from_files = kd_site::meta::merge(&[&read.in_file, &read.side]);
 		from_files.retain(|(k, _)| Some(k.as_str()) != field);
-		let edited = match before.by_url.get(&url) {
+		let verify = !self.in_overrides_session();
+		let path = o.path.clone();
+		let (edited, added) = match before.by_url.get(&url) {
 			Some(entry) => {
 				// What the entry says wins over the files already (§4), so its keys stay.
 				let add: Meta = from_files
 					.into_iter()
 					.filter(|(k, _)| !entry.meta.iter().any(|(ek, _)| ek == k))
 					.collect();
-				change_overrides_entry(&o.path, &text, &before, &url, true, &add, &[])?
+				let edit = EntryEdit {
+					url: &url,
+					is_virtual: true,
+					add: &add,
+					take: &[],
+				};
+				let edited = change_overrides_entry(&path, &text, &before, &edit, verify)?;
+				self.follow_entries(&[EntryChange::Change(edit)]);
+				(edited, None)
 			}
-			None => add_overrides_entry(
-				&o.path,
-				&text,
-				&before,
-				kd_site::meta::Override {
+			None => {
+				let entry = kd_site::meta::Override {
 					url: url.clone(),
 					is_virtual: true,
 					meta: from_files,
 					lastmod: None,
-				},
-			)?,
+				};
+				let edited = add_overrides_entry(&path, &text, &before, entry.clone(), verify)?;
+				(edited, Some(entry))
+			}
 		};
+		if let Some(entry) = added {
+			self.follow_entries(&[EntryChange::Add(entry)]);
+		}
 		let mut txn = Txn::default();
-		txn.writes.push((o.path.clone(), edited));
+		txn.writes.push((path, edited));
 		txn.removes.push(from);
 		if read.sidecar_dep.hash != kd_build::MISSING_FILE_HASH {
 			txn.removes.push(read.sidecar);
 		}
 		txn.prune_to = Some(self.input_dir());
-		self.left_behind = txn.commit()?;
+		self.left_behind = txn.commit_with(self.batch.as_mut())?;
 		self.plan_after_files_changed()?;
 		Ok(url)
 	}
@@ -2834,16 +3142,30 @@ impl Ui {
 		if let Some(why) = self.output_collision(i, &file) {
 			return fail("collision", why);
 		}
-		let edited = if kept.is_empty() && entry.lastmod.is_none() {
-			remove_overrides_entry(&o.path, &text, &before, &url)?
-		} else {
-			let take: Vec<String> = moved.iter().map(|(k, _)| k.clone()).collect();
-			change_overrides_entry(&o.path, &text, &before, &url, false, &Vec::new(), &take)?
+		let verify = !self.in_overrides_session();
+		let path = o.path.clone();
+		let removes_entry = kept.is_empty() && entry.lastmod.is_none();
+		let take: Vec<String> = moved.iter().map(|(k, _)| k.clone()).collect();
+		let edit = EntryEdit {
+			url: &url,
+			is_virtual: false,
+			add: &Vec::new(),
+			take: &take,
 		};
+		let edited = if removes_entry {
+			remove_overrides_entry(&path, &text, &before, &url, verify)?
+		} else {
+			change_overrides_entry(&path, &text, &before, &edit, verify)?
+		};
+		if removes_entry {
+			self.follow_entries(&[EntryChange::Remove(&url)]);
+		} else {
+			self.follow_entries(&[EntryChange::Change(edit)]);
+		}
 		let mut txn = Txn::default();
 		txn.writes.push((to, page_text));
-		txn.writes.push((o.path.clone(), edited));
-		txn.commit()?;
+		txn.writes.push((path, edited));
+		txn.commit_with(self.batch.as_mut())?;
 		self.plan_after_files_changed()?;
 		Ok(url)
 	}
@@ -2907,16 +3229,23 @@ impl Ui {
 		// when there is an entry to remove, and for the edit (it is megabytes on a site of a
 		// hundred thousand pages, and the handle's parsed copy answers when the text is the
 		// one it read).
+		let in_session = self.in_overrides_session();
 		let entry_removed = match &self.overrides {
 			Some(o) => {
-				let now = fs::read_to_string(&o.path).map_err(|e| io_fail(&o.path, &e))?;
+				let now = if in_session {
+					o.text.clone()
+				} else {
+					fs::read_to_string(&o.path).map_err(|e| io_fail(&o.path, &e))?
+				};
 				let before = Self::overrides_before(o, &now)?;
 				if page.is_virtual || before.by_url.contains_key(&url) {
-					let hash = hash_hex(now.as_bytes());
-					hash_expected(expect, "overrides", &o.path, Some(hash.as_str()))?;
+					if !in_session {
+						let hash = hash_hex(now.as_bytes());
+						hash_expected(expect, "overrides", &o.path, Some(hash.as_str()))?;
+					}
 					Some((
 						o.path.clone(),
-						remove_overrides_entry(&o.path, &now, &before, &url)?,
+						remove_overrides_entry(&o.path, &now, &before, &url, !in_session)?,
 					))
 				} else {
 					None
@@ -2931,9 +3260,10 @@ impl Ui {
 			None => None,
 		};
 		if let Some((path, edited)) = entry_removed {
+			self.follow_entries(&[EntryChange::Remove(&url)]);
 			txn.writes.push((path, edited));
 		}
-		self.left_behind = txn.commit()?;
+		self.left_behind = txn.commit_with(self.batch.as_mut())?;
 		self.plan_after_files_changed()?;
 		Ok(())
 	}
@@ -3028,7 +3358,7 @@ impl Ui {
 		if overrides_entry {
 			self.follow_overrides(expect, &old_url, new_url, &mut txn)?;
 		}
-		txn.commit()?;
+		txn.commit_with(self.batch.as_mut())?;
 		self.plan_after_files_changed()?;
 		Ok(new_url.to_string())
 	}
@@ -3145,7 +3475,7 @@ impl Ui {
 		if by_place && overrides_entry && new_url != page.file.url {
 			self.follow_overrides(expect, &page.file.url, &new_url, &mut txn)?;
 		}
-		txn.commit()?;
+		txn.commit_with(self.batch.as_mut())?;
 		self.plan_after_files_changed()?;
 		Ok(new_url)
 	}
@@ -3153,19 +3483,27 @@ impl Ui {
 	/// Adds to `txn` the rewrite of the entry of a page in `pages.overrides`, which is keyed by
 	/// the URL, so that it has `new_url`.
 	fn follow_overrides(
-		&self,
+		&mut self,
 		expect: &Value,
 		old_url: &str,
 		new_url: &str,
 		txn: &mut Txn,
 	) -> F<()> {
-		let Some(o) = &self.overrides else {
+		if self.overrides.is_none() {
 			return fail("invalid", "the site has no pages.overrides file");
+		}
+		let (path, edited) = {
+			let (o, text) = self.overrides_expected(expect, "")?;
+			let before = Self::overrides_before(o, &text)?;
+			let edited =
+				edit_overrides_text(&o.path, &text, &before, old_url, None, Some(new_url))?;
+			(o.path.clone(), edited)
 		};
-		let text = read_expected(expect, "overrides", &o.path)?;
-		let before = Self::overrides_before(o, &text)?;
-		let edited = edit_overrides_text(&o.path, &text, &before, old_url, None, Some(new_url))?;
-		txn.writes.push((o.path.clone(), edited));
+		self.follow_entries(&[EntryChange::Rename {
+			old: old_url,
+			new: new_url,
+		}]);
+		txn.writes.push((path, edited));
 		Ok(())
 	}
 
@@ -3204,6 +3542,8 @@ impl Ui {
 	}
 }
 
+#[cfg(test)]
+mod batch_tests;
 #[cfg(test)]
 mod diff_tests;
 #[cfg(test)]

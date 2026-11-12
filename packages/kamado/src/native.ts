@@ -92,6 +92,23 @@ export interface Native {
 	 */
 	uiEdit(handle: string, editJson: string): string;
 	/**
+	 * Makes several edits as one: all of them, or none (`{ edits: [{ url, expect, change }, …] }`;
+	 * each edit is the request of `uiEdit` (`set`, `delete`, `moveUrl`, `movePath`, `create`,
+	 * `virtualize`, `materialize`, `deletePage`), but `revert` is not taken). The order of `edits` does
+	 * not decide the order they are made in: what frees places comes first, then the moves (in an
+	 * order that finds each place free, exchanges and rings included), then what makes pages, then
+	 * the keys. Every edit names the page as it is before the batch. Every `expect` is checked,
+	 * against the files before the batch, before anything is written; if any edit then fails,
+	 * everything written is put back.
+	 *
+	 * The result is JSON: `{ ok: true, version, overridesHash, count, warning? }` (`version` is one
+	 * more than before), or `{ ok: false, code, message, errors: [{ index, code, message }] }` with
+	 * nothing written and the version as it was. `errors` has every edit that cannot be made with
+	 * the others (told before anything is written), or the one edit that was refused while the batch
+	 * was made; `index` is `null` for a failure no edit is behind. A request that is not one throws.
+	 */
+	uiEditBatch(handle: string, batchJson: string): string;
+	/**
 	 * The git blob ids of what the files of some pages hold now (`{ urls, format }`, where `format`
 	 * is `sha1` or `sha256`); the result is JSON, `{ files: [{ path, blob }], overrides }`. A URL no
 	 * page has is skipped. The core runs no `git`: the caller compares these with the ids git has.

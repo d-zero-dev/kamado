@@ -1293,3 +1293,175 @@ test('ui.keys of the config reaches the screen as it is written, and adds no col
 		rmSync(site.root, { recursive: true, force: true });
 	}
 });
+
+test('a batch of edits is made as one: an exchange of URLs is made, and a refused batch writes nothing', () => {
+	const site = makeSite();
+	writeFileSync(path.join(site.root, 'src/other.html'), '---\ntitle: Other\n---\n');
+	const handle = native().uiOpen(site.config, '{}');
+	try {
+		const rows = JSON.parse(native().uiPages(handle, query));
+		const history = rows.pages.find((p) => p.url === '/about/history.html');
+		const other = rows.pages.find((p) => p.url === '/other.html');
+		const before = {
+			history: site.read('src/about/history.html'),
+			other: site.read('src/other.html'),
+			overrides: site.read('pages.overrides.json'),
+		};
+		const batch = (edits) =>
+			JSON.parse(native().uiEditBatch(handle, JSON.stringify({ edits })));
+
+		// refused after the first edit was made: the second moves into a URL that stays a page
+		const refused = batch([
+			{
+				url: '/about/history.html',
+				expect: expectOf(rows, history),
+				change: { op: 'set', key: 'title', value: 'Changed' },
+			},
+			{
+				url: '/other.html',
+				expect: expectOf(rows, other),
+				change: { op: 'moveUrl', url: '/' },
+			},
+		]);
+		assert.equal(refused.ok, false, JSON.stringify(refused));
+		assert.equal(refused.errors.length, 1);
+		assert.equal(refused.errors[0].index, 1);
+		assert.equal(site.read('src/about/history.html'), before.history);
+		assert.equal(site.read('src/other.html'), before.other);
+		assert.equal(site.read('pages.overrides.json'), before.overrides);
+
+		// the two pages exchange their URLs, and a key of one is set in the same batch
+		const swapped = batch([
+			{
+				url: '/about/history.html',
+				expect: expectOf(rows, history),
+				change: { op: 'moveUrl', url: '/other.html' },
+			},
+			{
+				url: '/other.html',
+				expect: expectOf(rows, other),
+				change: { op: 'moveUrl', url: '/about/history.html' },
+			},
+			{
+				url: '/other.html',
+				expect: expectOf(rows, other),
+				change: { op: 'set', key: 'title', value: 'Other 2' },
+			},
+		]);
+		assert.equal(swapped.ok, true, JSON.stringify(swapped));
+		assert.equal(swapped.count, 3);
+		assert.equal(site.read('src/other.html'), before.history);
+		assert.equal(site.read('src/about/history.html'), '---\ntitle: Other 2\n---\n');
+		assert.equal(
+			JSON.parse(native().uiPages(handle, query)).pages.filter((p) =>
+				p.url.endsWith('history.html'),
+			).length,
+			1,
+		);
+	} finally {
+		native().uiClose(handle);
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});
+
+test('a batch tells every edit that cannot be made, refuses a request that is not one, and changes the entries of pages.overrides in one write', () => {
+	const site = makeSite();
+	const handle = native().uiOpen(site.config, '{}');
+	try {
+		const rows = JSON.parse(native().uiPages(handle, query));
+		const history = rows.pages.find((p) => p.url === '/about/history.html');
+		const batch = (edits) =>
+			JSON.parse(native().uiEditBatch(handle, JSON.stringify({ edits })));
+		const overrides = () => site.read('pages.overrides.json');
+		const before = {
+			history: site.read('src/about/history.html'),
+			overrides: overrides(),
+			version: rows.version,
+		};
+
+		// an empty batch changes nothing and tells nothing
+		const empty = batch([]);
+		assert.deepEqual(
+			{ ok: empty.ok, count: empty.count, version: empty.version },
+			{ ok: true, count: 0, version: before.version },
+		);
+		assert.equal(empty.warning, undefined);
+
+		// every edit that cannot be made is told, with its place in the request, before a byte is written
+		const refused = batch([
+			{ url: '/nowhere/', expect: {}, change: { op: 'deletePage' } },
+			{
+				url: '/about/history.html',
+				expect: expectOf(rows, history),
+				change: { op: 'revert', key: 'title', head: {} },
+			},
+			{
+				url: '/about/history.html',
+				expect: expectOf(rows, history),
+				change: { op: 'moveUrl', url: '/about/history.html' },
+			},
+		]);
+		assert.equal(refused.ok, false);
+		assert.deepEqual(
+			refused.errors.map((e) => [e.index, e.code]),
+			[
+				[0, 'notFound'],
+				[1, 'invalid'],
+				[2, 'invalid'],
+			],
+		);
+		assert.equal(site.read('src/about/history.html'), before.history);
+		assert.equal(overrides(), before.overrides);
+		assert.equal(JSON.parse(native().uiPages(handle, query)).version, before.version);
+
+		// a stale hash is a conflict and writes nothing
+		const stale = batch([
+			{
+				url: '/about/history.html',
+				expect: { ...expectOf(rows, history), input: '0'.repeat(64) },
+				change: { op: 'set', key: 'title', value: 'Late' },
+			},
+		]);
+		assert.equal(stale.code, 'conflict');
+		assert.equal(site.read('src/about/history.html'), before.history);
+
+		// entries of pages.overrides: a virtual page made and one moved
+		const ex = { overrides: rows.overridesHash };
+		// (the refusal for a stale hash read the site again, so the version moved on)
+		const versionBefore = JSON.parse(native().uiPages(handle, query)).version;
+		const made = batch([
+			{ url: '/new/', expect: ex, change: { op: 'create', path: null } },
+			{ url: '/ext/', expect: ex, change: { op: 'moveUrl', url: '/external/' } },
+		]);
+		assert.equal(made.ok, true, JSON.stringify(made));
+		assert.equal(made.count, 2);
+		assert.equal(made.version, versionBefore + 1);
+		const after = overrides();
+		assert.match(after, /"\/new\/"/);
+		assert.match(after, /"\/external\/"/);
+		assert.doesNotMatch(after, /"\/ext\/"/);
+		const now = JSON.parse(native().uiPages(handle, query));
+		assert.equal(
+			now.pages.some((p) => p.url === '/new/' && p.virtual),
+			true,
+		);
+		assert.equal(
+			now.pages.some((p) => p.url === '/external/'),
+			true,
+		);
+		assert.equal(now.overridesHash, made.overridesHash);
+
+		// a request that is not one throws
+		assert.throws(() => native().uiEditBatch(handle, '{'), /invalid JSON/);
+		assert.throws(() => native().uiEditBatch(handle, '{"edits":{}}'), /edits/);
+		assert.throws(
+			() =>
+				native().uiEditBatch(handle, '{"edits":[{"url":"/","change":{"op":"explode"}}]}'),
+			/change\.op/,
+		);
+	} finally {
+		native().uiClose(handle);
+		rmSync(site.root, { recursive: true, force: true });
+	}
+	assert.throws(() => native().uiEditBatch(handle, '{"edits":[]}'), /no editor/);
+});
