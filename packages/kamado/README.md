@@ -30,7 +30,7 @@ Rust のコアを持つ、オンデマンドの静的サイトジェネレータ
 | `dir`       | 入力と出力のディレクトリ（異なること）                                                         |
 | `site`      | `host` / `baseURL` / `siteName` / `siteNameEn`（未指定なら`package.json`の`production`）       |
 | `pages`     | 対象の glob、出力パス、レイアウト、`alias` / `define`、メタデータの`overrides`                 |
-| `data`      | JSON / YAML / HTML / テキストのデータと、設定内のリテラル                                      |
+| `data`      | JSON / YAML / HTML / テキスト、実行するスクリプト（`.ts`/`.js`等）のデータと、設定内のリテラル |
 | `html`      | doctype・整形・圧縮・文字参照・画像寸法・DOM ルール・取り込み・head への挿入・ページ別の上書き |
 | `sitemap`   | `sitemap.xml`（`false`で無効）                                                                 |
 | `styles`    | `@import`の展開、alias、banner、sourcemap、圧縮                                                |
@@ -51,6 +51,7 @@ kamado --help           (-h)
 ```
 
 - `--config`/`-c`を省略すると、カレントディレクトリの`kamado.config.jsonc`を使う。`--cache-dir`は差分ビルドの manifest や plan cache の置き場を変える（`build`・`server`・`pages`・`ui`）。相対パスは**打った場所（cwd）基準**。
+- **実行するデータファイル**: `data.dir`の`.ts`/`.mts`/`.js`/`.mjs`は default export の値、または`{ readFile, signal }`を受け取る関数（`await`できる）で、値は JSON にできるものに限る。`export const maxAge = <秒>`（開発サーバーが時間でも再実行）と`export const timeout = <秒>`（既定 60 秒）が書ける。`build`は 1 つでも失敗したら exit 1。仕様は`docs/v3/RFC.md` §3.2。`build()`の`report.data`には、`--verbose`のためのデータファイルごとの 1 行（実行した・所要時間・値のハッシュの先頭）が入る。
 - `build`は設定の対象を全部出力する。`globs`を渡すとその入力だけ（相対パスは打った場所からのパス。ディレクトリはその中のすべて。無いファイルと、先頭が`!`の否定はエラー。何も選ばなかったものは警告）。`--incremental`は前回から変わっていないものを飛ばす（`--force`で無視）。`--jobs`は並列度（JSX の描画のワーカーと Rust のスレッドの数）で、`auto`（既定）は使える CPU の数から決める。JSX のページは、読んだ`data`のキーが変わったときだけ描き直す（`--verbose`が理由を書く）。`--verify-deps`は、描いたページを新しいワーカーで描き直して HTML を比べ、モジュールの変数にデータを貯めたページを見つけて失敗にする。重い計算を全ページで 1 回にしたいときは、`kamado/jsx`の`memo(fn)`を使う（引数を`Object.is`で比べる。`props.data`を渡すと、読んだキーが呼び出したページの依存になる）。
 - `pages`は、ビルドせずに全ページの一覧を JSON で書き出す（標準出力か`--out`。相対パスは打った場所からのパス）。1 ページが 1 要素で、URL・入出力のパス・`fileSlug`・`filePathStem`・`extension`・階層（`depth`と、親のディレクトリの`parent`）・仮想ページかどうか・マージ後の`meta`を持つ。ディレクトリマップをスプレッドシートに写すためのもの（形は`docs/v3/RFC.md` §14.1）。入力ファイルのない仮想ページ（`pages.overrides`）は`inputPath`と`extension`が`null`で、`outputPath`は書き出されないがあるはずの場所。`globs`と、読まないフラグ（`--force`・`--jobs`・`--skip-unchanged`・`--verbose`）は、渡すとエラー。`--incremental`は plan cache を読んで更新する。端末には、読み始めと終わり（と、計画の警告があれば`warning: ...`）を標準エラーに出す。
 - `server`はリクエストごとに依存ファイルを stat し、変わっていなければ前回の結果を返す。ファイルは書き出さない。ライブリロードはない。変更したコンポーネントはワーカーを作り直して反映する。応えるのは`localhost`・IP アドレス・`devServer.host`・`devServer.allowedHosts`宛ての要求だけで、別のサイトからの要求は`403`（`docs/v3/RFC.md` §12）。`devServer.host`が`localhost`（既定）なら`127.0.0.1`と`::1`の両方で待ち受ける。位置引数と、読まないフラグ（`--force`・`--incremental`・`--jobs`・`--skip-unchanged`・`--out`・`--port`など）は、渡すとエラー。
