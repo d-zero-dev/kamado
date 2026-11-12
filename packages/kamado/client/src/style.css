@@ -313,6 +313,21 @@ button:disabled {
 	background: var(--active-bg);
 }
 
+/* The button that covers a cell, for the pointer: it shows nothing itself. It is positioned, and
+   the text of the cell is not, so it is drawn over the text (the bar of a difference and the box
+   of a boolean come after it, and are over it). That is why the text of a cell cannot be selected
+   by dragging: a double click enters the edit, where it can. */
+.cell-hit {
+	position: absolute;
+	inset: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: none;
+	cursor: inherit;
+	outline: none;
+}
+
 /* The text of a cell is what is cut with an ellipsis, so that the line under it (where the value
    is written) is not. */
 .cell-text {
@@ -461,6 +476,8 @@ button.diff-mark:focus-visible::after {
 	box-sizing: border-box;
 	width: 1rem;
 	height: 1rem;
+	padding: 0;
+	background: transparent;
 	border: 1.5px solid var(--muted);
 	border-radius: 3px;
 	vertical-align: -0.2rem;

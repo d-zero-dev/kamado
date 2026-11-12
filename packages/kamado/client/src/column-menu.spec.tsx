@@ -47,3 +47,18 @@ describe('the note of the column menu', () => {
 		expect(html).toContain('role="menuitem"');
 	});
 });
+
+describe('the buttons of the column menu', () => {
+	test('send the screen’s own commands to an element that is in the output', () => {
+		const html = renderToStaticMarkup(<ColumnMenu {...menu} note="What it is for" />);
+		const buttons = html.match(/<button[^>]*>/g) ?? [];
+		expect(buttons.length).toBeGreaterThan(0);
+		for (const button of buttons) {
+			const target = /commandfor="([^"]*)"/.exec(button)?.[1];
+			const command = /\scommand="([^"]*)"/.exec(button)?.[1];
+			expect(target).toBeDefined();
+			expect(html).toContain(` id="${target}"`);
+			expect(command).toMatch(/^--./);
+		}
+	});
+});

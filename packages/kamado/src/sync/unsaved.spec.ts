@@ -21,8 +21,8 @@ afterEach(() => {
 });
 
 /**
- *
- * @param {...any} args
+ * Runs git in the test repository, as a user that has a name and an address.
+ * @param args - The arguments of git
  */
 function git(...args: string[]): void {
 	execFileSync(

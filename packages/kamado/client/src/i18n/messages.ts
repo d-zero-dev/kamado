@@ -213,14 +213,14 @@ export const en = {
 	'sync.more': 'Show more',
 	'sync.failedTitle': 'The sync failed',
 	'sync.failedBody': 'Nothing was applied.',
+	'sync.failedBodyExport': 'Nothing was written.',
 	'sync.stack': 'Details',
-	'sync.nothingTitle': 'The script returned nothing',
-	'sync.nothingBody': 'Nothing was applied.',
 	'sync.nochangeTitle': 'No changes',
 	'sync.nochangeBody':
 		'The files of the local repository match what the script returned.',
-	'sync.invalidTitle': 'The result cannot be applied',
+	'sync.invalidTitle': 'What the script returned cannot be used',
 	'sync.invalidBody': 'Nothing was applied. Fix these in what the script returns:',
+	'sync.invalidBodyExport': 'Nothing was written. Fix these in what the script returns:',
 	'sync.problemsMore': '{count} more problem(s) are not listed',
 	'sync.reviewTitle': 'There are {count} difference(s).',
 	'sync.reviewBody': 'Applying changes the files of the local repository.',
@@ -245,10 +245,12 @@ export const en = {
 		'git cannot bring these changes back (this is not a repository, or nothing is committed yet)',
 	'sync.conflictTitle': 'The files changed meanwhile',
 	'sync.conflictBody': 'Nothing was applied. Run the sync again.',
+	'sync.conflictBodyExport': 'Nothing was written. Run the sync again.',
 	'sync.notReady':
 		'That sync is not waiting to be applied any more. Run it again if you want it.',
 	'sync.refusedTitle': 'The differences could not be applied',
 	'sync.refusedBody': 'Nothing was applied.',
+	'sync.refusedBodyExport': 'Nothing was written.',
 	'sync.failuresMore': '{count} more not listed',
 	'sync.applied':
 		'Applied “{name}” ({count} edit(s)). Look at the result with git diff; use git reset for what you do not want.',
@@ -256,6 +258,25 @@ export const en = {
 	'sync.failedStatus': 'Sync “{name}” failed: {message}',
 	'sync.notStarted': 'Sync “{name}” was not started: {message}',
 	'sync.lostContact': 'Lost contact with the server: {message}',
+	'sync.writing': 'Exporting “{name}”…',
+	'sync.export': 'Export',
+	'sync.reviewBodyExport':
+		'Exporting changes what the script writes to. The files of the local repository do not change.',
+	'sync.reviewTitleNoDiff': 'No difference can be shown.',
+	'sync.reviewBodyNoDiff':
+		'The script has no read, so it cannot be compared with what it writes to. It exports {count} page(s). The files of the local repository do not change.',
+	'sync.nochangeBodyExport':
+		'What the script writes to matches the files of the local repository.',
+	'sync.cancelAsk': 'Cancel this sync?',
+	'sync.cancelAskWriting':
+		'The script is exporting. If you cancel, what it writes to may be left half written.',
+	'sync.cancelYes': 'Cancel the sync',
+	'sync.cancelKeep': 'Keep going',
+	'sync.failedBodyWrite':
+		'What the script writes to may be half written. Run it again to export what is left.',
+	'sync.cancelledWrite':
+		'Sync “{name}” was cancelled while it exported. What it writes to may be half written',
+	'sync.exported': 'Exported “{name}” ({count} item(s)).',
 } as const;
 
 /** The name of a message. */
@@ -469,15 +490,16 @@ export const ja: Record<MessageKey, string> = {
 	'sync.more': 'もっと見る',
 	'sync.failedTitle': '同期に失敗しました',
 	'sync.failedBody': '何も適用していません。',
+	'sync.failedBodyExport': '何も書き出していません。',
 	'sync.stack': '詳細',
-	'sync.nothingTitle': 'スクリプトは何も返しませんでした',
-	'sync.nothingBody': '何も適用していません。',
 	'sync.nochangeTitle': '変更はありません',
 	'sync.nochangeBody':
 		'ローカルリポジトリのファイルは、スクリプトが返した内容と一致しています。',
-	'sync.invalidTitle': '戻り値を適用できません',
+	'sync.invalidTitle': 'スクリプトが返した内容を使えません',
 	'sync.invalidBody':
-		'何も適用していません。スクリプトが返す内容の、次の点を直してください。',
+		'何も適用していません。スクリプトが返す内容を、次のとおり直してください。',
+	'sync.invalidBodyExport':
+		'何も書き出していません。スクリプトが返す内容を、次のとおり直してください。',
 	'sync.problemsMore': 'ほかに {count} 件の問題があります（一覧にはありません）',
 	'sync.reviewTitle': '{count} 件の差分があります。',
 	'sync.reviewBody': '適用すると、ローカルリポジトリのファイルが変わります。',
@@ -502,10 +524,12 @@ export const ja: Record<MessageKey, string> = {
 		'git で戻せません（リポジトリではないか、まだコミットがありません）',
 	'sync.conflictTitle': '途中でファイルが変わりました',
 	'sync.conflictBody': '何も適用していません。もう一度実行してください。',
+	'sync.conflictBodyExport': '何も書き出していません。もう一度実行してください。',
 	'sync.notReady':
 		'その同期は、もう適用を待っていません。必要なら、もう一度実行してください。',
 	'sync.refusedTitle': '差分を適用できませんでした',
 	'sync.refusedBody': '何も適用していません。',
+	'sync.refusedBodyExport': '何も書き出していません。',
 	'sync.failuresMore': 'ほか {count} 件は一覧にありません',
 	'sync.applied':
 		'「{name}」を適用しました（{count} 件の編集）。結果は git diff で確かめ、不要なら git reset で戻します。',
@@ -513,4 +537,23 @@ export const ja: Record<MessageKey, string> = {
 	'sync.failedStatus': '同期「{name}」が失敗しました: {message}',
 	'sync.notStarted': '同期「{name}」を始められませんでした: {message}',
 	'sync.lostContact': 'サーバーとの通信が切れました: {message}',
+	'sync.writing': '「{name}」で書き出しています…',
+	'sync.export': '書き出す',
+	'sync.reviewBodyExport':
+		'書き出すと、スクリプトの書き出し先のデータが変わります。ローカルリポジトリのファイルは変わりません。',
+	'sync.reviewTitleNoDiff': '差分は表示できません。',
+	'sync.reviewBodyNoDiff':
+		'スクリプトに read が無いため、書き出し先と比べられません。{count} 件のページを書き出します。ローカルリポジトリのファイルは変わりません。',
+	'sync.nochangeBodyExport':
+		'書き出し先のデータは、ローカルリポジトリのファイルと一致しています。',
+	'sync.cancelAsk': '同期をキャンセルしますか？',
+	'sync.cancelAskWriting':
+		'書き出しの途中です。キャンセルすると、書き出し先が途中までしか書き換わらない可能性があります。',
+	'sync.cancelYes': '同期をキャンセルする',
+	'sync.cancelKeep': '続ける',
+	'sync.failedBodyWrite':
+		'書き出し先は途中まで書き換わっている可能性があります。もう一度実行すると、残りを書き出します。',
+	'sync.cancelledWrite':
+		'同期「{name}」を書き出しの途中でキャンセルしました。書き出し先は途中まで書き換わっている可能性があります',
+	'sync.exported': '「{name}」を書き出しました（{count} 件）。',
 };

@@ -12,6 +12,7 @@ import {
 	removeItem,
 	valuesOf,
 } from './logic/list-items.js';
+import { useCommands } from './use-commands.js';
 
 /** The control that has the focus after the list was changed: the one the person was on. */
 type Focus =
@@ -128,9 +129,64 @@ export function ListEditor({ label, draft, commit, cancel, invalid }: ListEditor
 		setFocus({ item: null, control: 'asJson' });
 	};
 
+	/**
+	 * The item a button of the list belongs to, by the `data-item` of its line.
+	 * @param button - The button that was pressed
+	 */
+	const itemOf = (button: HTMLElement) => {
+		const id = Number(button.closest<HTMLElement>('[data-item]')?.dataset.item);
+		return items.find((item) => item.id === id);
+	};
+
+	const commands = useCommands(
+		{
+			asList: toList,
+			asJson: toJson,
+			up: (button) => {
+				const item = itemOf(button);
+				if (item !== undefined) {
+					setItems(moveItem(items, item.id, -1));
+					setFocus({ item: item.id, control: 'up' });
+				}
+			},
+			down: (button) => {
+				const item = itemOf(button);
+				if (item !== undefined) {
+					setItems(moveItem(items, item.id, 1));
+					setFocus({ item: item.id, control: 'down' });
+				}
+			},
+			remove: (button) => {
+				const item = itemOf(button);
+				if (item === undefined) {
+					return;
+				}
+				const index = items.indexOf(item);
+				const next = removeItem(items, item.id);
+				setItems(next);
+				const after = next[index] ?? next[index - 1];
+				setFocus(
+					after === undefined
+						? { item: null, control: 'add' }
+						: { item: after.id, control: 'remove' },
+				);
+			},
+			add: () => {
+				const next = addItem(items, newKind ?? kindToAdd(items));
+				setItems(next);
+				const added = next.at(-1);
+				if (added !== undefined) {
+					setFocus({ item: added.id, control: 'input' });
+				}
+			},
+		},
+		root,
+	);
+
 	return (
 		<div
-			ref={root}
+			ref={commands.ref}
+			id={commands.id}
 			role="group"
 			aria-label={label}
 			// A button is not given the focus by a click in Safari, which gives it to the nearest
@@ -176,7 +232,7 @@ export function ListEditor({ label, draft, commit, cancel, invalid }: ListEditor
 						onChange={(event) => setJson(event.target.value)}
 					/>
 					<div className="list-actions">
-						<button type="button" data-control="asList" onClick={toList}>
+						<button type="button" data-control="asList" {...commands.run('asList')}>
 							{t('list.asList')}
 						</button>
 					</div>
@@ -216,10 +272,7 @@ export function ListEditor({ label, draft, commit, cancel, invalid }: ListEditor
 									data-control="up"
 									aria-label={t('list.up', { n: index + 1 })}
 									disabled={index === 0}
-									onClick={() => {
-										setItems(moveItem(items, item.id, -1));
-										setFocus({ item: item.id, control: 'up' });
-									}}>
+									{...commands.run('up')}>
 									<span aria-hidden="true">↑</span>
 								</button>
 								<button
@@ -227,26 +280,14 @@ export function ListEditor({ label, draft, commit, cancel, invalid }: ListEditor
 									data-control="down"
 									aria-label={t('list.down', { n: index + 1 })}
 									disabled={index === items.length - 1}
-									onClick={() => {
-										setItems(moveItem(items, item.id, 1));
-										setFocus({ item: item.id, control: 'down' });
-									}}>
+									{...commands.run('down')}>
 									<span aria-hidden="true">↓</span>
 								</button>
 								<button
 									type="button"
 									data-control="remove"
 									aria-label={t('list.remove', { n: index + 1 })}
-									onClick={() => {
-										const next = removeItem(items, item.id);
-										setItems(next);
-										const after = next[index] ?? next[index - 1];
-										setFocus(
-											after === undefined
-												? { item: null, control: 'add' }
-												: { item: after.id, control: 'remove' },
-										);
-									}}>
+									{...commands.run('remove')}>
 									<span aria-hidden="true">✕</span>
 								</button>
 							</li>
@@ -263,20 +304,10 @@ export function ListEditor({ label, draft, commit, cancel, invalid }: ListEditor
 								</option>
 							))}
 						</select>
-						<button
-							type="button"
-							data-control="add"
-							onClick={() => {
-								const next = addItem(items, newKind ?? kindToAdd(items));
-								setItems(next);
-								const added = next.at(-1);
-								if (added !== undefined) {
-									setFocus({ item: added.id, control: 'input' });
-								}
-							}}>
+						<button type="button" data-control="add" {...commands.run('add')}>
 							{t('list.add')}
 						</button>
-						<button type="button" data-control="asJson" onClick={toJson}>
+						<button type="button" data-control="asJson" {...commands.run('asJson')}>
 							{t('list.asJson')}
 						</button>
 					</div>

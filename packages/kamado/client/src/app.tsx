@@ -26,7 +26,7 @@ import {
 	useState,
 } from 'react';
 
-import { AddPageDialog } from './add-page-dialog.js';
+import { ADD_PAGE_DIALOG_ID, AddPageDialog } from './add-page-dialog.js';
 import {
 	ApiError,
 	createPage,
@@ -54,6 +54,7 @@ import {
 	inferredKinds,
 	sameKinds,
 } from './logic/columns.js';
+import { builtinCommand } from './logic/commands.js';
 import {
 	cellDiffOf,
 	revertFailureOf,
@@ -130,6 +131,7 @@ import { PageDialog } from './page-dialog.js';
 import { ResetDialog } from './reset-dialog.js';
 import { RevertDialog } from './revert-dialog.js';
 import { SyncDialog, type SyncEnd } from './sync-dialog.js';
+import { useCommands } from './use-commands.js';
 
 /**
  * Rows put in the page at a time: the first paint is not held up by the rest. 500 rows drew
@@ -481,7 +483,12 @@ function Screen({
 		setSyncRequest(null);
 		switch (end.kind) {
 			case 'applied': {
-				setStatus(t('sync.applied', { name: end.name, count: end.count }));
+				setStatus(
+					t(end.direction === 'export' ? 'sync.exported' : 'sync.applied', {
+						name: end.name,
+						count: end.count,
+					}),
+				);
 				break;
 			}
 			case 'failed': {
@@ -489,7 +496,11 @@ function Screen({
 				break;
 			}
 			case 'cancelled': {
-				setStatus(t('sync.cancelled', { name: end.name }));
+				setStatus(
+					t(end.phase === 'write' ? 'sync.cancelledWrite' : 'sync.cancelled', {
+						name: end.name,
+					}),
+				);
 				break;
 			}
 			case 'notStarted': {
@@ -1430,22 +1441,20 @@ function Screen({
 		return { row: Number(cell.dataset.row), col: Number(cell.dataset.col) };
 	};
 
-	const onClick = (event: React.MouseEvent<HTMLDivElement>) => {
-		const at = cellAt(event.target);
-		if (at !== null && editing === null) {
-			setActive(at);
-			focusGrid();
-			// A click on the bar of a difference asks whether to put the value back.
-			if ((event.target as HTMLElement).closest('[data-revert]') !== null) {
-				requestRevert(at);
-				return;
-			}
-			// A click on the box of a boolean turns it over (the box is the only part of the cell
-			// that does: a click on the rest of it only gives the cell the focus).
-			if ((event.target as HTMLElement).closest('[data-toggle]') !== null) {
-				startEdit(at);
-			}
+	/**
+	 * Gives the cell of a button of the grid the focus, unless a cell is being edited.
+	 * @param button - The button that was pressed: the one that covers the cell, the bar of a
+	 * difference, or the box of a boolean
+	 * @returns The cell, or `null` when nothing was done
+	 */
+	const focusCellOf = (button: HTMLElement): Position | null => {
+		const at = cellAt(button);
+		if (at === null || editing !== null) {
+			return null;
 		}
+		setActive(at);
+		focusGrid();
+		return at;
 	};
 
 	const onDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -1774,8 +1783,54 @@ function Screen({
 		),
 	} as React.CSSProperties;
 
+	// The buttons of the bar, of the headers and of the cells send their commands to the root.
+	// A header, a cell and the revert bar are told apart by where the button is (`data-column`,
+	// `role="gridcell"`).
+	const commands = useCommands({
+		previous: () => go(page - 1),
+		next: () => go(page + 1),
+		readAgain: reloadWhenIdle,
+		// The button of the footer asks whether to put the settings back to the defaults.
+		reset: () => setResetting(true),
+		syncMenu: (button) => {
+			if (syncMenu !== null) {
+				setSyncMenu(null);
+				return;
+			}
+			const rect = button.getBoundingClientRect();
+			setSyncMenu({ left: rect.left, bottom: rect.bottom });
+		},
+		columnMenu: (button) => {
+			const id = button.closest<HTMLElement>('[data-column]')?.dataset.column;
+			if (id !== undefined) {
+				if (menu?.id === id) {
+					closeMenu(true);
+				} else {
+					openMenu(id, button);
+				}
+			}
+		},
+		// The button over a cell gives the cell the focus.
+		cell: (button) => void focusCellOf(button),
+		// The bar of a difference asks whether to put the value back.
+		revert: (button) => {
+			const at = focusCellOf(button);
+			if (at !== null) {
+				requestRevert(at);
+			}
+		},
+		// The box of a boolean turns it over (the box is the only part of the cell that does: the
+		// rest of it only gives the cell the focus).
+		toggle: (button) => {
+			const at = focusCellOf(button);
+			if (at !== null) {
+				startEdit(at);
+			}
+		},
+	});
+
 	return (
-		<div className="app">
+		<div ref={commands.ref} id={commands.id} className="app">
 			<header className="bar">
 				<h1>kamado ui</h1>
 				{git !== null && (
@@ -1811,7 +1866,7 @@ function Screen({
 					</select>
 				</label>
 				<nav aria-label={t('app.pages')} className="pager">
-					<button type="button" disabled={page === 0} onClick={() => go(page - 1)}>
+					<button type="button" disabled={page === 0} {...commands.run('previous')}>
 						{t('app.previous')}
 					</button>
 					<span>
@@ -1819,17 +1874,17 @@ function Screen({
 							? ''
 							: rangeLabel(page * pageSize, rows.pages.length, rows.total)}
 					</span>
-					<button type="button" disabled={page >= pages - 1} onClick={() => go(page + 1)}>
+					<button type="button" disabled={page >= pages - 1} {...commands.run('next')}>
 						{t('app.next')}
 					</button>
 				</nav>
-				<button type="button" onClick={() => addPageRef.current?.showModal()}>
+				<button type="button" {...builtinCommand(ADD_PAGE_DIALOG_ID, 'show-modal')}>
 					{t('app.addPage')}
 				</button>
-				<button type="button" onClick={() => dialogRef.current?.showModal()}>
+				<button type="button" {...builtinCommand(ADD_KEY_DIALOG_ID, 'show-modal')}>
 					{t('app.addKey')}
 				</button>
-				<button type="button" onClick={reloadWhenIdle} disabled={loading}>
+				<button type="button" disabled={loading} {...commands.run('readAgain')}>
 					{t('app.readAgain')}
 				</button>
 				{syncFunctions.length > 0 && (
@@ -1840,14 +1895,7 @@ function Screen({
 						aria-haspopup="menu"
 						aria-expanded={syncMenu !== null}
 						disabled={loading}
-						onClick={(event) => {
-							if (syncMenu !== null) {
-								setSyncMenu(null);
-								return;
-							}
-							const rect = event.currentTarget.getBoundingClientRect();
-							setSyncMenu({ left: rect.left, bottom: rect.bottom });
-						}}>
+						{...commands.run('syncMenu')}>
 						{t('sync.button')} ▾
 					</button>
 				)}
@@ -1913,7 +1961,6 @@ function Screen({
 				className="grid"
 				style={gridStyle}
 				onKeyDown={onKeyDown}
-				onClick={onClick}
 				onDoubleClick={onDoubleClick}>
 				<div
 					role="row"
@@ -2001,9 +2048,7 @@ function Screen({
 									aria-haspopup="menu"
 									aria-expanded={menu?.id === id}
 									aria-label={t('column.menu', { name })}
-									onClick={(event) =>
-										menu?.id === id ? closeMenu(true) : openMenu(id, event.currentTarget)
-									}>
+									{...commands.run('columnMenu')}>
 									<span aria-hidden="true">⋮</span>
 								</button>
 								<span
@@ -2041,6 +2086,7 @@ function Screen({
 						editing={editing !== null && editing.url === row.url ? editing : null}
 						diff={diffs?.pages[row.url]}
 						overridesFile={rows.overridesFile ?? null}
+						commandTarget={commands.id}
 						onCommit={commitStable}
 						onCancel={cancelStable}
 						onInvalid={setProblem}
@@ -2058,10 +2104,7 @@ function Screen({
 						compared={diffs !== null}
 					/>
 				</section>
-				<button
-					type="button"
-					className="reset-settings"
-					onClick={() => setResetting(true)}>
+				<button type="button" className="reset-settings" {...commands.run('reset')}>
 					{t('reset.button')}
 				</button>
 			</footer>
@@ -2172,6 +2215,9 @@ function Screen({
 	);
 }
 
+/** The `id` of the dialog that adds a key: the button of the bar that opens it names it in `commandfor`. */
+const ADD_KEY_DIALOG_ID = 'add-key-dialog';
+
 interface AddKeyProps {
 	readonly dialogRef: React.RefObject<HTMLDialogElement | null>;
 	readonly onAdd: (name: string, kind: FieldKind) => void;
@@ -2191,7 +2237,7 @@ function AddKeyDialog({ dialogRef, onAdd }: AddKeyProps) {
 	return (
 		<dialog
 			ref={dialogRef}
-			id="add-key-dialog"
+			id={ADD_KEY_DIALOG_ID}
 			aria-labelledby="add-key-title"
 			className="dialog">
 			<form
@@ -2229,7 +2275,7 @@ function AddKeyDialog({ dialogRef, onAdd }: AddKeyProps) {
 					</select>
 				</label>
 				<div className="actions">
-					<button type="button" onClick={() => dialogRef.current?.close()}>
+					<button type="button" {...builtinCommand(ADD_KEY_DIALOG_ID, 'close')}>
 						{t('dialog.cancel')}
 					</button>
 					<button type="submit">{t('dialog.add')}</button>

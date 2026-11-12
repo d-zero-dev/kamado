@@ -1,5 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef } from 'react';
 
+import { useCommands } from './use-commands.js';
+
 /** One entry of a menu. */
 export interface MenuItem {
 	readonly id: string;
@@ -123,11 +125,26 @@ export function ColumnMenu({ label, note, anchor, items, onChoose, onClose }: Me
 		buttons[next]?.focus();
 	};
 
+	const commands = useCommands(
+		{
+			choose: (source) => {
+				if (source.dataset.item !== undefined) {
+					onChoose(source.dataset.item);
+				}
+			},
+		},
+		menu,
+	);
+
 	return (
 		// The note is outside the element with `role="menu"`: the children of a menu are its
 		// entries, and a paragraph among them is not one. The menu still points at it with
 		// `aria-describedby`, which can name any element.
-		<div ref={menu} className="column-menu" onKeyDown={onKeyDown}>
+		<div
+			ref={commands.ref}
+			id={commands.id}
+			className="column-menu"
+			onKeyDown={onKeyDown}>
 			{note !== undefined && (
 				<p id={noteId} className="note">
 					{note}
@@ -145,7 +162,8 @@ export function ColumnMenu({ label, note, anchor, items, onChoose, onClose }: Me
 						role="menuitem"
 						tabIndex={-1}
 						disabled={item.disabled}
-						onClick={() => onChoose(item.id)}>
+						data-item={item.id}
+						{...commands.run('choose')}>
 						{item.label}
 					</button>
 				))}

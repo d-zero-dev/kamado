@@ -29,7 +29,7 @@ export function operationLabel(operation: SyncFunction, language: string): strin
  * @param status - How the sync stands
  */
 export function isFinished(status: SyncStatus): boolean {
-	return status !== 'running';
+	return status !== 'running' && status !== 'writing';
 }
 
 /** The kinds of change that always have a tab, in the order they are shown. */

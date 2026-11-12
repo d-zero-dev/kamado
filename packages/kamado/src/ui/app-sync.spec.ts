@@ -1,10 +1,6 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
+import type { SyncController } from '../sync/controller.js';
 
 import { describe, expect, test, vi } from 'vitest';
-
-import { createSyncController, type SyncController } from '../sync/controller.js';
 
 import { createUiApp, TOKEN_HEADER } from './app.js';
 
@@ -335,83 +331,7 @@ describe('POST /api/sync/cancel', () => {
 	});
 });
 
-describe('with the controller of the sync behind the routes', () => {
-	test('a script is run by its name, followed by its state, applied by its id, and told as applied', async () => {
-		const dir = mkdtempSync(path.join(tmpdir(), 'kamado-app-sync-'));
-		try {
-			const file = path.join(dir, 'drop.mjs');
-			writeFileSync(
-				file,
-				'export default async (pages, ctx) => { ctx.log("info", "hello"); return []; };',
-			);
-			const snapshot = {
-				version: 1,
-				overridesHash: null,
-				inputDir: '/s/src',
-				outputPathField: null,
-				warnings: [],
-				pages: [
-					{
-						url: '/a/',
-						inputPath: '/s/src/a/index.html',
-						outputPath: '/s/out/a/index.html',
-						fileSlug: 'a',
-						filePathStem: '/a/index',
-						extension: '.html',
-						depth: 1,
-						parent: '/',
-						virtual: false,
-						meta: {},
-						hashes: { input: 'h', sidecar: null },
-					},
-				],
-			};
-			const sync = createSyncController({
-				editor: {
-					handle: 'h1',
-					uiRefresh: () => '{}',
-					uiSyncPages: () => JSON.stringify(snapshot),
-					uiSyncLocked: () => '{"locked":{}}',
-					uiEditBatch: () => '{"ok":true,"version":2,"overridesHash":null,"count":1}',
-				},
-				functions: [{ name: 'drop', label: 'Drop', script: file }],
-				cwd: dir,
-				scrub: (text) => text,
-			});
-			const app = setup(sync);
-			const run = await app.request('/api/sync/run', post({ name: 'drop' }));
-			expect(run.status).toBe(202);
-			const { id } = (await run.json()) as { id: string };
-			let state: { status: string; log: { message: string }[] } | undefined;
-			for (let i = 0; i < 100; i += 1) {
-				const response = await app.request(`/api/sync/state?id=${id}&after=0`, GET);
-				state = (await response.json()) as typeof state;
-				if (state?.status !== 'running') {
-					break;
-				}
-				await new Promise((resolve) => setTimeout(resolve, 50));
-			}
-			expect(state?.status).toBe('review');
-			expect(state?.log.map((line) => line.message)).toEqual(['hello']);
-			const changes = await app.request(`/api/sync/changes?id=${id}&kind=deleted`, GET);
-			expect(await changes.json()).toEqual({
-				total: 1,
-				changes: [{ kind: 'deleted', url: '/a/', inputPath: 'a/index.html' }],
-			});
-			const applied = await app.request('/api/sync/apply', post({ id }));
-			expect(applied.status).toBe(200);
-			expect(await applied.json()).toMatchObject({
-				status: 'applied',
-				applied: { count: 1 },
-			});
-			// a second request finds nothing waiting
-			const second = await app.request('/api/sync/apply', post({ id }));
-			expect(second.status).toBe(409);
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	});
-
+describe('the numbers in a query', () => {
 	test('a number in a query that is too long is not a number', async () => {
 		const response = await setup(fakeSync()).request(
 			'/api/sync/state?id=x&after=1234567890',

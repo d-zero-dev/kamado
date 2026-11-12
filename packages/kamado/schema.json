@@ -306,7 +306,7 @@
 					"allOf": [{ "$ref": "#/definitions/columnList" }]
 				},
 				"syncFunctions": {
-					"description": "The operations of the sync button of kamado ui, and of kamado sync. Each runs a script of the project that returns every page the site should have; kamado finds the difference from the pages now and applies it to the files of the local repository after a confirmation. Only a sync reads and runs them: the build, the dev server and kamado ui itself do not run a script.",
+					"description": "The operations of the sync button of kamado ui, and of kamado sync. Each runs a script of the project: an import (`read`) changes the files of the local repository to the pages the outside data has, and an export (`write`) changes the outside data to the pages of the repository. kamado finds the difference and asks for a confirmation before anything is applied or written. Only a sync reads and runs them: the build, the dev server and kamado ui itself do not run a script.",
 					"type": "array",
 					"items": {
 						"type": "object",
@@ -326,7 +326,7 @@
 								]
 							},
 							"script": {
-								"description": "The ES module of the script, relative to the directory of this file. Its default export is a function `(pages, ctx) => result`, which Node imports as it is.",
+								"description": "The ES module of the script, relative to the directory of this file. Its default export is an object `{ select?, read?, write? }`, which Node imports as it is: with `write` it is an export, without it an import (`read` is needed).",
 								"type": "string",
 								"minLength": 1
 							}

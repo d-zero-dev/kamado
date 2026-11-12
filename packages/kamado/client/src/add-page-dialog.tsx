@@ -1,7 +1,11 @@
 import { useState } from 'react';
 
 import { useI18n } from './i18n/context.js';
+import { builtinCommand } from './logic/commands.js';
 import { newPageOf } from './logic/page-edits.js';
+
+/** The `id` of the dialog: the button of the bar that opens it names it in `commandfor`. */
+export const ADD_PAGE_DIALOG_ID = 'add-page-dialog';
 
 interface AddPageProps {
 	readonly dialogRef: React.RefObject<HTMLDialogElement | null>;
@@ -35,7 +39,7 @@ export function AddPageDialog({ dialogRef, onAdd }: AddPageProps) {
 	return (
 		<dialog
 			ref={dialogRef}
-			id="add-page-dialog"
+			id={ADD_PAGE_DIALOG_ID}
 			aria-labelledby="add-page-title"
 			className="dialog wordy"
 			onClose={() => setProblem('')}>
@@ -81,7 +85,7 @@ export function AddPageDialog({ dialogRef, onAdd }: AddPageProps) {
 					{problem}
 				</p>
 				<div className="actions">
-					<button type="button" onClick={() => dialogRef.current?.close()}>
+					<button type="button" {...builtinCommand(ADD_PAGE_DIALOG_ID, 'close')}>
 						{t('dialog.cancel')}
 					</button>
 					<button type="submit">{t('dialog.add')}</button>

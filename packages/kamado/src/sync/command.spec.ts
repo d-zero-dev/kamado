@@ -45,9 +45,9 @@ function context(over: Partial<SyncCommandContext> & { run?: Run } = {}) {
 		ask: vi.fn(async () => 'y'),
 		run: vi.fn<Run>(async (_c, _t, options) => {
 			if (await options.confirm?.(summary())) {
-				return { kind: 'applied', summary: summary(), count: 1 };
+				return { kind: 'applied', direction: 'import', summary: summary(), count: 1 };
 			}
-			return { kind: 'declined', summary: summary() };
+			return { kind: 'declined', direction: 'import', summary: summary() };
 		}),
 		...over,
 	};
@@ -221,13 +221,15 @@ describe('syncCommand', () => {
 		expect(ctx.ask).not.toHaveBeenCalled();
 	});
 
-	test.each<[SyncReport, string]>([
-		[{ kind: 'nothing' }, 'The script returned nothing, so nothing was applied.'],
-		[{ kind: 'nochange', summary: summary() }, 'No changes'],
-	])('says how it ended: %j', async (report, line) => {
+	test('says that nothing changed', async () => {
+		const report: SyncReport = {
+			kind: 'nochange',
+			direction: 'import',
+			summary: summary(),
+		};
 		const { ctx, out } = context({ run: vi.fn<Run>(async () => report) });
 		expect(await syncCommand(['import'], {}, ctx)).toBe(0);
-		expect(out.join('')).toContain(line);
+		expect(out.join('')).toContain('No changes');
 	});
 
 	test('a script that failed is told with its stack, and the code is 1', async () => {
@@ -242,7 +244,7 @@ describe('syncCommand', () => {
 		const text = out.join('');
 		expect(text).toContain('the script failed: no sheet');
 		expect(text).toContain('at f (s.mjs:1:1)');
-		expect(text).toContain('Nothing was applied.');
+		expect(text).toContain('Nothing was changed.');
 	});
 
 	test('what cannot be applied is told in every problem, and the code is 1', async () => {

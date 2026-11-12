@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import { useI18n } from './i18n/context.js';
+import { useCommands } from './use-commands.js';
 
 /** What the dialog asks about: the cell that is to be put back as HEAD has it. */
 export interface RevertRequest {
@@ -53,9 +54,21 @@ export function RevertDialog({ request, onConfirm, onCancel }: RevertDialogProps
 		}
 	}, [request]);
 
+	const commands = useCommands(
+		{
+			confirm: () => {
+				chosen.current = true;
+				dialog.current?.close();
+				onConfirm();
+			},
+		},
+		dialog,
+	);
+
 	return (
 		<dialog
-			ref={dialog}
+			ref={commands.ref}
+			id={commands.id}
 			aria-labelledby="revert-title"
 			className="dialog"
 			onClose={() => {
@@ -84,21 +97,10 @@ export function RevertDialog({ request, onConfirm, onCancel }: RevertDialogProps
 					{request.where !== null && <p>{t('revert.where', { where: request.where })}</p>}
 					<div className="actions">
 						{/* The focus starts here: putting back loses what is there now. */}
-						<button
-							type="button"
-							autoFocus
-							onClick={() => {
-								dialog.current?.close();
-							}}>
+						<button type="button" autoFocus {...commands.builtin('close')}>
 							{t('dialog.cancel')}
 						</button>
-						<button
-							type="button"
-							onClick={() => {
-								chosen.current = true;
-								dialog.current?.close();
-								onConfirm();
-							}}>
+						<button type="button" {...commands.run('confirm')}>
 							{t('revert.confirm')}
 						</button>
 					</div>

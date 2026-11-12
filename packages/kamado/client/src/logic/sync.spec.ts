@@ -49,9 +49,9 @@ describe('operationLabel', () => {
 describe('isFinished', () => {
 	test.each([
 		['running', false],
+		['writing', false],
 		['failed', true],
 		['cancelled', true],
-		['nothing', true],
 		['nochange', true],
 		['invalid', true],
 		['review', true],

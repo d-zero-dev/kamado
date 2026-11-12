@@ -19,7 +19,13 @@ import {
 	displayProblem,
 	type DisplayChange,
 } from './display.js';
-import { runSync, SyncError, type SyncReport, type SyncRun } from './sync.js';
+import {
+	runSync,
+	SyncError,
+	type SyncReport,
+	type SyncReview,
+	type SyncRun,
+} from './sync.js';
 import { showControls } from './terminal.js';
 
 /** The flags `kamado sync` reads, as `parseArgs` gives them. */
@@ -92,8 +98,29 @@ function lineOf(change: DisplayChange): string {
 }
 
 /**
+ * What to say that the sync did nothing, in the words of its direction (unknown before the
+ * confirmation, where a failure cannot tell an import from an export).
+ * @param direction - Which way the sync went, when it is known
+ * @returns A sentence
+ */
+function nothingDone(direction: 'import' | 'export' | undefined): string {
+	switch (direction) {
+		case 'export': {
+			return 'Nothing was written.';
+		}
+		case 'import': {
+			return 'Nothing was applied.';
+		}
+		default: {
+			return 'Nothing was changed.';
+		}
+	}
+}
+
+/**
  * The summary as the text the confirmation shows.
  * @param summary - What the sync would change
+ * @param review - Which way the sync goes (default: an import, which changes the site)
  * @returns The lines, each ending with a newline
  * @example
  * ```ts
@@ -101,9 +128,16 @@ function lineOf(change: DisplayChange): string {
  * // '1 change:\n+ /n/ (virtual)\n'
  * ```
  */
-export function summaryText(summary: SyncSummary): string {
+export function summaryText(summary: SyncSummary, review?: SyncReview): string {
 	const total = summary.changes.length;
-	const lines = [`${total} ${total === 1 ? 'change' : 'changes'}:`];
+	if (review?.direction === 'export' && !review.diffed) {
+		return `The script would write ${review.targets} ${review.targets === 1 ? 'page' : 'pages'} outside. No difference can be shown: the script has no read.\n`;
+	}
+	const lines = [
+		review?.direction === 'export'
+			? `${total} ${total === 1 ? 'change' : 'changes'} to what is outside:`
+			: `${total} ${total === 1 ? 'change' : 'changes'}:`,
+	];
 	for (const change of summary.changes.slice(0, MAX_LISTED)) {
 		lines.push(lineOf(displayChange(change)));
 	}
@@ -151,6 +185,9 @@ export async function syncCommand(
 	const run = context.run ?? runSync;
 	let running: Run | undefined;
 	let interrupted = false;
+	// Known once the script has been read and the changes are to be confirmed: a failure before that
+	// cannot say whether it was an import or an export.
+	let direction: 'import' | 'export' | undefined;
 	const onSigint = (): void => {
 		interrupted = true;
 		running?.cancel();
@@ -165,16 +202,26 @@ export async function syncCommand(
 			onRun: (r) => {
 				running = r;
 			},
-			confirm: async (summary) => {
-				context.write(summaryText(summary));
+			confirm: async (summary, review) => {
+				direction = review?.direction === 'export' ? 'export' : 'import';
+				context.write(summaryText(summary, review));
+				const out = review?.direction === 'export';
 				if (!context.interactive) {
 					throw new Error(
-						'there are changes to apply, and nothing was applied: this is not a terminal to confirm them on (pass --yes to apply them)',
+						out
+							? 'there is something to write, and nothing was written: this is not a terminal to confirm it on (pass --yes to write it)'
+							: 'there are changes to apply, and nothing was applied: this is not a terminal to confirm them on (pass --yes to apply them)',
 					);
 				}
 				let answer: string;
 				try {
-					answer = await context.ask('Apply these changes? [y/N] ');
+					answer = await context.ask(
+						review?.direction === 'export'
+							? review.diffed
+								? 'Write these changes outside? [y/N] '
+								: `Write ${review.targets} ${review.targets === 1 ? 'page' : 'pages'} outside? [y/N] `
+							: 'Apply these changes? [y/N] ',
+					);
 				} catch {
 					// Ctrl-C at the question is a cancel, as it is while the script runs.
 					interrupted = true;
@@ -184,28 +231,41 @@ export async function syncCommand(
 			},
 		});
 		switch (report.kind) {
-			case 'nothing': {
-				context.write('The script returned nothing, so nothing was applied.\n');
-				return 0;
-			}
 			case 'nochange': {
-				context.write('No changes: the pages are what the script returned.\n');
+				context.write(
+					report.direction === 'export'
+						? 'No changes: what is outside is what the site has.\n'
+						: 'No changes: the pages are what the script returned.\n',
+				);
 				return 0;
 			}
 			case 'declined': {
-				context.write('Nothing was applied.\n');
+				context.write(
+					report.direction === 'export'
+						? 'Nothing was written.\n'
+						: 'Nothing was applied.\n',
+				);
 				return 0;
 			}
 			case 'applied': {
+				const total = report.summary.changes.length;
 				context.write(
-					`Applied ${report.summary.changes.length} ${report.summary.changes.length === 1 ? 'change' : 'changes'}. Look at them with git diff, and git reset what you do not want.\n`,
+					report.direction === 'export'
+						? total > 0
+							? `Wrote ${total} ${total === 1 ? 'change' : 'changes'} outside.\n`
+							: `Wrote ${report.count} ${report.count === 1 ? 'page' : 'pages'} outside.\n`
+						: `Applied ${total} ${total === 1 ? 'change' : 'changes'}. Look at them with git diff, and git reset what you do not want.\n`,
 				);
 				return 0;
 			}
 		}
 	} catch (error) {
 		if (interrupted) {
-			context.write(`${styleText('bold', 'Cancelled.')} Nothing was applied.\n`);
+			context.write(
+				error instanceof SyncError && error.phase === 'write'
+					? `${styleText('bold', 'Cancelled.')} The script was writing: what is outside may be half written. The site was not changed.\n`
+					: `${styleText('bold', 'Cancelled.')} ${nothingDone(direction)}\n`,
+			);
 			return 130;
 		}
 		if (!(error instanceof SyncError)) {
@@ -221,12 +281,16 @@ export async function syncCommand(
 				if (shown.stack !== null) {
 					context.write(`${styleText('dim', shown.stack)}\n`);
 				}
-				context.write('Nothing was applied.\n');
+				context.write(
+					error.phase === 'write'
+						? 'What is outside may be half written. The site was not changed: run the sync again to write what is left.\n'
+						: `${nothingDone(direction)}\n`,
+				);
 				break;
 			}
 			case 'invalid': {
 				context.write(
-					`${styleText(['bold', 'red'], 'The script returned pages that cannot be applied, so nothing was applied:')}\n`,
+					`${styleText(['bold', 'red'], 'The script returned something that cannot be used, so nothing was changed:')}\n`,
 				);
 				for (const problem of error.problems ?? []) {
 					context.write(`  ${displayProblem(problem)}\n`);

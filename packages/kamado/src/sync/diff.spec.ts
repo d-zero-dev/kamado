@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { diff, type Snapshot, type SnapshotPage } from './diff.js';
+import { diff, pairByPlace, type Snapshot, type SnapshotPage } from './diff.js';
 
 const INPUT = '/site/src';
 
@@ -807,5 +807,33 @@ describe('the keys that cannot be edited, when the list does not tell them', () 
 		]);
 		expect(result.ok).toBe(false);
 		expect(result.needsLocked).toEqual(['/a/']);
+	});
+});
+
+describe('pairByPlace', () => {
+	test('pairs by inputPath first, so that a changed url is the same page', () => {
+		const item = { url: '/new/', inputPath: 'a.html' };
+		const other = { url: '/old/', inputPath: 'a.html' };
+		expect([...pairByPlace([item], [other])]).toEqual([[item, other]]);
+	});
+
+	test('pairs by url what has no inputPath to pair by', () => {
+		const item = { url: '/a/' };
+		const other = { url: '/a/', inputPath: null };
+		expect([...pairByPlace([item], [other])]).toEqual([[item, other]]);
+	});
+
+	test('does not pair an item with a partner that another item took by inputPath', () => {
+		const first = { url: '/x/', inputPath: 'a.html' };
+		const second = { url: '/a/' };
+		const other = { url: '/a/', inputPath: 'a.html' };
+		expect([...pairByPlace([second, first], [other])]).toEqual([[first, other]]);
+	});
+
+	test('falls back to the url when the inputPath finds nobody, and leaves an item with no partner out', () => {
+		const item = { url: '/a/', inputPath: 'b.html' };
+		const other = { url: '/a/', inputPath: 'a.html' };
+		const stray = { url: '/z/' };
+		expect([...pairByPlace([item, stray], [other])]).toEqual([[item, other]]);
 	});
 });

@@ -3,6 +3,7 @@ import type { HeldLog, SyncTab } from './logic/sync.js';
 import type { SyncChange, SyncKind, SyncState } from './types.js';
 
 import { hiddenLines, tabsOf } from './logic/sync.js';
+import { useCommands, type Commands } from './use-commands.js';
 
 /** The changes of one kind that the screen holds, and how many there are. */
 export interface HeldChanges {
@@ -129,18 +130,18 @@ export function ChangeLine({ change, t }: { change: SyncChange; t: Translate }) 
  * @param props.tabs - The tabs
  * @param props.tab - The tab that is shown
  * @param props.t - Says a message
- * @param props.onTab - Called with the kind of the tab that was chosen
+ * @param props.run - Gives the attributes of a button that sends a command to the element that handles them
  */
 function Tabs({
 	tabs,
 	tab,
 	t,
-	onTab,
+	run,
 }: {
 	tabs: readonly SyncTab[];
 	tab: SyncKind | null;
 	t: Translate;
-	onTab: (kind: SyncKind) => void;
+	run: Commands<HTMLElement, 'tab'>['run'];
 }) {
 	return (
 		<div role="tablist" aria-label={t('sync.kinds')} className="sync-tabs">
@@ -153,7 +154,8 @@ function Tabs({
 					aria-selected={entry.kind === tab}
 					aria-controls="sync-panel"
 					disabled={entry.disabled}
-					onClick={() => onTab(entry.kind)}>
+					data-kind={entry.kind}
+					{...run('tab')}>
 					<span className="count">{entry.count.toLocaleString('en-US')}</span>
 					<span>{t(`sync.kind.${entry.kind}`)}</span>
 				</button>
@@ -188,16 +190,24 @@ export function SyncView({
 	onTab,
 	onMore,
 }: SyncViewProps) {
+	// The tabs and the button that reads more are in the body of the review: it is where they send
+	// their commands.
+	const commands = useCommands({
+		tab: (button) => onTab(button.dataset.kind as SyncKind),
+		more: onMore,
+	});
 	const status = state?.status ?? 'running';
+	const live = status === 'running' || status === 'writing';
+	const exporting = state?.direction === 'export';
 	const hidden = hiddenLines(log);
 	const logBox = (
 		<section aria-labelledby="sync-log-title" className="sync-section">
 			<h3 id="sync-log-title">{t('sync.log')}</h3>
 			{hidden > 0 && <p className="hint">{t('sync.logHidden', { count: hidden })}</p>}
 			{log.lines.length === 0 ? (
-				<p className="hint">{status === 'running' ? t('sync.logEmpty') : ''}</p>
+				<p className="hint">{live ? t('sync.logEmpty') : ''}</p>
 			) : (
-				<ol className="sync-log" aria-live={status === 'running' ? 'polite' : 'off'}>
+				<ol className="sync-log" aria-live={live ? 'polite' : 'off'}>
 					{log.lines.map((line, i) => (
 						<li key={`${log.next - log.lines.length + i}`} className={`log-${line.type}`}>
 							<span className="log-type">{line.type}</span> {line.message}
@@ -223,6 +233,19 @@ export function SyncView({
 	}
 
 	switch (status) {
+		case 'writing': {
+			return (
+				<>
+					<h2 id="sync-title">{t('sync.writing', { name })}</h2>
+					<div className="sync-body">
+						<p role="status" className="sync-running">
+							<span className="spinner" aria-hidden="true" />
+						</p>
+						{logBox}
+					</div>
+				</>
+			);
+		}
 		case 'running':
 		case 'cancelled': {
 			return (
@@ -252,20 +275,12 @@ export function SyncView({
 								</details>
 							)}
 						</div>
-						<p>{t('sync.failedBody')}</p>
+						<p>
+							{state?.phase === 'write'
+								? t('sync.failedBodyWrite')
+								: t(exporting ? 'sync.failedBodyExport' : 'sync.failedBody')}
+						</p>
 						{logBox}
-					</div>
-				</>
-			);
-		}
-		case 'nothing': {
-			return (
-				<>
-					<h2 id="sync-title">{t('sync.nothingTitle')}</h2>
-					<div className="sync-body">
-						<p className="sync-op">{name}</p>
-						<p>{t('sync.nothingBody')}</p>
-						{log.lines.length > 0 && logBox}
 					</div>
 				</>
 			);
@@ -280,7 +295,7 @@ export function SyncView({
 							<span className="check" aria-hidden="true">
 								✓
 							</span>
-							{t('sync.nochangeBody')}
+							{exporting ? t('sync.nochangeBodyExport') : t('sync.nochangeBody')}
 						</p>
 						{log.lines.length > 0 && logBox}
 					</div>
@@ -294,7 +309,7 @@ export function SyncView({
 					<h2 id="sync-title">{t('sync.invalidTitle')}</h2>
 					<div className="sync-body">
 						<p className="sync-op">{name}</p>
-						<p>{t('sync.invalidBody')}</p>
+						<p>{t(exporting ? 'sync.invalidBodyExport' : 'sync.invalidBody')}</p>
 						<ul className="sync-problems" role="alert">
 							{problems?.listed.map((text, i) => (
 								<li key={i}>{text}</li>
@@ -318,7 +333,9 @@ export function SyncView({
 					<h2 id="sync-title">{t('sync.conflictTitle')}</h2>
 					<div className="sync-body">
 						<p className="sync-op">{name}</p>
-						<p role="alert">{t('sync.conflictBody')}</p>
+						<p role="alert">
+							{t(exporting ? 'sync.conflictBodyExport' : 'sync.conflictBody')}
+						</p>
 						<Failures state={state} t={t} />
 					</div>
 				</>
@@ -331,7 +348,7 @@ export function SyncView({
 					<div className="sync-body">
 						<p className="sync-op">{name}</p>
 						<p role="alert">{state?.refused?.message}</p>
-						<p>{t('sync.refusedBody')}</p>
+						<p>{t(exporting ? 'sync.refusedBodyExport' : 'sync.refusedBody')}</p>
 						<Failures state={state} t={t} />
 					</div>
 				</>
@@ -345,13 +362,26 @@ export function SyncView({
 			if (summary === undefined) {
 				return <h2 id="sync-title">{name}</h2>;
 			}
+			if (exporting && state?.diffed === false) {
+				// The script has no `read`: nothing was compared, so there is no list to show.
+				return (
+					<>
+						<h2 id="sync-title">{t('sync.reviewTitleNoDiff')}</h2>
+						<div className="sync-body">
+							<p className="sync-op">{name}</p>
+							<p>{t('sync.reviewBodyNoDiff', { count: state.targets ?? 0 })}</p>
+							{log.lines.length > 0 && logBox}
+						</div>
+					</>
+				);
+			}
 			const tabs = tabsOf(summary.counts);
 			return (
 				<>
 					<h2 id="sync-title">{t('sync.reviewTitle', { count: summary.total })}</h2>
-					<div className="sync-body">
+					<div ref={commands.ref} id={commands.id} className="sync-body">
 						<p className="sync-op">{name}</p>
-						<p>{t('sync.reviewBody')}</p>
+						<p>{exporting ? t('sync.reviewBodyExport') : t('sync.reviewBody')}</p>
 						{summary.gitUnavailable ? (
 							<p role="alert" className="sync-warning">
 								{t('sync.gitUnavailable')}
@@ -377,7 +407,7 @@ export function SyncView({
 								</div>
 							)
 						)}
-						<Tabs tabs={tabs} tab={tab} t={t} onTab={onTab} />
+						<Tabs tabs={tabs} tab={tab} t={t} run={commands.run} />
 						<div
 							role="tabpanel"
 							id="sync-panel"
@@ -398,7 +428,7 @@ export function SyncView({
 											type="button"
 											className="more"
 											disabled={changes.loading}
-											onClick={onMore}>
+											{...commands.run('more')}>
 											{t('sync.more')} ({changes.items.length.toLocaleString('en-US')} /{' '}
 											{changes.total.toLocaleString('en-US')})
 										</button>

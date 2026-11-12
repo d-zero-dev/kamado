@@ -5,7 +5,7 @@
  * importing the generator without running it.
  */
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 /**
@@ -58,10 +58,15 @@ export function unformatted(rust: string): string {
  * wrote. A generator that writes on import would rewrite the committed files on
  * every `yarn test`.
  *
- * The outputs hold a marker while the child runs, and get their contents back
- * afterwards. Comparing the contents before and after would not do: the spec
- * imports the generator itself, so a generator that writes on import has already
- * written the same contents before the comparison starts.
+ * The outputs hold their own contents the whole time: the files are committed ones
+ * that other specs and scripts read and import while this runs (the specs run in
+ * parallel), so a marker written into them would be read by those as the table. What
+ * is set instead is the modification time of each output, to the epoch: a write by
+ * the child, even of the same contents, changes it. Comparing the contents before
+ * and after would not do: the spec imports the generator itself, so a generator that
+ * writes on import has already written the same contents before the comparison
+ * starts. The original times are put back afterwards, and the contents of an output
+ * that the child wrote.
  * @param generator - The path of the generator
  * @param outputs - The paths of the files it writes when it is run
  * @returns The exit status, what it printed and the outputs it wrote
@@ -73,11 +78,11 @@ export function importGenerator(
 	generator: string,
 	outputs: readonly string[],
 ): { status: number | null; stdout: string; changed: string[] } {
+	const before = outputs.map((file) => statSync(file));
 	const contents = outputs.map((file) => readFileSync(file, 'utf8'));
-	const marker = `not written by ${generator}\n`;
 	try {
 		for (const file of outputs) {
-			writeFileSync(file, marker);
+			utimesSync(file, 0, 0);
 		}
 		const url = pathToFileURL(generator).href;
 		const run = spawnSync(
@@ -85,11 +90,16 @@ export function importGenerator(
 			['--input-type=module', '--eval', `await import(${JSON.stringify(url)});`],
 			{ encoding: 'utf8' },
 		);
-		const changed = outputs.filter((file) => readFileSync(file, 'utf8') !== marker);
+		const changed = outputs.filter((file) => statSync(file).mtimeMs !== 0);
 		return { status: run.status, stdout: run.stdout, changed };
 	} finally {
 		for (const [index, file] of outputs.entries()) {
-			writeFileSync(file, contents[index]!);
+			// Only a file that the child wrote is written again, with what it held.
+			if (statSync(file).mtimeMs !== 0) {
+				writeFileSync(file, contents[index]!);
+			}
+			const stat = before[index]!;
+			utimesSync(file, stat.atimeMs / 1000, stat.mtimeMs / 1000);
 		}
 	}
 }

@@ -12,6 +12,7 @@ import {
 	mergeOptions,
 	optionsProblem,
 } from './logic/kinds.js';
+import { useCommands } from './use-commands.js';
 
 interface OptionsDialogProps {
 	/** The identifier of the column (`meta:<key>`). */
@@ -169,9 +170,23 @@ export function OptionsDialog({
 		dialog.current?.close();
 	};
 
+	const commands = useCommands(
+		{
+			remove: (source) =>
+				setOptions(options.filter((o) => optionKey(o) !== source.dataset.option)),
+			add: addTyped,
+			fromPages: () => {
+				setAdding(true);
+				readNow(options);
+			},
+		},
+		dialog,
+	);
+
 	return (
 		<dialog
-			ref={dialog}
+			ref={commands.ref}
+			id={commands.id}
 			aria-labelledby="options-title"
 			className="dialog options-dialog"
 			onClose={onClose}>
@@ -205,11 +220,8 @@ export function OptionsDialog({
 										<button
 											type="button"
 											aria-label={t('options.remove', { option: String(option) })}
-											onClick={() =>
-												setOptions(
-													options.filter((o) => optionKey(o) !== optionKey(option)),
-												)
-											}>
+											data-option={optionKey(option)}
+											{...commands.run('remove')}>
 											<span aria-hidden="true">✕</span>
 										</button>
 									</li>
@@ -243,18 +255,12 @@ export function OptionsDialog({
 									</option>
 								))}
 							</select>
-							<button type="button" onClick={addTyped}>
+							<button type="button" {...commands.run('add')}>
 								{t('dialog.add')}
 							</button>
 						</div>
 						{initial !== null && (
-							<button
-								type="button"
-								disabled={adding}
-								onClick={() => {
-									setAdding(true);
-									readNow(options);
-								}}>
+							<button type="button" disabled={adding} {...commands.run('fromPages')}>
 								{t('options.fromPages')}
 							</button>
 						)}
@@ -266,7 +272,7 @@ export function OptionsDialog({
 					</p>
 				)}
 				<div className="actions">
-					<button type="button" onClick={() => dialog.current?.close()}>
+					<button type="button" {...commands.builtin('close')}>
 						{t('dialog.cancel')}
 					</button>
 					<button type="submit" disabled={loading}>

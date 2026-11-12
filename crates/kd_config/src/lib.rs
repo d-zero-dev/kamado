@@ -264,7 +264,9 @@ pub struct UiKey {
 }
 
 /// One operation of the sync button of `kamado ui` (and of `kamado sync <name>`): a script of
-/// the project that returns the pages the site should have (RFC section 14.2).
+/// the project that exports `{ select?, read?, write? }`. With `write` it writes the site out to
+/// the outside data (an export); without it, it brings the outside data into the site (an
+/// import) (RFC section 14.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncFunction {
 	/// What `kamado sync <name>` and the screen call the operation by. Not empty, and not

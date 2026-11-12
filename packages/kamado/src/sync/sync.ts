@@ -20,6 +20,7 @@ import { type Run } from './runner.js';
 import { prepareSync, type ApplyFailure } from './session.js';
 import {
 	type Label,
+	type SyncDirection,
 	type SyncOptions,
 	type SyncOutcome,
 	type SyncSummary,
@@ -57,10 +58,24 @@ export type SyncErrorKind =
 	| 'invalid'
 	/** The sync was cancelled. */
 	| 'cancelled'
-	/** The core refused the edits, and nothing was written. */
+	/**
+	 * Nothing was written: the core refused the edits of an import, or the site changed while an
+	 * export waited for the confirmation.
+	 */
 	| 'refused'
 	/** There are changes, and nobody confirmed them. */
 	| 'unconfirmed';
+
+/**
+ * Where a script failed or was stopped. `read` is before the script has said what the data is
+ * (`select` and `read`): nothing was written anywhere. `write` is while an export wrote: what is
+ * outside may be half written, and the site was not changed.
+ * @example
+ * ```ts
+ * const phase: SyncPhase = 'write';
+ * ```
+ */
+export type SyncPhase = 'read' | 'write';
 
 /**
  * What a sync that did not apply rejects with. `kind` says which way it ended, and the other
@@ -80,6 +95,11 @@ export class SyncError extends Error {
 	/** What the core refused, for `refused`. */
 	readonly failures?: readonly ApplyFailure[];
 	readonly kind: SyncErrorKind;
+	/**
+	 * Where the script failed (`failed`) or was stopped (`cancelled`): `write` means that what is
+	 * outside may be half written. Absent for the other kinds.
+	 */
+	readonly phase?: SyncPhase;
 	/** Every problem of what the script returned, for `invalid`. */
 	readonly problems?: readonly Problem[];
 	/** The stack of the script, for `failed` (the stack of this error is the caller's). */
@@ -96,6 +116,7 @@ export class SyncError extends Error {
 			problems?: readonly Problem[];
 			failures?: readonly ApplyFailure[];
 			summary?: SyncSummary;
+			phase?: SyncPhase;
 		} = {},
 	) {
 		super(message);
@@ -105,23 +126,52 @@ export class SyncError extends Error {
 		this.problems = extra.problems;
 		this.failures = extra.failures;
 		this.summary = extra.summary;
+		this.phase = extra.phase;
 	}
 }
 
 /** What a run of a sync gives when it did not throw. */
 export type SyncReport =
-	| { readonly kind: 'nothing' }
-	| { readonly kind: 'nochange'; readonly summary: SyncSummary }
-	| { readonly kind: 'declined'; readonly summary: SyncSummary }
-	| { readonly kind: 'applied'; readonly summary: SyncSummary; readonly count: number };
+	| {
+			readonly kind: 'nochange';
+			readonly direction: SyncDirection;
+			readonly summary: SyncSummary;
+	  }
+	| {
+			readonly kind: 'declined';
+			readonly direction: SyncDirection;
+			readonly summary: SyncSummary;
+	  }
+	| {
+			readonly kind: 'applied';
+			readonly direction: SyncDirection;
+			readonly summary: SyncSummary;
+			readonly count: number;
+	  };
+
+/** What a confirmation is told besides the summary. */
+export type SyncReview =
+	| { readonly direction: 'import' }
+	| {
+			readonly direction: 'export';
+			/** `false` when the script has no `read`: nothing was compared. */
+			readonly diffed: boolean;
+			/** How many pages the script would write out. */
+			readonly targets: number;
+	  };
 
 /** What {@link runSync} takes beyond the options of {@link sync}. */
 export interface SyncRun extends SyncOptions {
 	/**
 	 * Asked when there are changes and `yes` is not set. Resolves `true` to apply, `false` to leave.
-	 * Without it, changes that are not confirmed by `yes` are an error.
+	 * Without it, changes that are not confirmed by `yes` are an error. The second argument says
+	 * which way the sync goes and, for an export, whether a difference was found; a confirmation that
+	 * leaves it out is one of an import.
 	 */
-	readonly confirm?: (summary: SyncSummary) => Promise<boolean> | boolean;
+	readonly confirm?: (
+		summary: SyncSummary,
+		review?: SyncReview,
+	) => Promise<boolean> | boolean;
 	/** The directory a script path is relative to (default: the cwd). */
 	readonly cwd?: string;
 	/** Told of the run when it starts, so that it can be cancelled. */
@@ -223,13 +273,11 @@ export async function runSync(
 			case 'failed': {
 				throw new SyncError('failed', `the script failed: ${prepared.message}`, {
 					scriptStack: prepared.stack,
+					phase: 'read',
 				});
 			}
 			case 'cancelled': {
 				throw new SyncError('cancelled', 'the sync was cancelled');
-			}
-			case 'nothing': {
-				return { kind: 'nothing' };
 			}
 			case 'invalid': {
 				const told = prepared.problems.map((p) => p.message);
@@ -240,25 +288,70 @@ export async function runSync(
 				);
 			}
 			case 'nochange': {
-				return { kind: 'nochange', summary: prepared.summary };
+				return {
+					kind: 'nochange',
+					direction: prepared.direction,
+					summary: prepared.summary,
+				};
 			}
 			case 'review': {
-				const { summary } = prepared;
+				const { summary, direction } = prepared;
+				const review: SyncReview =
+					prepared.direction === 'export'
+						? { direction: 'export', diffed: prepared.diffed, targets: prepared.targets }
+						: { direction: 'import' };
 				if (options.yes !== true) {
 					if (options.confirm === undefined) {
 						throw new SyncError(
 							'unconfirmed',
-							`the script returned changes, and nothing was applied: pass yes: true to apply them (${describeCounts(summary)})`,
+							prepared.direction === 'export' && !prepared.diffed
+								? `the script would write ${prepared.targets} pages outside, and nothing was written: pass yes: true to write them (no difference can be shown: the script has no read)`
+								: `the script has changes to make, and nothing was ${direction === 'export' ? 'written' : 'applied'}: pass yes: true to ${direction === 'export' ? 'write' : 'apply'} them (${describeCounts(summary)})`,
 							{ summary },
 						);
 					}
-					if (!(await options.confirm(summary))) {
-						return { kind: 'declined', summary };
+					if (!(await options.confirm(summary, review))) {
+						if (prepared.direction === 'export') {
+							prepared.discard();
+						}
+						return { kind: 'declined', direction, summary };
 					}
 				}
 				if (started.run?.cancelled === true) {
 					// Ctrl-C after the script returned (while git was asked, or at the question).
 					throw new SyncError('cancelled', 'the sync was cancelled');
+				}
+				if (prepared.direction === 'export') {
+					const written = await prepared.write();
+					switch (written.kind) {
+						case 'written': {
+							return { kind: 'applied', direction, summary, count: written.count };
+						}
+						case 'conflict': {
+							throw new SyncError('refused', written.message, { failures: [], summary });
+						}
+						case 'notWritten': {
+							throw new SyncError(
+								'failed',
+								`the script failed, and nothing was written: ${written.message}`,
+								{ scriptStack: written.stack, phase: 'read' },
+							);
+						}
+						case 'failed': {
+							throw new SyncError(
+								'failed',
+								`the script failed while writing, and what is outside may be half written: ${written.message}`,
+								{ scriptStack: written.stack, phase: 'write' },
+							);
+						}
+						case 'cancelled': {
+							throw new SyncError(
+								'cancelled',
+								'the sync was cancelled while the script wrote, and what is outside may be half written',
+								{ phase: 'write' },
+							);
+						}
+					}
 				}
 				const applied = prepared.apply();
 				if (!applied.ok) {
@@ -267,7 +360,7 @@ export async function runSync(
 						summary,
 					});
 				}
-				return { kind: 'applied', summary, count: applied.count };
+				return { kind: 'applied', direction, summary, count: applied.count };
 			}
 			default: {
 				const unreachable: never = prepared;
@@ -311,27 +404,32 @@ export function describeCounts(summary: SyncSummary): string {
 }
 
 /**
- * Runs the script of a sync on the pages of the site described by `configPath`, finds what
- * its answer changes, and applies the changes to the files of the local repository, all together
- * or not at all (RFC §14.2, "同期"). It is `kamado sync`'s function: the script is the one of an
- * operation of `ui.syncFunctions` named `target`, or a file when no operation has that name.
+ * Runs the script of a sync on the pages of the site described by `configPath`, finds the
+ * difference between the data of the script and the site, and applies it after the confirmation,
+ * all together or not at all (RFC §14.2, "同期"). It is `kamado sync`'s function: the script is the
+ * one of an operation of `ui.syncFunctions` named `target`, or a file when no operation has that
+ * name.
  *
  * The script runs in a process of its own, with the privileges of the caller, on the pages as
- * `kamado pages` lists them. What it returns is every page the site should have; a page that
- * exists and is not returned is removed. Nothing is written when the script returns nothing
- * (or `null`), when what it returned is what the site is, or when anything is wrong (a script that
- * fails, a result that cannot be applied, a file that changed while the script ran). There is no
- * question asked: changes are applied only with `yes: true`, and otherwise the call throws
- * (`kamado sync` asks on the terminal and then passes `yes`).
+ * `kamado pages` lists them. A script that has `write` is an export: the difference is what would
+ * change outside, and `write` runs only once the changes are confirmed. A script that has none is
+ * an import: `read` returns the pages the data has, in the range `select` returned, and the files
+ * of the local repository are changed to match (a page of the range that `read` does not return is
+ * removed). Nothing is written when what the script gave is what the site is, or when anything is
+ * wrong (a script that fails, a result that cannot be applied, a file that changed while the script
+ * ran). There is no question asked: changes are applied only with `yes: true`, and otherwise the
+ * call throws (`kamado sync` asks on the terminal and then passes `yes`). An export whose script
+ * has no `read` has no difference to find, so without `yes` it always throws.
  * @param configPath - Absolute path of `kamado.config.jsonc`
  * @param target - The name of an operation of `ui.syncFunctions`, or the path of a script
  * (relative to the cwd)
  * @param options - `yes`, `cacheDir` and where the log goes
  * @returns Whether anything was applied, and what the changes were
- * @throws {SyncError} when the script fails (`kind: 'failed'`, with the message of the script), what
- * it returned cannot be applied (`invalid`, with every problem), the core refuses the edits
- * (`refused`), there are changes and `yes` is not set (`unconfirmed`), or the run was stopped from
- * outside (`cancelled`)
+ * @throws {SyncError} when the script fails (`kind: 'failed'`, with the message of the script and
+ * the `phase`: `write` means that what is outside may be half written), what it returned cannot be
+ * applied (`invalid`, with every problem), the core refuses the edits or the site changed while an
+ * export waited (`refused`), there are changes and `yes` is not set (`unconfirmed`), or the run was
+ * stopped from outside (`cancelled`)
  * @throws {Error} when the config or the pages cannot be read, no script is found, or `options` has
  * a key that is not in {@link SYNC_OPTION_KEYS} (`unknown option: <key>`)
  * @example
@@ -349,28 +447,9 @@ export async function sync(
 ): Promise<SyncOutcome> {
 	assertKnownOptions(options, SYNC_OPTION_KEYS);
 	const report = await runSync(configPath, target, options);
-	const empty: SyncSummary = {
-		counts: {
-			added: 0,
-			deleted: 0,
-			movedUrl: 0,
-			movedFile: 0,
-			virtualized: 0,
-			materialized: 0,
-			meta: 0,
-		},
-		changes: [],
-		unsaved: [],
+	return {
+		applied: report.kind === 'applied',
+		summary: report.summary,
+		direction: report.direction,
 	};
-	switch (report.kind) {
-		case 'nothing': {
-			return { applied: false, summary: empty };
-		}
-		case 'applied': {
-			return { applied: true, summary: report.summary };
-		}
-		default: {
-			return { applied: false, summary: report.summary };
-		}
-	}
 }
