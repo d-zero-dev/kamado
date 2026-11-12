@@ -2,6 +2,8 @@ import { describe, expect, test } from 'vitest';
 
 import { ids, lint } from '../lint.test-util.js';
 
+import { noUntrackedInput } from './no-untracked-input.js';
+
 const RULE = 'no-untracked-input';
 
 describe(RULE, () => {
@@ -108,5 +110,59 @@ describe(RULE, () => {
 			{ messageId: 'noFetch', line: 2, column: 1 },
 			{ messageId: 'noTopLevelAwait', line: 3, column: 1 },
 		]);
+	});
+
+	test.each([
+		['export default () => process.env.API_KEY;', 'noEnvironment'],
+		["export default () => process.env['API_KEY'];", 'noEnvironment'],
+		['const { API_KEY } = process.env;', 'noEnvironment'],
+		['export default () => new Date();', 'noTime'],
+		['export default () => Date();', 'noTime'],
+		['export default () => Date.now();', 'noTime'],
+		['const built = new Date().toISOString();', 'noTime'],
+		['export default () => Math.random();', 'noRandom'],
+		["export default () => process['env'].A;", 'noEnvironment'],
+		['export default () => globalThis.process.env.A;', 'noEnvironment'],
+		['export default () => process.argv;', 'noEnvironment'],
+		['export default () => performance.now();', 'noTime'],
+		['export default () => crypto.randomUUID();', 'noRandom'],
+		['export default () => crypto.getRandomValues(new Uint8Array(1));', 'noRandom'],
+		['const { random } = Math;', 'noRandom'],
+		['const { now } = Date;', 'noTime'],
+		['const { env: environment } = process;', 'noEnvironment'],
+		['const id = Math.floor(Math.random() * 10);', 'noRandom'],
+	])('invalid (the environment, the clock, randomness): %s', (code, messageId) => {
+		expect(ids(RULE, code)).toStrictEqual([messageId]);
+	});
+
+	test.each([
+		['export default (p) => new Date(p.date);'],
+		["export default () => new Date('2026-01-01');"],
+		['export default () => new Date(0);'],
+		['export default () => Date.parse(x);'],
+		['export default () => Math.floor(1.5);'],
+		['const process = { env: {} };\nexport default () => process.env.A;'],
+		['export default (Date) => new Date();'],
+		['export default (Date) => Date.now();'],
+		['export default (Math) => Math.random();'],
+		['export default () => ({ Date: 1 }).Date;'],
+		['export default (o) => o.process.env;'],
+		['export default (o) => o.Math.random();'],
+	])('valid (what is not the environment, the clock or randomness): %s', (code) => {
+		expect(ids(RULE, code)).toStrictEqual([]);
+	});
+
+	test('the messages point to a data file, not to a plain file of data.dir', () => {
+		for (const id of [
+			'noFileRead',
+			'noFetch',
+			'noChildProcess',
+			'noTopLevelAwait',
+			'noEnvironment',
+			'noTime',
+			'noRandom',
+		]) {
+			expect(noUntrackedInput.meta?.messages?.[id]).toContain('a script of data.dir');
+		}
 	});
 });
