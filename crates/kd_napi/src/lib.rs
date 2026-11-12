@@ -632,6 +632,19 @@ unsafe fn ui_edit(env: napi_env, info: napi_callback_info) -> napi_value {
 	}
 }
 
+/// `uiEditBatch(handle, batchJson)` -> the JSON result of the batch (all of its edits are made, or none).
+unsafe fn ui_edit_batch(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<2>(
+			env,
+			info,
+			c"uiEditBatch: expected (handle, batchJson) strings",
+			|[handle, batch]| ui::edit_batch(&handle, &batch).map_err(Thrown::from),
+		)
+	}
+}
+
 /// `uiDiffFiles(handle, queryJson)` -> the JSON of the git blob ids of the files of some pages.
 unsafe fn ui_diff_files(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
@@ -880,6 +893,7 @@ unsafe fn register(env: napi_env, exports: napi_value) -> napi_value {
 		export_guarded!(api, env, exports, c"uiValues", ui_values);
 		export_guarded!(api, env, exports, c"uiRefresh", ui_refresh);
 		export_guarded!(api, env, exports, c"uiEdit", ui_edit);
+		export_guarded!(api, env, exports, c"uiEditBatch", ui_edit_batch);
 		export_guarded!(api, env, exports, c"uiDiffFiles", ui_diff_files);
 		export_guarded!(api, env, exports, c"uiDiff", ui_diff);
 		export_guarded!(api, env, exports, c"uiServer", ui_server);
