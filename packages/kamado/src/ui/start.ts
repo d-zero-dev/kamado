@@ -169,6 +169,14 @@ export async function ui(
 			 * screen then has no button, and everything else works as it did.
 			 */
 			syncFunctions?: SyncFunctionConfig[];
+			/**
+			 * `ui.defaultKeyOrder` and `ui.defaultFixedKeys`, as written, or `null` when the config
+			 * does not write them. Read as not written when the core does not say it: the screen
+			 * then lays the columns out by its own defaults (the fixed columns, then the keys by
+			 * name, with the URL pinned).
+			 */
+			defaultKeyOrder?: string[] | null;
+			defaultFixedKeys?: string[] | null;
 		};
 		const port = options.port ?? dev.port + 1;
 		wanted = port;
@@ -221,6 +229,12 @@ export async function ui(
 				settings,
 				git: cachedReadGit(path.dirname(configPath)),
 				head: createHeadDiff({ cwd: path.dirname(configPath), core, handle }),
+				columnDefaults: {
+					...(Array.isArray(dev.defaultKeyOrder) ? { order: dev.defaultKeyOrder } : {}),
+					...(Array.isArray(dev.defaultFixedKeys)
+						? { pinned: dev.defaultFixedKeys }
+						: {}),
+				},
 				overridesFile:
 					typeof dev.overrides === 'string'
 						? relativeFile(path.dirname(configPath), dev.overrides)

@@ -134,6 +134,14 @@ pub(crate) fn server(handle: &str) -> Result<String, String> {
 					.map_or(Value::Null, |path| Value::String(path.to_owned())),
 			),
 			("syncFunctions".to_owned(), settings.sync_functions_json()),
+			(
+				"defaultKeyOrder".to_owned(),
+				settings.default_key_order_json(),
+			),
+			(
+				"defaultFixedKeys".to_owned(),
+				settings.default_fixed_keys_json(),
+			),
 		])
 		.to_json())
 	})

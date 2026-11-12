@@ -769,7 +769,7 @@ unsafe fn ui_diff(env: napi_env, info: napi_callback_info) -> napi_value {
 	}
 }
 
-/// `uiServer(handle)` -> `{ "port", "open", "inputDir", "outputDir", "overrides", "syncFunctions" }`.
+/// `uiServer(handle)` -> `{ "port", "open", "inputDir", "outputDir", "overrides", "syncFunctions", "defaultKeyOrder", "defaultFixedKeys" }`.
 unsafe fn ui_server(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
 	unsafe {

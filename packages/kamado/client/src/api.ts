@@ -1,3 +1,4 @@
+import type { ColumnDefaults } from './logic/layout.js';
 import type { SortState } from './logic/sort.js';
 import type {
 	Change,
@@ -17,6 +18,7 @@ import type {
 	Values,
 } from './types.js';
 
+import { parseColumnDefaults } from './logic/column-defaults.js';
 import { sortParams } from './logic/sort.js';
 
 /** An answer that was not a success. */
@@ -42,6 +44,18 @@ export class ApiError extends Error {
 function token(): string {
 	return (
 		document.querySelector<HTMLMetaElement>('meta[name="kamado-token"]')?.content ?? ''
+	);
+}
+
+/**
+ * The layout of the columns the config gives (`ui.defaultKeyOrder`, `ui.defaultFixedKeys`), as the
+ * server placed it in the page. Read from the page and not asked for: the server has the config
+ * when it serves the page, and the screen has it even when its settings cannot be read.
+ */
+export function columnDefaults(): ColumnDefaults {
+	return parseColumnDefaults(
+		document.querySelector<HTMLMetaElement>('meta[name="kamado-column-defaults"]')
+			?.content,
 	);
 }
 

@@ -185,3 +185,75 @@ fn schema_ui_options_match_the_parser() {
 		&format!(r#"{{ {dir}, "ui": {{ "keys": {{ "title": {{ "nope": 1 }} }} }} }}"#),
 	);
 }
+
+/// A `dir` that is valid (the input and the output must differ).
+const DIR: &str = r#""dir": { "input": "src", "output": "out" }"#;
+
+/// The columns the parser takes in `ui.defaultKeyOrder` besides `meta:<key>`.
+fn columns_by_parser() -> Vec<String> {
+	kd_config::UI_BUILTIN_COLUMNS
+		.iter()
+		.map(|name| (*name).to_string())
+		.collect()
+}
+
+#[test]
+fn schema_column_lists_match_the_parser() {
+	let root = schema();
+	let ui = root.get("properties").unwrap().get("ui").unwrap();
+	let list = root.get("definitions").unwrap().get("columnList").unwrap();
+	for key in ["defaultKeyOrder", "defaultFixedKeys"] {
+		let node = ui.get("properties").unwrap().get(key).unwrap();
+		// The property points at the shared definition (inside `allOf`, to keep its own description).
+		let Some(Value::Array(all_of)) = node.get("allOf") else {
+			panic!("ui.{key} is not an allOf of columnList");
+		};
+		assert_eq!(
+			all_of[0].get("$ref").and_then(Value::as_str),
+			Some("#/definitions/columnList")
+		);
+	}
+
+	// The identifiers: the pattern names the same fixed columns as the parser, and `meta:<key>`.
+	let Some(Value::String(pattern)) = list.get("items").unwrap().get("pattern") else {
+		panic!("columnList.items has no pattern");
+	};
+	let names = pattern
+		.strip_prefix("^(")
+		.and_then(|rest| rest.strip_suffix(r"|meta:[\s\S]+)$"))
+		.unwrap_or_else(|| panic!("unexpected pattern {pattern:?}"));
+	let mut in_schema: Vec<String> = names.split('|').map(str::to_string).collect();
+	let mut in_parser = columns_by_parser();
+	in_schema.sort();
+	in_parser.sort();
+	assert_eq!(
+		in_schema, in_parser,
+		"schema and parser disagree about the fixed columns"
+	);
+	for name in &in_parser {
+		let config = format!(r#"{{ {DIR}, "ui": {{ "defaultKeyOrder": ["{name}"] }} }}"#);
+		assert!(kd_config::parse(&config, "/p", None).is_ok(), "{name}");
+	}
+
+	// The limits: the schema says what the parser enforces.
+	let number = |node: &Value, key: &str| match node.get(key) {
+		Some(Value::Number(n)) => *n as usize,
+		_ => panic!("no {key}"),
+	};
+	assert_eq!(number(list, "maxItems"), 500);
+	assert_eq!(number(list.get("items").unwrap(), "maxLength"), 256);
+	let at = |n: usize| {
+		let many = (0..n)
+			.map(|i| format!(r#""meta:k{i}""#))
+			.collect::<Vec<_>>()
+			.join(",");
+		kd_config::parse(
+			&format!(r#"{{ {DIR}, "ui": {{ "defaultKeyOrder": [{many}] }} }}"#),
+			"/p",
+			None,
+		)
+	};
+	assert!(at(500).is_ok());
+	assert!(at(501).is_err());
+	assert_eq!(list.get("uniqueItems"), Some(&Value::Bool(true)));
+}

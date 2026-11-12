@@ -13,6 +13,17 @@
 			"type": "object",
 			"additionalProperties": { "type": "string" }
 		},
+		"columnList": {
+			"description": "Identifiers of the columns of the table of kamado ui, each once, at most 500. An identifier is at most 256 UTF-16 code units long (a character outside the Basic Multilingual Plane counts as two, which maxLength does not count), meta: included; the parser of kamado is the authority.",
+			"type": "array",
+			"maxItems": 500,
+			"uniqueItems": true,
+			"items": {
+				"type": "string",
+				"maxLength": 256,
+				"pattern": "^(url|virtual|inputPath|outputPath|parent|depth|meta:[\\s\\S]+)$"
+			}
+		},
 		"label": {
 			"description": "A text, or a text per language of the screen of kamado ui (the keys are languages such as \"en\" and \"ja\"; a language the screen does not speak is never shown). The text is looked for in the language of the screen, then in \"en\". null and an empty text are the same as not writing it.",
 			"oneOf": [
@@ -285,6 +296,14 @@
 							"description": { "$ref": "#/definitions/label" }
 						}
 					}
+				},
+				"defaultKeyOrder": {
+					"description": "The order of the columns of the table until a person sets one on the screen (what the screen saves in ui-settings.json wins). The identifiers: url, virtual, inputPath, outputPath, parent, depth, or meta:<key> for a key of the metadata (meta:order for the key that places a page). A column this list does not name goes after the ones it names, in the default order. A key that no page has gets no column.",
+					"allOf": [{ "$ref": "#/definitions/columnList" }]
+				},
+				"defaultFixedKeys": {
+					"description": "The columns pinned to the left edge of the table until a person pins or unpins one on the screen (what the screen saves wins), in the order written, whatever defaultKeyOrder says. [] pins none. Without it only url is pinned.",
+					"allOf": [{ "$ref": "#/definitions/columnList" }]
 				},
 				"syncFunctions": {
 					"description": "The operations of the sync button of kamado ui, and of kamado sync. Each runs a script of the project that returns every page the site should have; kamado finds the difference from the pages now and applies it to the files of the local repository after a confirmation. Only a sync reads and runs them: the build, the dev server and kamado ui itself do not run a script.",

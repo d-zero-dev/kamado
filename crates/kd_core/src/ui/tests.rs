@@ -1869,6 +1869,25 @@ fn the_server_settings_have_the_defaults_of_the_config() {
 	let settings = ui.server();
 	assert_eq!(settings.port, 3000);
 	assert!(!settings.open);
+	assert_eq!(settings.default_key_order, None);
+	assert_eq!(settings.default_fixed_keys, None);
+	assert_eq!(settings.default_key_order_json().to_json(), "null");
+	assert_eq!(settings.default_fixed_keys_json().to_json(), "null");
+}
+
+#[test]
+fn the_server_settings_tell_the_default_columns_as_written() {
+	let site = Site::new("server_default_columns");
+	let ui = site.open(
+		r#", "ui": { "defaultKeyOrder": ["url", "meta:title", "inputPath"], "defaultFixedKeys": [] }"#,
+	);
+	let settings = ui.server();
+	assert_eq!(
+		settings.default_key_order_json().to_json(),
+		r#"["url","meta:title","inputPath"]"#
+	);
+	// `[]` is written (no column pinned), which is not the same as not written.
+	assert_eq!(settings.default_fixed_keys_json().to_json(), "[]");
 }
 
 fn move_path(path: &str) -> String {
