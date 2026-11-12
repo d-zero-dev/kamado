@@ -2,6 +2,7 @@
 /* eslint-disable no-console -- the CLI's job is to print */
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { parseArgs, styleText } from 'node:util';
 
 import { buildFrom } from './build-from.js';
@@ -10,6 +11,7 @@ import { parseJobs } from './jobs.js';
 import { pagesCommand } from './pages-command.js';
 import { start } from './server/start.js';
 import { summarize } from './summary.js';
+import { syncCommand } from './sync/command.js';
 import { uiCommand } from './ui/command.js';
 import { settingsCommand } from './ui/settings-command.js';
 import { defaultSettingsFile } from './ui/settings.js';
@@ -20,6 +22,7 @@ const USAGE = `Usage:
   kamado server           [--config <file>] [--cache-dir <dir>] [--verbose]
   kamado pages            [--out <file>] [--incremental] [--cache-dir <dir>] [--config <file>]
   kamado ui               [--port <n>] [--open | --no-open] [--cache-dir <dir>] [--config <file>]
+  kamado sync <name|path> [-y, --yes] [--cache-dir <dir>] [--config <file>]
   kamado ui-settings list
   kamado ui-settings reset [--config <file>]
   kamado ui-settings delete <config-file> | --all
@@ -31,6 +34,9 @@ to --out.
 pages, to make a page virtual (its file goes, its URL stays) and to remove pages, and writes
 them back to the source files. It listens on localhost, on the port of devServer plus one
 unless --port says otherwise.
+\`sync\` runs a script of the project (an operation of ui.syncFunctions by its name, or a file by its
+path), which returns every page the site should have, shows what that changes, asks, and applies
+it to the files of the local repository (--yes does not ask). It writes nothing when anything is wrong.
 \`ui-settings\` looks at what \`ui\` saved in ~/.config/kamado/ui-settings.json, for each project:
 \`list\` shows the projects, \`reset\` removes those of the project of the config file, and
 \`delete\` removes those of the project of the given config file (or, with --all, those of every
@@ -84,6 +90,58 @@ function resolveConfig(configFlag: string | undefined): string {
 }
 
 /**
+ * Runs `kamado sync`, asking on the terminal.
+ * @param rest - The arguments after the command
+ * @param values - The flags
+ * @param values.config - The `--config` flag
+ * @param values.yes - The `--yes` flag
+ * @returns The process exit code
+ */
+async function runSyncCommand(
+	rest: readonly string[],
+	values: { config?: string; 'cache-dir'?: string; yes?: boolean },
+): Promise<number> {
+	const interactive = process.stdin.isTTY && process.stderr.isTTY;
+	return await syncCommand(
+		rest,
+		{
+			config: values.config,
+			'cache-dir':
+				values['cache-dir'] === undefined
+					? undefined
+					: path.resolve(process.cwd(), values['cache-dir']),
+			yes: values.yes,
+		},
+		{
+			cwd: process.cwd(),
+			resolveConfig: () => resolveConfig(values.config),
+			write: (text) => process.stderr.write(text),
+			interactive,
+			ask: async (question) => {
+				const lines = createInterface({
+					input: process.stdin,
+					output: process.stderr,
+				});
+				const cancel = new AbortController();
+				// Ctrl-C at the question leaves as it does anywhere else: the sync is not applied.
+				lines.once('SIGINT', () => {
+					cancel.abort();
+				});
+				try {
+					return await lines.question(question, { signal: cancel.signal });
+				} catch (error) {
+					// The question was cancelled: said as it is, so that it ends as any other cancel.
+					process.stderr.write('\n');
+					throw error;
+				} finally {
+					lines.close();
+				}
+			},
+		},
+	);
+}
+
+/**
  * Parses the command line and runs the command.
  * @param argv - Arguments without the node binary and script
  * @returns The process exit code
@@ -106,6 +164,7 @@ async function main(argv: readonly string[]): Promise<number> {
 			open: { type: 'boolean', default: false },
 			'no-open': { type: 'boolean', default: false },
 			all: { type: 'boolean', default: false },
+			yes: { type: 'boolean', short: 'y', default: false },
 			help: { type: 'boolean', short: 'h', default: false },
 		},
 	});
@@ -181,6 +240,9 @@ async function main(argv: readonly string[]): Promise<number> {
 			});
 			// The server keeps the process alive, as `server` does.
 			return 0;
+		}
+		case 'sync': {
+			return await runSyncCommand(rest, values);
 		}
 		case 'ui-settings': {
 			console.log(

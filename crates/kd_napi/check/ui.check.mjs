@@ -513,13 +513,22 @@ test('the editor tells the port and the directories of the config', () => {
 	const site = makeSite();
 	const handle = native().uiOpen(site.config, '{}');
 	try {
+		// Behavior change: uiServer also tells syncFunctions (none here)
 		assert.deepEqual(JSON.parse(native().uiServer(handle)), {
 			port: 3000,
 			open: false,
 			inputDir: path.join(site.root, 'src'),
 			outputDir: path.join(site.root, 'out'),
 			overrides: path.join(site.root, 'pages.overrides.json'),
+			syncFunctions: [],
 		});
+		// assert.deepEqual(JSON.parse(native().uiServer(handle)), { // previous
+		// 	port: 3000, // previous
+		// 	open: false, // previous
+		// 	inputDir: path.join(site.root, 'src'), // previous
+		// 	outputDir: path.join(site.root, 'out'), // previous
+		// 	overrides: path.join(site.root, 'pages.overrides.json'), // previous
+		// }); // previous
 	} finally {
 		native().uiClose(handle);
 	}
@@ -1464,4 +1473,72 @@ test('a batch tells every edit that cannot be made, refuses a request that is no
 		rmSync(site.root, { recursive: true, force: true });
 	}
 	assert.throws(() => native().uiEditBatch(handle, '{"edits":[]}'), /no editor/);
+});
+
+test('ui.syncFunctions of the config reaches the command with the scripts made absolute, and a sync starts from every page with the hashes of its files', () => {
+	const site = makeSite();
+	writeFileSync(
+		site.config,
+		JSON.stringify({
+			dir: { input: 'src', output: 'out' },
+			build: { cacheDir: '.cache' },
+			pages: { overrides: 'pages.overrides.json' },
+			ui: {
+				syncFunctions: [
+					{
+						name: 'import',
+						label: { ja: '取り込む', en: 'Import' },
+						script: './scripts/import.mjs',
+					},
+				],
+			},
+		}),
+	);
+	const handle = native().uiOpen(site.config, '{}');
+	try {
+		const settings = JSON.parse(native().uiServer(handle));
+		assert.deepEqual(settings.syncFunctions, [
+			{
+				name: 'import',
+				label: { ja: '取り込む', en: 'Import' },
+				script: path.join(site.root, 'scripts', 'import.mjs'),
+			},
+		]);
+
+		const sync = JSON.parse(native().uiSyncPages(handle));
+		const rows = JSON.parse(native().uiPages(handle, query));
+		assert.equal(sync.version, rows.version);
+		assert.equal(sync.overridesHash, rows.overridesHash);
+		assert.equal(sync.inputDir, path.join(site.root, 'src'));
+		assert.equal(sync.overridesFile, path.join(site.root, 'pages.overrides.json'));
+		assert.equal(sync.outputPathField, null);
+		// every page, in the order of the plan, with the entry of `kamado pages` and the
+		// hashes the rows give
+		assert.deepEqual(
+			sync.pages.map((page) => page.url),
+			rows.pages.map((row) => row.url),
+		);
+		for (const [i, page] of sync.pages.entries()) {
+			assert.deepEqual(page.hashes, rows.pages[i].hashes);
+			for (const key of ['fileSlug', 'filePathStem', 'extension', 'depth', 'parent']) {
+				assert.ok(key in page, `${key} of ${page.url}`);
+			}
+		}
+		assert.equal(sync.pages.find((page) => page.url === '/ext/').virtual, true);
+		// the keys that cannot be edited are asked for apart, for the pages named
+		assert.ok(sync.pages.every((page) => !('locked' in page)));
+		const locked = JSON.parse(
+			native().uiSyncLocked(handle, JSON.stringify({ urls: ['/', '/nope/'] })),
+		);
+		assert.equal(locked.version, sync.version);
+		assert.deepEqual(locked.locked, { '/': {} });
+	} finally {
+		native().uiClose(handle);
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});
+
+test('a request for a sync of a handle that is not open throws', () => {
+	assert.throws(() => native().uiSyncPages('0'), /no editor/);
+	assert.throws(() => native().uiSyncPages(), /expected \(handle\) string/);
 });

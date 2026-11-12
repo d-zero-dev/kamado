@@ -34,7 +34,7 @@ pub fn pages(loaded: &Loaded, options: &BuildOptions) -> Result<String, String> 
 	Ok(map_json(&plan))
 }
 
-fn map_json(plan: &Plan) -> String {
+pub(crate) fn map_json(plan: &Plan) -> String {
 	Value::Object(vec![
 		("version".to_owned(), Value::Number(1.0)),
 		(
@@ -57,7 +57,7 @@ fn map_json(plan: &Plan) -> String {
 /// One page of the list. A virtual page has no input file, so no input path and no extension:
 /// the plan derives them from the URL, and a path that does not exist must not be taken for
 /// one that does. Its output path stays, the place where the page would be written (and is not).
-fn entry_json(page: &Page) -> Value {
+pub(crate) fn entry_json(page: &Page) -> Value {
 	let f = &page.file;
 	let (depth, parent) = kd_site::url_depth_and_parent(&f.url);
 	let real = |text: &str| {

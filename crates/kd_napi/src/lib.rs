@@ -691,6 +691,32 @@ unsafe fn ui_refresh(env: napi_env, info: napi_callback_info) -> napi_value {
 	}
 }
 
+/// `uiSyncPages(handle)` -> the JSON of every page, for a sync.
+unsafe fn ui_sync_pages(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<1>(
+			env,
+			info,
+			c"uiSyncPages: expected (handle) string",
+			|[handle]| ui::sync_pages(&handle).map_err(Thrown::from),
+		)
+	}
+}
+
+/// `uiSyncLocked(handle, queryJson)` -> the JSON of the keys that cannot be edited, for some pages.
+unsafe fn ui_sync_locked(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<2>(
+			env,
+			info,
+			c"uiSyncLocked: expected (handle, queryJson) strings",
+			|[handle, query]| ui::sync_locked(&handle, &query).map_err(Thrown::from),
+		)
+	}
+}
+
 /// `uiEdit(handle, editJson)` -> the JSON result of the edit.
 unsafe fn ui_edit(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
@@ -743,7 +769,7 @@ unsafe fn ui_diff(env: napi_env, info: napi_callback_info) -> napi_value {
 	}
 }
 
-/// `uiServer(handle)` -> `{ "port", "open", "inputDir", "outputDir", "overrides" }`.
+/// `uiServer(handle)` -> `{ "port", "open", "inputDir", "outputDir", "overrides", "syncFunctions" }`.
 unsafe fn ui_server(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
 	unsafe {
@@ -975,6 +1001,8 @@ unsafe fn register(env: napi_env, exports: napi_value) -> napi_value {
 		export_guarded!(api, env, exports, c"uiRefresh", ui_refresh);
 		export_guarded!(api, env, exports, c"uiEdit", ui_edit);
 		export_guarded!(api, env, exports, c"uiEditBatch", ui_edit_batch);
+		export_guarded!(api, env, exports, c"uiSyncPages", ui_sync_pages);
+		export_guarded!(api, env, exports, c"uiSyncLocked", ui_sync_locked);
 		export_guarded!(api, env, exports, c"uiDiffFiles", ui_diff_files);
 		export_guarded!(api, env, exports, c"uiDiff", ui_diff);
 		export_guarded!(api, env, exports, c"uiServer", ui_server);

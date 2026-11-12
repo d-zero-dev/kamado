@@ -200,3 +200,109 @@ export interface Diffs {
 	/** The keys HEAD holds that no page has now (the screen has no column for them). */
 	readonly columns: readonly string[];
 }
+
+/** An operation of `ui.syncFunctions`, as `GET /api/sync` lists it (RFC §14.2, "同期"). */
+export interface SyncFunction {
+	readonly name: string;
+	/** As written in the config: a text, or a text per language. */
+	readonly label: string | Readonly<Record<string, string>> | null;
+}
+
+/** How a sync stands. */
+export type SyncStatus =
+	| 'running'
+	| 'failed'
+	| 'cancelled'
+	| 'nothing'
+	| 'nochange'
+	| 'invalid'
+	| 'review'
+	| 'applied'
+	| 'conflict'
+	| 'refused';
+
+/** The kinds of change a sync lists. */
+export type SyncKind =
+	| 'deleted'
+	| 'movedUrl'
+	| 'movedFile'
+	| 'virtualized'
+	| 'materialized'
+	| 'added'
+	| 'meta';
+
+/** A line of the log of a script. */
+export interface SyncLogLine {
+	readonly type: 'info' | 'warn' | 'error';
+	readonly message: string;
+}
+
+/** What `GET /api/sync/state` answers. */
+export interface SyncState {
+	readonly id: string;
+	readonly name: string;
+	readonly status: SyncStatus;
+	readonly log: readonly SyncLogLine[];
+	/** The place of the next line of the log: ask for the log `after` this. */
+	readonly next: number;
+	/** How many lines were dropped from the start of the log. */
+	readonly dropped: number;
+	readonly failure?: { readonly message: string; readonly stack: string | null };
+	readonly problems?: { readonly total: number; readonly listed: readonly string[] };
+	readonly summary?: {
+		readonly counts: Readonly<Record<SyncKind, number>>;
+		readonly total: number;
+		readonly unsaved: { readonly total: number; readonly listed: readonly string[] };
+		readonly gitUnavailable: boolean;
+	};
+	readonly applied?: { readonly count: number };
+	readonly refused?: {
+		readonly code: string;
+		readonly message: string;
+		readonly failures: {
+			readonly total: number;
+			readonly listed: readonly {
+				readonly url: string | null;
+				readonly op: string | null;
+				readonly message: string;
+			}[];
+		};
+	};
+}
+
+/** One change of a sync, as it is shown: texts, with the values as short previews. */
+export type SyncChange =
+	| {
+			readonly kind: 'added';
+			readonly url: string;
+			readonly virtual: boolean;
+			readonly inputPath: string | null;
+			readonly keys: number;
+	  }
+	| { readonly kind: 'deleted'; readonly url: string; readonly inputPath: string | null }
+	| { readonly kind: 'movedUrl'; readonly from: string; readonly to: string }
+	| {
+			readonly kind: 'movedFile';
+			readonly url: string;
+			readonly from: string | null;
+			readonly to: string;
+	  }
+	| { readonly kind: 'virtualized'; readonly url: string; readonly inputPath: string }
+	| {
+			readonly kind: 'materialized';
+			readonly url: string;
+			readonly inputPath: string | null;
+	  }
+	| {
+			readonly kind: 'meta';
+			readonly url: string;
+			readonly key: string;
+			readonly before?: string;
+			readonly after?: string;
+	  };
+
+/** What `GET /api/sync/changes` answers: a page of the changes of one kind. */
+export interface SyncChanges {
+	readonly total: number;
+	readonly changes: readonly SyncChange[];
+}

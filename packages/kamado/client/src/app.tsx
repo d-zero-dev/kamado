@@ -13,6 +13,7 @@ import type {
 	Rows,
 	SettingsPatch,
 	SettingsView,
+	SyncFunction,
 } from './types.js';
 
 import {
@@ -33,6 +34,7 @@ import {
 	fetchDiff,
 	fetchGit,
 	fetchRows,
+	fetchSyncFunctions,
 	refreshSite,
 	removePage,
 	revertCell,
@@ -117,10 +119,12 @@ import {
 	sortAfterFailure,
 	type SortState,
 } from './logic/sort.js';
+import { operationLabel } from './logic/sync.js';
 import { FIELD_KINDS, defaultOf, draftOf, parseDraft } from './logic/value.js';
 import { OptionsDialog } from './options-dialog.js';
 import { PageDialog } from './page-dialog.js';
 import { RevertDialog } from './revert-dialog.js';
+import { SyncDialog, type SyncEnd } from './sync-dialog.js';
 
 /**
  * Rows put in the page at a time: the first paint is not held up by the rest. 500 rows drew
@@ -286,6 +290,18 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	// Where the focus goes back to when the menu is closed by a key: the header button it was
 	// opened from, or the grid.
 	const menuRestore = useRef<HTMLElement | null>(null);
+	// The operations of `ui.syncFunctions` (none: there is no sync button), the menu of them, and the
+	// sync that is being run (a new request runs the operation again).
+	const [syncFunctions, setSyncFunctions] = useState<readonly SyncFunction[]>([]);
+	const [syncMenu, setSyncMenu] = useState<{
+		readonly left: number;
+		readonly bottom: number;
+	} | null>(null);
+	const [syncRequest, setSyncRequest] = useState<{
+		readonly operation: SyncFunction;
+		readonly nonce: number;
+	} | null>(null);
+	const syncButton = useRef<HTMLButtonElement>(null);
 	const [dragging, setDragging] = useState<string | null>(null);
 	const [dropOn, setDropOn] = useState<string | null>(null);
 	const resize = useRef<{
@@ -400,6 +416,62 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	const reloadWhenIdle = useCallback(() => {
 		void queue.current.idle().then(() => reload(true));
 	}, [reload]);
+
+	// The operations of the sync are told once: they come from the config, which is read when
+	// `kamado ui` starts. A server that does not answer leaves the screen without the button.
+	useEffect(() => {
+		const controller = new AbortController();
+		fetchSyncFunctions(controller.signal).then(
+			(functions) => {
+				if (!controller.signal.aborted) {
+					setSyncFunctions(functions);
+				}
+			},
+			(error: unknown) => {
+				if (!controller.signal.aborted) {
+					// No button, and no hint why, would leave a person with a config that has operations
+					// wondering where they are.
+					setProblem(
+						tRef.current('sync.lostContact', {
+							message: error instanceof Error ? error.message : String(error),
+						}),
+					);
+				}
+			},
+		);
+		return () => controller.abort();
+	}, []);
+
+	/**
+	 * Says how a sync ended, and reads the list from the files again: the script may have touched
+	 * them, and what was applied has changed them.
+	 * @param end - How the dialog of the sync was left
+	 */
+	const syncEnded = (end: SyncEnd) => {
+		setSyncRequest(null);
+		switch (end.kind) {
+			case 'applied': {
+				setStatus(t('sync.applied', { name: end.name, count: end.count }));
+				break;
+			}
+			case 'failed': {
+				setStatus(t('sync.failedStatus', { name: end.name, message: end.message }));
+				break;
+			}
+			case 'cancelled': {
+				setStatus(t('sync.cancelled', { name: end.name }));
+				break;
+			}
+			case 'notStarted': {
+				setStatus(t('sync.notStarted', { name: end.name, message: end.message }));
+				return;
+			}
+			case 'closed': {
+				break;
+			}
+		}
+		reloadWhenIdle();
+	};
 
 	// The search waits for the typing to stop.
 	useEffect(() => {
@@ -1683,6 +1755,25 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				<button type="button" onClick={reloadWhenIdle} disabled={loading}>
 					{t('app.readAgain')}
 				</button>
+				{syncFunctions.length > 0 && (
+					<button
+						ref={syncButton}
+						type="button"
+						className="sync-button"
+						aria-haspopup="menu"
+						aria-expanded={syncMenu !== null}
+						disabled={loading}
+						onClick={(event) => {
+							if (syncMenu !== null) {
+								setSyncMenu(null);
+								return;
+							}
+							const rect = event.currentTarget.getBoundingClientRect();
+							setSyncMenu({ left: rect.left, bottom: rect.bottom });
+						}}>
+						{t('sync.button')} ▾
+					</button>
+				)}
 				<label>
 					{t('app.language')}
 					<select
@@ -1900,6 +1991,37 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					onClose={closeMenu}
 				/>
 			)}
+			{syncMenu !== null && (
+				<ColumnMenu
+					label={t('sync.menu')}
+					anchor={syncMenu}
+					items={syncFunctions.map((operation) => ({
+						id: operation.name,
+						label: operationLabel(operation, language),
+					}))}
+					onChoose={(name) => {
+						setSyncMenu(null);
+						const operation = syncFunctions.find((candidate) => candidate.name === name);
+						if (operation !== undefined) {
+							// The edits that are being saved are made first: the pages the script is
+							// given are the ones on disk.
+							void queue.current.idle().then(() => {
+								setSyncRequest((before) => ({
+									operation,
+									nonce: (before?.nonce ?? 0) + 1,
+								}));
+							});
+						}
+					}}
+					onClose={(restoreFocus) => {
+						setSyncMenu(null);
+						if (restoreFocus) {
+							syncButton.current?.focus();
+						}
+					}}
+				/>
+			)}
+			<SyncDialog request={syncRequest} onEnd={syncEnded} />
 			{optionsFor !== null && (
 				<OptionsDialog
 					key={optionsFor}
