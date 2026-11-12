@@ -118,6 +118,12 @@ jobs:
       - name: Sync the pages with a script through the addon
         run: node --test crates/kd_napi/check/sync.check.mjs
 
+      # The range of a sync (select) and an export (write): an import changes only what select
+      # names, an export writes nothing before it is confirmed and nothing when a file changed
+      # meanwhile, and it never changes the files of the site.
+      - name: Import with a range and export through the addon
+        run: node --test crates/kd_napi/check/sync-select.check.mjs
+
       # A relative cache directory is relative to the config file for the API and to the
       # directory the command was typed in for --cache-dir (RFC §13).
       - name: Resolve a relative cache directory
