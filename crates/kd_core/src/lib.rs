@@ -272,7 +272,7 @@ fn compile_globs(globs: &[String]) -> Result<Vec<kd_glob::Pattern>, String> {
 }
 
 /// What reading one page's files gave.
-struct Read {
+pub(crate) struct Read {
 	kind: PageKind,
 	in_file: Meta,
 	body: Option<String>,
@@ -286,7 +286,7 @@ struct Read {
 /// knows, whose files have the size and modification time it recorded, is not
 /// read: what the cache holds stands for it, and its body is read later if it
 /// is needed (`body_pending`).
-fn read_files(
+pub(crate) fn read_files(
 	input_path: &str,
 	cached: Option<&plan_cache::CachedPage>,
 ) -> Result<(Read, bool), String> {
@@ -337,6 +337,85 @@ fn same_stat(path: &str, dep: &kd_build::Dep) -> bool {
 				&& (size, sec, nsec) == (dep.size, dep.mtime_sec, dep.mtime_nsec)
 		}
 	}
+}
+
+/// A page file as the plan has it before the overrides are applied.
+pub(crate) struct Assembled {
+	pub page: Page,
+	/// What the conflict policy is given of the page.
+	pub candidate: Candidate,
+	/// What the plan cache keeps of the page, when it was asked for.
+	pub cached: Option<plan_cache::CachedPage>,
+}
+
+/// Makes the page of the page file at `input_path` from what reading it gave: its output
+/// location, its metadata (the file's and its sidecar's), and the output path a key of the
+/// metadata gives it (`pages.outputPathField`). `hit` is whether the plan cache stood for the
+/// page, so that its body is pending; `want_cached` is whether the cache entry is needed.
+///
+/// Why one function for the plan and for the editor: the editor, after an edit of a few pages
+/// of a big site, makes the pages that changed with the rules the plan makes all of them with,
+/// and a second copy of the rules would be one more place for the two to differ.
+///
+/// # Errors
+///
+/// A message for a path a key gives that is not an output path.
+pub(crate) fn assemble_page(
+	config: &Config,
+	dirs: &Dirs<'_>,
+	input_path: &str,
+	read: Read,
+	hit: bool,
+	want_cached: bool,
+) -> Result<Assembled, String> {
+	// A page of the cache has its metadata but not its body.
+	let body_pending = hit && read.kind == PageKind::Html;
+	let Read {
+		kind,
+		in_file,
+		body,
+		input_dep,
+		side,
+		sidecar,
+		sidecar_dep,
+	} = read;
+	let cached = want_cached.then(|| plan_cache::CachedPage {
+		kind,
+		in_file: in_file.clone(),
+		input_dep: input_dep.clone(),
+		side: side.clone(),
+		sidecar: sidecar.clone(),
+		sidecar_dep: sidecar_dep.clone(),
+	});
+	let mut file = kd_site::page_file(input_path, dirs);
+	let deps = BTreeMap::from([(input_path.to_string(), input_dep), (sidecar, sidecar_dep)]);
+	let meta = kd_site::meta::merge(&[&in_file, &side]);
+	let mut from_override = false;
+	if let Some(field) = &config.pages.output_path_field
+		&& let Some(Value::String(p)) = meta.iter().find(|(k, _)| k == field).map(|(_, v)| v)
+		&& !p.is_empty()
+	{
+		file = kd_site::apply_meta_path_override(&file, p, dirs)
+			.map_err(|e| format!("{input_path}: invalid {field:?}: {e}"))?;
+		from_override = true;
+	}
+	Ok(Assembled {
+		page: Page {
+			file: file.clone(),
+			kind,
+			meta,
+			body,
+			body_pending,
+			deps,
+			is_virtual: false,
+			lastmod: None,
+		},
+		candidate: Candidate {
+			file,
+			from_override,
+		},
+		cached,
+	})
 }
 
 /// Discovers pages, resolves their metadata and output locations, applies
@@ -464,60 +543,13 @@ pub(crate) fn plan_with_overrides(
 		if !hit {
 			misses += 1;
 		}
-		// A page of the cache has its metadata but not its body.
-		let body_pending = hit && read.kind == PageKind::Html;
-		let Read {
-			kind,
-			in_file,
-			body,
-			input_dep,
-			side,
-			sidecar,
-			sidecar_dep,
-		} = read;
 		// What is learned is only needed when it differs from the cache.
-		if !all_hit {
-			learned.pages.insert(
-				input_path.clone(),
-				plan_cache::CachedPage {
-					kind,
-					in_file: in_file.clone(),
-					input_dep: input_dep.clone(),
-					side: side.clone(),
-					sidecar: sidecar.clone(),
-					sidecar_dep: sidecar_dep.clone(),
-				},
-			);
+		let assembled = assemble_page(config, &dirs, &input_path, read, hit, !all_hit)?;
+		if let Some(cached) = assembled.cached {
+			learned.pages.insert(input_path.clone(), cached);
 		}
-		let mut file = kd_site::page_file(&input_path, &dirs);
-		let deps = BTreeMap::from([(input_path.clone(), input_dep), (sidecar, sidecar_dep)]);
-		let meta = kd_site::meta::merge(&[&in_file, &side]);
-		let mut from_override = false;
-		if let Some(field) = &config.pages.output_path_field
-			&& let Some(Value::String(p)) = meta.iter().find(|(k, _)| k == field).map(|(_, v)| v)
-			&& !p.is_empty()
-		{
-			file = kd_site::apply_meta_path_override(&file, p, &dirs)
-				.map_err(|e| format!("{input_path}: invalid {field:?}: {e}"))?;
-			from_override = true;
-		}
-		pages_by_input.insert(
-			file.input_path.clone(),
-			Page {
-				file: file.clone(),
-				kind,
-				meta,
-				body,
-				body_pending,
-				deps,
-				is_virtual: false,
-				lastmod: None,
-			},
-		);
-		candidates.push(Candidate {
-			file,
-			from_override,
-		});
+		pages_by_input.insert(assembled.candidate.file.input_path.clone(), assembled.page);
+		candidates.push(assembled.candidate);
 	}
 	if std::env::var_os("KD_TIMING").is_some() {
 		eprintln!(

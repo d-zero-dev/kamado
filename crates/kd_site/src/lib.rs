@@ -542,6 +542,23 @@ pub fn discover_all(input_dir: &str, searches: &[Search<'_>]) -> std::io::Result
 	Ok(out)
 }
 
+/// Whether the file at `rel` (relative to the directory searched) is one a search finds: a
+/// `files` pattern matches it and no `ignore` pattern does. The rule of the walk, for whoever
+/// follows the changes of the files without walking again.
+///
+/// # Example
+///
+/// ```
+/// let files = [kd_glob::Pattern::new("**/*.html").unwrap()];
+/// let ignore = [kd_glob::Pattern::new("_includes/**").unwrap()];
+/// assert!(kd_site::matches_search(&files, &ignore, "a/index.html"));
+/// assert!(!kd_site::matches_search(&files, &ignore, "_includes/head.html"));
+/// ```
+#[must_use]
+pub fn matches_search(files: &[kd_glob::Pattern], ignore: &[kd_glob::Pattern], rel: &str) -> bool {
+	files.iter().any(|p| p.matches(rel)) && !ignore.iter().any(|p| p.matches(rel))
+}
+
 fn walk(
 	dir: &std::path::Path,
 	rel_prefix: &str,
@@ -610,9 +627,7 @@ fn walk(
 			walk(&entry.path(), &rel, searches, out, visited, links)?;
 		} else if is_file {
 			for (search, list) in searches.iter().zip(out.iter_mut()) {
-				if search.files.iter().any(|p| p.matches(&rel))
-					&& !search.ignore.iter().any(|p| p.matches(&rel))
-				{
+				if matches_search(search.files, search.ignore, &rel) {
 					list.push(rel.clone());
 				}
 			}
