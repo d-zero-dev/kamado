@@ -2,9 +2,10 @@
 	"lerna": "10.0.0",
 	"version": "3.0.0-alpha.6",
 	"npmClient": "yarn",
-	"packages": ["packages/*"],
+	"packages": ["packages/*", "packages/@kamado-io/*"],
 	"command": {
 		"version": {
+			"forcePublish": true,
 			"message": "chore(release): publish %s"
 		}
 	}
