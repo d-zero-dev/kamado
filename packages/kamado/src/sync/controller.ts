@@ -12,9 +12,15 @@
 
 import type { Problem } from './diff.js';
 import type { Run, ScriptLog } from './runner.js';
-import type { ApplyFailure, Prepared, SyncEditor } from './session.js';
-import type { SyncFunctionConfig } from './sync.js';
-import type { Label, SyncChange, SyncChangeKind, SyncSummary } from './types.js';
+import type { ApplyFailure, Prepared, SyncEditor, WriteResult } from './session.js';
+import type { SyncFunctionConfig, SyncPhase } from './sync.js';
+import type {
+	Label,
+	SyncChange,
+	SyncChangeKind,
+	SyncDirection,
+	SyncSummary,
+} from './types.js';
 
 import { randomUUID } from 'node:crypto';
 
@@ -49,14 +55,14 @@ export type SyncStatus =
 	/** The script failed (or the pages could not be listed). */
 	| 'failed'
 	| 'cancelled'
-	/** The script returned nothing. */
-	| 'nothing'
-	/** What the script returned is what the site is. */
+	/** The data is what the site is. */
 	| 'nochange'
 	/** What the script returned cannot be applied. */
 	| 'invalid'
 	/** There are changes to confirm. */
 	| 'review'
+	/** The script of an export is writing: what is outside may be half written until it ends. */
+	| 'writing'
 	| 'applied'
 	/** A file changed since the script was given the pages: nothing was applied. */
 	| 'conflict'
@@ -75,6 +81,20 @@ export interface SyncState {
 	/** How many lines were dropped from the start of the log because it was too long. */
 	readonly dropped: number;
 	readonly failure?: { readonly message: string; readonly stack: string | null };
+	/**
+	 * Which way the sync goes, once the script has said (the shape of the script decides it):
+	 * absent while it runs or when it failed first.
+	 */
+	readonly direction?: SyncDirection;
+	/** For an export: `false` when the script has no `read`, so nothing was compared. */
+	readonly diffed?: boolean;
+	/** For an export: how many pages the script would write out. */
+	readonly targets?: number;
+	/**
+	 * Where the script failed or was stopped, when it matters: `write` means that what is outside
+	 * may be half written. Set for `failed` (`read` or `write`) and for `cancelled` (only `write`).
+	 */
+	readonly phase?: SyncPhase;
 	readonly problems?: { readonly total: number; readonly listed: readonly string[] };
 	readonly summary?: {
 		readonly counts: SyncSummary['counts'];
@@ -114,6 +134,10 @@ interface Job {
 	log: ScriptLog[];
 	run?: Run;
 	failure?: { message: string; stack: string | null };
+	direction?: SyncDirection;
+	diffed?: boolean;
+	targets?: number;
+	phase?: SyncPhase;
 	problems?: readonly Problem[];
 	summary?: SyncSummary;
 	/** The changes of the summary by their kind, made when the screen first asks for a list. */
@@ -164,9 +188,13 @@ export interface SyncController {
 	) => { readonly total: number; readonly changes: readonly DisplayChange[] } | null;
 	/** Applies what was shown for the sync `id`, when it is waiting for the confirmation. */
 	readonly apply: (id: string) => ApplyAnswer;
-	/** Stops the sync `id` while its script runs; `false` when there is nothing to stop. */
+	/**
+	 * Stops the sync `id`: while its script runs, while an export writes (what is outside may be half
+	 * written: the state says so), or while the changes wait for the confirmation (they are dropped,
+	 * and the script that waits is stopped). `false` when there is nothing to stop.
+	 */
 	readonly cancel: (id: string) => boolean;
-	/** Stops what runs: the screen is going away. */
+	/** Stops what runs and drops what waits for a confirmation: the screen is going away. */
 	readonly close: () => void;
 }
 
@@ -220,14 +248,11 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
 			case 'failed': {
 				target.status = 'failed';
 				target.failure = { message: prepared.message, stack: prepared.stack };
+				target.phase = 'read';
 				break;
 			}
 			case 'cancelled': {
 				target.status = 'cancelled';
-				break;
-			}
-			case 'nothing': {
-				target.status = 'nothing';
 				break;
 			}
 			case 'invalid': {
@@ -237,28 +262,93 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
 			}
 			case 'nochange': {
 				target.status = 'nochange';
+				target.direction = prepared.direction;
 				target.summary = prepared.summary;
 				break;
 			}
 			case 'review': {
 				target.status = 'review';
+				target.direction = prepared.direction;
 				target.summary = prepared.summary;
 				target.prepared = prepared;
+				if (prepared.direction === 'export') {
+					target.diffed = prepared.diffed;
+					target.targets = prepared.targets;
+				}
 				break;
 			}
 		}
+	};
+
+	/**
+	 * Ends the write of an export: the script wrote, or it did not.
+	 * @param target - The job
+	 * @param result - How the write ended
+	 */
+	const settleWrite = (target: Job, result: WriteResult): void => {
+		if (target.status !== 'writing') {
+			return;
+		}
+		switch (result.kind) {
+			case 'written': {
+				target.status = 'applied';
+				target.applied = { count: result.count };
+				break;
+			}
+			case 'conflict': {
+				target.status = 'conflict';
+				target.refused = { code: 'conflict', message: result.message, failures: [] };
+				break;
+			}
+			case 'failed': {
+				target.status = 'failed';
+				target.failure = { message: result.message, stack: result.stack };
+				target.phase = 'write';
+				break;
+			}
+			case 'notWritten': {
+				// Nothing was written: the script was gone before it was asked to, or the pages could
+				// not be listed again.
+				target.status = 'failed';
+				target.failure = { message: result.message, stack: result.stack };
+				target.phase = 'read';
+				break;
+			}
+			case 'cancelled': {
+				target.status = 'cancelled';
+				target.phase = 'write';
+				break;
+			}
+		}
+	};
+
+	/**
+	 * Lets go of what a sync that is not going to be applied still holds: the script of an
+	 * export waits in its process for a confirmation, and is stopped.
+	 * @param target - The job
+	 */
+	const discard = (target: Job): void => {
+		if (target.prepared?.direction === 'export') {
+			target.prepared.discard();
+		}
+		target.prepared = undefined;
 	};
 
 	return {
 		functions: () => options.functions.map((f) => ({ name: f.name, label: f.label })),
 
 		run(name) {
-			if (job?.status === 'running') {
+			if (job?.status === 'running' || job?.status === 'writing') {
 				return { ok: false, error: 'busy' };
 			}
 			const operation = options.functions.find((f) => f.name === name);
 			if (operation === undefined) {
 				return { ok: false, error: 'unknown' };
+			}
+			// A confirmation that was left (the tab was closed) is not applied by a later sync: the
+			// script that waits for it is stopped.
+			if (job?.status === 'review') {
+				discard(job);
 			}
 			const target: Job = {
 				id: randomUUID(),
@@ -278,6 +368,16 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
 				onLog: (log) => push(target, log),
 				onRun: (run) => {
 					target.run = run;
+				},
+				onGone: ({ message, stack }) => {
+					// The script of an export died while its confirmation was shown: it can no longer
+					// be applied, so the state says so (and why) to whoever asks for it next.
+					if (target.status === 'review' && target.prepared?.direction === 'export') {
+						target.prepared = undefined;
+						target.status = 'failed';
+						target.failure = { message, stack };
+						target.phase = 'read';
+					}
 				},
 			}).then(
 				(prepared) => settle(target, prepared),
@@ -309,6 +409,18 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
 				next: current.first + current.log.length,
 				dropped: current.first,
 			};
+			if (current.direction !== undefined) {
+				state.direction = current.direction;
+			}
+			if (current.diffed !== undefined) {
+				state.diffed = current.diffed;
+			}
+			if (current.targets !== undefined) {
+				state.targets = current.targets;
+			}
+			if (current.phase !== undefined) {
+				state.phase = current.phase;
+			}
 			if (current.failure !== undefined) {
 				const shown = displayFailure({
 					message: options.scrub(current.failure.message),
@@ -405,6 +517,22 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
 			}
 			// What was shown is applied once: a second request finds nothing to apply.
 			job.prepared = undefined;
+			if (prepared.direction === 'export') {
+				// The script writes in its own process, and the screen follows by asking for the state.
+				const target = job;
+				target.status = 'writing';
+				prepared.write().then(
+					(written) => settleWrite(target, written),
+					(error: unknown) => {
+						settleWrite(target, {
+							kind: 'failed',
+							message: error instanceof Error ? error.message : String(error),
+							stack: null,
+						});
+					},
+				);
+				return { ok: true };
+			}
 			const result = prepared.apply();
 			if (result.ok) {
 				job.status = 'applied';
@@ -421,16 +549,28 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
 		},
 
 		cancel(id) {
-			if (job?.id !== id || job.status !== 'running') {
+			if (job?.id !== id) {
 				return false;
 			}
-			job.run?.cancel();
-			return true;
+			if (job.status === 'running' || job.status === 'writing') {
+				// While the script runs, or an export writes (what is outside may be half written).
+				job.run?.cancel();
+				return true;
+			}
+			if (job.status === 'review') {
+				// The confirmation is dropped: nothing is applied, and the script that waits is stopped.
+				discard(job);
+				job.status = 'cancelled';
+				return true;
+			}
+			return false;
 		},
 
 		close() {
-			if (job?.status === 'running') {
+			if (job?.status === 'running' || job?.status === 'writing') {
 				job.run?.cancel();
+			} else if (job?.status === 'review') {
+				discard(job);
 			}
 		},
 	};

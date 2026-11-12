@@ -152,7 +152,7 @@ export type DiffResult =
 const NO_LOCKS: Readonly<Record<string, string>> = {};
 
 /** A row of the result that was read and found well formed. */
-interface Row {
+export interface Row {
 	readonly index: number;
 	readonly url: string;
 	/** Relative to `dir.input`; `undefined` when the row does not say, `null` when it says there is none. */
@@ -210,7 +210,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * @param inputDir - The absolute `dir.input`
  * @param absolute - The absolute path of a file in it
  */
-function relativeTo(inputDir: string, absolute: string): string {
+export function relativeTo(inputDir: string, absolute: string): string {
 	return path.relative(inputDir, absolute).split(path.sep).join('/');
 }
 
@@ -252,42 +252,33 @@ function sidecarOf(input: string): string {
 }
 
 /**
- * Finds what the result changes in the site.
- * @param snapshot - The pages the site has (`uiSyncPages`), as of the moment the script was given them
- * @param rows - What the script returned: an array of pages (`SyncResult`)
- * @returns The edits of one batch and the summary, or every problem of the result (and no edits)
+ * Reads the rows of a list as what each says, if it is well formed. A row with a problem is told
+ * and left out of the result, so that one mistake does not hide the others and does not make
+ * more. It is the check of what a script returns, and the same check is made of what `select`
+ * and `read` return.
+ * @param rows - What the script returned: an array of pages
+ * @param inputDir - The absolute `dir.input`
+ * @param name - What a row is called in a problem (`row` or `select row`)
+ * @returns The rows that are well formed, and every problem of the others
  * @example
  * ```ts
- * const result = diff(snapshot, [{ url: '/about/', inputPath: 'about/index.html' }]);
- * if (result.ok) {
- * 	console.log(result.edits.length, result.summary.counts);
- * }
+ * const { read, problems } = readRows([{ url: '/a/' }, { url: 'b' }], '/site/src');
+ * // read.length === 1, problems[0].message === 'row 2 (b): url must be a string that starts with /'
  * ```
  */
-export function diff(snapshot: Snapshot, rows: readonly unknown[]): DiffResult {
+export function readRows(
+	rows: readonly unknown[],
+	inputDir: string,
+	name = 'row',
+): { read: Row[]; problems: Problem[] } {
 	const problems: Problem[] = [];
-	const { inputDir, outputPathField } = snapshot;
-	// The pages whose locked keys the difference needed and was not told: asked for, and the
-	// difference made again (see `needsLocked`). Until it is told, nothing is locked.
-	const needsLocked = new Set<string>();
-	const lockedOf = (page: SnapshotPage): Readonly<Record<string, string>> => {
-		if (page.locked === undefined) {
-			needsLocked.add(page.url);
-			return NO_LOCKS;
-		}
-		return page.locked;
-	};
-	const problem = (row: Row | number, url: string | null, message: string) => {
-		const index = typeof row === 'number' ? row : row.index;
+	const problem = (index: number, url: string | null, message: string) => {
 		problems.push({
 			row: index,
 			url,
-			message: `row ${index}${url === null ? '' : ` (${url})`}: ${message}`,
+			message: `${name} ${index}${url === null ? '' : ` (${url})`}: ${message}`,
 		});
 	};
-
-	// 1. What each row says, if it is well formed. A row with a problem is told and left out of
-	// the rest, so that one mistake does not hide the others and does not make more.
 	const read: Row[] = [];
 	const urls = new Map<string, number>();
 	const inputPaths = new Map<string, number>();
@@ -363,37 +354,131 @@ export function diff(snapshot: Snapshot, rows: readonly unknown[]): DiffResult {
 			read.push({ index, url, inputPath, virtual, meta });
 		}
 	}
+	return { read, problems };
+}
 
-	// 2. Which page each row is.
-	const byInput = new Map<string, SnapshotPage>();
-	const byUrl = new Map<string, SnapshotPage>();
-	for (const page of snapshot.pages) {
-		byUrl.set(page.url, page);
-		if (!page.virtual && page.inputPath !== null) {
-			byInput.set(relativeTo(inputDir, page.inputPath), page);
+/**
+ * Finds which page of the site each row is: the page with the same `inputPath`, else the one with
+ * the same `url` that no row took already. Never a guess from the likeness of two pages.
+ * @param snapshot - The pages the site has
+ * @param rows - Rows that are well formed ({@link readRows})
+ * @returns The page of each row that is one, and the pages that rows took
+ * @example
+ * ```ts
+ * const { matched } = matchPages(snapshot, readRows([{ url: '/a/' }], snapshot.inputDir).read);
+ * ```
+ */
+export function matchPages(
+	snapshot: Snapshot,
+	rows: readonly Row[],
+): { matched: Map<Row, SnapshotPage>; taken: Set<SnapshotPage> } {
+	const places = snapshot.pages.map((page) => ({
+		page,
+		url: page.url,
+		inputPath:
+			!page.virtual && page.inputPath !== null
+				? relativeTo(snapshot.inputDir, page.inputPath)
+				: null,
+	}));
+	const paired = pairByPlace(rows, places);
+	const matched = new Map<Row, SnapshotPage>(
+		[...paired].map(([row, place]) => [row, place.page]),
+	);
+	return { matched, taken: new Set(matched.values()) };
+}
+
+/**
+ * Pairs the items of two lists by where they are: first by the same `inputPath` (when it is a
+ * string), then by the same `url` among the items of `others` that no item took already. It is the
+ * one rule that tells which page two lists mean, whichever of them is the site.
+ * @param items - The items to find a partner for, in the order they are looked at
+ * @param others - The items they may be paired with
+ * @returns The partner of each item that has one
+ * @example
+ * ```ts
+ * const pairs = pairByPlace([{ url: '/a/', inputPath: 'a.html' }], [{ url: '/old/', inputPath: 'a.html' }]);
+ * // one pair: the same file, though the url differs
+ * ```
+ */
+export function pairByPlace<
+	A extends { readonly url: string; readonly inputPath?: string | null },
+	B extends { readonly url: string; readonly inputPath?: string | null },
+>(items: readonly A[], others: readonly B[]): Map<A, B> {
+	const byInput = new Map<string, B>();
+	const byUrl = new Map<string, B>();
+	for (const other of others) {
+		byUrl.set(other.url, other);
+		if (typeof other.inputPath === 'string') {
+			byInput.set(other.inputPath, other);
 		}
 	}
-	const taken = new Set<SnapshotPage>();
-	const matched = new Map<Row, SnapshotPage>();
-	for (const row of read) {
-		if (typeof row.inputPath === 'string') {
-			const page = byInput.get(row.inputPath);
-			if (page !== undefined) {
-				taken.add(page);
-				matched.set(row, page);
+	const taken = new Set<B>();
+	const pairs = new Map<A, B>();
+	for (const item of items) {
+		if (typeof item.inputPath === 'string') {
+			const other = byInput.get(item.inputPath);
+			if (other !== undefined) {
+				taken.add(other);
+				pairs.set(item, other);
 			}
 		}
 	}
-	for (const row of read) {
-		if (matched.has(row)) {
+	for (const item of items) {
+		if (pairs.has(item)) {
 			continue;
 		}
-		const page = byUrl.get(row.url);
-		if (page !== undefined && !taken.has(page)) {
-			taken.add(page);
-			matched.set(row, page);
+		const other = byUrl.get(item.url);
+		if (other !== undefined && !taken.has(other)) {
+			taken.add(other);
+			pairs.set(item, other);
 		}
 	}
+	return pairs;
+}
+
+/**
+ * Finds what the result changes in the site.
+ * @param snapshot - The pages the site has (`uiSyncPages`), as of the moment the script was given them
+ * @param rows - The pages the outside data has, as rows: those `importRows` made in the range of
+ * `select`, or what `read` returned when the script has no `select`
+ * @returns The edits of one batch and the summary, or every problem of the result (and no edits)
+ * @example
+ * ```ts
+ * const result = diff(snapshot, [{ url: '/about/', inputPath: 'about/index.html' }]);
+ * if (result.ok) {
+ * 	console.log(result.edits.length, result.summary.counts);
+ * }
+ * ```
+ */
+export function diff(snapshot: Snapshot, rows: readonly unknown[]): DiffResult {
+	const problems: Problem[] = [];
+	const { inputDir, outputPathField } = snapshot;
+	// The pages whose locked keys the difference needed and was not told: asked for, and the
+	// difference made again (see `needsLocked`). Until it is told, nothing is locked.
+	const needsLocked = new Set<string>();
+	const lockedOf = (page: SnapshotPage): Readonly<Record<string, string>> => {
+		if (page.locked === undefined) {
+			needsLocked.add(page.url);
+			return NO_LOCKS;
+		}
+		return page.locked;
+	};
+	const problem = (row: Row | number, url: string | null, message: string) => {
+		const index = typeof row === 'number' ? row : row.index;
+		problems.push({
+			row: index,
+			url,
+			message: `row ${index}${url === null ? '' : ` (${url})`}: ${message}`,
+		});
+	};
+
+	// 1. What each row says, if it is well formed. A row with a problem is told and left out of
+	// the rest, so that one mistake does not hide the others and does not make more.
+	const { read, problems: rowProblems } = readRows(rows, inputDir);
+	problems.push(...rowProblems);
+
+	// 2. Which page each row is.
+	const { matched, taken } = matchPages(snapshot, read);
 
 	// 3. What each row asks for.
 	const edits: BatchEdit[] = [];

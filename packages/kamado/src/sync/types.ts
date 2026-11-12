@@ -19,8 +19,11 @@ export type Label = string | Readonly<Record<string, string>>;
  * What a script is given besides the pages.
  * @example
  * ```ts
- * export default async (pages: readonly PageMapEntry[], ctx: SyncContext) => {
- * 	ctx.log('info', `${pages.length} pages under ${ctx.inputDir}`);
+ * export default {
+ * 	read: async (pages: readonly PageMapEntry[], ctx: SyncContext) => {
+ * 		ctx.log('info', `${pages.length} pages under ${ctx.inputDir}`);
+ * 		return [{ url: '/', inputPath: 'index.html', meta: { title: 'Home' } }];
+ * 	},
  * };
  * ```
  */
@@ -43,8 +46,8 @@ export interface SyncContext {
 }
 
 /**
- * One page of what a script returns: the page as it should be. A {@link PageMapEntry} is one,
- * returned as it is; only these four fields are read, and the rest is ignored.
+ * One page of what `select` or `read` returns. A {@link PageMapEntry} is one, returned as it
+ * is; only these four fields are read, and the rest is ignored.
  * @example
  * ```ts
  * const page: SyncPage = {
@@ -72,39 +75,118 @@ export interface SyncPage {
 	 */
 	readonly virtual?: boolean;
 	/**
-	 * The metadata the page should have, all of it: a key that is not here is removed from the
-	 * page. Left out, the metadata of the page is not touched. Values are JSON.
+	 * The metadata of the page, for the keys of the range `select` gave. In an import, a key of the
+	 * range that is not here is removed from the page, and a key outside the range stays as it is.
+	 * Left out, the metadata of the page is not touched. Values are JSON.
 	 */
 	readonly meta?: Readonly<Record<string, unknown>>;
 }
 
 /**
- * What a script returns: nothing (or `null`) to change nothing, or every page the site should
- * have. A page that exists and is not in the list is removed.
+ * What a script of an import gives (RFC §14.2, "同期"): the pages of the site that the outside
+ * data corresponds to (`select`), and the pages the outside data has (`read`). A sync finds the
+ * difference between the two and changes the site to what `read` returned, in the range `select`
+ * gave: a page or a key that `select` leaves out is not touched.
  * @example
  * ```ts
- * const nothing: SyncResult = null;
- * const pages: SyncResult = [{ url: '/', virtual: false }];
- * ```
- */
-export type SyncResult = void | null | readonly SyncPage[];
-
-/**
- * A script of `ui.syncFunctions`: the default export of its module.
- * @example
- * ```ts
- * import type { SyncScript } from 'kamado';
+ * import type { SyncImport } from 'kamado';
  *
- * const script: SyncScript = async (pages) => {
- * 	return pages.map((page) => ({ url: page.url, meta: { ...page.meta, checked: true } }));
+ * const script: SyncImport = {
+ * 	select: (pages) => pages.map((page) => ({ url: page.url, inputPath: page.inputPath, meta: { title: page.meta.title } })),
+ * 	read: async () => [{ url: '/', inputPath: 'index.html', meta: { title: 'Home' } }],
  * };
  * export default script;
  * ```
  */
-export type SyncScript = (
-	pages: readonly PageMapEntry[],
-	ctx: SyncContext,
-) => SyncResult | Promise<SyncResult>;
+export interface SyncImport {
+	/**
+	 * The range of the site the data corresponds to: the pages, and the keys of `meta` of each.
+	 * Left out, it is every page with every field (`virtual`, and all of `meta`).
+	 */
+	readonly select?: (
+		pages: readonly PageMapEntry[],
+		ctx: SyncContext,
+	) => readonly SyncPage[] | Promise<readonly SyncPage[]>;
+	/** The pages the outside data has, in the range `select` gave. */
+	readonly read: (
+		pages: readonly PageMapEntry[],
+		ctx: SyncContext,
+	) => readonly SyncPage[] | Promise<readonly SyncPage[]>;
+}
+
+/**
+ * What a write is given (see {@link SyncExport}).
+ * @example
+ * ```ts
+ * const write = async ({ rows, changes }: SyncWriteInput) => {
+ * 	console.log(rows.length, changes?.length);
+ * };
+ * ```
+ */
+export interface SyncWriteInput {
+	/** What `select` returned (every page when it was left out), as JSON: what the outside data should be. */
+	readonly rows: readonly SyncPage[];
+	/**
+	 * What differs between what `read` returned and `rows`, as the confirmation showed it. Not
+	 * given when the script has no `read`: then nothing was compared.
+	 */
+	readonly changes?: readonly SyncChange[];
+	/** Every page of the site (`kamado pages`), as the script was given them. */
+	readonly pages: readonly PageMapEntry[];
+}
+
+/**
+ * What a script of an export gives (RFC §14.2, "同期"): the range of the site to write out
+ * (`select`), the data as it is outside (`read`), and the means to write (`write`). `write` runs
+ * only after the difference is shown and confirmed; nothing is written before. Without `read`,
+ * nothing can be compared, so the confirmation asks only whether to write.
+ * @example
+ * ```ts
+ * import type { SyncExport } from 'kamado';
+ *
+ * const script: SyncExport = {
+ * 	select: (pages) => pages.map((page) => ({ url: page.url, meta: { title: page.meta.title } })),
+ * 	read: async () => await readSheet(),
+ * 	write: async ({ rows }) => {
+ * 		await writeSheet(rows);
+ * 	},
+ * };
+ * export default script;
+ * ```
+ */
+export interface SyncExport {
+	/** The range of the site to write out. Left out, it is every page with every field. */
+	readonly select?: SyncImport['select'];
+	/** The pages the outside data has now. Left out, no difference is shown. */
+	readonly read?: SyncImport['read'];
+	/** Writes `rows` outside. Called once, after the confirmation. */
+	readonly write: (input: SyncWriteInput, ctx: SyncContext) => void | Promise<void>;
+}
+
+/**
+ * A script of `ui.syncFunctions`: the default export of its module. With `write` it writes out
+ * (the site to the outside data); without it, it imports (the outside data to the site).
+ * @example
+ * ```ts
+ * import type { SyncScript } from 'kamado';
+ *
+ * const script: SyncScript = {
+ * 	read: async () => [{ url: '/', virtual: false, meta: { checked: true } }],
+ * };
+ * export default script;
+ * ```
+ */
+export type SyncScript = SyncImport | SyncExport;
+
+/**
+ * Which way a sync goes: the outside data into the site, or the site out. A script that has
+ * `write` goes out; one that has none comes in.
+ * @example
+ * ```ts
+ * const direction: SyncDirection = 'import';
+ * ```
+ */
+export type SyncDirection = 'import' | 'export';
 
 /**
  * The kinds of change a sync finds, as the summary counts them.
@@ -198,14 +280,16 @@ export interface SyncSummary {
  * ```ts
  * const outcome: SyncOutcome = await sync('/site/kamado.config.jsonc', 'import', { yes: true });
  * if (outcome.applied) {
- * 	console.log(outcome.summary.counts);
+ * 	console.log(outcome.direction, outcome.summary.counts);
  * }
  * ```
  */
 export interface SyncOutcome {
-	/** `false` when the script returned nothing, or what it returned is what the site is. */
+	/** `false` when there was no difference, or the changes were declined. */
 	readonly applied: boolean;
 	readonly summary: SyncSummary;
+	/** Which way the sync went (the shape of the script decides it). */
+	readonly direction: SyncDirection;
 }
 
 /**
@@ -218,7 +302,8 @@ export interface SyncOutcome {
 export interface SyncOptions {
 	/**
 	 * Apply without asking. Without it, a sync that has changes to make writes nothing and throws
-	 * (`kamado sync` asks on the terminal; the function does not).
+	 * (`kamado sync` asks on the terminal; the function does not). An export whose script has no
+	 * `read` has no difference to look at, so without `yes` it always throws.
 	 */
 	readonly yes?: boolean;
 	/**

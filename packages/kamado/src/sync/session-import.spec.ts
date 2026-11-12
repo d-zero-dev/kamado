@@ -12,7 +12,7 @@ import { prepareSync, type SyncEditor } from './session.js';
 
 let dir: string;
 beforeAll(() => {
-	dir = mkdtempSync(path.join(tmpdir(), 'kamado-sync-session-'));
+	dir = mkdtempSync(path.join(tmpdir(), 'kamado-sync-session-import-'));
 });
 afterAll(() => {
 	rmSync(dir, { recursive: true, force: true });
@@ -62,8 +62,8 @@ beforeEach(() => {
 
 let count = 0;
 /**
- *
- * @param body
+ * Writes a script and returns its path.
+ * @param body - The module of the script
  */
 function script(body: string): string {
 	const file = path.join(dir, `s-${count++}.mjs`);
@@ -74,18 +74,18 @@ function script(body: string): string {
 const prepare = (body: string, extra: object = {}) =>
 	prepareSync({ editor, script: script(body), cwd: dir, onLog: () => {}, ...extra });
 
-describe('prepareSync', () => {
+describe('prepareSync (import)', () => {
 	test('gives the script the pages without the hashes and the locks, and the directory of the input', async () => {
 		const lines: string[] = [];
 		const prepared = await prepareSync({
 			editor,
 			script: script(
-				'export default async (pages, ctx) => { ctx.log("info", JSON.stringify({ pages, dir: ctx.inputDir })); return null; };',
+				'export default { read: async (pages, ctx) => { ctx.log("info", JSON.stringify({ pages, dir: ctx.inputDir })); return []; } };',
 			),
 			cwd: dir,
 			onLog: (log) => lines.push(log.message),
 		});
-		expect(prepared).toEqual({ kind: 'nothing' });
+		expect(prepared.kind).toBe('review');
 		const { pages, dir: inputDir } = JSON.parse(lines[0]!) as {
 			pages: Record<string, unknown>[];
 			dir: string;
@@ -101,7 +101,7 @@ describe('prepareSync', () => {
 		await prepareSync({
 			editor,
 			script: script(
-				'export default async (pages, ctx) => { ctx.log("info", process.cwd()); return null; };',
+				'export default { read: async (pages, ctx) => { ctx.log("info", process.cwd()); return []; } };',
 			),
 			cwd: dir,
 			onLog: (log) => lines.push(log.message),
@@ -110,18 +110,11 @@ describe('prepareSync', () => {
 		expect(realpathSync(dir)).not.toBe(realpathSync(process.cwd()));
 	});
 
-	test('returns nothing to apply when the script returns nothing', async () => {
-		expect(await prepare('export default async () => {};')).toEqual({ kind: 'nothing' });
-		expect(await prepare('export default async () => null;')).toEqual({
-			kind: 'nothing',
-		});
-		expect(uiEditBatch).not.toHaveBeenCalled();
-	});
-
 	test('returns no change when what the script returns is what the site is', async () => {
-		const prepared = await prepare('export default async (pages) => pages;');
+		const prepared = await prepare('export default { read: async (pages) => pages };');
 		expect(prepared).toMatchObject({
 			kind: 'nochange',
+			direction: 'import',
 			summary: {
 				counts: {
 					added: 0,
@@ -141,7 +134,7 @@ describe('prepareSync', () => {
 
 	test('tells every problem of what the script returned, and writes nothing', async () => {
 		const prepared = await prepare(
-			'export default async () => [{ url: "no" }, { url: "/n/" }];',
+			'export default { read: async () => [{ url: "no" }, { url: "/n/" }] };',
 		);
 		expect(prepared).toMatchObject({ kind: 'invalid' });
 		expect(prepared.kind === 'invalid' && prepared.problems).toHaveLength(2);
@@ -150,83 +143,27 @@ describe('prepareSync', () => {
 
 	test('tells how the script failed, with its stack, and does not look for a difference', async () => {
 		const prepared = await prepare(
-			'export default async () => { throw new Error("no sheet"); };',
+			'export default { read: async () => { throw new Error("no sheet"); } };',
 		);
 		expect(prepared).toMatchObject({ kind: 'failed', message: 'no sheet' });
 		expect(prepared.kind === 'failed' && prepared.stack).toContain('no sheet');
 		expect(uiEditBatch).not.toHaveBeenCalled();
 	});
 
-	test('can be cancelled while the script runs', async () => {
-		let run: { cancel: () => void } | undefined;
-		const pending = prepareSync({
-			editor,
-			script: script('export default async () => { await new Promise(() => {}); };'),
-			cwd: dir,
-			onLog: () => {},
-			onRun: (r) => {
-				run = r;
-			},
-		});
-		await vi.waitFor(() => expect(run).toBeDefined());
-		run?.cancel();
-		expect(await pending).toEqual({ kind: 'cancelled' });
-	});
-
-	test('a cancel asked after the script has returned ends the sync as cancelled, and nothing is left to apply', async () => {
-		const prepared = await prepareSync({
-			editor,
-			script: script('export default async () => [];'),
-			cwd: dir,
-			onLog: () => {},
-			onRun: (run) => {
-				// asked as soon as the script has returned, before the difference is looked at
-				void run.done.then(() => run.cancel());
-			},
-		});
-		expect(prepared).toEqual({ kind: 'cancelled' });
-		expect(uiEditBatch).not.toHaveBeenCalled();
-	});
-
-	test('a script that fails because it was cancelled is a cancel, not a failure', async () => {
-		let stop: (() => void) | undefined;
-		const pending = prepareSync({
-			editor,
-			script: script('export default async () => { await new Promise(() => {}); };'),
-			cwd: dir,
-			onLog: () => {},
-			onRun: (run) => {
-				stop = () => run.cancel();
-			},
-		});
-		await vi.waitFor(() => expect(stop).toBeDefined());
-		stop?.();
-		expect(await pending).toEqual({ kind: 'cancelled' });
-	});
-
-	test('reads the files again first when asked, and not otherwise', async () => {
-		await prepare('export default async () => null;');
-		expect(uiRefresh).not.toHaveBeenCalled();
-		await prepare('export default async () => null;', { refresh: true });
-		expect(uiRefresh).toHaveBeenCalledWith('h1');
-		expect(uiRefresh.mock.invocationCallOrder[0]).toBeLessThan(
-			uiSyncPages.mock.invocationCallOrder[1]!,
-		);
-	});
-
 	test('tells that git cannot bring anything back where there is no repository', async () => {
-		const prepared = await prepare('export default async () => [];');
+		const prepared = await prepare('export default { read: async () => [] };');
 		expect(prepared).toMatchObject({
 			kind: 'review',
+			direction: 'import',
 			summary: { gitUnavailable: true, unsaved: [] },
 		});
 	});
 });
 
-describe('the keys that cannot be edited', () => {
+describe('the keys that cannot be edited (import)', () => {
 	test('are not asked for when no key is changed', async () => {
-		await prepare('export default async (pages) => pages;');
-		await prepare('export default async () => [];');
+		await prepare('export default { read: async (pages) => pages };');
+		await prepare('export default { read: async () => [] };');
 		expect(uiSyncLocked).not.toHaveBeenCalled();
 	});
 
@@ -238,7 +175,7 @@ describe('the keys that cannot be edited', () => {
 			}),
 		);
 		const prepared = await prepare(
-			'export default async () => [{ url: "/a/", meta: { title: "changed" } }];',
+			'export default { read: async () => [{ url: "/a/", meta: { title: "changed" } }] };',
 		);
 		expect(uiSyncLocked).toHaveBeenCalledTimes(1);
 		expect(JSON.parse(uiSyncLocked.mock.calls[0]![1])).toEqual({ urls: ['/a/'] });
@@ -251,18 +188,18 @@ describe('the keys that cannot be edited', () => {
 
 	test('let a change of a key that is not locked through', async () => {
 		const prepared = await prepare(
-			'export default async () => [{ url: "/a/", meta: { title: "changed" } }];',
+			'export default { read: async () => [{ url: "/a/", meta: { title: "changed" } }] };',
 		);
 		expect(uiSyncLocked).toHaveBeenCalledTimes(1);
 		expect(prepared.kind).toBe('review');
 	});
 });
 
-describe('the files git cannot bring back', () => {
+describe('the files git cannot bring back (import)', () => {
 	test('are named in the summary when a page that goes has changes that are not committed', async () => {
 		vi.stubEnv('GIT_CONFIG_GLOBAL', devNull);
 		vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
-		const repo = mkdtempSync(path.join(tmpdir(), 'kamado-sync-repo-'));
+		const repo = mkdtempSync(path.join(tmpdir(), 'kamado-sync-import-repo-'));
 		try {
 			const git = (...args: string[]) =>
 				execFileSync(
@@ -295,7 +232,7 @@ describe('the files git cannot bring back', () => {
 			);
 			const prepared = await prepareSync({
 				editor,
-				script: script('export default async () => [];'),
+				script: script('export default { read: async () => [] };'),
 				cwd: repo,
 				onLog: () => {},
 			});
@@ -304,7 +241,9 @@ describe('the files git cannot bring back', () => {
 				summary: { unsaved: ['a/index.html'] },
 			});
 			expect(
-				prepared.kind === 'review' && prepared.summary.gitUnavailable,
+				prepared.kind === 'review' &&
+					prepared.direction === 'import' &&
+					prepared.summary.gitUnavailable,
 			).toBeUndefined();
 		} finally {
 			vi.unstubAllEnvs();
@@ -313,12 +252,12 @@ describe('the files git cannot bring back', () => {
 	});
 });
 
-describe('apply', () => {
+describe('apply (import)', () => {
 	const review = async () => {
 		const prepared = await prepare(
-			'export default async () => [{ url: "/moved/", inputPath: "a/index.html", meta: { title: "B" } }];',
+			'export default { read: async () => [{ url: "/moved/", inputPath: "a/index.html", meta: { title: "B" } }] };',
 		);
-		if (prepared.kind !== 'review') {
+		if (prepared.kind !== 'review' || prepared.direction !== 'import') {
 			throw new Error(prepared.kind);
 		}
 		return prepared;

@@ -35,8 +35,10 @@ pages, to make a page virtual (its file goes, its URL stays) and to remove pages
 them back to the source files. It listens on localhost, on the port of devServer plus one
 unless --port says otherwise.
 \`sync\` runs a script of the project (an operation of ui.syncFunctions by its name, or a file by its
-path), which returns every page the site should have, shows what that changes, asks, and applies
-it to the files of the local repository (--yes does not ask). It writes nothing when anything is wrong.
+path), which exports { select?, read?, write? }. With a write it exports: it shows what differs
+from the data outside, asks, and then the write puts the pages there. Without one it imports: it
+shows what the returned pages change, asks, and applies it to the files of the local repository
+(--yes does not ask). It changes nothing when anything is wrong.
 \`ui-settings\` looks at what \`ui\` saved in ~/.config/kamado/ui-settings.json, for each project:
 \`list\` shows the projects, \`reset\` removes those of the project of the config file, and
 \`delete\` removes those of the project of the given config file (or, with --all, those of every
