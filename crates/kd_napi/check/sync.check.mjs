@@ -1,8 +1,11 @@
 /**
- * A sync through the built addon and the built Node side (RFC §14.2, "同期"): the pages are listed
- * by the core, a script is run in a process of its own, the difference is found, and the edits are
- * applied by the core as one batch. The unit tests of `diff.ts` and `session.ts` use a core that is
- * made up; this is where the laws that make a sync right are shown to hold with the real one:
+ * An import through the built addon and the built Node side (RFC §14.2, "同期"): the pages are
+ * listed by the core, a script (`{ read }`, with no `select` and no `write`) is run in a process
+ * of its own, the difference is found, and the edits are applied by the core as one batch.
+ * Without `select` every page and every key is in the range, so what `read` returns is taken as
+ * the whole of the pages; with `select` (laws 2 and 3 are also made from a seed with it) only the
+ * pages and keys it names are set to what `read` returns, and every byte of the rest stays. The unit tests of `diff.ts` and `session.ts` use a core that is made
+ * up; this is where the laws that make a sync right are shown to hold with the real one:
  *
  * 1. what a script is given and returns unchanged changes nothing;
  * 2. what is applied makes the pages what the script returned (url, virtual, metadata);
@@ -209,7 +212,7 @@ let scriptCount = 0;
  */
 function scriptReturning(site, rows) {
 	const file = path.join(scriptsDir, `script-${scriptCount++}.mjs`);
-	writeFileSync(file, `export default async () => ${JSON.stringify(rows)};`);
+	writeFileSync(file, `export default { read: async () => ${JSON.stringify(rows)} };`);
 	return file;
 }
 
@@ -244,6 +247,8 @@ test('law 1: the pages returned as they were given change nothing', async () => 
 			scriptReturning(site, given(opened.pages())),
 		);
 		assert.equal(prepared.kind, 'nochange');
+		// `read` without `write` is an import, and without `select` it is about every page
+		assert.equal(prepared.direction, 'import');
 		assert.deepEqual(tree(site.root), before);
 		// by the url alone is the same
 		const urls = opened.pages().pages.map((page) => ({ url: page.url }));
@@ -553,17 +558,236 @@ test('the seeds made every kind of change, in numbers that mean something', (t) 
 	}
 });
 
+/**
+ * Makes a script with `select`, from what a seed says: some of the pages are in the range, each
+ * with some of its keys (and maybe a key it does not have yet), and `virtual` named or not.
+ * What `read` returns changes only what is named: the keys are given another value, taken away,
+ * or kept, and a page whose `virtual` is named is made virtual or given its file, or kept.
+ * @param {ReturnType<typeof random>} next - The numbers
+ * @param {object} snapshot - What the core listed
+ * @returns {{ select: object[], read: object[], expected: Map<string, { virtual: boolean, meta: object }>, selected: Set<string>, kinds: Record<string, number> }} the rows and what the pages must be afterwards
+ */
+function selectCaseFrom(next, snapshot) {
+	const pick = (items) => items[Math.floor(next() * items.length)];
+	const select = [];
+	const read = [];
+	const expected = new Map();
+	const selected = new Set();
+	const kinds = {};
+	const count = (kind) => {
+		kinds[kind] = (kinds[kind] ?? 0) + 1;
+	};
+	for (const page of snapshot.pages) {
+		expected.set(page.url, { virtual: page.virtual, meta: structuredClone(page.meta) });
+		if (next() >= 0.55) {
+			continue;
+		}
+		selected.add(page.url);
+		const namesVirtual = next() < 0.4;
+		// where the file is is named only by a page that keeps its file and whose `virtual` is not named
+		const namesPlace = !page.virtual && !namesVirtual && next() < 0.5;
+		const keys = Object.keys(page.meta);
+		const chosen = keys.filter(() => next() < 0.5);
+		const added = `added${Math.floor(next() * 3)}`;
+		if (!(added in page.meta) && next() < 0.4) {
+			chosen.push(added);
+		}
+		const namesMeta = chosen.length > 0 || next() < 0.2;
+		const selectRow = { url: page.url };
+		const readRow = { url: page.url };
+		if (namesPlace) {
+			const place = path.relative(snapshot.inputDir, page.inputPath);
+			selectRow.inputPath = place;
+			readRow.inputPath = place;
+		}
+		if (namesVirtual) {
+			selectRow.virtual = page.virtual;
+			const flips = next() < 0.5;
+			readRow.virtual = flips ? !page.virtual : page.virtual;
+			expected.get(page.url).virtual = readRow.virtual;
+			count(flips ? 'virtualNamedFlipped' : 'virtualNamedKept');
+		} else if (page.virtual) {
+			count('virtualNotNamed');
+		}
+		if (namesMeta) {
+			selectRow.meta = Object.fromEntries(chosen.map((key) => [key, '']));
+			readRow.meta = {};
+			const after = expected.get(page.url).meta;
+			let changesAKey = false;
+			for (const key of chosen) {
+				const roll = next();
+				if (roll < 0.55) {
+					const value = pick(HOSTILE_VALUES);
+					readRow.meta[key] = value;
+					after[key] = value;
+					changesAKey = true;
+					count(key in page.meta ? 'keyChanged' : 'keyAdded');
+				} else if (roll < 0.7) {
+					delete after[key];
+					changesAKey = key in page.meta || changesAKey;
+					count('keyDeleted');
+				} else if (key in page.meta) {
+					readRow.meta[key] = page.meta[key];
+				}
+			}
+			if (changesAKey && chosen.length < keys.length + (chosen.includes(added) ? 1 : 0)) {
+				count('someKeysOnly');
+			}
+		}
+		select.push(selectRow);
+		read.push(readRow);
+	}
+	if (selected.size > 0 && selected.size < snapshot.pages.length) {
+		count('somePagesOnly');
+	}
+	return { select, read, expected, selected, kinds };
+}
+
+/**
+ * Writes a script that has `select` and `read`, and gives its path.
+ * @param {object[]} select
+ * @param {object[]} read
+ */
+function scriptWithSelect(select, read) {
+	const file = path.join(scriptsDir, `script-${scriptCount++}.mjs`);
+	writeFileSync(
+		file,
+		`export default { select: () => ${JSON.stringify(select)}, read: async () => ${JSON.stringify(read)} };`,
+	);
+	return file;
+}
+
+/** How many changes of each kind the seeds with `select` made. */
+const madeWithSelect = {};
+let selectSeedsRun = 0;
+
+for (const seed of SEEDS) {
+	test(`laws 2 and 3 with select: seed ${seed} changes only what select names, leaves the rest as it was, and returned again changes nothing`, async () => {
+		const site = makeSite();
+		const opened = open(site);
+		try {
+			const snapshot = opened.pages();
+			const { select, read, expected, selected, kinds } = selectCaseFrom(
+				random(seed + 100_000),
+				snapshot,
+			);
+			const note = `seed ${seed}\nselect: ${JSON.stringify(select)}\nread: ${JSON.stringify(read)}`;
+			const before = tree(site.root);
+			// the files a page in the range may change: its own, its sidecar, and pages.overrides
+			const mayChange = new Set(selected.size > 0 ? ['pages.overrides.json'] : []);
+			for (const page of snapshot.pages) {
+				if (selected.has(page.url) && page.inputPath !== null && !page.virtual) {
+					const file = path.relative(site.root, page.inputPath);
+					mayChange.add(file);
+					mayChange.add(file.replace(/\.[^./]+$/u, '.json'));
+				}
+			}
+			const file = scriptWithSelect(select, read);
+			const prepared = await prepare(opened, site, file);
+			selectSeedsRun += 1;
+			for (const [kind, n] of Object.entries(kinds)) {
+				madeWithSelect[kind] = (madeWithSelect[kind] ?? 0) + n;
+			}
+			assert.ok(
+				prepared.kind === 'review' || prepared.kind === 'nochange',
+				`${note}\n${prepared.kind}: ${JSON.stringify(prepared.problems ?? prepared.message)}`,
+			);
+			if (prepared.kind === 'review') {
+				madeWithSelect.applied = (madeWithSelect.applied ?? 0) + 1;
+				const applied = prepared.apply();
+				assert.equal(
+					applied.ok,
+					true,
+					`${note}\nthe core refused: ${JSON.stringify(applied)}`,
+				);
+			}
+			// law 2: what is named is what was read, and nothing else moved
+			const after = opened.pages();
+			assert.deepEqual(
+				after.pages.map((page) => page.url).toSorted(),
+				[...expected.keys()].toSorted(),
+				note,
+			);
+			for (const page of after.pages) {
+				const want = expected.get(page.url);
+				assert.equal(page.virtual, want.virtual, `${note}\n${page.url} virtual`);
+				assert.deepEqual(page.meta, want.meta, `${note}\n${page.url} meta`);
+			}
+			const now = tree(site.root);
+			for (const [name, hash] of Object.entries(before)) {
+				if (!mayChange.has(name)) {
+					assert.equal(now[name], hash, `${note}\n${name} must be as it was`);
+				}
+			}
+			// law 3
+			const again = await prepare(opened, site, file);
+			assert.equal(
+				again.kind,
+				'nochange',
+				`${note}\nreturned again it is ${again.kind}: ${JSON.stringify(again.summary?.changes ?? again.problems ?? again.message)}`,
+			);
+			// and what is on disk is what a new editor reads
+			const fresh = open(site);
+			try {
+				for (const page of fresh.pages().pages) {
+					assert.deepEqual(
+						page.meta,
+						expected.get(page.url).meta,
+						`${note}\n${page.url}`,
+					);
+				}
+			} finally {
+				fresh.close();
+			}
+		} finally {
+			opened.close();
+			rmSync(site.root, { recursive: true, force: true });
+		}
+	});
+}
+
+test('the seeds with select made every kind of change, in numbers that mean something', (t) => {
+	if (selectSeedsRun !== SEEDS.length) {
+		t.skip('the seeds were not all run');
+		return;
+	}
+	for (const kind of [
+		'applied',
+		'somePagesOnly',
+		'someKeysOnly',
+		'keyChanged',
+		'keyAdded',
+		'keyDeleted',
+		'virtualNamedFlipped',
+		'virtualNamedKept',
+		'virtualNotNamed',
+	]) {
+		assert.ok(
+			(madeWithSelect[kind] ?? 0) >= 5,
+			`${kind}: ${madeWithSelect[kind] ?? 0} in ${SEEDS.length} seeds`,
+		);
+	}
+});
+
 test('law 4: a script that fails leaves every byte as it was, whichever way it fails', async () => {
 	const site = makeSite();
 	const opened = open(site);
 	try {
 		const before = tree(site.root);
 		for (const [body, kind] of [
-			['export default async () => { throw new Error("no sheet"); };', 'failed'],
-			['export default async () => { process.exit(0); };', 'failed'],
-			['export default async () => ({ url: "/x/" });', 'failed'],
+			[
+				'export default { read: async () => { throw new Error("no sheet"); } };',
+				'failed',
+			],
+			['export default { read: async () => { process.exit(0); } };', 'failed'],
+			['export default { read: async () => ({ url: "/x/" }) };', 'failed'],
+			['export default { read: async () => {} };', 'failed'],
+			['export default { read: async () => null };', 'failed'],
 			['export default 5;', 'failed'],
-			['export default async () => [{ url: "/x/" }, { url: "no-slash" }];', 'invalid'],
+			[
+				'export default { read: async () => [{ url: "/x/" }, { url: "no-slash" }] };',
+				'invalid',
+			],
 		]) {
 			const file = path.join(scriptsDir, `fail-${scriptCount++}.mjs`);
 			writeFileSync(file, body);
@@ -856,7 +1080,7 @@ test('law 5: the key __proto__ is written as a key in a front matter and in page
 			const file = path.join(scriptsDir, `proto-${scriptCount++}.mjs`);
 			writeFileSync(
 				file,
-				`export default async () => JSON.parse(${JSON.stringify(JSON.stringify(rows))});`,
+				`export default { read: async () => JSON.parse(${JSON.stringify(JSON.stringify(rows))}) };`,
 			);
 			const before = tree(site.root);
 			const prepared = await prepare(opened, site, file);
