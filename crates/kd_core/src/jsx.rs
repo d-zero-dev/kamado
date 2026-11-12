@@ -310,6 +310,31 @@ impl Modules {
 		Ok(entry.expect("the entry was compiled or cached"))
 	}
 
+	/// The source files that `src` is made of: itself, everything it imports, and
+	/// the files that were looked for and not found on the way (creating one of
+	/// them changes what an import means). `src` was compiled already.
+	pub(crate) fn sources_of(&self, src: &str) -> Vec<String> {
+		let table = self.lock();
+		let mut seen: HashSet<String> = HashSet::new();
+		let mut order: Vec<String> = Vec::new();
+		let mut queue = vec![src.to_owned()];
+		while let Some(next) = queue.pop() {
+			if !seen.insert(next.clone()) {
+				continue;
+			}
+			order.push(next.clone());
+			if let Some(compiled) = table.get(&next) {
+				queue.extend(compiled.imports.iter().cloned());
+				for missing in &compiled.missing {
+					if seen.insert(missing.clone()) {
+						order.push(missing.clone());
+					}
+				}
+			}
+		}
+		order
+	}
+
 	fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<Compiled>>> {
 		self.state.lock().unwrap_or_else(|e| e.into_inner())
 	}

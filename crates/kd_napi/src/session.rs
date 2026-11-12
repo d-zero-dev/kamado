@@ -29,6 +29,51 @@ pub(crate) fn options_from_json(json: &str) -> Result<kd_core::BuildOptions, Str
 	crate::build_options_from_json(json)
 }
 
+/// The data files that are scripts, compiled for the Node side to run:
+/// `{ "cacheDir": "…", "dataDir": "…" | null, "modules": [{ "key", "source", "module", "sources": […] }] }`.
+///
+/// # Errors
+///
+/// Any error of reading the data directory or compiling a data file, as a message.
+pub(crate) fn data_plan(
+	config_path: &str,
+	options_json: &str,
+	runtime: &str,
+) -> Result<String, String> {
+	let options = options_from_json(options_json)?;
+	let loaded = kd_core::load(config_path)?;
+	let plan = kd_core::data_plan(&loaded, &options, runtime)?;
+	let text = |s: &str| Value::String(s.to_owned());
+	let modules = plan
+		.modules
+		.iter()
+		.map(|m| {
+			Value::Object(vec![
+				("key".to_owned(), text(&m.key)),
+				("source".to_owned(), text(&m.source)),
+				("module".to_owned(), text(&m.module)),
+				(
+					"sources".to_owned(),
+					Value::Array(m.sources.iter().map(|s| text(s)).collect()),
+				),
+			])
+		})
+		.collect();
+	Ok(Value::Object(vec![
+		("cacheDir".to_owned(), text(&plan.cache_dir)),
+		(
+			"dataDir".to_owned(),
+			plan.data_dir.as_deref().map_or(Value::Null, text),
+		),
+		(
+			"extensions".to_owned(),
+			Value::Array(kd_core::SCRIPT_EXTENSIONS.iter().map(|e| text(e)).collect()),
+		),
+		("modules".to_owned(), Value::Array(modules)),
+	])
+	.to_json())
+}
+
 /// Plans a build. The result is a JSON object:
 /// `{ "handle": "…", "jobs": [{ "page": 0, "main": "/abs.mjs" | null, "layout": … }], "context": {…} | null, "scripts": {…} | null }`
 /// (`scripts` is the request for esbuild).
@@ -118,7 +163,8 @@ pub(crate) fn feed(handle: &str, mut bytes: &[u8]) -> Result<(), String> {
 
 /// Finishes a build with what JavaScript made, as JSON:
 /// `{ "pages": [[page, "html"], …], "scripts": [{ "id", "code", "inputs": […] }, …],
-/// "reads": [[page, ["key", …] or null], …] }` (`reads`: the keys of `data` each page read; `null` is every key).
+/// "reads": [[page, ["key", …] or null], …], "data": ["line", …] }` (`reads`: the keys of `data` each page read; `null` is every key;
+/// `data`: what was decided about each data file that is a script, for the report).
 /// The result is the report as JSON.
 ///
 /// # Errors
@@ -191,7 +237,12 @@ pub(crate) fn finish(handle: &str, results_json: &str) -> Result<String, String>
 		})();
 		reads.push(parsed.ok_or("results: each read must be [page, [key, …] or null]")?);
 	}
-	let report = entry.prepared.finish_with_reads(rendered, scripts, reads)?;
+	let data = match value.get("data") {
+		None => Vec::new(),
+		Some(v) => string_array(v).ok_or("results: data must be an array of strings")?,
+	};
+	let mut report = entry.prepared.finish_with_reads(rendered, scripts, reads)?;
+	report.data = data;
 	kd_core::write_report(&entry.loaded.config, &report)?;
 	Ok(report.to_json())
 }
@@ -283,6 +334,125 @@ mod tests {
 				.contains("no prepared build")
 		);
 		let _ = fs::remove_dir_all(&root);
+	}
+
+	fn data_site(name: &str) -> String {
+		let root = site(name);
+		fs::create_dir_all(format!("{root}/data")).unwrap();
+		fs::write(
+			format!("{root}/src/index.tsx"),
+			"export default ({ data }) => <p>{data.news}</p>;\n",
+		)
+		.unwrap();
+		fs::write(
+			format!("{root}/kamado.config.jsonc"),
+			r#"{ "dir": { "input": "src", "output": "out" }, "data": { "dir": "data" }, "build": { "cacheDir": ".cache" } }"#,
+		)
+		.unwrap();
+		root
+	}
+
+	#[test]
+	fn the_data_files_that_are_scripts_are_compiled_with_what_they_import() {
+		let root = data_site("data_plan");
+		fs::write(
+			format!("{root}/data/news.ts"),
+			"import { shape } from '../lib/shape.ts';\nexport default async (): Promise<string> => shape('a');\n",
+		)
+		.unwrap();
+		fs::create_dir_all(format!("{root}/lib")).unwrap();
+		fs::write(
+			format!("{root}/lib/shape.ts"),
+			"export const shape = (s: string): string => s;\n",
+		)
+		.unwrap();
+		fs::write(format!("{root}/data/site.json"), "{}").unwrap();
+
+		let plan = data_plan(
+			&format!("{root}/kamado.config.jsonc"),
+			"{}",
+			"file:///runtime.js",
+		)
+		.unwrap();
+
+		let plan = kd_jsonc::parse(&plan).unwrap();
+		let modules = plan.get("modules").and_then(|m| m.as_array()).unwrap();
+		assert_eq!(modules.len(), 1, "site.json is not a script");
+		assert_eq!(modules[0].get("key").and_then(|k| k.as_str()), Some("news"));
+		let module = modules[0].get("module").and_then(|k| k.as_str()).unwrap();
+		assert!(module.ends_with("/data/news.ts.mjs"), "{module}");
+		let sources: Vec<&str> = modules[0]
+			.get("sources")
+			.and_then(|k| k.as_array())
+			.unwrap()
+			.iter()
+			.filter_map(|v| v.as_str())
+			.collect();
+		assert!(sources.iter().any(|p| p.ends_with("/data/news.ts")));
+		assert!(sources.iter().any(|p| p.ends_with("/lib/shape.ts")));
+		assert!(
+			plan.get("cacheDir")
+				.and_then(|c| c.as_str())
+				.is_some_and(|c| c.ends_with("/.cache"))
+		);
+		let _ = fs::remove_dir_all(&root);
+	}
+
+	#[test]
+	fn a_script_data_file_without_its_value_stops_the_build_and_with_it_is_the_data() {
+		let root = data_site("executed");
+		fs::write(format!("{root}/data/news.ts"), "export default 'x';\n").unwrap();
+		let config = format!("{root}/kamado.config.jsonc");
+
+		let without = prepare(&config, "{}", "file:///runtime.js").err().unwrap();
+		let with = prepare(
+			&config,
+			r#"{"executedData":{"news":{"value":"fresh"}}}"#,
+			"file:///runtime.js",
+		)
+		.unwrap();
+		let failed = prepare(
+			&config,
+			r#"{"executedData":{"news":{"error":"timed out"}}}"#,
+			"file:///runtime.js",
+		)
+		.unwrap();
+
+		assert!(
+			without.contains("a script data file was not run"),
+			"{without}"
+		);
+		let with = kd_jsonc::parse(&with).unwrap();
+		let context = with.get("context").unwrap();
+		assert_eq!(
+			context.get("data").map(Value::to_json).as_deref(),
+			Some("{\"news\":\"fresh\"}")
+		);
+		assert_eq!(context.get("dataErrors"), None, "nothing failed");
+		let failed = kd_jsonc::parse(&failed).unwrap();
+		let context = failed.get("context").unwrap();
+		assert_eq!(
+			context.get("data").map(Value::to_json).as_deref(),
+			Some("{}")
+		);
+		assert_eq!(
+			context.get("dataErrors").map(Value::to_json).as_deref(),
+			Some("{\"news\":\"timed out\"}")
+		);
+		let _ = fs::remove_dir_all(&root);
+	}
+
+	#[test]
+	fn executed_data_of_a_wrong_shape_is_refused() {
+		for bad in [
+			r#"{"executedData":[]}"#,
+			r#"{"executedData":{"a":{}}}"#,
+			r#"{"executedData":{"a":{"value":1,"error":"x"}}}"#,
+			r#"{"executedData":{"a":{"error":1}}}"#,
+		] {
+			assert!(options_from_json(bad).is_err(), "{bad}");
+		}
+		assert!(options_from_json(r#"{"executedData":{"a":{"value":null}}}"#).is_ok());
 	}
 
 	/// Prepares a site of one JSX page and returns the handle.
