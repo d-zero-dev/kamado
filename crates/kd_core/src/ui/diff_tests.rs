@@ -1013,3 +1013,46 @@ fn the_ids_of_the_files_follow_what_the_plan_read_and_a_change_made_through_the_
 	ui.refresh().unwrap();
 	assert_eq!(ids(&mut ui), s(&blob("---\ntitle: C\n---\n")));
 }
+
+#[test]
+fn an_order_put_back_in_two_files_leaves_the_plan_in_the_order_head_gives() {
+	let site = Site::new("revert_order");
+	site.write("src/a.html", "---\ntitle: A\n---\n");
+	site.write("src/b.html", "---\ntitle: B\norder: 5\n---\n");
+	site.write("src/c.html", "---\ntitle: C\n---\n");
+	site.write(
+		"pages.overrides.json",
+		r#"{"version":1,"pages":[{"url":"/b.html","meta":{"order":4}}]}"#,
+	);
+	let mut ui = site.open(OVERRIDES);
+	let head = head_of(
+		&mut ui,
+		&["/b.html"],
+		&[
+			("src/b.html", H::Text("---\ntitle: B\norder: -3\n---\n")),
+			(
+				"pages.overrides.json",
+				H::Text(r#"{"version":1,"pages":[{"url":"/b.html","meta":{"order":-2}}]}"#),
+			),
+		],
+		true,
+	);
+	let answer = revert(&mut ui, "/b.html", Some("order"), &head);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(site.read("src/b.html"), "---\ntitle: B\norder: -3\n---\n");
+	assert!(site.read("pages.overrides.json").contains("-2"));
+	// the entry wins over the file, so the page is at -2: before the pages that have none
+	assert_eq!(
+		value_of(&mut ui, "/b.html", "order"),
+		Some(Value::Number(-2.0))
+	);
+	let rows = json(&ui.pages(r#"{"offset":0,"limit":100}"#).unwrap());
+	let Some(Value::Array(pages)) = rows.get("pages") else {
+		panic!("pages")
+	};
+	let urls: Vec<&str> = pages
+		.iter()
+		.map(|p| p.get("url").and_then(Value::as_str).unwrap())
+		.collect();
+	assert_eq!(urls, ["/b.html", "/a.html", "/c.html"]);
+}

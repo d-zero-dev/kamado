@@ -26,8 +26,6 @@ export interface Row {
 	readonly inputPath: string | null;
 	readonly outputPath: string;
 	readonly virtual: boolean;
-	/** The place of the page in the plan, from 1 (the order `pages` and `nav()` have). */
-	readonly order: number;
 	readonly depth: number;
 	readonly parent: string | null;
 	readonly hashes: { readonly input: string | null; readonly sidecar: string | null };
@@ -37,6 +35,8 @@ export interface Row {
 /** What `GET /api/pages` answers. */
 export interface Rows {
 	readonly version: number;
+	/** Where the window the list holds starts (the page that was located, when one was asked for). */
+	readonly offset: number;
 	readonly total: number;
 	readonly columns: readonly string[];
 	readonly overridesHash: string | null;

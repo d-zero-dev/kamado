@@ -15,7 +15,6 @@ function row(url: string, meta: Record<string, unknown>): Row {
 		inputPath: `src${url}`,
 		outputPath: url,
 		virtual: false,
-		order: 1,
 		depth: 1,
 		parent: '/',
 		hashes: { input: 'h', sidecar: null },

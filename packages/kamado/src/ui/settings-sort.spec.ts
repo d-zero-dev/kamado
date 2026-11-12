@@ -91,10 +91,12 @@ describe('the sort in the file', () => {
 			}
 			return parsed.settings.projects.a;
 		};
-		expect(read({ key: 'meta:order', desc: true })?.sort).toEqual({
-			key: 'meta:order',
-			desc: true,
-		});
+		// Behavior change: `meta:order` places a page among its siblings only (RFC section 6), so it is no sort and is dropped when the file is read
+		expect(read({ key: 'meta:order', desc: true })).not.toHaveProperty('sort');
+		// expect(read({ key: 'meta:order', desc: true })?.sort).toEqual({ // previous
+		// 	key: 'meta:order', // previous
+		// 	desc: true, // previous
+		// }); // previous
 		expect(read({ key: 'nope' })).not.toHaveProperty('sort');
 		expect(read('url')).not.toHaveProperty('sort');
 	});

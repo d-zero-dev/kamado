@@ -195,19 +195,31 @@ fn a_row_says_its_place_in_the_plan() {
 	);
 	let mut ui = site.open(OVERRIDES);
 	let rows = all(&mut ui);
-	// the pages of the file come first, in its order; the others follow
-	assert_eq!(urls(&rows), ["/c.html", "/v/", "/a.html", "/b.html"]);
-	assert_eq!(number(&page(&rows, "/c.html"), "order"), 1.0);
-	assert_eq!(number(&page(&rows, "/v/"), "order"), 2.0);
-	assert_eq!(number(&page(&rows, "/a.html"), "order"), 3.0);
-	assert_eq!(number(&page(&rows, "/b.html"), "order"), 4.0);
+	// the entries of the file do not place the pages
+	// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the order of `pages` is the one `order` and the URLs make, a page before what hangs from it, the children in the natural order of their URLs
+	assert_eq!(urls(&rows), ["/a.html", "/b.html", "/c.html", "/v/"]);
+	// assert_eq!(urls(&rows), ["/c.html", "/v/", "/a.html", "/b.html"]); // previous
+	// Behavior change: a row no longer carries a number for its place in the plan (RFC section 14.2): `order` is the meta key that places a page, shown as a column of the metadata
+	assert!(page(&rows, "/c.html").get("order").is_none());
+	// assert_eq!(number(&page(&rows, "/c.html"), "order"), 1.0); // previous
+	// Behavior change: a row no longer carries a number for its place in the plan (RFC section 14.2): `order` is the meta key that places a page, shown as a column of the metadata
+	assert!(page(&rows, "/v/").get("order").is_none());
+	// assert_eq!(number(&page(&rows, "/v/"), "order"), 2.0); // previous
+	// Behavior change: a row no longer carries a number for its place in the plan (RFC section 14.2): `order` is the meta key that places a page, shown as a column of the metadata
+	assert!(page(&rows, "/a.html").get("order").is_none());
+	// assert_eq!(number(&page(&rows, "/a.html"), "order"), 3.0); // previous
+	// Behavior change: a row no longer carries a number for its place in the plan (RFC section 14.2): `order` is the meta key that places a page, shown as a column of the metadata
+	assert!(page(&rows, "/b.html").get("order").is_none());
+	// assert_eq!(number(&page(&rows, "/b.html"), "order"), 4.0); // previous
 	// the place is the place in the plan whatever the rows are sorted or cut by
 	let window = json(
 		&ui.pages(r#"{"offset":1,"limit":1,"sort":{"key":"url"}}"#)
 			.unwrap(),
 	);
 	assert_eq!(urls(&window), ["/b.html"]);
-	assert_eq!(number(&page(&window, "/b.html"), "order"), 4.0);
+	// Behavior change: a row no longer carries a number for its place in the plan (RFC section 14.2): `order` is the meta key that places a page, shown as a column of the metadata
+	assert!(page(&window, "/b.html").get("order").is_none());
+	// assert_eq!(number(&page(&window, "/b.html"), "order"), 4.0); // previous
 }
 
 #[test]
@@ -222,18 +234,33 @@ fn rows_are_sorted_by_the_columns_a_row_always_has() {
 		r#"{ "version": 1, "pages": [ { "url": "/b/deep/x.html" } ] }"#,
 	);
 	let mut ui = site.open(OVERRIDES);
+	// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the order of `pages` is the one `order` and the URLs make, a page before what hangs from it, the children in the natural order of their URLs
 	assert_eq!(
 		urls(&all(&mut ui)),
-		["/b/deep/x.html", "/a.html", "/b/", "/"]
+		["/", "/a.html", "/b/", "/b/deep/x.html"]
 	);
-	assert_eq!(
-		sorted_urls(&mut ui, "order", false),
-		["/b/deep/x.html", "/a.html", "/b/", "/"]
+	// assert_eq!(
+	// 	urls(&all(&mut ui)),
+	// 	["/b/deep/x.html", "/a.html", "/b/", "/"]
+	// ); // previous
+	// Behavior change: `order` is no column of a row (RFC section 14.2), so it is no sort key either
+	assert!(
+		ui.pages(r#"{"offset":0,"limit":100,"sort":{"key":"order"}}"#)
+			.is_err()
 	);
-	assert_eq!(
-		sorted_urls(&mut ui, "order", true),
-		["/", "/b/", "/a.html", "/b/deep/x.html"]
+	// assert_eq!(
+	// 	sorted_urls(&mut ui, "order", false),
+	// 	["/b/deep/x.html", "/a.html", "/b/", "/"]
+	// ); // previous
+	// Behavior change: `order` is no column of a row (RFC section 14.2), so it is no sort key either
+	assert!(
+		ui.pages(r#"{"offset":0,"limit":100,"sort":{"key":"order","desc":true}}"#)
+			.is_err()
 	);
+	// assert_eq!(
+	// 	sorted_urls(&mut ui, "order", true),
+	// 	["/", "/b/", "/a.html", "/b/deep/x.html"]
+	// ); // previous
 	// depth: `/` is 0, `/a.html` and `/b/` are 1, `/b/deep/x.html` is 3; equal ones keep the plan
 	assert_eq!(
 		sorted_urls(&mut ui, "depth", false),
@@ -264,7 +291,8 @@ fn rows_are_sorted_by_the_columns_a_row_always_has() {
 	assert!(
 		ui.pages(r#"{"offset":0,"limit":1,"sort":{"key":"hashes"}}"#)
 			.unwrap_err()
-			.contains("`order`, `outputPath`, `parent`, `depth`")
+			// Behavior change: the sort keys do not include `order` any more (RFC section 14.2)
+			.contains("`virtual`, `outputPath`, `parent`, `depth`") // .contains("`order`, `outputPath`, `parent`, `depth`") // previous
 	);
 }
 
@@ -464,7 +492,9 @@ fn a_virtual_page_is_made_as_an_entry_after_the_last_one() {
 	let row = answer.get("page").unwrap();
 	assert_eq!(row.get("virtual"), Some(&Value::Bool(true)));
 	assert_eq!(row.get("inputPath"), Some(&Value::Null));
-	assert_eq!(number(row, "order"), 2.0);
+	// Behavior change: a row no longer carries a number for its place in the plan (RFC section 14.2): `order` is the meta key that places a page, shown as a column of the metadata
+	assert!(row.get("order").is_none());
+	// assert_eq!(number(row, "order"), 2.0); // previous
 	// the hash the answer has is the one the next edit of the file is checked against
 	let ex = format!(
 		r#"{{"overrides":{}}}"#,
@@ -599,7 +629,9 @@ fn the_entry_a_page_has_already_is_the_one_made_virtual() {
 	let row = answer.get("page").unwrap();
 	assert_eq!(cell(row, "title").get("value"), Some(&s("Override")));
 	assert_eq!(cell(row, "layout").get("value"), Some(&s("sub")));
-	assert_eq!(number(row, "order"), 2.0);
+	// Behavior change: a row no longer carries a number for its place in the plan (RFC section 14.2): `order` is the meta key that places a page, shown as a column of the metadata
+	assert!(row.get("order").is_none());
+	// assert_eq!(number(row, "order"), 2.0); // previous
 }
 
 #[test]
@@ -904,7 +936,9 @@ fn a_virtual_page_that_is_removed_is_an_entry_that_is_removed() {
 		site.read("pages.overrides.json"),
 		r#"{ "version": 1, "pages": [ { "url": "/w/", "virtual": true } ] }"#
 	);
-	assert_eq!(urls(&all(&mut ui)), ["/w/", "/"]);
+	// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the order of `pages` is the one `order` and the URLs make, a page before what hangs from it, the children in the natural order of their URLs
+	assert_eq!(urls(&all(&mut ui)), ["/", "/w/"]);
+	// assert_eq!(urls(&all(&mut ui)), ["/w/", "/"]); // previous
 }
 
 #[test]

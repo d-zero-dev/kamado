@@ -1,6 +1,6 @@
-//! The natural order of `kamado ui`'s sort (RFC §14.2): a port of `numericalComparator` and
-//! `pathComparator` of `@d-zero/shared` (`src/sort/`), so that the order of the screen is the
-//! one the team's other tools give.
+//! The natural order of the plan (RFC §6) and of `kamado ui`'s sort (RFC §14.2): a port of
+//! `numericalComparator` and `pathComparator` of `@d-zero/shared` (`src/sort/`), so that the
+//! order of the screen is the one the team's other tools give.
 //!
 //! What is ported is what a kamado page can reach. A kamado URL has no host, query or hash of
 //! its own (RFC §6), so the host and protocol steps of `pathComparator` compare equal for
@@ -596,7 +596,7 @@ mod tests {
 	/// `scripts/generate-natural-golden.mjs` from `@d-zero/shared`.
 	#[test]
 	fn pairs_compare_as_the_shared_package_does() {
-		let text = include_str!("../../tests/natural_golden.tsv");
+		let text = include_str!("../tests/natural_golden.tsv");
 		let mut checked = 0;
 		for line in text.lines() {
 			let f: Vec<&str> = line.split('\t').collect();

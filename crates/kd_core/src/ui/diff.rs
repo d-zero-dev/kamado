@@ -943,16 +943,20 @@ impl Ui {
 			);
 		}
 		let mut failed: Option<Fail> = None;
-		if let (Some(change), Some(after)) = (&overrides_change, overrides_after)
-			&& let Err(e) = self.after_key_edit(i, change, Some(after))
-		{
-			failed = Some(e);
+		// The place of the page in the plan is where `order` puts it, and a key that is put back
+		// may move it: the page is found by its URL each time.
+		if let (Some(change), Some(after)) = (&overrides_change, overrides_after) {
+			let at = self.by_url.get(&url).copied().unwrap_or(i);
+			if let Err(e) = self.after_key_edit(at, change, Some(after)) {
+				failed = Some(e);
+			}
 		}
 		for (origin, change) in &plan {
 			if *origin == Origin::Overrides {
 				continue;
 			}
-			if let Err(e) = self.after_key_edit(i, change, None) {
+			let at = self.by_url.get(&url).copied().unwrap_or(i);
+			if let Err(e) = self.after_key_edit(at, change, None) {
 				failed = Some(e);
 			}
 		}

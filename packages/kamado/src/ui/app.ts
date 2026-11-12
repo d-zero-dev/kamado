@@ -332,6 +332,9 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 			);
 		}
 		const q = ctx.req.query('q');
+		// The URL of a page whose window is wanted instead of the one at `offset` (the core says
+		// where that window starts, in `offset` of the answer).
+		const locate = ctx.req.query('locate');
 		const sort = sortFromQuery(ctx.req.query('sort'), ctx.req.query('desc'));
 		if (sort === null) {
 			return ctx.json(
@@ -354,6 +357,7 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 							offset,
 							limit,
 							...(q === undefined || q === '' ? {} : { q }),
+							...(locate === undefined || locate === '' ? {} : { locate }),
 							...(sort === undefined ? {} : { sort }),
 						}),
 					),

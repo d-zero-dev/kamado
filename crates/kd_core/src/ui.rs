@@ -20,6 +20,8 @@ use kd_jsonc::edit::Seg;
 use kd_site::meta::{Meta, Overrides};
 use kd_site::{Dirs, PageFile};
 
+use crate::natural;
+use crate::nav_order::ORDER_KEY;
 use crate::plan_cache::{CachedPage, PlanCache};
 use crate::session::PlanSettings;
 use crate::{BuildOptions, Loaded, Page, PageKind, Plan};
@@ -27,7 +29,6 @@ use crate::{BuildOptions, Loaded, Page, PageKind, Plan};
 mod batch;
 mod diff;
 mod moves;
-mod natural;
 
 /// What the editor shows for a key whose value comes from the URL.
 const URL_KEY_REASON: &str = "this key sets the URL of the page; change the URL instead";
@@ -1344,8 +1345,6 @@ enum SortColumn {
 	Url,
 	InputPath,
 	Virtual,
-	/// The place of the page in the plan.
-	Order,
 	OutputPath,
 	Parent,
 	Depth,
@@ -1353,7 +1352,11 @@ enum SortColumn {
 }
 
 /// What a `sort.key` that names no column is answered with.
-const SORT_KEY_REASON: &str = "query: `sort.key` must be `url`, `inputPath`, `virtual`, `order`, `outputPath`, `parent`, `depth` or `meta:<key>`";
+const SORT_KEY_REASON: &str = "query: `sort.key` must be `url`, `inputPath`, `virtual`, `outputPath`, `parent`, `depth` or `meta:<key>`";
+
+/// What `meta:order` is answered with: the key places a page among its siblings only (RFC §6),
+/// so ordering every page by it would mean nothing.
+const SORT_ORDER_REASON: &str = "query: `sort.key` cannot be `meta:order`: it places a page among its siblings, and is not an order of all the pages";
 
 /// The order a query asks for.
 #[derive(Clone, PartialEq, Eq)]
@@ -1369,6 +1372,8 @@ struct Query {
 	limit: usize,
 	q: Option<String>,
 	sort: Option<Sort>,
+	/// The URL of a page whose window is wanted instead of the one at `offset`.
+	locate: Option<String>,
 }
 
 /// The `sort` of a query: `None` when there is none (absent or `null`), an error naming the
@@ -1384,11 +1389,11 @@ fn parse_sort(v: &Value) -> Result<Option<Sort>, String> {
 		Some(Value::String(k)) if k == "url" => SortColumn::Url,
 		Some(Value::String(k)) if k == "inputPath" => SortColumn::InputPath,
 		Some(Value::String(k)) if k == "virtual" => SortColumn::Virtual,
-		Some(Value::String(k)) if k == "order" => SortColumn::Order,
 		Some(Value::String(k)) if k == "outputPath" => SortColumn::OutputPath,
 		Some(Value::String(k)) if k == "parent" => SortColumn::Parent,
 		Some(Value::String(k)) if k == "depth" => SortColumn::Depth,
 		Some(Value::String(k)) => match k.strip_prefix("meta:") {
+			Some("order") => return Err(SORT_ORDER_REASON.to_string()),
 			Some(name) if !name.is_empty() => SortColumn::Meta(name.to_string()),
 			_ => return Err(SORT_KEY_REASON.to_string()),
 		},
@@ -1441,11 +1446,17 @@ fn parse_query(json: &str) -> Result<Query, String> {
 		Some(Value::String(s)) => Some(s.to_lowercase()),
 		Some(_) => return Err("query: `q` must be a string".to_string()),
 	};
+	let locate = match v.get("locate") {
+		None | Some(Value::Null) => None,
+		Some(Value::String(s)) => Some(s.clone()),
+		Some(_) => return Err("query: `locate` must be a string".to_string()),
+	};
 	Ok(Query {
 		offset: number("offset")?,
 		limit: number("limit")?,
 		q,
 		sort: parse_sort(&v)?,
+		locate,
 	})
 }
 
@@ -1702,6 +1713,17 @@ impl Ui {
 		Ok(())
 	}
 
+	/// Puts the pages of the plan in the order the plan gives them (RFC §6), after the metadata
+	/// of a page was changed in memory.
+	fn arrange_plan(&mut self) {
+		let pages = std::mem::take(&mut self.plan.pages);
+		self.plan.pages = crate::nav_order::arrange(pages);
+		// What was made of the places of the pages (the order of every page for a sort) names
+		// pages by their place, which is not what it was.
+		self.sort_cache = None;
+		self.reindex();
+	}
+
 	fn reindex(&mut self) {
 		self.by_url = self
 			.plan
@@ -1727,6 +1749,12 @@ impl Ui {
 			.filter(|k| Some(*k) != field.as_ref())
 			.cloned()
 			.collect();
+		// The key that places a page is a column even when no page has it yet (RFC §14.2): a
+		// person who wants to put a page somewhere starts by writing it.
+		// (Unless it is the key that makes the URL, which is no column.)
+		if field.as_deref() != Some(ORDER_KEY) {
+			self.columns.insert(ORDER_KEY.to_owned());
+		}
 	}
 
 	/// Reads the plan again (the files are `stat`ed, and only the ones that changed are
@@ -1958,8 +1986,6 @@ impl Ui {
 				Value::String(f.output_path.clone()),
 			),
 			("virtual".to_owned(), Value::Bool(page.is_virtual)),
-			// The place of the page in the plan, from 1: the order `pages` and `nav()` have.
-			("order".to_owned(), Value::Number((i + 1) as f64)),
 			("depth".to_owned(), Value::Number(depth as f64)),
 			(
 				"parent".to_owned(),
@@ -2068,13 +2094,6 @@ impl Ui {
 			}
 			SortColumn::Virtual => {
 				let keys: Vec<Option<bool>> = pages.iter().map(|p| Some(p.is_virtual)).collect();
-				arrange(indices, keys, &mut present, &mut missing, |a, b| {
-					order(a.cmp(b))
-				});
-			}
-			SortColumn::Order => {
-				// The index of a page is its place in the plan.
-				let keys: Vec<Option<usize>> = indices.iter().map(|&i| Some(i)).collect();
 				arrange(indices, keys, &mut present, &mut missing, |a, b| {
 					order(a.cmp(b))
 				});
@@ -2307,8 +2326,20 @@ impl Ui {
 	pub fn pages(&mut self, query_json: &str) -> Result<String, String> {
 		let query = parse_query(query_json)?;
 		let n = self.plan.pages.len();
-		let cut = |total: usize| {
-			let start = query.offset.min(total);
+		// The plan's place of the page `locate` names, if it has one.
+		let located: Option<usize> = query
+			.locate
+			.as_ref()
+			.and_then(|url| self.by_url.get(url).copied());
+		// Where the window starts: at the window that holds the located page (a multiple of
+		// `limit`), when the page is among the ones the query keeps (`at` is its place among
+		// them), and at `offset` otherwise.
+		let cut = |total: usize, at: Option<usize>| {
+			let start = match at {
+				Some(place) if query.limit > 0 => place / query.limit * query.limit,
+				_ => query.offset,
+			}
+			.min(total);
 			(start, start.saturating_add(query.limit).min(total))
 		};
 		// The pages of the window, and how many pages match. Every page is sorted once for the
@@ -2316,15 +2347,16 @@ impl Ui {
 		// query; but when the plan has no such order yet and the query keeps a small part of the
 		// pages, only those are sorted. Where the comparison has a cycle (see `natural`) the two
 		// can differ; no order is promised there.
-		let (total, ids): (usize, Vec<usize>) = match (&query.q, &query.sort) {
+		let (total, start, ids): (usize, usize, Vec<usize>) = match (&query.q, &query.sort) {
 			(None, None) => {
-				let (start, end) = cut(n);
-				(n, (start..end).collect())
+				let (start, end) = cut(n, located);
+				(n, start, (start..end).collect())
 			}
 			(None, Some(sort)) => {
 				let order = self.sorted_all(sort);
-				let (start, end) = cut(n);
-				(n, order[start..end].to_vec())
+				let at = located.and_then(|i| order.iter().position(|&p| p == i));
+				let (start, end) = cut(n, at);
+				(n, start, order[start..end].to_vec())
 			}
 			(Some(q), sort) => {
 				let kept: Vec<usize> = self
@@ -2354,13 +2386,15 @@ impl Ui {
 						}
 					},
 				};
-				let (start, end) = cut(kept.len());
-				(kept.len(), kept[start..end].to_vec())
+				let at = located.and_then(|i| kept.iter().position(|&p| p == i));
+				let (start, end) = cut(kept.len(), at);
+				(kept.len(), start, kept[start..end].to_vec())
 			}
 		};
 		let rows: Vec<Value> = ids.iter().map(|&i| self.page_json(i)).collect();
 		Ok(Value::Object(vec![
 			("version".to_owned(), Value::Number(self.version as f64)),
+			("offset".to_owned(), Value::Number(start as f64)),
 			("total".to_owned(), Value::Number(total as f64)),
 			(
 				"columns".to_owned(),
@@ -2771,7 +2805,14 @@ impl Ui {
 				o.text = text;
 			}
 		}
+		let before = crate::nav_order::order_of(&self.plan.pages[i].meta);
 		self.reread_page(i)?;
+		// What the key places is a place in the plan: when its number changed, the plan is
+		// put in its order again (without reading the site: the order is made of the metadata
+		// and the URLs the handle has).
+		if crate::nav_order::order_of(&self.plan.pages[i].meta) != before {
+			self.arrange_plan();
+		}
 		// A key set on this page is a column now, and one deleted from the last page that
 		// had it is not.
 		match change {
@@ -2779,11 +2820,12 @@ impl Ui {
 				self.columns.insert(key.clone());
 			}
 			KeyChange::Delete(key) => {
-				if !self
-					.plan
-					.pages
-					.iter()
-					.any(|p| p.meta.iter().any(|(k, _)| k == key))
+				if key != ORDER_KEY
+					&& !self
+						.plan
+						.pages
+						.iter()
+						.any(|p| p.meta.iter().any(|(k, _)| k == key))
 				{
 					self.columns.remove(key);
 				}

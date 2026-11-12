@@ -148,10 +148,20 @@ fn rows_say_where_each_value_comes_from_and_whether_it_can_be_edited() {
 	assert_eq!(ext.get("virtual"), Some(&Value::Bool(true)));
 	assert_eq!(ext.get("inputPath"), Some(&Value::Null));
 	assert_eq!(cell(&ext, "title").get("origin"), Some(&s("overrides")));
+	// Behavior change: `columns` always has `order` (RFC section 14.2): the key that places a page is a column even when no page has it
 	assert_eq!(
 		rows.get("columns"),
-		Some(&Value::Array(vec![s("layout"), s("nav"), s("title")]))
+		Some(&Value::Array(vec![
+			s("layout"),
+			s("nav"),
+			s("order"),
+			s("title")
+		]))
 	);
+	// assert_eq!( // previous
+	// 	rows.get("columns"), // previous
+	// 	Some(&Value::Array(vec![s("layout"), s("nav"), s("title")])) // previous
+	// ); // previous
 	assert_eq!(rows.get("overridesHash").map(Value::is_null), Some(false));
 }
 
@@ -259,20 +269,21 @@ fn rows_are_sorted_by_the_natural_order_over_every_page_and_not_only_the_window(
 
 #[test]
 fn a_page_without_a_value_goes_last_whichever_way_the_column_runs() {
+	// The sample key is `rank`: `order` places a page and is no key to sort by (RFC section 6).
 	let site = Site::new("sort_meta");
-	site.write("src/a.html", "---\norder: 10\n---\n");
-	site.write("src/b.html", "---\norder: 2\n---\n");
+	site.write("src/a.html", "---\nrank: 10\n---\n");
+	site.write("src/b.html", "---\nrank: 2\n---\n");
 	site.write("src/c.html", "---\ntitle: none\n---\n");
-	site.write("src/d.html", "---\norder: ~\n---\n");
-	site.write("src/e.html", "---\norder: 2\n---\n");
+	site.write("src/d.html", "---\nrank: ~\n---\n");
+	site.write("src/e.html", "---\nrank: 2\n---\n");
 	let mut ui = site.open("");
-	let asc = r#"{"offset":0,"limit":100,"sort":{"key":"meta:order"}}"#;
+	let asc = r#"{"offset":0,"limit":100,"sort":{"key":"meta:rank"}}"#;
 	// `b` and `e` are equal: the plan's order (by URL) is kept.
 	assert_eq!(
 		urls_of(&mut ui, asc),
 		["/b.html", "/e.html", "/a.html", "/c.html", "/d.html"]
 	);
-	let desc = r#"{"offset":0,"limit":100,"sort":{"key":"meta:order","desc":true}}"#;
+	let desc = r#"{"offset":0,"limit":100,"sort":{"key":"meta:rank","desc":true}}"#;
 	assert_eq!(
 		urls_of(&mut ui, desc),
 		["/a.html", "/b.html", "/e.html", "/c.html", "/d.html"]
@@ -281,30 +292,31 @@ fn a_page_without_a_value_goes_last_whichever_way_the_column_runs() {
 
 #[test]
 fn the_order_kept_for_a_sort_follows_an_edit_and_a_new_plan() {
+	// The sample key is `rank`: `order` places a page and is no key to sort by (RFC section 6).
 	let site = Site::new("sort_cache");
-	site.write("src/a.html", "---\norder: 1\n---\n");
-	site.write("src/b.html", "---\norder: 2\n---\n");
-	site.write("src/c.html", "---\norder: 3\n---\n");
+	site.write("src/a.html", "---\nrank: 1\n---\n");
+	site.write("src/b.html", "---\nrank: 2\n---\n");
+	site.write("src/c.html", "---\nrank: 3\n---\n");
 	let mut ui = site.open("");
-	let query = r#"{"offset":0,"limit":100,"sort":{"key":"meta:order"}}"#;
+	let query = r#"{"offset":0,"limit":100,"sort":{"key":"meta:rank"}}"#;
 	assert_eq!(urls_of(&mut ui, query), ["/a.html", "/b.html", "/c.html"]);
 	// The same sort again is answered from what was kept: the same rows.
 	assert_eq!(urls_of(&mut ui, query), ["/a.html", "/b.html", "/c.html"]);
 	// An edit changes the version: the order is made again.
 	let all = all(&mut ui);
 	let row = page(&all, "/a.html");
-	let answer = edit(&mut ui, "/a.html", &expect(&all, &row), &set("order", "9"));
+	let answer = edit(&mut ui, "/a.html", &expect(&all, &row), &set("rank", "9"));
 	assert!(ok(&answer));
 	assert_eq!(urls_of(&mut ui, query), ["/b.html", "/c.html", "/a.html"]);
 	// A file changed outside is read in by a refresh, which is a new plan.
-	site.write("src/b.html", "---\norder: 20\n---\n");
+	site.write("src/b.html", "---\nrank: 20\n---\n");
 	ui.refresh().unwrap();
 	assert_eq!(urls_of(&mut ui, query), ["/c.html", "/a.html", "/b.html"]);
 	// A query keeps the order of the sort for the pages it keeps.
-	let found = r#"{"offset":0,"limit":100,"q":".html","sort":{"key":"meta:order","desc":true}}"#;
+	let found = r#"{"offset":0,"limit":100,"q":".html","sort":{"key":"meta:rank","desc":true}}"#;
 	assert_eq!(urls_of(&mut ui, found), ["/b.html", "/a.html", "/c.html"]);
 	// And a window is cut from that order.
-	let window = r#"{"offset":1,"limit":1,"q":".html","sort":{"key":"meta:order","desc":true}}"#;
+	let window = r#"{"offset":1,"limit":1,"q":".html","sort":{"key":"meta:rank","desc":true}}"#;
 	assert_eq!(urls_of(&mut ui, window), ["/a.html"]);
 }
 
@@ -781,7 +793,12 @@ fn the_output_path_key_is_changed_by_moving_the_url_and_not_as_a_key() {
 		cell(&row, "path").get("editable"),
 		Some(&Value::Bool(false))
 	);
-	assert_eq!(rows.get("columns"), Some(&Value::Array(vec![s("title")])));
+	// Behavior change: `columns` always has `order` (RFC section 14.2): the key that places a page is a column even when no page has it
+	assert_eq!(
+		rows.get("columns"),
+		Some(&Value::Array(vec![s("order"), s("title")]))
+	);
+	// assert_eq!(rows.get("columns"), Some(&Value::Array(vec![s("title")]))); // previous
 	let ex = expect(&rows, &row);
 	let answer = edit(&mut ui, "/en/news.html", &ex, &set("path", r#""/x.html""#));
 	assert_eq!(code(&answer), "notEditable");
@@ -912,7 +929,9 @@ fn moving_a_virtual_page_changes_the_url_in_pages_overrides() {
 	let Some(Value::Array(pages)) = rows.get("pages") else {
 		panic!("pages")
 	};
-	assert_eq!(pages[0].get("url"), Some(&s("/outside/")));
+	// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the order of `pages` is the one `order` and the URLs make, a page before what hangs from it, the children in the natural order of their URLs
+	assert_eq!(pages[0].get("url"), Some(&s("/a.html")));
+	// assert_eq!(pages[0].get("url"), Some(&s("/outside/"))); // previous
 }
 
 #[test]
@@ -1194,14 +1213,24 @@ fn a_column_goes_when_the_last_page_that_had_the_key_loses_it() {
 	site.write("src/b.html", "---\ntitle: B\n---\n");
 	let mut ui = site.open("");
 	let rows = all(&mut ui);
+	// Behavior change: `columns` always has `order` (RFC section 14.2): the key that places a page is a column even when no page has it
 	assert_eq!(
 		rows.get("columns"),
-		Some(&Value::Array(vec![s("only"), s("title")]))
+		Some(&Value::Array(vec![s("only"), s("order"), s("title")]))
 	);
+	// assert_eq!( // previous
+	// 	rows.get("columns"), // previous
+	// 	Some(&Value::Array(vec![s("only"), s("title")])) // previous
+	// ); // previous
 	let ex = expect(&rows, &page(&rows, "/a.html"));
 	assert!(ok(&edit(&mut ui, "/a.html", &ex, &delete("only"))));
 	let rows = all(&mut ui);
-	assert_eq!(rows.get("columns"), Some(&Value::Array(vec![s("title")])));
+	// Behavior change: `columns` always has `order` (RFC section 14.2): the key that places a page is a column even when no page has it
+	assert_eq!(
+		rows.get("columns"),
+		Some(&Value::Array(vec![s("order"), s("title")]))
+	);
+	// assert_eq!(rows.get("columns"), Some(&Value::Array(vec![s("title")]))); // previous
 }
 
 #[test]
@@ -2375,7 +2404,9 @@ fn the_answer_carries_how_the_config_presents_the_keys() {
 		r#"{"title":{"label":{"ja":"タイトル","en":"Title"},"description":"Used for <title>"},"navHidden":{"label":"Hidden"},"layout":{}}"#
 	);
 	// the keys of the config are not columns: no page has them
-	assert_eq!(answer.get("columns").unwrap().to_json(), "[]");
+	// Behavior change: `columns` always has `order` (RFC section 14.2): the key that places a page is a column even when no page has it
+	assert_eq!(answer.get("columns").unwrap().to_json(), r#"["order"]"#);
+	// assert_eq!(answer.get("columns").unwrap().to_json(), "[]"); // previous
 }
 
 #[test]
@@ -2407,4 +2438,317 @@ fn the_answer_has_no_keys_when_the_config_names_none() {
 	site.write("src/index.html", "<p>x</p>");
 	let mut ui = site.open("");
 	assert_eq!(all(&mut ui).get("keys").unwrap().to_json(), "{}");
+}
+
+// ---- the key that places a page (`order`, RFC §6)
+
+fn order_site(name: &str) -> (Site, Ui) {
+	let site = Site::new(name);
+	site.write("src/index.html", "---\ntitle: Home\n---\n");
+	site.write("src/a.html", "---\ntitle: A\n---\n");
+	site.write("src/b.html", "---\ntitle: B\n---\n");
+	site.write("src/c.html", "---\ntitle: C\n---\n");
+	let ui = site.open("");
+	(site, ui)
+}
+
+#[test]
+fn the_pages_are_listed_by_their_order_among_their_siblings() {
+	let (site, mut ui) = order_site("order_listed");
+	assert_eq!(
+		urls_of(&mut ui, r#"{"offset":0,"limit":100}"#),
+		["/", "/a.html", "/b.html", "/c.html"]
+	);
+	site.write("src/c.html", "---\ntitle: C\norder: -1\n---\n");
+	site.write("src/a.html", "---\ntitle: A\norder: \"3\"\n---\n");
+	ui.refresh().unwrap();
+	assert_eq!(
+		urls_of(&mut ui, r#"{"offset":0,"limit":100}"#),
+		["/", "/c.html", "/b.html", "/a.html"]
+	);
+}
+
+#[test]
+fn an_edit_of_order_puts_the_pages_in_their_order_without_reading_the_site() {
+	let (_site, mut ui) = order_site("order_edit");
+	let plans = ui.plans;
+	let rows = all(&mut ui);
+	let answer = edit(
+		&mut ui,
+		"/a.html",
+		&expect(&rows, &page(&rows, "/a.html")),
+		&set("order", "5"),
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(
+		urls_of(&mut ui, r#"{"offset":0,"limit":100}"#),
+		["/", "/b.html", "/c.html", "/a.html"]
+	);
+	// The answer is the page where it is now, and the plan was not read again.
+	assert_eq!(
+		answer.get("page").and_then(|p| p.get("url")),
+		Some(&s("/a.html"))
+	);
+	assert_eq!(ui.plans, plans);
+	// A key that is not `order` leaves the order alone.
+	let rows = all(&mut ui);
+	let answer = edit(
+		&mut ui,
+		"/b.html",
+		&expect(&rows, &page(&rows, "/b.html")),
+		&set("title", r#""Bee""#),
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(
+		urls_of(&mut ui, r#"{"offset":0,"limit":100}"#),
+		["/", "/b.html", "/c.html", "/a.html"]
+	);
+	// Taking `order` away puts the page back among the others.
+	let rows = all(&mut ui);
+	let answer = edit(
+		&mut ui,
+		"/a.html",
+		&expect(&rows, &page(&rows, "/a.html")),
+		&delete("order"),
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(
+		urls_of(&mut ui, r#"{"offset":0,"limit":100}"#),
+		["/", "/a.html", "/b.html", "/c.html"]
+	);
+}
+
+#[test]
+fn the_order_column_is_there_whether_or_not_a_page_has_it_and_stays_when_the_last_one_loses_it() {
+	let (_site, mut ui) = order_site("order_column");
+	assert_eq!(
+		all(&mut ui).get("columns").unwrap().to_json(),
+		r#"["order","title"]"#
+	);
+	let rows = all(&mut ui);
+	let answer = edit(
+		&mut ui,
+		"/a.html",
+		&expect(&rows, &page(&rows, "/a.html")),
+		&set("order", "1"),
+	);
+	assert!(ok(&answer), "{answer:?}");
+	let rows = all(&mut ui);
+	let answer = edit(
+		&mut ui,
+		"/a.html",
+		&expect(&rows, &page(&rows, "/a.html")),
+		&delete("order"),
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(
+		all(&mut ui).get("columns").unwrap().to_json(),
+		r#"["order","title"]"#
+	);
+}
+
+#[test]
+fn no_row_carries_a_number_of_its_place() {
+	let (_site, mut ui) = order_site("order_no_number");
+	let rows = all(&mut ui);
+	assert!(page(&rows, "/a.html").get("order").is_none());
+}
+
+#[test]
+fn order_is_not_a_key_to_sort_by_and_the_refusal_says_why() {
+	let (_site, mut ui) = order_site("order_no_sort");
+	for key in ["order", "meta:order"] {
+		let error = ui
+			.pages(&format!(
+				r#"{{"offset":0,"limit":100,"sort":{{"key":"{key}"}}}}"#
+			))
+			.unwrap_err();
+		assert!(error.contains("sort.key"), "{key}: {error}");
+	}
+	let error = ui
+		.pages(r#"{"offset":0,"limit":100,"sort":{"key":"meta:order"}}"#)
+		.unwrap_err();
+	assert!(error.contains("siblings"), "{error}");
+}
+
+#[test]
+fn a_page_is_found_in_the_window_that_holds_it() {
+	let site = Site::new("order_locate");
+	for n in 0..10 {
+		site.write(&format!("src/p{n}.html"), "x");
+	}
+	let mut ui = site.open("");
+	let query = |extra: &str| format!(r#"{{"offset":0,"limit":3{extra}}}"#);
+	// `/p7.html` is the eighth page: the third window of three starts at 6.
+	let located = rows(&mut ui, &query(r#","locate":"/p7.html""#));
+	assert_eq!(located.get("offset"), Some(&Value::Number(6.0)));
+	assert_eq!(
+		urls_of(&mut ui, &query(r#","locate":"/p7.html""#)),
+		["/p6.html", "/p7.html", "/p8.html"]
+	);
+	// Without it, the window is where `offset` says, and the answer says where that is.
+	let plain = rows(&mut ui, r#"{"offset":3,"limit":3}"#);
+	assert_eq!(plain.get("offset"), Some(&Value::Number(3.0)));
+	// A page that is not there leaves the window where it was asked for.
+	let none = rows(&mut ui, r#"{"offset":3,"limit":3,"locate":"/nope/"}"#);
+	assert_eq!(none.get("offset"), Some(&Value::Number(3.0)));
+	// The window is the one of the sort and of the search the query has.
+	let sorted = rows(
+		&mut ui,
+		r#"{"offset":0,"limit":3,"sort":{"key":"url","desc":true},"locate":"/p7.html"}"#,
+	);
+	assert_eq!(sorted.get("offset"), Some(&Value::Number(0.0)));
+	let found = rows(
+		&mut ui,
+		r#"{"offset":0,"limit":2,"q":"p","locate":"/p5.html"}"#,
+	);
+	assert_eq!(found.get("offset"), Some(&Value::Number(4.0)));
+	// A page that the search leaves out is not found: the window is the one asked for.
+	let left_out = rows(
+		&mut ui,
+		r#"{"offset":2,"limit":2,"q":"p1","locate":"/p5.html"}"#,
+	);
+	assert_eq!(left_out.get("offset"), Some(&Value::Number(1.0)));
+	assert!(ui.pages(r#"{"offset":0,"limit":3,"locate":1}"#).is_err());
+}
+
+const WITH_OVERRIDES: &str = r#", "pages": { "overrides": "pages.overrides.json" }"#;
+
+fn plan_urls(ui: &mut Ui) -> Vec<String> {
+	urls_of(ui, r#"{"offset":0,"limit":100}"#)
+}
+
+fn set_order(ui: &mut Ui, url: &str, value: &str) {
+	let rows = all(ui);
+	let answer = edit(
+		ui,
+		url,
+		&expect(&rows, &page(&rows, url)),
+		&set("order", value),
+	);
+	assert!(ok(&answer), "{answer:?}");
+}
+
+#[test]
+fn order_is_read_from_every_source_and_an_edit_places_the_page_wherever_it_is_written() {
+	let site = Site::new("order_sources");
+	site.write("src/a.html", "---\ntitle: A\n---\n");
+	site.write("src/b.html", "---\ntitle: B\n---\n");
+	site.write("src/b.json", r#"{ "order": 5 }"#);
+	site.write("src/c.html", "---\ntitle: C\n---\n");
+	site.write(
+		"pages.overrides.json",
+		r#"{ "version": 1, "pages": [ { "url": "/c.html", "meta": { "order": -1 } }, { "url": "/v/", "virtual": true, "meta": { "order": -2 } } ] }"#,
+	);
+	let mut ui = site.open(WITH_OVERRIDES);
+	// the sidecar, an entry of the file and a virtual page place pages as the page file does
+	assert_eq!(plan_urls(&mut ui), ["/v/", "/c.html", "/a.html", "/b.html"]);
+	// each edit is written where the key is, and the page goes where its number says
+	set_order(&mut ui, "/b.html", "-5");
+	assert!(site.read("src/b.json").contains("-5"));
+	assert_eq!(plan_urls(&mut ui), ["/b.html", "/v/", "/c.html", "/a.html"]);
+	set_order(&mut ui, "/c.html", "9");
+	assert!(!site.read("pages.overrides.json").contains("-1"));
+	assert_eq!(plan_urls(&mut ui), ["/b.html", "/v/", "/a.html", "/c.html"]);
+	set_order(&mut ui, "/v/", "7");
+	assert_eq!(plan_urls(&mut ui), ["/b.html", "/a.html", "/v/", "/c.html"]);
+}
+
+#[test]
+fn the_order_of_the_index_of_a_directory_moves_what_is_in_it() {
+	let site = Site::new("order_directory");
+	for path in ["a/index.html", "a/x.html", "b/index.html", "c.html"] {
+		site.write(&format!("src/{path}"), "---\ntitle: T\n---\n");
+	}
+	let mut ui = site.open("");
+	assert_eq!(plan_urls(&mut ui), ["/a/", "/a/x.html", "/b/", "/c.html"]);
+	set_order(&mut ui, "/a/", "5");
+	assert_eq!(plan_urls(&mut ui), ["/b/", "/c.html", "/a/", "/a/x.html"]);
+}
+
+#[test]
+fn a_number_written_another_way_leaves_the_place_and_one_that_is_none_is_zero() {
+	let (_site, mut ui) = order_site("order_spelling");
+	set_order(&mut ui, "/a.html", "5");
+	assert_eq!(plan_urls(&mut ui), ["/", "/b.html", "/c.html", "/a.html"]);
+	// 5 written as "5.0" is the same place
+	set_order(&mut ui, "/a.html", "5.0");
+	assert_eq!(plan_urls(&mut ui), ["/", "/b.html", "/c.html", "/a.html"]);
+	// a text that is no number is 0
+	set_order(&mut ui, "/a.html", "\"abc\"");
+	assert_eq!(plan_urls(&mut ui), ["/", "/a.html", "/b.html", "/c.html"]);
+}
+
+#[test]
+fn the_order_kept_for_a_sort_is_not_the_one_of_before_an_edit_of_order() {
+	let (_site, mut ui) = order_site("order_sort_cache");
+	let by_url = r#"{"offset":0,"limit":100,"sort":{"key":"url"}}"#;
+	let window = r#"{"offset":0,"limit":2,"sort":{"key":"url","desc":true}}"#;
+	let before = urls_of(&mut ui, by_url);
+	let before_window = urls_of(&mut ui, window);
+	// the sort is kept for the plan as it is; the edit puts the pages in another order
+	set_order(&mut ui, "/a.html", "5");
+	assert_eq!(plan_urls(&mut ui), ["/", "/b.html", "/c.html", "/a.html"]);
+	assert_eq!(urls_of(&mut ui, by_url), before);
+	assert_eq!(urls_of(&mut ui, window), before_window);
+}
+
+#[test]
+fn the_window_of_a_located_page_follows_the_limit_the_sort_and_the_search() {
+	let site = Site::new("order_locate_edges");
+	for n in 0..10 {
+		site.write(&format!("src/p{n}.html"), "x");
+	}
+	let mut ui = site.open("");
+	let offset = |ui: &mut Ui, query: &str| rows(ui, query).get("offset").cloned();
+	let n = |v: f64| Some(Value::Number(v));
+	// descending by URL, `/p7.html` is third: in the window of two that starts at 2
+	assert_eq!(
+		offset(
+			&mut ui,
+			r#"{"offset":0,"limit":2,"sort":{"key":"url","desc":true},"locate":"/p7.html"}"#
+		),
+		n(2.0)
+	);
+	// the search keeps `/p1.html` and `/p7.html`, as the second of two: the window of one
+	assert_eq!(
+		offset(
+			&mut ui,
+			r#"{"offset":0,"limit":1,"q":"p1","sort":{"key":"url"},"locate":"/p1.html"}"#
+		),
+		n(0.0)
+	);
+	assert_eq!(
+		offset(
+			&mut ui,
+			r#"{"offset":0,"limit":1,"q":"p","sort":{"key":"url"},"locate":"/p5.html"}"#
+		),
+		n(5.0)
+	);
+	// a window of no rows has no window to find, and a window larger than the list starts at 0
+	assert_eq!(
+		offset(&mut ui, r#"{"offset":3,"limit":0,"locate":"/p5.html"}"#),
+		n(3.0)
+	);
+	assert_eq!(
+		offset(&mut ui, r#"{"offset":0,"limit":100,"locate":"/p5.html"}"#),
+		n(0.0)
+	);
+	// the search keeps the page where the window is asked for, and drops it where it is not
+	assert_eq!(
+		offset(
+			&mut ui,
+			r#"{"offset":0,"limit":3,"q":"p5","locate":"/p9.html"}"#
+		),
+		n(0.0)
+	);
+}
+
+#[test]
+fn a_site_with_no_page_has_a_window_at_zero_whatever_is_located() {
+	let site = Site::new("order_locate_empty");
+	let mut ui = site.open("");
+	let answer = rows(&mut ui, r#"{"offset":0,"limit":10,"locate":"/a/"}"#);
+	assert_eq!(answer.get("offset"), Some(&Value::Number(0.0)));
+	assert_eq!(answer.get("total"), Some(&Value::Number(0.0)));
 }

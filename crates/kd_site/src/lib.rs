@@ -359,13 +359,7 @@ pub fn path_to_local_path(pathname: &str, extension: &str) -> String {
 /// ```
 #[must_use]
 pub fn url_depth_and_parent(url: &str) -> (usize, Option<String>) {
-	let rest = url.strip_prefix('/').unwrap_or(url);
-	let mut segments: Vec<&str> = rest.split('/').collect();
-	let name = segments.pop().unwrap_or("");
-	// `//` is one separator, as the tree reads a path.
-	let dirs: Vec<&str> = segments.into_iter().filter(|s| !s.is_empty()).collect();
-	let stem = &name[..name.len() - path::extname(name).len()];
-	let is_index = name.is_empty() || stem.to_lowercase() == "index";
+	let (dirs, is_index) = split_page_url(url);
 	let depth = dirs.len() + usize::from(!is_index);
 	let above = if is_index {
 		match dirs.split_last() {
@@ -381,6 +375,48 @@ pub fn url_depth_and_parent(url: &str) -> (usize, Option<String>) {
 		format!("/{}/", above.join("/"))
 	};
 	(depth, Some(parent))
+}
+
+/// The directories a page URL is in, and whether the page is the index of the last one: what
+/// the `parent`, the depth and the tree of the navigation all read a URL for, so they are told
+/// by one rule. `//` is one separator, as the tree reads a path; an index is a last segment that
+/// is empty (the URL ends with `/`) or whose name, without its extension, is `index` in any case.
+fn split_page_url(url: &str) -> (Vec<&str>, bool) {
+	let rest = url.strip_prefix('/').unwrap_or(url);
+	let mut segments: Vec<&str> = rest.split('/').collect();
+	let name = segments.pop().unwrap_or("");
+	let dirs: Vec<&str> = segments.into_iter().filter(|s| !s.is_empty()).collect();
+	let stem = &name[..name.len() - path::extname(name).len()];
+	let is_index = name.is_empty() || stem.to_lowercase() == "index";
+	(dirs, is_index)
+}
+
+/// The name a page has as a node of the navigation tree (RFC §6, "並び順"): the directory for
+/// the index of a directory (`/a/` for `/a/`, `/a/index.php` and `/a/INDEX.html`; `/` for the
+/// root), and the URL itself for any other page. A page and the directory it is the index of
+/// are one node; the parent of a node is the `parent` that [`url_depth_and_parent`] gives
+/// for it.
+///
+/// # Example
+///
+/// ```
+/// assert_eq!(kd_site::url_stem("/"), "/");
+/// assert_eq!(kd_site::url_stem("/a/"), "/a/");
+/// assert_eq!(kd_site::url_stem("/a/INDEX.html"), "/a/");
+/// assert_eq!(kd_site::url_stem("/a/b.html"), "/a/b.html");
+/// ```
+#[must_use]
+pub fn url_stem(url: &str) -> String {
+	let (dirs, is_index) = split_page_url(url);
+	if is_index {
+		if dirs.is_empty() {
+			"/".to_string()
+		} else {
+			format!("/{}/", dirs.join("/"))
+		}
+	} else {
+		url.to_string()
+	}
 }
 
 /// What to do when two inputs produce the same output path.

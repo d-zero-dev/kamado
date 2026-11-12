@@ -1854,3 +1854,49 @@ fn the_check_of_edits_that_exclude_each_other_is_not_the_product_of_the_pages_th
 		"{n} deletes took {took:?} to check"
 	);
 }
+
+fn urls_in_order(rows: &Value) -> Vec<String> {
+	let Some(Value::Array(pages)) = rows.get("pages") else {
+		panic!("pages")
+	};
+	pages
+		.iter()
+		.map(|p| p.get("url").and_then(Value::as_str).unwrap().to_owned())
+		.collect()
+}
+
+#[test]
+fn a_batch_that_sets_order_leaves_the_pages_in_the_order_it_makes() {
+	let (_site, mut ui) = three("batch_order");
+	assert_eq!(urls_in_order(&rows(&mut ui)), ["/a/", "/b/", "/c/"]);
+	let r = rows(&mut ui);
+	let answer = batch(
+		&mut ui,
+		&[
+			("/c/", expect(&r, "/c/"), set("order", "-1")),
+			("/a/", expect(&r, "/a/"), set("order", "3")),
+		],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	// the answer, and what the next read tells, are in the new order
+	assert_eq!(urls_in_order(&rows(&mut ui)), ["/c/", "/b/", "/a/"]);
+}
+
+#[test]
+fn a_batch_that_moves_and_makes_pages_leaves_the_pages_in_the_tree_order() {
+	let (_site, mut ui) = three("batch_tree_order");
+	let r = rows(&mut ui);
+	let answer = batch(
+		&mut ui,
+		&[
+			("/a/", expect(&r, "/a/"), move_to("/z/")),
+			(
+				"/aa/",
+				"{}".to_string(),
+				r#"{"op":"create","path":"aa/index.html"}"#.to_string(),
+			),
+		],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(urls_in_order(&rows(&mut ui)), ["/aa/", "/b/", "/c/", "/z/"]);
+}

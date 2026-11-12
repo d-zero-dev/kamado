@@ -237,7 +237,7 @@ describe('POST /api/edit: pages that are made, made virtual, given a file and re
 });
 
 describe('GET /api/pages: the columns every row has are sorts', () => {
-	test.each(['order', 'outputPath', 'parent', 'depth'])(
+	test.each(['outputPath', 'parent', 'depth'])(
 		'%s is passed to the core',
 		async (key) => {
 			const { app, editor } = setup();
@@ -259,7 +259,9 @@ describe('GET /api/pages: the columns every row has are sorts', () => {
 		expect(response.status).toBe(400);
 		const body = (await response.json()) as { error: string; message: string };
 		expect(body.error).toBe('invalidSort');
-		expect(body.message).toContain('order, outputPath, parent, depth');
+		// Behavior change: the number of the place in the plan is no column any more (RFC section 14.2): `order` is a key of the metadata
+		expect(body.message).toContain('inputPath, outputPath, parent, depth');
+		// expect(body.message).toContain('order, outputPath, parent, depth'); // previous
 		expect(editor.uiPages).not.toHaveBeenCalled();
 	});
 });
