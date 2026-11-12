@@ -11,6 +11,40 @@
  * which keys matter, so it depends on every key; so does a failed render.
  */
 
+/**
+ * Gives `data` a key for each data file that failed to run: reading it throws, with the
+ * reason, so a page that needs the file fails and the others are not affected.
+ * Why a getter on the key and not a check in the recording view: enumeration, the spread
+ * and `JSON.stringify` then fail as well, instead of silently leaving the key out.
+ * @param data - The data of the context
+ * @param errors - The reason of each failed key, if any
+ * @returns `data` itself when nothing failed, else a copy with the failed keys added
+ * @example
+ * ```ts
+ * const data = withFailures({ a: 1 }, { news: 'timed out' });
+ * data.news; // throws: data.news is not available …
+ * ```
+ */
+export function withFailures<T extends object>(
+	data: T,
+	errors: Readonly<Record<string, string>> | null | undefined,
+): T {
+	const failed = Object.entries(errors ?? {});
+	if (failed.length === 0) {
+		return data;
+	}
+	const copy = { ...data } as Record<string, unknown>;
+	for (const [key, why] of failed) {
+		Object.defineProperty(copy, key, {
+			enumerable: true,
+			get() {
+				throw new Error(`data.${key} is not available, its data file failed: ${why}`);
+			},
+		});
+	}
+	return copy as T;
+}
+
 /** What `tracedData` tells about a `data` that records reads. */
 export interface TracedData<T extends object> {
 	/** The plain data behind the view. */

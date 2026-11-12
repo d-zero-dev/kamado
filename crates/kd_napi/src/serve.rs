@@ -222,6 +222,15 @@ pub(crate) fn finish_render_reads(
 	.map(answer)
 }
 
+/// Gives the dev server what the data files that are scripts made of themselves:
+/// `{ "<key>": { "value": … } | { "error": "…" } }`, for all of them.
+pub(crate) fn set_data(handle: &str, executed_json: &str) -> Result<String, Thrown> {
+	let value = kd_jsonc::parse(executed_json).map_err(|e| format!("executed data: {e}"))?;
+	let executed = crate::executed_from(&value)?;
+	with(handle, |serve| serve.set_executed(executed))?;
+	Ok("{}".to_owned())
+}
+
 /// Takes what esbuild built for a `script` answer:
 /// `{ "code": "...", "inputs": ["..."] }`.
 pub(crate) fn finish_script(handle: &str, tok: &str, output_json: &str) -> Result<String, Thrown> {

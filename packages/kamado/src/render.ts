@@ -11,7 +11,7 @@ import { availableParallelism } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 
-import { recordDataReads } from './data-trace.js';
+import { recordDataReads, withFailures } from './data-trace.js';
 import { createProps, type RenderContext } from './props.js';
 
 /** What the core asks for one page. */
@@ -110,12 +110,13 @@ export async function createRenderer(
 	onReads?: (page: number, keys: readonly string[] | null) => void,
 ): Promise<(job: RenderJob) => Promise<Rendered>> {
 	const { render, html: markup } = (await import(runtimeUrl)) as RuntimeModule;
+	const data = withFailures(context.data, context.dataErrors);
 	return async (job) => {
 		const page = context.pages[job.page];
 		if (!page) {
 			throw new Error(`the core asked for page ${job.page}, which does not exist`);
 		}
-		const trace = recordDataReads(context.data);
+		const trace = recordDataReads(data);
 		// Why `data` is replaced after `createProps` and not passed to it: the context it takes
 		// is shared by every page (it caches the page list), while the view that records
 		// belongs to this render.

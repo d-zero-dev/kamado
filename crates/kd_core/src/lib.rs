@@ -32,8 +32,12 @@ pub mod style;
 pub mod style_import;
 mod ui;
 
+pub use data::{Executed, SCRIPT_EXTENSIONS, ScriptFile};
 pub use page_map::pages;
-pub use session::{Prepared, RenderJob, ScriptOutput, build, prepare, write_report};
+pub use session::{
+	DataModule, DataPlan, Prepared, RenderJob, ScriptOutput, build, data_plan, prepare,
+	write_report,
+};
 pub use ui::{ServerSettings, Ui};
 
 use kd_config::Config;
@@ -808,6 +812,9 @@ pub struct BuildOptions {
 	/// A dev server is building: `onServer` source maps are written and the
 	/// banner is the development warning.
 	pub serving: bool,
+	/// What the Node side made of each data file that is a script: its value, or
+	/// why it has none (see [`data_plan`]).
+	pub executed_data: Vec<(String, Executed)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -863,6 +870,9 @@ pub struct Report {
 	/// Why a page that an earlier build wrote was built again: `(url, reason)`.
 	/// Pages built for the first time have none. For `--verbose`.
 	pub reasons: Vec<(String, String)>,
+	/// What the Node side decided about each data file that is a script, one line each,
+	/// for `--verbose`. The caller sets it before the report is written.
+	pub data: Vec<String>,
 }
 
 impl Report {
@@ -937,6 +947,10 @@ impl Report {
 				})
 				.collect();
 			fields.push(("reasons".to_string(), Value::Array(reasons)));
+		}
+		if !self.data.is_empty() {
+			let lines = self.data.iter().map(|l| Value::String(l.clone())).collect();
+			fields.push(("data".to_string(), Value::Array(lines)));
 		}
 		Value::Object(fields).to_json()
 	}

@@ -599,6 +599,82 @@ pub(crate) fn site_json(config: &kd_config::Config) -> Value {
 	])
 }
 
+/// A data file that is a script, compiled for the Node side to run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataModule {
+	/// The key of `data` the value is given to.
+	pub key: String,
+	/// The data file (absolute path).
+	pub source: String,
+	/// The compiled module Node imports (absolute path).
+	pub module: String,
+	/// Every file the module is made of, with the files that were looked for and not
+	/// found: when one changes (or appears), the data file has to run again.
+	pub sources: Vec<String>,
+}
+
+/// The data files that are scripts, ready to run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataPlan {
+	/// In the order of the file names.
+	pub modules: Vec<DataModule>,
+	/// Where the values are kept between runs (absolute path).
+	pub cache_dir: String,
+	/// `data.dir`, when the site has one.
+	pub data_dir: Option<String>,
+}
+
+/// Compiles the data files of `data.dir` that are scripts (with the compiler of the
+/// pages: `pages.alias`, `pages.define`, TypeScript, and the imports followed), so that
+/// the Node side can run them before the data is loaded. Nothing is run here.
+///
+/// # Errors
+///
+/// A message for a data directory that cannot be read, two files with the same key,
+/// or a syntax error or unresolvable import in a data file.
+pub fn data_plan(
+	loaded: &Loaded,
+	options: &BuildOptions,
+	runtime: &str,
+) -> Result<DataPlan, String> {
+	let config = &loaded.config;
+	let cache_dir = kd_build::cache_dir(
+		&config.root_dir,
+		options
+			.cache_dir
+			.as_deref()
+			.or(config.build.cache_dir.as_deref()),
+	);
+	let files = crate::data::script_files(config)?;
+	let modules = Modules::new(
+		&config.root_dir,
+		runtime,
+		&config.pages.alias,
+		&config.pages.define,
+	);
+	let mut planned = Vec::with_capacity(files.len());
+	for file in files {
+		if planned.iter().any(|m: &DataModule| m.key == file.key) {
+			return Err(format!(
+				"{}: another data file already defines the key {:?}",
+				file.path, file.key
+			));
+		}
+		let compiled = modules.compile(&file.path)?;
+		planned.push(DataModule {
+			key: file.key,
+			sources: modules.sources_of(&file.path),
+			module: compiled.out_path.clone(),
+			source: file.path,
+		});
+	}
+	Ok(DataPlan {
+		modules: planned,
+		cache_dir,
+		data_dir: config.data.dir.clone(),
+	})
+}
+
 /// What planning the pages gives, with the settings that were decided on the way.
 pub(crate) struct Planned {
 	pub plan: Plan,
@@ -724,7 +800,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	let env = page_env(loaded, options);
 	let pipeline = html::Pipeline::compile(config)?;
 	let sitemap = crate::sitemap::settings(config)?;
-	let data = crate::data::load(config)?;
+	let data = crate::data::load(config, &options.executed_data)?;
 	lap(&mut lap_at, "html pipeline and data");
 
 	let any_js = plan.pages.iter().any(needs_js);
@@ -1035,14 +1111,15 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	} else {
 		let date = now_iso();
 		let pages: Vec<Value> = plan.pages.iter().map(|p| page_json(p, &date)).collect();
-		Some(
-			Value::Object(vec![
-				("site".to_owned(), site_json(config)),
-				("data".to_owned(), data.value),
-				("pages".to_owned(), Value::Array(pages)),
-			])
-			.to_json(),
-		)
+		let mut members = vec![
+			("site".to_owned(), site_json(config)),
+			("data".to_owned(), data.value),
+			("pages".to_owned(), Value::Array(pages)),
+		];
+		if let Some(errors) = crate::data::errors_json(&data.errors) {
+			members.push(("dataErrors".to_owned(), errors));
+		}
+		Some(Value::Object(members).to_json())
 	};
 
 	lap(&mut lap_at, "assets and context");
@@ -1365,6 +1442,7 @@ impl Prepared {
 			assets: Vec::with_capacity(asset_results.len()),
 			warnings: shared.plan.warnings.clone(),
 			elapsed_ms: 0,
+			data: Vec::new(),
 			reasons: reasons
 				.into_iter()
 				.map(|(i, why)| (shared.plan.pages[i].file.url.clone(), why))

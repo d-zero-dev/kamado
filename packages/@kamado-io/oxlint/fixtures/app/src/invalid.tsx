@@ -22,6 +22,10 @@ export const fetchAll = () => fetch('https://example.com/all.json'); // ✗ no-u
 export const fetchEach = (urls: string[]) => urls.map(fetch); // ✗ no-untracked-input
 export const legacy = () => new XMLHttpRequest(); // ✗ no-untracked-input
 const { fetch: get } = globalThis; // ✗ no-untracked-input
+export const key = () => process.env['API_KEY']; // ✗ no-untracked-input
+export const builtAt = () => new Date().toISOString(); // ✗ no-untracked-input
+export const nowMs = () => Date.now(); // ✗ no-untracked-input
+export const pick = () => Math.random(); // ✗ no-untracked-input
 
 export const Header = (props: { title: string }) => {
 	visits++; // ✗ no-module-state

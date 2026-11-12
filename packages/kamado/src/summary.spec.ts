@@ -120,4 +120,13 @@ describe('summarize', () => {
 			'  cached    /o/css/a.css',
 		]);
 	});
+
+	test('what was decided about the data files comes before the pages, with --verbose only', () => {
+		const withData = { ...report, data: ['data news: ran (12ms, hash a1b2c3d4)'] };
+
+		expect(plain(summarize(withData, false))).not.toContain('data news');
+		expect(plain(summarize(withData, true)).split('\n')[0]).toBe(
+			'  data news: ran (12ms, hash a1b2c3d4)',
+		);
+	});
 });

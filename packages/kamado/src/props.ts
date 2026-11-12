@@ -29,6 +29,8 @@ export interface RenderContext {
 	readonly site: SiteInfo;
 	readonly data: GlobalData;
 	readonly pages: readonly PageEntry[];
+	/** Why a data file that is a script has no value: the key and the reason. */
+	readonly dataErrors?: Readonly<Record<string, string>>;
 }
 
 const infoCache = new WeakMap<RenderContext, readonly PageInfo[]>();

@@ -7,6 +7,7 @@ import { styleText } from 'node:util';
 
 import { createAdaptorServer } from '@hono/node-server';
 
+import { DataFiles, readDataPlan } from '../data-files.js';
 import { assertKnownOptions } from '../known-options.js';
 import { native } from '../native.js';
 import { RUNTIME_URL } from '../runtime-url.js';
@@ -102,11 +103,25 @@ export async function start(
 	assertKnownOptions(options, START_OPTION_KEYS);
 	const write = options.write ?? ((text: string) => process.stdout.write(text));
 	const core = native();
+	// The data files that are scripts run before the server opens (what the disk holds from an
+	// earlier run is used when it is still good) and again, when out of date, before a request.
+	const dataFiles = new DataFiles(readDataPlan(configPath, options.cacheDir), {
+		root: path.dirname(configPath),
+		replan: () => readDataPlan(configPath, options.cacheDir),
+		verbose: (line) => {
+			if (options.verbose === true) {
+				write(`${line}\n`);
+			}
+		},
+		warn: (line) => write(`${styleText('yellow', `warning: ${line}`)}\n`),
+	});
+	await dataFiles.start();
 	const open = () =>
 		JSON.parse(
 			core.serveOpen(
 				configPath,
 				JSON.stringify({
+					executedData: dataFiles.executed(),
 					serving: true,
 					tzOffsetMinutes: 0 - new Date().getTimezoneOffset(),
 					esbuildVersion: ESBUILD_VERSION,
@@ -124,7 +139,13 @@ export async function start(
 	const { app, close } = createApp(description, RUNTIME_URL, {
 		// The port, the host, the allowed hosts, the proxy and the start path
 		// stay those of the first opening.
-		reopen: () => open().handle,
+		reopen: async () => {
+			// The config was read again, so the data files are planned again before the core
+			// is given their values.
+			await dataFiles.reload();
+			return open().handle;
+		},
+		data: { refresh: () => dataFiles.refresh(), executed: () => dataFiles.executed() },
 		onRequest: (log) => {
 			if (options.verbose === true || log.kind !== 'file' || log.status >= 400) {
 				write(formatRequest(log) + '\n');

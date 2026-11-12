@@ -318,8 +318,9 @@ yarn build
 
 ## 4. データ
 
-- `globalData.dir`の`.json`/`.yml`/`.yaml`（v2 は`.yaml`を無視）と、文字列として読む`.html`/`.txt`が使える。キーはファイル名（拡張子なし）。
-- `.js`のデータ（default export、関数）は**廃止**。値を計算する処理は、prebuild のスクリプトで JSON に書き出す（`"prebuild": "node scripts/build-data.mjs"`）。
+- `globalData.dir`の`.json`/`.yml`/`.yaml`（v2 は`.yaml`を無視）と、文字列として読む`.html`/`.txt`、実行する`.ts`/`.mts`/`.js`/`.mjs`が使える。キーはファイル名（拡張子なし）。
+- **外部の入力は、データファイル（`.ts`/`.mts`/`.js`/`.mjs`）に取りまとめる**。コンポーネントの中の`fs`・`fetch`・環境変数・`new Date()`・`Math.random()`は、差分ビルドと開発サーバーが知らない入力なので、データファイルに移す。データファイルの書き方（`readFile`、`maxAge`、`timeout`、失敗の扱い）は RFC §3.2。`@kamado-io/oxlint`の`no-untracked-input`が、ページの側の書き方を止める。
+- v2 の`.js`のデータ（default export、関数）は、**実行するデータファイル**として動く。ただし関数が受け取るものが変わる（before: v2 の引数、after: `{ readFile, signal }`）。ファイルを読むなら、`fs`の代わりに渡された`readFile`を使う（読んだファイルが依存として記録される）。値は JSON にできるものに限る（`Date`などはエラー）。計算だけの処理は、そのまま default export の値にするか、prebuild で JSON に書き出してもよい。使い方の全体は RFC §3.2。
 - **`.js`を`.html`に置き換えるときは、名前の衝突を先に確かめる**。データのディレクトリに同じ名前の`.html`がすでにあると、v3 は警告なしにその`.html`を`data.<名前>`として読む。たとえば`blocks.js`が`bge-blocks.html`を読み、別の`blocks2.js`が`blocks.html`を読む構成を考える。`blocks.js`を消して、`bge-blocks.html`の中身を`blocks.html`に置くと、既存の`blocks.html`が`data.blocks`になり、別の中身になる。置き換える前に、同じ名前の`.html`が無いかを調べる。ぶつかるときは、どちらかのデータの名前を付け替える（`blocks2.js`の出力は`blocks2.html`にする）。参照するページの`data.<名前>`も直す。
 - `globalData.data`（設定内のリテラル）は`data.values`。同じキーは設定が優先。
 

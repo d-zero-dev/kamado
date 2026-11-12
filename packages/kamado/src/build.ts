@@ -105,6 +105,16 @@ export interface BuildReport {
 	 * ```
 	 */
 	readonly reasons?: readonly (readonly [string, string])[];
+	/**
+	 * What was decided about each data file that is a script (it ran, with the time and the
+	 * first characters of the hash of its value; the value and anything it was made from are
+	 * never in it), for `--verbose`. Absent when the site has none.
+	 * @example
+	 * ```ts
+	 * report.data; // ['data news: ran (231ms, hash a1b2c3d4)']
+	 * ```
+	 */
+	readonly data?: readonly string[];
 }
 
 /**

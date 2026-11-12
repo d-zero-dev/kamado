@@ -249,6 +249,8 @@ struct State {
 	date: String,
 	data: crate::data::Data,
 	data_stamp: String,
+	/// What the Node side made of the data files that are scripts.
+	executed: Vec<(String, crate::data::Executed)>,
 	/// Counts the changes to the metadata of pages; part of the environment
 	/// of pages JavaScript renders (they can read the whole page list).
 	epoch: u64,
@@ -442,8 +444,9 @@ impl Serve {
 				assets,
 				asset_by_output,
 				date: now_iso(),
-				data: crate::data::load(config)?,
+				data: crate::data::load(config, &options.executed_data)?,
 				data_stamp: crate::data::stamp(config),
+				executed: options.executed_data.clone(),
 				epoch: 0,
 				cache: HashMap::new(),
 				asset_cache: HashMap::new(),
@@ -653,10 +656,37 @@ impl Serve {
 	fn refresh_data(&self, st: &mut State) -> Result<(), String> {
 		let stamp = crate::data::stamp(&self.loaded.config);
 		if stamp != st.data_stamp {
-			st.data = crate::data::load(&self.loaded.config)?;
+			// A script file that was added is not run yet: its key fails for the pages that read
+			// it until the Node side gives its value.
+			let executed = crate::data::with_pending(&self.loaded.config, &st.executed);
+			st.data = crate::data::load(&self.loaded.config, &executed)?;
 			st.data_stamp = stamp;
 			st.data_dirty = true;
 		}
+		Ok(())
+	}
+
+	/// Takes what the Node side made of the data files that are scripts (all of them:
+	/// a key that is not given is a script file that was not run). A page that read
+	/// a key whose value or failure differs is rendered again; the others are kept.
+	///
+	/// # Errors
+	///
+	/// A message when the data cannot be loaded with them (a script file without an
+	/// entry, or two files with the same key). The server then keeps the data it had.
+	pub fn set_executed(
+		&self,
+		executed: Vec<(String, crate::data::Executed)>,
+	) -> Result<(), String> {
+		let mut st = self.lock();
+		// The stamp is taken before the data is read: a file that changes in between is seen
+		// as changed by the next request.
+		let stamp = crate::data::stamp(&self.loaded.config);
+		let data = crate::data::load(&self.loaded.config, &executed)?;
+		st.executed = executed;
+		st.data = data;
+		st.data_stamp = stamp;
+		st.data_dirty = true;
 		Ok(())
 	}
 
@@ -803,13 +833,15 @@ impl Serve {
 				.iter()
 				.map(|p| page_json(p, &st.date))
 				.collect();
-			let context = Value::Object(vec![
+			let mut members = vec![
 				("site".to_owned(), site_json(&self.loaded.config)),
 				("data".to_owned(), st.data.value.clone()),
 				("pages".to_owned(), Value::Array(pages)),
-			])
-			.to_json();
-			return (Some(context), None);
+			];
+			if let Some(errors) = crate::data::errors_json(&st.data.errors) {
+				members.push(("dataErrors".to_owned(), errors));
+			}
+			return (Some(Value::Object(members).to_json()), None);
 		}
 		if st.dirty_pages.is_empty() && !st.data_dirty {
 			return (None, None);
@@ -831,9 +863,17 @@ impl Serve {
 		};
 		st.dirty_pages.clear();
 		st.data_dirty = false;
+		// The failures go with the data, as an object even when there are none: it is what
+		// clears the failures that the renderer has.
+		let errors = if matches!(data, Value::Null) {
+			Value::Null
+		} else {
+			crate::data::errors_json(&st.data.errors).unwrap_or(Value::Object(Vec::new()))
+		};
 		let update = Value::Object(vec![
 			("pages".to_owned(), Value::Array(pages)),
 			("data".to_owned(), data),
+			("dataErrors".to_owned(), errors),
 		])
 		.to_json();
 		(None, Some(update))
@@ -1817,6 +1857,92 @@ mod tests {
 			serve.request("/b.html").unwrap(),
 			Served::Render(_)
 		));
+	}
+
+	#[test]
+	fn the_values_of_script_data_files_are_given_later_and_only_their_readers_render_again() {
+		use crate::data::Executed;
+		let site = Site::new("jsx-script-data");
+		site.write(
+			"src/a.tsx",
+			"export default (p: any) => <p>{p.data.news}</p>;\n",
+		);
+		site.write(
+			"src/b.tsx",
+			"export default (p: any) => <p>{p.data.other}</p>;\n",
+		);
+		site.write("data/news.ts", "export default 'x';\n");
+		site.write("data/other.json", "1");
+		site.write(
+			"kamado.config.jsonc",
+			r#"{ "dir": { "input": "src", "output": "out" }, "data": { "dir": "data" }, "build": { "cacheDir": ".cache" } }"#,
+		);
+		let loaded = crate::load(&format!("{}/kamado.config.jsonc", site.root)).unwrap();
+		let value = |text: &str| {
+			vec![(
+				"news".to_owned(),
+				Executed::Value(Value::String(text.to_owned())),
+			)]
+		};
+		let serve = Serve::open(
+			loaded,
+			BuildOptions {
+				esbuild_version: Some("0.1.0".to_owned()),
+				executed_data: value("one"),
+				..Default::default()
+			},
+			"file:///runtime.js",
+		)
+		.unwrap();
+		let a = render(serve.request("/a.html").unwrap());
+		assert_eq!(
+			kd_jsonc::parse(a.context.as_deref().unwrap())
+				.unwrap()
+				.get("data")
+				.and_then(|d| d.get("news"))
+				.and_then(Value::as_str),
+			Some("one")
+		);
+		serve
+			.finish_render_with_reads(a.token, "<p>one</p>", Some(&["news".to_owned()]))
+			.unwrap();
+		let b = render(serve.request("/b.html").unwrap());
+		serve
+			.finish_render_with_reads(b.token, "<p>1</p>", Some(&["other".to_owned()]))
+			.unwrap();
+
+		serve.set_executed(value("two")).unwrap();
+
+		assert_eq!(text(serve.request("/b.html").unwrap()).1, "<p>1</p>\n");
+		let again = render(serve.request("/a.html").unwrap());
+		let update = kd_jsonc::parse(again.update.as_deref().unwrap()).unwrap();
+		assert_eq!(
+			update.get("data").map(Value::to_json),
+			Some(r#"{"news":"two","other":1}"#.to_owned())
+		);
+		assert_eq!(
+			update.get("dataErrors").map(Value::to_json),
+			Some("{}".to_owned()),
+			"an object, even with no failures: it clears the renderer's"
+		);
+
+		// A failure has no value in the data and is told apart.
+		serve
+			.finish_render_with_reads(again.token, "<p>two</p>", Some(&["news".to_owned()]))
+			.unwrap();
+		serve
+			.set_executed(vec![(
+				"news".to_owned(),
+				Executed::Failed("timed out".to_owned()),
+			)])
+			.unwrap();
+		let failed = render(serve.request("/a.html").unwrap());
+		let update = kd_jsonc::parse(failed.update.as_deref().unwrap()).unwrap();
+		assert_eq!(
+			update.get("dataErrors").map(Value::to_json),
+			Some(r#"{"news":"timed out"}"#.to_owned())
+		);
+		assert_eq!(text(serve.request("/b.html").unwrap()).1, "<p>1</p>\n");
 	}
 
 	/// A site of one page that reads `data.alpha`, served, with `data/alpha.json` = 1.
