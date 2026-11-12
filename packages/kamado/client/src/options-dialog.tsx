@@ -12,11 +12,12 @@ import {
 	mergeOptions,
 	optionsProblem,
 } from './logic/kinds.js';
-import { columnLabel } from './logic/layout.js';
 
 interface OptionsDialogProps {
 	/** The identifier of the column (`meta:<key>`). */
 	readonly column: string;
+	/** The name the column is shown by (its label when the config gives one, see `columnHeading`). */
+	readonly name: string;
 	/**
 	 * The options the column has, or `null` when it is not an enum yet: the options are then made
 	 * from the values the pages hold under the key.
@@ -51,6 +52,7 @@ function kindNameOf(option: EnumOption): NewKind {
  * column starts with. It is opened for the column when it is made an enum, and again to edit them.
  * @param props - The dialog's props
  * @param props.column - The identifier of the column
+ * @param props.name - The name the column is shown by
  * @param props.initial - The options now, or `null` for a column that is not an enum yet
  * @param props.kinds - The kinds of all the columns now
  * @param props.onSave - Called with the options when they are saved
@@ -58,6 +60,7 @@ function kindNameOf(option: EnumOption): NewKind {
  */
 export function OptionsDialog({
 	column,
+	name,
 	initial,
 	kinds,
 	onSave,
@@ -166,7 +169,6 @@ export function OptionsDialog({
 		dialog.current?.close();
 	};
 
-	const name = columnLabel(column, t);
 	return (
 		<dialog
 			ref={dialog}

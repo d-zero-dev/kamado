@@ -71,11 +71,11 @@ import {
 	withKind,
 	type KindsSettings,
 } from './logic/kinds.js';
+import { columnHeading } from './logic/labels.js';
 import {
 	MAX_COLUMN_WIDTH,
 	MIN_COLUMN_WIDTH,
 	columnIds,
-	columnLabel,
 	columnName,
 	layoutOf,
 	moveColumn,
@@ -215,7 +215,7 @@ interface ScreenProps extends AppProps {
  * @param props.onLocale - Called with the language the person chose
  */
 function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps) {
-	const { t } = useI18n();
+	const { t, language } = useI18n();
 	// The effects and the queued edits say things too: they read the translator of the latest
 	// render, so that a change of language does not read the list again.
 	// Written in a layout effect and not while drawing: a ref is not written during a render
@@ -228,6 +228,10 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	const [rows, setRows] = useState<Rows | null>(null);
 	// The names of the layouts: the `layout` column chooses among them when there are some.
 	const layouts = rows?.layouts ?? null;
+	// How the config presents the keys (`ui.keys`): the name a column is shown by, and what goes
+	// with it on hover and in its menu.
+	const keys = rows?.keys;
+	const headingOf = (id: string) => columnHeading(id, keys, language, t);
 	// The branch and the commit shown in the header; read with the first list and each time
 	// the files are read again (the branch can be switched while the screen is open).
 	const [git, setGit] = useState<GitInfo | null>(null);
@@ -907,11 +911,12 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			return;
 		}
 		if (!column.startsWith('meta:')) {
+			// A fixed column has no label (`ui.keys` is for metadata keys), so it is named by its id.
 			setProblem(t('app.cannotEditHere', { name: column }));
 			return;
 		}
 		const key = columnName(column);
-		const name = columnLabel(column, t);
+		const name = headingOf(column).name;
 		const enumKind = enumKindOf(kinds, column, layouts);
 		const { cell, kind } = editKindOf(row, key, hints, enumKind);
 		if (cell !== undefined && !cell.editable) {
@@ -998,7 +1003,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		if (rows === null || row === undefined || column === undefined) {
 			return;
 		}
-		const name = columnLabel(column, t);
+		const name = headingOf(column).name;
 		const diff = cellDiffOf(diffs?.pages[row.url], column);
 		if (diff === undefined) {
 			setStatus(t('diff.noDifference', { name }));
@@ -1172,7 +1177,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 		apply(
 			row.url,
 			{ op: 'set', key, value: parsed.value },
-			t('app.saved', { key: columnLabel(at.column, t) }),
+			t('app.saved', { key: headingOf(at.column).name }),
 		);
 	};
 
@@ -1240,7 +1245,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					return;
 				}
 				event.preventDefault();
-				const name = columnLabel(`meta:${key}`, t);
+				const name = headingOf(`meta:${key}`).name;
 				if (cell.editable) {
 					apply(row.url, { op: 'delete', key }, t('app.removed', { key: name }));
 				} else {
@@ -1403,7 +1408,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	 */
 	const movedSaid = (next: ColumnState, id: string) =>
 		t('column.movedTo', {
-			name: columnLabel(id, t),
+			name: headingOf(id).name,
 			position: positionOf(layoutOf(known, next), id) + 1,
 			count: colCount,
 		});
@@ -1415,7 +1420,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	 */
 	const widthSaid = (next: ColumnState, id: string) =>
 		t('column.width', {
-			name: columnLabel(id, t),
+			name: headingOf(id).name,
 			width: widthOf(layoutOf(known, next), id),
 		});
 
@@ -1478,7 +1483,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	 * @param action - The id of the entry
 	 */
 	const runMenu = (id: string, action: string) => {
-		const name = columnLabel(id, t);
+		const name = headingOf(id).name;
 		switch (action) {
 			case 'pin': {
 				changeLayout(pinColumn(columnState, known, id), t('column.pinned', { name }));
@@ -1748,7 +1753,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					className="row head"
 					onKeyDown={onHeaderKeyDown}>
 					{columns.map((id, col) => {
-						const name = columnLabel(id, t);
+						const { name, detail } = headingOf(id);
 						const direction = ariaSortOf(sort, id);
 						const isPinned = col < pinnedCount;
 						// A column goes only to a place of its own group: the pinned ones among
@@ -1761,6 +1766,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 							<div
 								key={id}
 								role="columnheader"
+								title={detail}
 								data-column={id}
 								aria-colindex={col + 1}
 								aria-sort={direction}
@@ -1880,7 +1886,8 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			</footer>
 			{menu !== null && (
 				<ColumnMenu
-					label={t('column.menu', { name: columnLabel(menu.id, t) })}
+					label={t('column.menu', { name: headingOf(menu.id).name })}
+					note={headingOf(menu.id).detail}
 					anchor={menu.anchor}
 					items={menuItems(menu.id)}
 					onChoose={(action) => {
@@ -1897,13 +1904,14 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				<OptionsDialog
 					key={optionsFor}
 					column={optionsFor}
+					name={headingOf(optionsFor).name}
 					initial={enumKindOf(kinds, optionsFor)?.options ?? null}
 					kinds={kinds}
 					onSave={(options) =>
 						changeKinds(
 							withKind(kinds, optionsFor, options),
 							t('column.kindSet', {
-								name: columnLabel(optionsFor, t),
+								name: headingOf(optionsFor).name,
 								count: options.length,
 							}),
 						)
@@ -1933,11 +1941,11 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 				dialogRef={dialogRef}
 				onAdd={(name, kind) => {
 					if (columns.includes(`meta:${name}`)) {
-						setStatus(t('app.alreadyColumn', { name }));
+						setStatus(t('app.alreadyColumn', { name: headingOf(`meta:${name}`).name }));
 						return;
 					}
 					setAdded((prev) => new Map(prev).set(name, kind));
-					setStatus(t('app.columnAdded', { name }));
+					setStatus(t('app.columnAdded', { name: headingOf(`meta:${name}`).name }));
 				}}
 			/>
 		</div>

@@ -6,6 +6,7 @@
  * checks it has exactly these fields.
  */
 import type { KindsSettings } from './logic/kinds.js';
+import type { KeyPresentations } from './logic/labels.js';
 import type { ColumnSettings } from './logic/layout.js';
 
 /** Where a value is written: the file of the page, its sidecar, or `pages.overrides`. */
@@ -44,6 +45,12 @@ export interface Rows {
 	 * The core always says it. A list without it (a value made by hand) is read as `null`.
 	 */
 	readonly layouts?: readonly string[] | null;
+	/**
+	 * How the config presents the metadata keys (`ui.keys`): a label (the name of the column) and
+	 * a description, each a text or a text per language. The core always says it (`{}` when the
+	 * config names none). `columnHeading` reads a list without it (a value made by hand) as `{}`.
+	 */
+	readonly keys?: KeyPresentations;
 	/**
 	 * The `pages.overrides` file, relative to the directory of the config file; `null` when the site has
 	 * none. A list without it (a value made by hand) is read as `null`.
