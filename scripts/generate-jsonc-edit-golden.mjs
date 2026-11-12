@@ -14,10 +14,12 @@
  * what this writes. Run it when `jsonc-parser` is upgraded or a case is added:
  * `node scripts/generate-jsonc-edit-golden.mjs`.
  */
-import { realpathSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { applyEdits, modify, parse } from 'jsonc-parser';
+
+import { isMain } from './is-main.mjs';
 
 /** Where the golden is written. */
 export const GOLDEN_FILE = path.resolve(
@@ -287,7 +289,7 @@ export function render() {
 	return `${JSON.stringify(cases(), null, '\t')}\n`;
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) {
+if (isMain(import.meta.filename)) {
 	writeFileSync(GOLDEN_FILE, render());
 	console.log(
 		`wrote ${cases().length} cases to ${path.relative(process.cwd(), GOLDEN_FILE)}`,

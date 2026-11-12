@@ -10,13 +10,36 @@
  * attribute, and the event handlers (`on*`, which take a function), are left out.
  *
  * Run it when react-dom is upgraded: `node scripts/generate-react-prop-names.mjs`.
+ * `scripts/pug-to-tsx-types.spec.ts` fails while the committed table is not what it
+ * writes, apart from the version in the header: that records the react-dom the
+ * table was last generated from, so a release that leaves the names as they are
+ * passes without a regeneration.
  */
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+
+import { isMain } from './is-main.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const dir = path.join(root, 'node_modules', 'react-dom');
 const output = path.join(import.meta.dirname, 'react-prop-names.mjs');
+
+/**
+ * Reads what the table is made from, out of `node_modules`.
+ * @returns {{ source: string, version: string }} The development server build of
+ * react-dom and its version
+ * @example
+ * const { source, version } = readSources();
+ */
+export function readSources() {
+	return {
+		source: readFileSync(
+			path.join(dir, 'cjs', 'react-dom-server.node.development.js'),
+			'utf8',
+		),
+		version: JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')).version,
+	};
+}
 
 /**
  * The `[HTML attribute, React prop]` pairs, sorted, where the two differ.
@@ -56,8 +79,11 @@ export function readPropNames(source) {
 /**
  * The text of the generated module.
  * @param {readonly (readonly [string, string])[]} names - From {@link readPropNames}
- * @param {string} version - The version of react-dom
- * @returns {string}
+ * @param {string} version - The version of react-dom that the header names
+ * @returns {string} The module, as `scripts/react-prop-names.mjs` holds it
+ * @example
+ * const { source, version } = readSources();
+ * const text = render(readPropNames(source), version);
  */
 export function render(names, version) {
 	// The names are letters, digits, `:` and `-`: single quotes need no escape, and
@@ -74,16 +100,18 @@ ${rows.join('\n')}
 `;
 }
 
-// Node resolves the main module through symbolic links, `argv[1]` keeps the path
-// as given.
-if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) {
-	const source = readFileSync(
-		path.join(dir, 'cjs', 'react-dom-server.node.development.js'),
-		'utf8',
-	);
-	const version = JSON.parse(
-		readFileSync(path.join(dir, 'package.json'), 'utf8'),
-	).version;
-	writeFileSync(output, render(readPropNames(source), version));
+/**
+ * Writes the table of the installed react-dom.
+ * @param {string} [out] - Where to write it
+ * @example
+ * generate(); // writes scripts/react-prop-names.mjs
+ */
+export function generate(out = output) {
+	const { source, version } = readSources();
+	writeFileSync(out, render(readPropNames(source), version));
+}
+
+if (isMain(import.meta.filename)) {
+	generate();
 	console.log(`wrote ${path.relative(root, output)}`);
 }

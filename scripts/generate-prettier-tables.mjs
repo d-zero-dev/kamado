@@ -15,11 +15,15 @@
  * Run it when `prettier-v2` is changed: `node scripts/generate-prettier-tables.mjs`,
  * then `cargo fmt --all` (the committed `tables.rs` is formatted).
  * `scripts/generate-prettier-tables.spec.ts` fails while the committed tables are
- * not what it writes.
+ * not what it writes, apart from the version in the header: that records the
+ * prettier the tables were last generated from, so a release that leaves them as
+ * they are passes without a regeneration.
  */
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+
+import { isMain } from './is-main.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const require = createRequire(import.meta.url);
@@ -83,7 +87,7 @@ function callStart(source, anchor) {
 /**
  * The element and attribute tables of `tables.rs`.
  * @param {string} source - The source of the HTML plugin
- * @param {string} version - The version of prettier it belongs to
+ * @param {string} version - The version of prettier that the header names
  * @returns {{ text: string, elements: number, attributeLists: number }}
  * The file, and how many elements and attribute lists it holds
  * @example
@@ -138,7 +142,7 @@ export function renderElementTables(source, version) {
  * first entry to the `zwnj` entry that closes it; the lexer adds `ngsp` after
  * it, which is added here too.
  * @param {string} source - The source of the HTML plugin
- * @param {string} version - The version of prettier it belongs to
+ * @param {string} version - The version of prettier that the header names
  * @returns {{ text: string, count: number }} The file, and how many names it holds
  * @example
  * const { source, version } = readSources();
@@ -184,21 +188,7 @@ export function renderEntityNames(source, version) {
 	return { text: lines.join('\n'), count: entityNames.length };
 }
 
-/**
- * Whether Node was started with this file. Node resolves the main module
- * through symbolic links while `argv[1]` keeps the path as given; a runner or
- * `--eval` has no path of a file that exists.
- * @returns {boolean} Whether this is the script that runs
- */
-function isMain() {
-	try {
-		return realpathSync(process.argv[1]) === import.meta.filename;
-	} catch {
-		return false;
-	}
-}
-
-if (isMain()) {
+if (isMain(import.meta.filename)) {
 	const { source, version } = readSources();
 	const tables = renderElementTables(source, version);
 	const out = path.join(outDir, 'tables.rs');

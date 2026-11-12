@@ -24,17 +24,35 @@
  * Nothing is probed by rendering. Run it when react-dom is upgraded:
  * `node scripts/generate-jsx-tables.mjs`, then `cargo fmt --all` (the Rust table is written
  * unformatted) and `yarn build` (the converter reads the build of `attr-table.ts`).
+ * `scripts/generate-jsx-tables.spec.ts` fails while the committed tables are not what it
+ * writes, apart from the formatting of the Rust table and the version in the header: that
+ * records the react-dom the tables were last generated from, so a release that leaves them
+ * as they are passes without a regeneration.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { isMain } from './is-main.mjs';
+
 const root = path.resolve(import.meta.dirname, '..');
 const dir = path.join(root, 'node_modules', 'react-dom');
-const source = readFileSync(
-	path.join(dir, 'cjs', 'react-dom-server-legacy.node.production.js'),
-	'utf8',
-);
-const version = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')).version;
+
+/**
+ * Reads what the tables are made from, out of `node_modules`.
+ * @returns {{ source: string, version: string }} The legacy server build of react-dom and
+ * its version
+ * @example
+ * const { source, version } = readSources();
+ */
+export function readSources() {
+	return {
+		source: readFileSync(
+			path.join(dir, 'cjs', 'react-dom-server-legacy.node.production.js'),
+			'utf8',
+		),
+		version: JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')).version,
+	};
+}
 
 const STRING = 0;
 const BOOLEAN = 1;
@@ -62,11 +80,12 @@ const KIND_NAMES = [
 
 /**
  * Returns the source between two markers.
+ * @param {string} source - The server build
  * @param {string} from - Start marker (included)
  * @param {string} to - End marker (excluded)
  * @returns {string} The slice
  */
-function between(from, to) {
+function between(source, from, to) {
 	const start = source.indexOf(from);
 	if (start === -1) {
 		throw new Error(`marker not found: ${from}`);
@@ -80,10 +99,11 @@ function between(from, to) {
 
 /**
  * Reads `unitlessNumbers = new Set("a b c".split(" "))`.
+ * @param {string} source - The server build
  * @returns {string[]} The style property names, sorted
  */
-function readUnitless() {
-	const body = between('unitlessNumbers = new Set(', 'aliases = new Map(');
+function readUnitless(source) {
+	const body = between(source, 'unitlessNumbers = new Set(', 'aliases = new Map(');
 	const match = /"([^"]+)"\.split/.exec(body);
 	if (!match) {
 		throw new Error('unitlessNumbers literal not found');
@@ -93,10 +113,11 @@ function readUnitless() {
 
 /**
  * Reads `aliases = new Map([["a", "b"], ...])`.
+ * @param {string} source - The server build
  * @returns {[string, string][]} Prop name to attribute name pairs
  */
-function readAliases() {
-	const body = between('aliases = new Map(', 'matchHtmlRegExp');
+function readAliases(source) {
+	const body = between(source, 'aliases = new Map(', 'matchHtmlRegExp');
 	const pairs = [];
 	const re = /\["([^"]+)",\s*"([^"]+)"\]/g;
 	let m;
@@ -112,12 +133,13 @@ function readAliases() {
 /**
  * Splits the `switch (name)` of `pushAttribute` into groups of case labels and
  * the handler source that follows them (whitespace removed).
+ * @param {string} source - The server build
  * @returns {{ labels: string[], pre: string, handler: string }[]} The groups.
  * A group that falls through from a guard (`src` / `href`) reports the guard
  * in `pre` and the labels that precede it in `preLabels`.
  */
-function readPushAttributeGroups() {
-	const body = between('function pushAttribute(', 'function pushInnerHTML(');
+function readPushAttributeGroups(source) {
+	const body = between(source, 'function pushAttribute(', 'function pushInnerHTML(');
 	const lines = body.split('\n').map((line) => line.trim());
 	const groups = [];
 	let labels = [];
@@ -251,10 +273,11 @@ function classify(group) {
 
 /**
  * Reads the elements React writes as `<tag .../>` and never closes.
+ * @param {string} source - The server build
  * @returns {string[]} The tag names, sorted
  */
-function readVoidElements() {
-	const body = between('var target = segment.chunks,', 'break a;');
+function readVoidElements(source) {
+	const body = between(source, 'var target = segment.chunks,', 'break a;');
 	const tags = [...body.matchAll(/case "([^"]+)":/g)].map((m) => m[1]);
 	return tags.filter((t) => !['title', 'style', 'script'].includes(t)).toSorted();
 }
@@ -265,9 +288,10 @@ function readVoidElements() {
  * element React drops them as unknown props, so they cannot be rows of the table above. The
  * props are the ones named here; the source is read to see that React still handles them in the
  * code of the element, and a React upgrade that moves them fails the generation.
+ * @param {string} source - The server build
  * @returns {[string, string][]} (tag, prop) pairs, sorted
  */
-function readElementBooleans() {
+function readElementBooleans(source) {
 	const wanted = [
 		['input', 'checked'],
 		['option', 'selected'],
@@ -288,37 +312,6 @@ function readElementBooleans() {
 	});
 }
 
-const unitless = readUnitless();
-const voidElements = readVoidElements();
-const elementBooleans = readElementBooleans();
-
-/** @type {Map<string, [string, number]>} */
-const props = new Map();
-for (const [prop, name] of readAliases()) {
-	if (prop !== name) {
-		props.set(prop, [name, STRING]);
-	}
-}
-for (const group of readPushAttributeGroups()) {
-	for (const [prop, kind, name] of classify(group)) {
-		if (props.has(prop)) {
-			throw new Error(`duplicate prop ${prop}`);
-		}
-		// A plain string kind with an unchanged name is the default path.
-		if (kind === STRING && name === prop) {
-			continue;
-		}
-		props.set(prop, [name, kind]);
-	}
-}
-const rows = [...props.entries()]
-	.map(([prop, [name, kind]]) => [prop, name, kind])
-	.toSorted((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
-
-const banner = `@generated by scripts/generate-jsx-tables.mjs — do not edit by hand.
-Source: react-dom ${version} (cjs/react-dom-server-legacy.node.production.js), read as
-text; nothing is probed by rendering.`;
-
 /**
  * Quotes a string for TypeScript.
  * @param {string} value - The string
@@ -327,62 +320,6 @@ text; nothing is probed by rendering.`;
 function ts(value) {
 	return `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
 }
-
-const tsLines = [];
-for (const line of banner.split('\n')) {
-	tsLines.push(`// ${line}`);
-}
-tsLines.push(
-	'',
-	'/** Attribute kinds; the numbers are shared with `crates/kd_js/src/react_attrs.rs`. */',
-);
-for (const [index, name] of KIND_NAMES.entries()) {
-	tsLines.push(`export const ${name} = ${index};`);
-}
-tsLines.push(
-	'',
-	'/** `[React prop name, HTML attribute name as React writes it, kind]`, sorted by prop name. */',
-	'export const PROPS: readonly (readonly [string, string, number])[] = [',
-);
-for (const [prop, name, kind] of rows) {
-	tsLines.push(`\t[${ts(prop)}, ${ts(name)}, ${KIND_NAMES[kind]}],`);
-}
-tsLines.push(
-	'];',
-	'',
-	'/**',
-	' * `[tag, React prop name]` of the boolean props that React writes in the code of the element, which',
-	' * the table above does not have (on any other element React drops them), sorted.',
-	' */',
-	'export const ELEMENT_BOOLEAN_PROPS: readonly (readonly [string, string])[] = [',
-);
-for (const [tag, prop] of elementBooleans) {
-	tsLines.push(`\t[${ts(tag)}, ${ts(prop)}],`);
-}
-tsLines.push(
-	'];',
-	'',
-	'/** Style properties that take no `px` suffix for numbers (sorted). */',
-	'export const UNITLESS: readonly string[] = [',
-);
-for (const name of unitless) {
-	tsLines.push(`\t${ts(name)},`);
-}
-tsLines.push(
-	'];',
-	'',
-	'/** HTML void elements as React knows them (sorted). */',
-	'export const VOID_ELEMENTS: readonly string[] = [',
-);
-for (const name of voidElements) {
-	tsLines.push(`\t${ts(name)},`);
-}
-tsLines.push('];', '');
-mkdirSync(path.join(root, 'packages', 'kamado', 'src', 'jsx'), { recursive: true });
-writeFileSync(
-	path.join(root, 'packages', 'kamado', 'src', 'jsx', 'attr-table.ts'),
-	tsLines.join('\n'),
-);
 
 /**
  * Quotes a string for Rust.
@@ -393,96 +330,209 @@ function rs(value) {
 	return JSON.stringify(value);
 }
 
-const rsLines = [];
-for (const line of banner.split('\n')) {
-	rsLines.push(`//! ${line}`);
-}
-rsLines.push(
-	'//!',
-	'//! The attribute table React DOM applies to host element props, as far as it',
-	'//! differs from "write the name as is".',
-	'',
-	'/// Written as `name="escaped value"`; function, symbol and boolean values are dropped.',
-	'pub const STRING: u8 = 0;',
-	'/// Truthy value writes `name=""`, falsy / function / symbol writes nothing.',
-	'pub const BOOLEAN: u8 = 1;',
-	'/// `true` writes `name=""`, `false` writes nothing, anything else is a string.',
-	'pub const OVERLOADED_BOOLEAN: u8 = 2;',
-	'/// Dropped when the value is not a number (`isNaN`), otherwise a string.',
-	'pub const NUMERIC: u8 = 3;',
-	'/// Like [`NUMERIC`] and additionally dropped below 1.',
-	'pub const POSITIVE_NUMERIC: u8 = 4;',
-	'/// A string even for booleans (`contentEditable="true"`).',
-	'pub const BOOLEANISH_STRING: u8 = 5;',
-	'/// Never written (`defaultValue`, `ref`, `suppressHydrationWarning`, ...).',
-	'pub const RESERVED: u8 = 6;',
-	'/// `src` / `href`: sanitised (`javascript:` URLs are rewritten), an empty string, function, symbol',
-	'/// and boolean are dropped. (React has no such "kind"; it is a separate branch of its switch.)',
-	'pub const URL_ATTR: u8 = 7;',
-	'/// `action`, `formAction`, `xlinkHref`: like [`URL_ATTR`] but an empty string is kept.',
-	'pub const URL_ATTR_KEEP_EMPTY: u8 = 8;',
-	'/// `style`: an object of CSS declarations (see the runtime), a string throws.',
-	'pub const STYLE: u8 = 9;',
-	'',
-	'/// `(React prop name, HTML attribute name as React writes it, kind)`, sorted by prop name in byte order.',
-	'///',
-	'/// Props React writes unchanged as plain strings (`id`, `title`, `alt`, `lang`, ...) are not in the',
-	'/// table: [`lookup`] returning `None` means "write the name as is, kind [`STRING`]". Further rules',
-	'/// that are not table entries:',
-	'///',
+/**
+ * The texts of `attr-table.ts` and of `react_attrs.rs` (before `cargo fmt`).
+ * @param {string} source - The server build, from {@link readSources}
+ * @param {string} version - The version of react-dom that the headers name
+ * @returns {{ ts: string, rust: string }} The two files, the Rust one before `cargo fmt`
+ * @example
+ * const { source, version } = readSources();
+ * const { ts, rust } = renderTables(source, version);
+ */
+export function renderTables(source, version) {
+	const unitless = readUnitless(source);
+	const voidElements = readVoidElements(source);
+	const elementBooleans = readElementBooleans(source);
 
-	'/// - `aria-*` and `data-*` props are written as is; unlike other [`STRING`] props their boolean',
-	'///   values are written (`aria-hidden="true"`), i.e. they behave like [`BOOLEANISH_STRING`].',
-	'/// - A name starting with `on` (any case, longer than two characters) that is not in the table is an',
-	'///   event handler and is dropped, as is a name that is not a valid attribute name.',
-	'/// - `key`, `children` and `dangerouslySetInnerHTML` are consumed by the element, not written.',
-	'/// - Custom elements (a `-` in the tag name) skip this table entirely and write names as is.',
-	`pub static PROPS: [(&str, &str, u8); ${rows.length}] = [`,
-);
-for (const [prop, name, kind] of rows) {
-	rsLines.push(`    (${rs(prop)}, ${rs(name)}, ${KIND_NAMES[kind]}),`);
+	/** @type {Map<string, [string, number]>} */
+	const props = new Map();
+	for (const [prop, name] of readAliases(source)) {
+		if (prop !== name) {
+			props.set(prop, [name, STRING]);
+		}
+	}
+	for (const group of readPushAttributeGroups(source)) {
+		for (const [prop, kind, name] of classify(group)) {
+			if (props.has(prop)) {
+				throw new Error(`duplicate prop ${prop}`);
+			}
+			// A plain string kind with an unchanged name is the default path.
+			if (kind === STRING && name === prop) {
+				continue;
+			}
+			props.set(prop, [name, kind]);
+		}
+	}
+	const rows = [...props.entries()]
+		.map(([prop, [name, kind]]) => [prop, name, kind])
+		.toSorted((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+
+	const banner = `@generated by scripts/generate-jsx-tables.mjs — do not edit by hand.
+Source: react-dom ${version} (cjs/react-dom-server-legacy.node.production.js), read as
+text; nothing is probed by rendering.`;
+
+	const tsLines = [];
+	for (const line of banner.split('\n')) {
+		tsLines.push(`// ${line}`);
+	}
+	tsLines.push(
+		'',
+		'/** Attribute kinds; the numbers are shared with `crates/kd_js/src/react_attrs.rs`. */',
+	);
+	for (const [index, name] of KIND_NAMES.entries()) {
+		tsLines.push(`export const ${name} = ${index};`);
+	}
+	tsLines.push(
+		'',
+		'/** `[React prop name, HTML attribute name as React writes it, kind]`, sorted by prop name. */',
+		'export const PROPS: readonly (readonly [string, string, number])[] = [',
+	);
+	for (const [prop, name, kind] of rows) {
+		tsLines.push(`\t[${ts(prop)}, ${ts(name)}, ${KIND_NAMES[kind]}],`);
+	}
+	tsLines.push(
+		'];',
+		'',
+		'/**',
+		' * `[tag, React prop name]` of the boolean props that React writes in the code of the element, which',
+		' * the table above does not have (on any other element React drops them), sorted.',
+		' */',
+		'export const ELEMENT_BOOLEAN_PROPS: readonly (readonly [string, string])[] = [',
+	);
+	for (const [tag, prop] of elementBooleans) {
+		tsLines.push(`\t[${ts(tag)}, ${ts(prop)}],`);
+	}
+	tsLines.push(
+		'];',
+		'',
+		'/** Style properties that take no `px` suffix for numbers (sorted). */',
+		'export const UNITLESS: readonly string[] = [',
+	);
+	for (const name of unitless) {
+		tsLines.push(`\t${ts(name)},`);
+	}
+	tsLines.push(
+		'];',
+		'',
+		'/** HTML void elements as React knows them (sorted). */',
+		'export const VOID_ELEMENTS: readonly string[] = [',
+	);
+	for (const name of voidElements) {
+		tsLines.push(`\t${ts(name)},`);
+	}
+	tsLines.push('];', '');
+
+	const rsLines = [];
+	for (const line of banner.split('\n')) {
+		rsLines.push(`//! ${line}`);
+	}
+	rsLines.push(
+		'//!',
+		'//! The attribute table React DOM applies to host element props, as far as it',
+		'//! differs from "write the name as is".',
+		'',
+		'/// Written as `name="escaped value"`; function, symbol and boolean values are dropped.',
+		'pub const STRING: u8 = 0;',
+		'/// Truthy value writes `name=""`, falsy / function / symbol writes nothing.',
+		'pub const BOOLEAN: u8 = 1;',
+		'/// `true` writes `name=""`, `false` writes nothing, anything else is a string.',
+		'pub const OVERLOADED_BOOLEAN: u8 = 2;',
+		'/// Dropped when the value is not a number (`isNaN`), otherwise a string.',
+		'pub const NUMERIC: u8 = 3;',
+		'/// Like [`NUMERIC`] and additionally dropped below 1.',
+		'pub const POSITIVE_NUMERIC: u8 = 4;',
+		'/// A string even for booleans (`contentEditable="true"`).',
+		'pub const BOOLEANISH_STRING: u8 = 5;',
+		'/// Never written (`defaultValue`, `ref`, `suppressHydrationWarning`, ...).',
+		'pub const RESERVED: u8 = 6;',
+		'/// `src` / `href`: sanitised (`javascript:` URLs are rewritten), an empty string, function, symbol',
+		'/// and boolean are dropped. (React has no such "kind"; it is a separate branch of its switch.)',
+		'pub const URL_ATTR: u8 = 7;',
+		'/// `action`, `formAction`, `xlinkHref`: like [`URL_ATTR`] but an empty string is kept.',
+		'pub const URL_ATTR_KEEP_EMPTY: u8 = 8;',
+		'/// `style`: an object of CSS declarations (see the runtime), a string throws.',
+		'pub const STYLE: u8 = 9;',
+		'',
+		'/// `(React prop name, HTML attribute name as React writes it, kind)`, sorted by prop name in byte order.',
+		'///',
+		'/// Props React writes unchanged as plain strings (`id`, `title`, `alt`, `lang`, ...) are not in the',
+		'/// table: [`lookup`] returning `None` means "write the name as is, kind [`STRING`]". Further rules',
+		'/// that are not table entries:',
+		'///',
+		'/// - `aria-*` and `data-*` props are written as is; unlike other [`STRING`] props their boolean',
+		'///   values are written (`aria-hidden="true"`), i.e. they behave like [`BOOLEANISH_STRING`].',
+		'/// - A name starting with `on` (any case, longer than two characters) that is not in the table is an',
+		'///   event handler and is dropped, as is a name that is not a valid attribute name.',
+		'/// - `key`, `children` and `dangerouslySetInnerHTML` are consumed by the element, not written.',
+		'/// - Custom elements (a `-` in the tag name) skip this table entirely and write names as is.',
+		`pub static PROPS: [(&str, &str, u8); ${rows.length}] = [`,
+	);
+	for (const [prop, name, kind] of rows) {
+		rsLines.push(`    (${rs(prop)}, ${rs(name)}, ${KIND_NAMES[kind]}),`);
+	}
+	rsLines.push(
+		'];',
+		'',
+		'/// Binary search in [`PROPS`]: `Some((attribute name, kind))`.',
+		"pub fn lookup(prop: &str) -> Option<(&'static str, u8)> {",
+		'    PROPS',
+		'        .binary_search_by(|entry| entry.0.cmp(prop))',
+		'        .ok()',
+		'        .map(|index| (PROPS[index].1, PROPS[index].2))',
+		'}',
+		'',
+		'/// Style properties that take no `px` suffix for numbers (sorted).',
+		`pub static UNITLESS: [&str; ${unitless.length}] = [`,
+	);
+	for (const name of unitless) {
+		rsLines.push(`    ${rs(name)},`);
+	}
+	rsLines.push(
+		'];',
+		'',
+		'/// Whether a numeric style value of this property is written without `px`.',
+		'pub fn is_unitless(prop: &str) -> bool {',
+		'    UNITLESS.binary_search(&prop).is_ok()',
+		'}',
+		'',
+		'/// HTML void elements as React knows them (sorted).',
+		`pub static VOID_ELEMENTS: [&str; ${voidElements.length}] = [`,
+	);
+	for (const name of voidElements) {
+		rsLines.push(`    ${rs(name)},`);
+	}
+	rsLines.push(
+		'];',
+		'',
+		'/// Whether React renders this tag as `<tag/>` without an end tag.',
+		'pub fn is_void_element(tag: &str) -> bool {',
+		'    VOID_ELEMENTS.binary_search(&tag).is_ok()',
+		'}',
+		'',
+	);
+	return { ts: tsLines.join('\n'), rust: rsLines.join('\n') };
 }
-rsLines.push(
-	'];',
-	'',
-	'/// Binary search in [`PROPS`]: `Some((attribute name, kind))`.',
-	"pub fn lookup(prop: &str) -> Option<(&'static str, u8)> {",
-	'    PROPS',
-	'        .binary_search_by(|entry| entry.0.cmp(prop))',
-	'        .ok()',
-	'        .map(|index| (PROPS[index].1, PROPS[index].2))',
-	'}',
-	'',
-	'/// Style properties that take no `px` suffix for numbers (sorted).',
-	`pub static UNITLESS: [&str; ${unitless.length}] = [`,
-);
-for (const name of unitless) {
-	rsLines.push(`    ${rs(name)},`);
+
+/** Where the tables are written. */
+export const OUTPUTS = {
+	ts: path.join(root, 'packages', 'kamado', 'src', 'jsx', 'attr-table.ts'),
+	rust: path.join(root, 'crates', 'kd_js', 'src', 'react_attrs.rs'),
+};
+
+/**
+ * Writes the tables of the installed react-dom.
+ * @param {{ ts: string, rust: string }} [outputs] - Where to write them
+ * @example
+ * generate(); // writes OUTPUTS
+ */
+export function generate(outputs = OUTPUTS) {
+	const { source, version } = readSources();
+	const tables = renderTables(source, version);
+	mkdirSync(path.dirname(outputs.ts), { recursive: true });
+	writeFileSync(outputs.ts, tables.ts);
+	writeFileSync(outputs.rust, tables.rust);
 }
-rsLines.push(
-	'];',
-	'',
-	'/// Whether a numeric style value of this property is written without `px`.',
-	'pub fn is_unitless(prop: &str) -> bool {',
-	'    UNITLESS.binary_search(&prop).is_ok()',
-	'}',
-	'',
-	'/// HTML void elements as React knows them (sorted).',
-	`pub static VOID_ELEMENTS: [&str; ${voidElements.length}] = [`,
-);
-for (const name of voidElements) {
-	rsLines.push(`    ${rs(name)},`);
+
+if (isMain(import.meta.filename)) {
+	generate();
 }
-rsLines.push(
-	'];',
-	'',
-	'/// Whether React renders this tag as `<tag/>` without an end tag.',
-	'pub fn is_void_element(tag: &str) -> bool {',
-	'    VOID_ELEMENTS.binary_search(&tag).is_ok()',
-	'}',
-	'',
-);
-writeFileSync(
-	path.join(root, 'crates', 'kd_js', 'src', 'react_attrs.rs'),
-	rsLines.join('\n'),
-);

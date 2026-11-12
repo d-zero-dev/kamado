@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 // The converter reads the Pug code with the acorn of the project that it converts. The
@@ -9,7 +10,13 @@ import * as acorn from 'acorn';
 import { Linter } from 'eslint';
 import { describe, expect, test } from 'vitest';
 
-import { readPropNames, render } from './generate-react-prop-names.mjs';
+import {
+	generate,
+	readPropNames,
+	readSources,
+	render,
+} from './generate-react-prop-names.mjs';
+import { committedVersion, importGenerator } from './generated-file.test-util.js';
 import {
 	blockText,
 	booleanCondition,
@@ -816,18 +823,22 @@ describe('the table of React prop names', () => {
 		expect([...names].filter(([attribute, prop]) => attribute === prop)).toEqual([]);
 	});
 
-	test('is what the generator writes for the installed react-dom', () => {
-		const dir = path.resolve(import.meta.dirname, '..', 'node_modules', 'react-dom');
-		const source = readFileSync(
-			path.join(dir, 'cjs', 'react-dom-server.node.development.js'),
-			'utf8',
-		);
-		const version = JSON.parse(
-			readFileSync(path.join(dir, 'package.json'), 'utf8'),
-		).version;
+	test('react-dom is the version package.json declares', () => {
+		const declared: string = JSON.parse(
+			readFileSync(path.resolve(import.meta.dirname, '..', 'package.json'), 'utf8'),
+		).devDependencies['react-dom'];
+		expect(readSources().version).toBe(declared);
+	});
+
+	test('is what the generator writes for the installed react-dom, apart from the version in the header', () => {
+		const { source } = readSources();
 		const committed = readFileSync(
 			path.resolve(import.meta.dirname, 'react-prop-names.mjs'),
 			'utf8',
+		);
+		const version = committedVersion(
+			committed,
+			/^\/\/ Source: the possibleStandardNames of react-dom (\S+) /mu,
 		);
 		// If this fails after react-dom was upgraded: node scripts/generate-react-prop-names.mjs
 		expect(render(readPropNames(source), version)).toBe(committed);
@@ -835,5 +846,32 @@ describe('the table of React prop names', () => {
 
 	test('the generated file is not read by cspell, which does not know the attribute names', () => {
 		expect(render([['a', 'b']], '1.0.0')).toContain('// cspell:disable');
+	});
+
+	test('running the generator writes the table to its file', () => {
+		const dir = mkdtempSync(path.join(tmpdir(), 'kamado-react-prop-names-'));
+		try {
+			const output = path.join(dir, 'react-prop-names.mjs');
+			generate(output);
+			const { source, version } = readSources();
+			expect(readFileSync(output, 'utf8')).toBe(render(readPropNames(source), version));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test('importing the generator writes nothing', () => {
+		expect(
+			importGenerator(
+				path.resolve(import.meta.dirname, 'generate-react-prop-names.mjs'),
+				[path.resolve(import.meta.dirname, 'react-prop-names.mjs')],
+			),
+		).toEqual({ status: 0, stdout: '', changed: [] });
+	});
+
+	test('the table says which react-dom it was made from', () => {
+		expect(render([['a', 'b']], '9.9.9').split('\n')[1]).toBe(
+			'// Source: the possibleStandardNames of react-dom 9.9.9 (cjs/react-dom-server.node.development.js).',
+		);
 	});
 });

@@ -10,16 +10,16 @@ import {
 	renderElementTables,
 	renderEntityNames,
 } from './generate-prettier-tables.mjs';
+import {
+	committedVersion,
+	importGenerator,
+	unformatted,
+} from './generated-file.test-util.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 const print = path.join(root, 'crates', 'kd_html', 'src', 'print');
 
-// `tables.rs` is formatted by `cargo fmt --all` after the generator wrote it,
-// which only moves white space and trailing commas outside the string literals.
-const unformatted = (rust: string): string =>
-	rust
-		.replaceAll(/("(?:[^"\\]|\\.)*")|\s+/gu, '$1')
-		.replaceAll(/("(?:[^"\\]|\\.)*")|,(?=[)\]])/gu, '$1');
+const header = /^\/\/ Source: prettier (\S+) /mu;
 
 describe('generate-prettier-tables', () => {
 	test('prettier-v2 is the version package.json declares', () => {
@@ -30,18 +30,20 @@ describe('generate-prettier-tables', () => {
 		expect(readSources().version).toBe(declared.slice(declared.lastIndexOf('@') + 1));
 	});
 
-	test('tables.rs is what the generator writes for the installed prettier-v2', () => {
-		const { source, version } = readSources();
+	test('tables.rs is what the generator writes for the installed prettier-v2, apart from the version in the header', () => {
+		const { source } = readSources();
 		const committed = readFileSync(path.join(print, 'tables.rs'), 'utf8');
+		const version = committedVersion(committed, header);
 		// If this fails after prettier-v2 was changed: node scripts/generate-prettier-tables.mjs
 		expect(unformatted(renderElementTables(source, version).text)).toBe(
 			unformatted(committed),
 		);
 	});
 
-	test('entity_names.rs is what the generator writes for the installed prettier-v2', () => {
-		const { source, version } = readSources();
+	test('entity_names.rs is what the generator writes for the installed prettier-v2, apart from the version in the header', () => {
+		const { source } = readSources();
 		const committed = readFileSync(path.join(print, 'entity_names.rs'), 'utf8');
+		const version = committedVersion(committed, header);
 		// If this fails after prettier-v2 was changed: node scripts/generate-prettier-tables.mjs
 		expect(renderEntityNames(source, version).text).toBe(committed);
 	});
@@ -105,5 +107,14 @@ describe('generate-prettier-tables', () => {
 		);
 		expect(run.status).toBe(0);
 		expect(run.stdout).toBe('');
+	});
+
+	test('importing the generator leaves its output files as they are', () => {
+		expect(
+			importGenerator(path.join(root, 'scripts', 'generate-prettier-tables.mjs'), [
+				path.join(print, 'tables.rs'),
+				path.join(print, 'entity_names.rs'),
+			]).changed,
+		).toEqual([]);
 	});
 });

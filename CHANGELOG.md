@@ -3,6 +3,19 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [3.0.0-alpha.6](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.5...v3.0.0-alpha.6) (2026-11-11)
+
+### Bug Fixes
+
+- **kamado:** reject unknown CLI flags and API option keys for build, pages, start, and ui ([d839ada](https://github.com/d-zero-dev/kamado/commit/d839ada84927262a02a9760631fcfaee6e1b98a2))
+- **repo:** compare the generated tables apart from the version in their header ([ddf6460](https://github.com/d-zero-dev/kamado/commit/ddf6460845e1154a4a645ef5ab9352550c1b74dd))
+
+### Features
+
+- **kamado:** export page and layout prop types from kamado/jsx ([970e747](https://github.com/d-zero-dev/kamado/commit/970e7478841c6d1f8edfa04de1232f12b3f0a658))
+- **repo:** import PageProps from kamado/jsx in pug-to-tsx ([13d1283](https://github.com/d-zero-dev/kamado/commit/13d12832e1d332ae1760217e2002215c84b35724))
+- **repo:** store pipeline warnings on manifest entries and re-emit them when cached ([1e69e02](https://github.com/d-zero-dev/kamado/commit/1e69e0283868de701dce8638962540d2e7596889))
+
 # [3.0.0-alpha.5](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.4...v3.0.0-alpha.5) (2026-11-11)
 
 ### Bug Fixes
