@@ -13,6 +13,14 @@
 			"type": "object",
 			"additionalProperties": { "type": "string" }
 		},
+		"label": {
+			"description": "A text, or a text per language of the screen of kamado ui (the keys are languages such as \"en\" and \"ja\"; a language the screen does not speak is never shown). The text is looked for in the language of the screen, then in \"en\". null and an empty text are the same as not writing it.",
+			"oneOf": [
+				{ "type": "string" },
+				{ "type": "object", "additionalProperties": { "type": "string" } },
+				{ "type": "null" }
+			]
+		},
 		"banner": {
 			"description": "A comment put at the top of each output. Placeholders: {{date:FORMAT}}, {{year}}, {{version}}. An empty string or false turns it off.",
 			"oneOf": [{ "type": "string" }, { "const": false }]
@@ -257,6 +265,26 @@
 				"report": {
 					"description": "Path of the JSON file the build result is written to.",
 					"type": "string"
+				}
+			}
+		},
+		"ui": {
+			"description": "What kamado ui shows, shared with the team through the repository. Only kamado ui reads it: the build and the dev server do not.",
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"keys": {
+					"description": "Metadata key -> how the table presents it. The label is the heading of the column; the key and the description are shown on hover and in the column menu. Without a label the key itself is the heading. It applies to the columns of metadata keys, not to the fixed columns (url, inputPath ...), and a key that no page has gets no column.",
+					"type": "object",
+					"propertyNames": { "minLength": 1 },
+					"additionalProperties": {
+						"type": "object",
+						"additionalProperties": false,
+						"properties": {
+							"label": { "$ref": "#/definitions/label" },
+							"description": { "$ref": "#/definitions/label" }
+						}
+					}
 				}
 			}
 		}

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef } from 'react';
 
 /** One entry of a menu. */
 export interface MenuItem {
@@ -11,6 +11,12 @@ export interface MenuItem {
 interface MenuProps {
 	/** The name of the menu for people who cannot see it. */
 	readonly label: string;
+	/**
+	 * A text that goes with the menu, shown above the entries (one line per line of it) and given
+	 * to people who cannot see it as the description of the menu. Not an entry: the keys of the
+	 * menu pass over it.
+	 */
+	readonly note?: string;
 	/** Where it opens: under this point of the screen. */
 	readonly anchor: { readonly left: number; readonly bottom: number };
 	readonly items: readonly MenuItem[];
@@ -29,14 +35,16 @@ interface MenuProps {
  * and gives the focus back. A click outside closes it.
  * @param props - The menu
  * @param props.label - The name of the menu
+ * @param props.note - A text shown above the entries
  * @param props.anchor - Where it opens: the left edge and the top edge of the menu, from the
  * left and the top of the window
  * @param props.items - The entries
  * @param props.onChoose - Called with the entry chosen
  * @param props.onClose - Called when the menu is to go
  */
-export function ColumnMenu({ label, anchor, items, onChoose, onClose }: MenuProps) {
+export function ColumnMenu({ label, note, anchor, items, onChoose, onClose }: MenuProps) {
 	const menu = useRef<HTMLDivElement>(null);
+	const noteId = useId();
 
 	// Kept inside the window: a column at the right edge opens its menu to the left of the point.
 	useLayoutEffect(() => {
@@ -116,23 +124,32 @@ export function ColumnMenu({ label, anchor, items, onChoose, onClose }: MenuProp
 	};
 
 	return (
-		<div
-			ref={menu}
-			role="menu"
-			aria-label={label}
-			className="column-menu"
-			onKeyDown={onKeyDown}>
-			{items.map((item) => (
-				<button
-					key={item.id}
-					type="button"
-					role="menuitem"
-					tabIndex={-1}
-					disabled={item.disabled}
-					onClick={() => onChoose(item.id)}>
-					{item.label}
-				</button>
-			))}
+		// The note is outside the element with `role="menu"`: the children of a menu are its
+		// entries, and a paragraph among them is not one. The menu still points at it with
+		// `aria-describedby`, which can name any element.
+		<div ref={menu} className="column-menu" onKeyDown={onKeyDown}>
+			{note !== undefined && (
+				<p id={noteId} className="note">
+					{note}
+				</p>
+			)}
+			<div
+				role="menu"
+				aria-label={label}
+				aria-describedby={note === undefined ? undefined : noteId}
+				className="entries">
+				{items.map((item) => (
+					<button
+						key={item.id}
+						type="button"
+						role="menuitem"
+						tabIndex={-1}
+						disabled={item.disabled}
+						onClick={() => onChoose(item.id)}>
+						{item.label}
+					</button>
+				))}
+			</div>
 		</div>
 	);
 }

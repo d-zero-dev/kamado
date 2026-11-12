@@ -239,6 +239,38 @@ pub struct Build {
 	pub report: Option<String>,
 }
 
+/// A text the screen of `kamado ui` shows: one text for every language, or a text per
+/// language (the keys are the languages of the screen, `en`, `ja` and so on).
+///
+/// The text is kept as it is written. The language names are not checked (a name the screen
+/// never asks for is never shown), and an empty text stays empty here: what counts as no text
+/// is decided where a text is chosen, on the screen, because an empty one would leave a header
+/// blank (RFC section 14.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Label {
+	/// The same text in every language.
+	Text(String),
+	/// Language name → text, in the order written.
+	Translations(Vec<(String, String)>),
+}
+
+/// How the screen of `kamado ui` presents one metadata key: its name and what it is for.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UiKey {
+	/// The name of the column, shown in its header.
+	pub label: Option<Label>,
+	/// What the key is for, shown on hover and in the menu of the column.
+	pub description: Option<Label>,
+}
+
+/// The `ui` section: what `kamado ui` shows, shared with the team through the repository. The
+/// build and the dev server do not read it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UiConfig {
+	/// Metadata key → how the screen presents it, in the order written.
+	pub keys: Vec<(String, UiKey)>,
+}
+
 /// The whole configuration with defaults applied and paths made absolute.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -254,6 +286,7 @@ pub struct Config {
 	pub scripts: Scripts,
 	pub dev_server: DevServer,
 	pub build: Build,
+	pub ui: UiConfig,
 }
 
 /// Default banner, the same text v2 produced.
@@ -292,6 +325,7 @@ pub fn parse(config_text: &str, root_dir: &str, package_json: Option<&str>) -> R
 		"scripts",
 		"devServer",
 		"build",
+		"ui",
 	])?;
 	let resolve = |p: &str| kd_site::path::join(root_dir, p);
 
@@ -582,6 +616,14 @@ pub fn parse(config_text: &str, root_dir: &str, package_json: Option<&str>) -> R
 		}
 	};
 
+	let ui = {
+		let o = root.obj("ui")?;
+		o.allow(&["keys"])?;
+		UiConfig {
+			keys: parse_ui_keys(&o)?,
+		}
+	};
+
 	Ok(Config {
 		root_dir: root_dir.to_string(),
 		dir,
@@ -594,7 +636,60 @@ pub fn parse(config_text: &str, root_dir: &str, package_json: Option<&str>) -> R
 		scripts,
 		dev_server,
 		build,
+		ui,
 	})
+}
+
+/// `ui.keys`: an object from metadata key to `{ label?, description? }`.
+///
+/// A key written twice is an error of the JSONC layer (`duplicate key`), so it is not checked
+/// here. An empty name is refused because no metadata key has one: an entry for it could never
+/// be shown. The names are not looked up among the keys of the pages: a key that no page has
+/// gets no column (the columns are the keys the pages hold), so a team can name a key before
+/// the first page has it.
+fn parse_ui_keys(ui: &Obj<'_>) -> R<Vec<(String, UiKey)>> {
+	let pairs = match ui.get("keys") {
+		None => return Ok(Vec::new()),
+		Some(Value::Object(pairs)) => pairs,
+		Some(_) => return Err(ui.err("keys", "expected an object")),
+	};
+	let mut keys = Vec::with_capacity(pairs.len());
+	for (name, value) in pairs {
+		if name.is_empty() {
+			return Err(ui.err("keys", "a key name must not be empty"));
+		}
+		let o = Obj::new(value, &format!("{}keys.{name}.", ui.prefix()))?;
+		o.allow(&["label", "description"])?;
+		keys.push((
+			name.clone(),
+			UiKey {
+				label: parse_label(&o, "label")?,
+				description: parse_label(&o, "description")?,
+			},
+		));
+	}
+	Ok(keys)
+}
+
+/// A text, or an object from language to text; `null` and a missing key are no label, as for
+/// the other optional texts. An empty text is kept as written: whether it counts as a text is
+/// decided where a text is chosen (the screen), see `Label`.
+fn parse_label(o: &Obj<'_>, key: &str) -> R<Option<Label>> {
+	match o.get(key) {
+		None | Some(Value::Null) => Ok(None),
+		Some(Value::String(s)) => Ok(Some(Label::Text(s.clone()))),
+		Some(Value::Object(pairs)) => {
+			let mut translations = Vec::with_capacity(pairs.len());
+			for (language, text) in pairs {
+				match text {
+					Value::String(s) => translations.push((language.clone(), s.clone())),
+					_ => return Err(o.err(&format!("{key}.{language}"), "expected a string")),
+				}
+			}
+			Ok(Some(Label::Translations(translations)))
+		}
+		Some(_) => Err(o.err(key, "expected a string or an object of strings")),
+	}
 }
 
 /// Parses the options of an `html.overrides` entry (what remains once its
@@ -1524,6 +1619,124 @@ mod tests {
 		assert_eq!(
 			fail(r#"{ "build": { "jobs": "many" } }"#).path,
 			"build.jobs"
+		);
+	}
+
+	#[test]
+	fn ui_keys_default_to_none() {
+		assert!(ok("{}").ui.keys.is_empty());
+		assert!(ok(r#"{ "ui": {} }"#).ui.keys.is_empty());
+		assert!(ok(r#"{ "ui": { "keys": {} } }"#).ui.keys.is_empty());
+	}
+
+	#[test]
+	fn ui_keys_read_a_label_and_a_description_as_text_or_translations() {
+		let cfg = ok(r#"{ "ui": { "keys": {
+			"title": {
+				"label": { "ja": "タイトル", "en": "Title" },
+				"description": "Used for <title> and the breadcrumbs"
+			},
+			"navHidden": { "label": "Hidden" },
+			"layout": {}
+		} } }"#);
+		assert_eq!(
+			cfg.ui.keys,
+			vec![
+				(
+					"title".to_string(),
+					UiKey {
+						label: Some(Label::Translations(vec![
+							("ja".to_string(), "タイトル".to_string()),
+							("en".to_string(), "Title".to_string()),
+						])),
+						description: Some(Label::Text(
+							"Used for <title> and the breadcrumbs".to_string()
+						)),
+					}
+				),
+				(
+					"navHidden".to_string(),
+					UiKey {
+						label: Some(Label::Text("Hidden".to_string())),
+						description: None,
+					}
+				),
+				("layout".to_string(), UiKey::default()),
+			]
+		);
+	}
+
+	#[test]
+	fn a_null_label_or_description_is_not_written() {
+		let cfg =
+			ok(r#"{ "ui": { "keys": { "title": { "label": null, "description": null } } } }"#);
+		assert_eq!(cfg.ui.keys, vec![("title".to_string(), UiKey::default())]);
+	}
+
+	#[test]
+	fn ui_and_keys_are_objects_and_null_is_not_one() {
+		assert_eq!(fail(r#"{ "ui": null }"#).path, "ui");
+		let e = fail(r#"{ "ui": { "keys": null } }"#);
+		assert_eq!(e.path, "ui.keys");
+		assert_eq!(e.message, "expected an object");
+	}
+
+	#[test]
+	fn an_empty_or_open_label_is_kept_as_it_is_written() {
+		let key = |text: &str| ok(text).ui.keys.into_iter().next().unwrap().1.label;
+		assert_eq!(
+			key(r#"{ "ui": { "keys": { "title": { "label": "" } } } }"#),
+			Some(Label::Text(String::new()))
+		);
+		assert_eq!(
+			key(r#"{ "ui": { "keys": { "title": { "label": {} } } } }"#),
+			Some(Label::Translations(Vec::new()))
+		);
+		// the language names are not checked: the screen asks for the ones it knows
+		assert_eq!(
+			key(r#"{ "ui": { "keys": { "title": { "label": { "fr": "Titre", "": "x" } } } } }"#),
+			Some(Label::Translations(vec![
+				("fr".to_string(), "Titre".to_string()),
+				(String::new(), "x".to_string()),
+			]))
+		);
+	}
+
+	#[test]
+	fn a_key_named_twice_in_ui_keys_is_an_error_of_the_document() {
+		let e = fail(r#"{ "ui": { "keys": { "title": {}, "title": {} } } }"#);
+		assert!(
+			e.message.contains(r#"duplicate key "title""#),
+			"{}",
+			e.message
+		);
+	}
+
+	#[test]
+	fn ui_keys_errors_carry_their_path() {
+		let e = fail(r#"{ "ui": { "sync": [] } }"#);
+		assert_eq!(e.path, "ui.sync");
+		assert!(e.message.starts_with("unknown option (allowed: keys"));
+		assert_eq!(fail(r#"{ "ui": { "keys": [] } }"#).path, "ui.keys");
+		assert_eq!(
+			fail(r#"{ "ui": { "keys": { "title": "T" } } }"#).path,
+			"ui.keys.title"
+		);
+		let e = fail(r#"{ "ui": { "keys": { "title": { "color": "T" } } } }"#);
+		assert_eq!(e.path, "ui.keys.title.color");
+		assert!(
+			e.message
+				.starts_with("unknown option (allowed: label, description")
+		);
+		let e = fail(r#"{ "ui": { "keys": { "title": { "label": 1 } } } }"#);
+		assert_eq!(e.path, "ui.keys.title.label");
+		assert_eq!(e.message, "expected a string or an object of strings");
+		let e = fail(r#"{ "ui": { "keys": { "title": { "label": { "ja": 1 } } } } }"#);
+		assert_eq!(e.path, "ui.keys.title.label.ja");
+		assert_eq!(e.message, "expected a string");
+		assert_eq!(
+			fail(r#"{ "ui": { "keys": { "": { "label": "x" } } } }"#).path,
+			"ui.keys"
 		);
 	}
 }
