@@ -10,6 +10,10 @@ import type {
 	Rows,
 	SettingsPatch,
 	SettingsView,
+	SyncChanges,
+	SyncFunction,
+	SyncKind,
+	SyncState,
 	Values,
 } from './types.js';
 
@@ -272,5 +276,99 @@ export function revertCell(
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token() },
 		body: JSON.stringify({ url, expect, key, head }),
+	});
+}
+
+/**
+ * The operations of `ui.syncFunctions` (RFC §14.2, "同期"): the names and the labels, as written.
+ * @param signal - To give up on an answer that does not come
+ * @example
+ * ```ts
+ * await fetchSyncFunctions(); // [{ name: 'import-sheet', label: { en: 'Import' } }]
+ * ```
+ */
+export async function fetchSyncFunctions(signal?: AbortSignal): Promise<SyncFunction[]> {
+	const answer = await call<{ functions: SyncFunction[] }>('/api/sync', { signal });
+	return answer.functions;
+}
+
+/**
+ * Starts the operation named `name`. The name is all the server is given: the script is the
+ * one the config says, and nothing else can be run from the screen.
+ * @param name - The name of an operation
+ * @returns The id of the sync
+ * @throws {ApiError} `busy` when a sync is running, `unknown` for a name the config does not have
+ */
+export async function startSync(name: string): Promise<string> {
+	const answer = await call<{ id: string }>('/api/sync/run', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token() },
+		body: JSON.stringify({ name }),
+	});
+	return answer.id;
+}
+
+/**
+ * How the sync stands, and the lines of its log from `after` on.
+ * @param id - The sync
+ * @param after - The place of the next line the screen has not read
+ * @param signal - To drop an answer that is not wanted any more
+ */
+export function fetchSyncState(
+	id: string,
+	after: number,
+	signal?: AbortSignal,
+): Promise<SyncState> {
+	const query = new URLSearchParams({ id, after: String(after) });
+	return call<SyncState>(`/api/sync/state?${query.toString()}`, { signal });
+}
+
+/**
+ * A page of the changes of one kind of the sync.
+ * @param id - The sync
+ * @param kind - The kind of change
+ * @param offset - The first change
+ * @param limit - How many changes
+ * @param signal - To drop an answer that is not wanted any more
+ */
+export function fetchSyncChanges(
+	id: string,
+	kind: SyncKind,
+	offset: number,
+	limit: number,
+	signal?: AbortSignal,
+): Promise<SyncChanges> {
+	const query = new URLSearchParams({
+		id,
+		kind,
+		offset: String(offset),
+		limit: String(limit),
+	});
+	return call<SyncChanges>(`/api/sync/changes?${query.toString()}`, { signal });
+}
+
+/**
+ * Applies what the sync showed. The id is all the server is given: it applies the edits it
+ * kept, not edits from the screen.
+ * @param id - The sync
+ * @returns The state of the sync after it
+ */
+export function applySync(id: string): Promise<SyncState> {
+	return call<SyncState>('/api/sync/apply', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token() },
+		body: JSON.stringify({ id }),
+	});
+}
+
+/**
+ * Stops the sync while its script runs.
+ * @param id - The sync
+ */
+export async function cancelSync(id: string): Promise<void> {
+	await call<{ cancelled: boolean }>('/api/sync/cancel', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'X-Kamado-Token': token() },
+		body: JSON.stringify({ id }),
 	});
 }
