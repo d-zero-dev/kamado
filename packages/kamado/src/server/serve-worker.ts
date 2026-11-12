@@ -34,9 +34,13 @@ port.on('message', (message: Message) => {
 			return;
 		}
 		try {
-			const renderOne = await createRenderer(context, runtimeUrl);
+			// Every key until the page says which it read.
+			let reads: readonly string[] | null = null;
+			const renderOne = await createRenderer(context, runtimeUrl, (_, keys) => {
+				reads = keys;
+			});
 			const [, html] = await renderOne(message.job);
-			port.postMessage({ id: message.id, html });
+			port.postMessage({ id: message.id, html, reads });
 		} catch (error) {
 			port.postMessage({
 				id: message.id,

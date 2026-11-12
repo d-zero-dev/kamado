@@ -210,7 +210,7 @@ export default ({ meta }: { meta: { title: string } }) => (
 - JSX の空白は React と同じ規則（行頭行末の空白と改行は消える。意図した空白は`{' '}`）。Pug の空白との差は、出力の比較で見つかります。
 - `<br>`などの空要素は`<br />`と書く。
 - HTML の要素に渡した関数の props（`onClick`など）は無視されます。警告は出ないので、`@kamado-io/oxlint`で見つけます（下の「型検査と lint に通す」）。
-- hooks（`useState`など）と Context は使えません。コンポーネントは**純粋関数**（同じ props から同じ出力。モジュールの変数を書き換えない）。ワーカーが並列に描画するので、破ると結果が不定になります。
+- hooks（`useState`など）と Context は使えません。コンポーネントは**純粋関数**（同じ props から同じ出力。モジュールの変数を書き換えない）。ワーカーが並列に描画するので、破ると結果が不定になります。ページの間で重い計算を使い回したいときは、モジュールの変数ではなく`kamado/jsx`の`memo(fn)`を使います。モジュールの変数にデータを貯めたページは、`kamado build --verify-deps`（新しいワーカーで描き直して HTML を比べる）で見つかります。
 - `import`できるもの: 相対パスと`pages.alias`の別名の TS/TSX/JSON、npm パッケージ（ESM）。CSS の import はできません。
 - TS は **erasable な構文だけ**（`enum`/`namespace`/パラメータプロパティは不可。`const`オブジェクトで置き換える）。
 
@@ -459,7 +459,8 @@ yarn kamado build --incremental        # そのページだけ built
 ```
 
 - 共有のレイアウトやコンポーネントを直すと、それを使うページだけが再ビルドされる。
-- データファイル（`data.dir`）を直すと、JSX で描画するページが再ビルドされる。
+- データファイル（`data.dir`）を直すと、そのキー（ファイル名）を読んだ JSX のページだけが再ビルドされる（`props.data`の列挙やスプレッドは全キーを読んだことになる）。`kamado build --verbose`が、描き直したページの理由（`data.<key> changed`など）を書く。
+- v3 の manifest は版が変わったので、更新後の最初の差分ビルドは全ページを作り直す。
 - どれかのページのメタ（front matter、sidecar、`pages.overrides`）を直すと、`pages`/`nav`などを読むかどうかにかかわらず、JSX で描画する全ページが再ビルドされる（`.html`ページは再ビルドされない）。
 
 ### 10.3 開発サーバー

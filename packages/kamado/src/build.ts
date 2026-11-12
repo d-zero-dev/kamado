@@ -8,6 +8,19 @@ export interface BuildOptions {
 	readonly force?: boolean;
 	readonly skipUnchanged?: boolean;
 	/**
+	 * Renders every page that this build rendered once more (not the pages it kept from an
+	 * earlier build), each in a worker of its own, and fails the build when the HTML differs
+	 * (RFC section 11). A failed build writes no manifest. Slow on a big site: render a part of
+	 * it with `targets`. It finds a page whose output depends
+	 * on something the build did not record, such as the data a page kept in a variable of
+	 * a module.
+	 * @example
+	 * ```ts
+	 * await build('/site/kamado.config.jsonc', { verifyDeps: true });
+	 * ```
+	 */
+	readonly verifyDeps?: boolean;
+	/**
 	 * Only the pages, stylesheets and scripts whose input file matches are
 	 * built. A relative entry is relative to the directory of the config file
 	 * (to the cwd from the CLI); an absolute one is used without a base. An
@@ -53,6 +66,7 @@ export const BUILD_OPTION_KEYS = [
 	'incremental',
 	'force',
 	'skipUnchanged',
+	'verifyDeps',
 	'targets',
 	'jobs',
 	'cacheDir',
@@ -82,6 +96,15 @@ export interface BuildReport {
 	readonly assets: readonly AssetResult[];
 	readonly warnings: readonly string[];
 	readonly elapsedMs: number;
+	/**
+	 * Why a page that an earlier build wrote was built again, as `[url, reason]` (for
+	 * `--verbose`). Absent when no page has one, as in a first build.
+	 * @example
+	 * ```ts
+	 * report.reasons; // [['/news/', 'data.posts changed']]
+	 * ```
+	 */
+	readonly reasons?: readonly (readonly [string, string])[];
 }
 
 /**

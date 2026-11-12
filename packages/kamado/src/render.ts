@@ -11,6 +11,7 @@ import { availableParallelism } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 
+import { recordDataReads } from './data-trace.js';
 import { createProps, type RenderContext } from './props.js';
 
 /** What the core asks for one page. */
@@ -32,6 +33,12 @@ export interface RenderJob {
 
 /** The HTML for a page: `[page index, html]`. */
 export type Rendered = readonly [number, string];
+
+/**
+ * The keys of `data` a page read: `[page index, keys]`, or `null` for the
+ * keys when the page depends on every key (see `data-trace.ts`).
+ */
+export type DataReads = readonly [number, readonly string[] | null];
 
 type Component = (props: Record<string, unknown>) => unknown;
 type Render = (component: Component, props: Record<string, unknown>) => string;
@@ -90,6 +97,7 @@ async function loadComponent(file: string, what: string): Promise<Component> {
  * Creates the function that renders one job.
  * @param context - Site, data and the page list
  * @param runtimeUrl - File URL of the JSX runtime
+ * @param onReads - Called after each page with the keys of `data` it read
  * @example
  * ```ts
  * const renderOne = await createRenderer(context, runtimeUrl);
@@ -99,6 +107,7 @@ async function loadComponent(file: string, what: string): Promise<Component> {
 export async function createRenderer(
 	context: RenderContext,
 	runtimeUrl: string,
+	onReads?: (page: number, keys: readonly string[] | null) => void,
 ): Promise<(job: RenderJob) => Promise<Rendered>> {
 	const { render, html: markup } = (await import(runtimeUrl)) as RuntimeModule;
 	return async (job) => {
@@ -106,6 +115,18 @@ export async function createRenderer(
 		if (!page) {
 			throw new Error(`the core asked for page ${job.page}, which does not exist`);
 		}
+		const trace = recordDataReads(context.data);
+		// Why `data` is replaced after `createProps` and not passed to it: the context it takes
+		// is shared by every page (it caches the page list), while the view that records
+		// belongs to this render.
+		const propsOf = (extra?: Record<string, unknown>) => {
+			const props = createProps(context, job.page, extra) as unknown as Record<
+				string,
+				unknown
+			>;
+			props.data = trace.data;
+			return props;
+		};
 		try {
 			let html: string;
 			if (job.main) {
@@ -113,24 +134,20 @@ export async function createRenderer(
 				// Why not pass PageProps: `render`'s props type is still a string-key
 				// bag from the JSX runtime; widening PageProps would pull page types
 				// into every render call site.
-				html = render(
-					main,
-					createProps(context, job.page) as unknown as Record<string, unknown>,
-				);
+				html = render(main, propsOf());
 			} else {
 				html = job.content ?? '';
 			}
 			if (job.layout) {
 				const layout = await loadComponent(job.layout, 'a layout');
-				html = render(
-					layout,
-					createProps(context, job.page, {
-						content: markup(html),
-					}) as unknown as Record<string, unknown>,
-				);
+				html = render(layout, propsOf({ content: markup(html) }));
 			}
+			trace.finish();
+			onReads?.(job.page, trace.keys());
 			return [job.page, html];
 		} catch (error) {
+			trace.fail();
+			onReads?.(job.page, null);
 			throw new Error(`Failed to render ${page.inputPath}: ${messageOf(error)}`, {
 				cause: error,
 			});
@@ -160,6 +177,15 @@ export interface RenderOptions {
 	 * tens of thousands of pages is not held in memory twice.
 	 */
 	readonly onRendered?: (rendered: readonly Rendered[]) => void;
+	/**
+	 * Renders each job in a worker of its own, which has rendered nothing before, and
+	 * stops it. For checking that a page does not depend on what other pages left in the
+	 * modules (`--verify-deps`). Slow on purpose: every worker starts with a copy of the
+	 * whole context, so on a big site render a part of it (`kamado build <globs>`).
+	 */
+	readonly isolate?: boolean;
+	/** Called with the keys of `data` that each batch of pages read. */
+	readonly onReads?: (reads: readonly DataReads[]) => void;
 }
 
 /**
@@ -193,6 +219,70 @@ export function resetInlineRendering(): void {
 }
 
 /**
+ * Renders every job in a worker that is started for it and stopped after it.
+ * @param jobs - What the core asked for
+ * @param context - Site, data and the page list
+ * @param options - Runtime and parallelism
+ */
+async function renderIsolated(
+	jobs: readonly RenderJob[],
+	context: RenderContext,
+	options: RenderOptions & { readonly parallelism: number },
+): Promise<Rendered[]> {
+	const results: Rendered[] = [];
+	let next = 0;
+	// Set by the first failure: the lanes that are still going stop starting workers.
+	let failed = false;
+	const lane = async () => {
+		while (next < jobs.length && !failed) {
+			const job = jobs[next++]!;
+			const worker = new Worker(new URL('render-worker.js', import.meta.url), {
+				workerData: { context, runtimeUrl: options.runtimeUrl },
+			});
+			try {
+				const message = await new Promise<{ results?: Rendered[]; error?: string }>(
+					(resolve, reject) => {
+						worker.on(
+							'message',
+							(m: { results?: Rendered[]; error?: string; ready?: true }) => {
+								if (m.ready) {
+									worker.postMessage({ jobs: [job] });
+								} else {
+									resolve(m);
+								}
+							},
+						);
+						worker.on('error', reject);
+						// A worker that exits without a message (`process.exit()` in a
+						// component, the memory limit) would leave the build waiting for ever.
+						worker.on('exit', () =>
+							reject(new Error('a render worker exited without rendering')),
+						);
+					},
+				);
+				if (message.error !== undefined) {
+					throw new Error(message.error);
+				}
+				if (options.onRendered) {
+					options.onRendered(message.results ?? []);
+				} else {
+					results.push(...(message.results ?? []));
+				}
+			} catch (error) {
+				failed = true;
+				throw error;
+			} finally {
+				await worker.terminate();
+			}
+		}
+	};
+	await Promise.all(
+		Array.from({ length: Math.min(options.parallelism, jobs.length) }, lane),
+	);
+	return results;
+}
+
+/**
  * Renders every job, in worker threads when there are enough of them.
  * @param jobs - What the core asked for
  * @param context - Site, data and the page list
@@ -212,13 +302,20 @@ export async function renderJobs(
 	if (jobs.length === 0) {
 		return [];
 	}
+	if (options.isolate) {
+		return await renderIsolated(jobs, context, { ...options, parallelism });
+	}
 	if (!renderedInThisThread && (parallelism === 1 || jobs.length < INLINE_BELOW)) {
 		renderedInThisThread = true;
-		const renderOne = await createRenderer(context, options.runtimeUrl);
+		const reads: DataReads[] = [];
+		const renderOne = await createRenderer(context, options.runtimeUrl, (page, keys) =>
+			reads.push([page, keys]),
+		);
 		const out: Rendered[] = [];
 		for (const job of jobs) {
 			out.push(await renderOne(job));
 		}
+		options.onReads?.(reads);
 		if (options.onRendered) {
 			options.onRendered(out);
 			return [];
@@ -269,13 +366,21 @@ export async function renderJobs(
 			running++;
 			worker.on(
 				'message',
-				(message: { results?: Rendered[]; error?: string; ready?: true }) => {
+				(message: {
+					results?: Rendered[];
+					reads?: DataReads[];
+					error?: string;
+					ready?: true;
+				}) => {
 					if (message.error !== undefined) {
 						stop(new Error(message.error));
 						return;
 					}
 					if (message.results) {
 						try {
+							if (message.reads) {
+								options.onReads?.(message.reads);
+							}
 							if (options.onRendered) {
 								options.onRendered(message.results);
 							} else {

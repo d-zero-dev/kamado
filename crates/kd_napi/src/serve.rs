@@ -205,6 +205,23 @@ pub(crate) fn finish_render(handle: &str, tok: &str, html: &str) -> Result<Strin
 	with(handle, |serve| serve.finish_render(tok, html)).map(answer)
 }
 
+/// [`finish_render`] with the keys of `data` the page read, as a JSON array of strings.
+pub(crate) fn finish_render_reads(
+	handle: &str,
+	tok: &str,
+	html: &str,
+	reads_json: &str,
+) -> Result<String, Thrown> {
+	let value = kd_jsonc::parse(reads_json).map_err(|e| format!("reads: {e}"))?;
+	let keys = crate::session::string_array(&value)
+		.ok_or_else(|| "reads: expected an array of keys".to_owned())?;
+	let tok = token(tok)?;
+	with(handle, |serve| {
+		serve.finish_render_with_reads(tok, html, Some(&keys))
+	})
+	.map(answer)
+}
+
 /// Takes what esbuild built for a `script` answer:
 /// `{ "code": "...", "inputs": ["..."] }`.
 pub(crate) fn finish_script(handle: &str, tok: &str, output_json: &str) -> Result<String, Thrown> {

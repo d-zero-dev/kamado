@@ -55,6 +55,8 @@ node --test crates/kd_napi/check/load.check.mjs
 
 相対パスの`cacheDir`の基準（API は設定ファイルのディレクトリ、CLI の`--cache-dir`は cwd。RFC §13）は、`node --test crates/kd_napi/check/cache-dir.check.mjs`で、実物のアドオンと CLI を通す（`yarn build`のあと）。
 
+`data`のキー単位の依存（読んだキーが変わったページだけを描き直すこと、`--verify-deps`が状態を持ち越すページを見つけること。RFC §11）は、`node --test crates/kd_napi/check/data-keys.check.mjs`で、同じく実物を通す。10 万ページでの計測は、`node benchmarks/v3/generate-jsx-fixtures.ts --pages=100000 --out=<dir>`で作ったサイトを`kamado build --incremental`で 2 回回し、使われていないキーのファイルを`data.dir`に足して変えてもう 1 回回す（全ページが`cached`になること）。
+
 `kamado ui`の画面は`packages/kamado/client`（React）で、`yarn build`が型を検査して、`scripts/build-ui.mjs`が esbuild で`packages/kamado/dist/ui`にまとめる（`yarn dev`は画面を作り直さない）。React は`packages/kamado`の devDependencies で、bundle に入るので、パッケージの実行時の依存は増えない。画面の論理は DOM の無い関数（`client/src/logic/`）に分けて Vitest で、サーバー（`src/ui/`）は`app.request`で確かめる。小さな部品（`column-menu.tsx`・`options-dialog.tsx`）は、`react-dom/server`で HTML にして確かめる（`client/src/*.spec.tsx`。操作は確かめない）。サーバーが実物のコアの答えを正しく中継し、絶対パスを出さないことは、`ui.check.mjs`が実物のアドオンで確かめる（画面が読む JSON の項目もそこで固定する）。配布物に画面が入っていることは、`node scripts/check-package-ui.mjs packages/kamado`（ローカルでは`yarn build`のあと。publish のワークフローは展開したパッケージに対して）が確かめる。
 
 画面の設定の保存（`packages/kamado/src/ui/settings.ts`）は、一時ディレクトリのファイルで Vitest が確かめる（同時に保存して項目が消えないこと、壊れたファイルの退避、新しい版を書かないこと、パスがブラウザに出ないこと）。`kamado ui-settings`は`KAMADO_UI_SETTINGS`を一時ファイルにして動かせる。ルートの`vitest.config.ts`は、同じ環境変数を一時ディレクトリのファイルに向ける。設定ファイルを明示しない`ui()`のテストが、実行する人の`~/.config/kamado/ui-settings.json`を読んだり、壊れているものを退避したりしないため。表示言語の辞書（`client/src/i18n/messages.ts`）は、両言語に同じ項目があることを Vitest が確かめる。

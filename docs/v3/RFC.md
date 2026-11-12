@@ -255,6 +255,7 @@ TSX を Rust が「HTML 文字列を返す JS」にコンパイルする。コ�
 - `<html static>`の`static`は`kamado/jsx`が`@types/react`の`HtmlHTMLAttributes`へ宣言マージする。`@types/react`は`kamado`の peerDependency（JSX の型検査に使う。`react`のランタイムは要らない）。
 - `tsconfig.json`は`"jsx": "preserve"`にする。`html()`の戻り値の型`HtmlChild`は、`@types/react`が子として受け付けるように、`ReactElement`と同じ形で宣言してある（値は`Markup`で、中身は読めない）。
 - hooks（`useState`など）、Context、`Suspense`は**非対応**。コンポーネントは**純粋関数**（同じ props なら同じ出力、モジュールの変数を書き換えない）。ワーカーが並列に描画するので、この契約を破ると結果が不定になる。
+- `kamado/jsx`の`memo(fn)`は、同じ引数（位置ごとに`Object.is`）の呼び出しの結果を、ワーカーの中で使い回す。`no-module-state`が止める「モジュールの変数に貯める」の代わりの、公式の入口。引数に`props.data`そのものを渡したときは、`fn`の中で読んだキーを、呼び出したページの依存へ再生する（キャッシュに当たっても、ページの依存は減らない）。Why not キーを利用者が返す形: キーを誤ると古い出力を返す。
 - この契約を破る書き方は、`@kamado-io/oxlint`（oxlint の規則。§18）がエラーにする。対象は、`react`の値の import、`'use client'`、`async`のコンポーネント、HTML の要素の関数の`on*`と`ref`、モジュールの変数の書き換え、ファイルの読み込みと`fetch`である。規則と設定は`packages/@kamado-io/oxlint/README.md`。kamado 本体はビルドで検査しない。
 - `import`できるもの: 相対パスと`pages.alias`で指定した別名の TSX/TS/JSON、npm パッケージ（Node が解決し、ESM のみ）。CSS の import は非対応。
 
@@ -419,15 +420,18 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 
 ## 11. 差分ビルド
 
-- manifest: v2 と同じ場所（`<os.tmpdir()>/kamado/<basename>-<hash>/`、`--cache-dir`で上書き。相対パスの基準は §13）。形式は**バイナリ**（`build-manifest.bin`、version 4）。文字列と（パス、指紋）の組を 1 回だけ書き、エントリは番号で参照する。各エントリは、その出力を書いたときの警告文字列と、Shift_JIS で`?`にした文字（§9.5）も持つ（差分ビルドで`cached`のとき要約に再掲するため）。末尾の SHA-256 で切り詰めや破損を検出し、読めなければ全ビルド。10 万ページでも数十 MB に収まる（JSON では数百 MB になる）。内容を見たいときは`Manifest::to_json`。
+- manifest: v2 と同じ場所（`<os.tmpdir()>/kamado/<basename>-<hash>/`、`--cache-dir`で上書き。相対パスの基準は §13）。形式は**バイナリ**（`build-manifest.bin`、version 5）。文字列と（パス、指紋）の組を 1 回だけ書き、エントリは番号で参照する。各エントリは、その出力を書いたときの警告文字列と、Shift_JIS で`?`にした文字（§9.5）も持つ（差分ビルドで`cached`のとき要約に再掲するため）。末尾の SHA-256 で切り詰めや破損を検出し、読めなければ全ビルド。10 万ページでも数十 MB に収まる（JSON では数百 MB になる）。内容を見たいときは`Manifest::to_json`。
 - plan cache（`plan-cache.bin`、同じディレクトリ）: ページごとに、ファイルと sidecar の指紋とメタを覚える。ファイルの size と mtime が記録と同じなら、読まず・ハッシュせず・パースせずにキャッシュのメタを使う（本文はそのページをビルドするときに読む）。何も変わらない差分ビルドは、ファイルごとに stat だけで終わる。`--force`は使わない。
 - 各入力と依存の指紋は`(size, mtime_ns)`を先に比較し、変わったときだけ SHA-256 を取る（`--force`で全て再計算）。ハッシュが一致すれば（early cutoff）再ビルドしない。同じ依存（レイアウトやコンポーネント）の stat は 1 ビルドで 1 回だけ。ビルド中に変更された入力は（読んだあとに書き換えられた可能性があるので）manifest に「最新」として記録せず、次のビルドでやり直す。
 - **既知の限界**: `(size, mtime_ns)`が記録と同じなら、内容は変わっていないとみなす。ファイルシステムの時計の粒度の内に、同じサイズで書き換えられた変更は検出できない（`--force`で全て再計算する）。
-- 環境ダイジェスト: 設定ファイルの内容、kamado のバージョン、`pages.overrides`、ページごとに「読んだメタのフィールド」の値。
+- 環境ダイジェスト: 設定ファイルの内容、kamado のバージョン、`pages.overrides`、ページごとに「読んだメタのフィールド」の値。JSX で描くページの環境ダイジェストには、ページの一覧（`nav()`・`breadcrumbs`。どれかのページの URL かメタが変わると JSX の全ページに効く）の指紋は入れ、`data`の値は入れない（下のキー単位の依存で見る）。
+- **`data`の依存はキー単位**: 描画ごとに`data`を`Proxy.revocable`で包み、ページが読んだトップレベルのキー（存在しないキーも）を記録して、描画のあとに revoke する。入れ子の値は素の値で返す。manifest のエントリは、読んだキーとそのときのキーごとの値のハッシュを持ち、次のビルドで今のハッシュと照合して、1 つでも違えばそのページだけを描き直す（early cutoff。描き直して出力が同じならそこで止まる）。列挙（`Object.keys`、スプレッド、`JSON.stringify`、`in`）・記録の無いページ（初回、manifest 欠落）・描画に失敗したページは**全キー依存**（`data`全体のハッシュ）。Why not 静的解析: 取りこぼすと古い出力が残る。Proxy が見た読み取りは取りこぼさない。version 4 以前の manifest は読まずに全ビルドにする。
+- `kamado build --verify-deps`は、描き終えたページを新しいワーカー（ほかのページの状態を持たない）で描き直し、出力のハッシュが違うページ（`inputPath`）を並べたエラーを赤字で出して exit 1 にする。HTML は書き出しの前に比べるので、失敗したビルドは manifest を保存しない（次のビルドは全ビルド）。対象は**そのビルドで描いたページだけ**（`cached`のページは描かない）。ページごとに新しいワーカーを起こし、サイトの全体（`data`とページの一覧）を渡すので、大きなサイトでは`globs`で絞って使う。`Date`・乱数・環境変数のような非決定的な読み取りも、同じ形で見つかる。モジュールの変数にデータ由来の値を貯めた（§7.2 の契約違反）ために、記録されていない読み取りが出力に混ざったことの検出。通常のビルドの速さには影響しない。
 - 依存ゼロのファイルはスキップしない（v2 と同じ）。manifest の version 不一致・破損は全ビルド。
 
 ## 12. 開発サーバー
 
+- **`data`が変わったとき**: ページのキャッシュを全部は捨てない。JSX で描いたページは、描いたときに読んだ`data`のキーのハッシュ（§11）と比べて、変わったページだけを描き直す。描画の最中に`data`が変わっても、ページは描き始めた時点の`data`のハッシュで記録するので、次の要求で描き直される。読んだキーが分からない描画（記録なし）は全キー依存。
 - **待ち受けるアドレス**: `devServer.host`が`localhost`（ホスト名の検査と同じく、小文字にして末尾の`.`を取って比べる）のときは名前を解決せず、`127.0.0.1`と`::1`の両方の同じポートで待ち受ける。`http://localhost:<port>/`・`http://127.0.0.1:<port>/`・`http://[::1]:<port>/`のどれでも繋がる。Node の`listen`は名前を 1 つのアドレスに解決するので、`localhost`を渡すと OS が最初に返すほう（macOS では`::1`）だけになり、空いたほうのアドレスの同じポートを別のプロセスが取れてしまうため。名前を解決しないのは、`localhost`は loopback（RFC 6761 §6.3）で、hosts ファイルが別のアドレスに向けていてもマシンの外に開かないため。マシンに無いアドレス（IPv6 が無効な環境の`::1`）は飛ばす。どちらかのアドレスでポートが使われていれば起動しない。ほかの値は書いたとおりのアドレスで待ち受ける。`Location`の表示は`devServer.host`のまま（IPv6 アドレスは URL の書き方どおり`[::1]`と括弧で囲む。Host の無い要求もこのホスト宛てとみなす。`::1`を飛ばしたときも変えない。IPv6 が無効なら OS も`localhost`を`::1`では繋がない）。
 - hono。`/` → `index.html`、末尾`/` → `index.html`、拡張子なし → `.html`。出力ディレクトリ外は 403。マップにない場合は出力ディレクトリから静的配信（`.html`/`.htm`への`html.inject`は§9.3）、なければ 404、コンパイルの失敗は 500（本文はエラーメッセージ）。
 - **要求の検査**: 開発サーバーはソース（inline の source map）や`proxy`の先の API を返す。そのため、どのルートよりも前にすべての要求（`proxy`を含む）を 2 つの検査にかけ、どちらかに当たれば`403`（本文は理由）にする。ログには`blocked`として出し、本文を`error`に載せる。
@@ -451,7 +455,7 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 
 ## 13. CLI
 
-`kamado build [globs...]`、`kamado server`、`kamado pages`、`kamado ui`、`kamado ui-settings`。各コマンドが取る位置引数とフラグは決まっており、取らないものを渡すとエラー（exit 1）にする（タイプミスの黙殺を防ぐ。§3 の未知のキーと同じ向き）。`build`・`server`・`pages`・`ui`に共通: `--config/-c`、`--cache-dir <dir>`、`--help/-h`（`ui-settings`は下のとおり）。`--verbose`は`build`と`server`。build: 位置引数`globs`、`--incremental`、`--force`、`--skip-unchanged`、`--jobs <n|auto>`（`auto`は設定の`build.jobs`と同じく既定の数）。server: 位置引数なし、共通と`--verbose`だけ（`--force`・`--incremental`・`--jobs`・`--skip-unchanged`・`--out`・`--port`・`--open`などは渡すとエラー）。pages: `--out <file>`、`--incremental`（位置引数と、`--force`・`--jobs`・`--skip-unchanged`・`--verbose`は読まず、渡すとエラー）。ui: `--port <n>`（既定は`devServer.port + 1`）、`--open`/`--no-open`（既定は`devServer.open`）。`--out`、`--force`、`--jobs`、`--skip-unchanged`、`--incremental`、`--verbose`、位置引数は、`ui`に渡すとエラー。`--port`と`--open`は`ui`だけのフラグで、ほかのコマンドに渡すとエラー。ui-settings: `list`、`reset [--config <file>]`、`delete <config-file>`か`delete --all`（`ui`が保存した設定の確認と削除。§14.2）。`--all`は`ui-settings delete`だけのフラグで、ほかのコマンド・サブコマンドに渡すとエラー。`--config`は`reset`だけ。`--cache-dir`、`--port`、`--open`、`--no-open`、`--out`、`--force`、`--jobs`、`--skip-unchanged`、`--incremental`、`--verbose`は、`ui-settings`に渡すとエラー。設定エラーは赤字で表示して exit 1。進捗表示（スピナー、done/total、`Build completed in Xs`）と色分けは v2 に準じる。
+`kamado build [globs...]`、`kamado server`、`kamado pages`、`kamado ui`、`kamado ui-settings`。各コマンドが取る位置引数とフラグは決まっており、取らないものを渡すとエラー（exit 1）にする（タイプミスの黙殺を防ぐ。§3 の未知のキーと同じ向き）。`build`・`server`・`pages`・`ui`に共通: `--config/-c`、`--cache-dir <dir>`、`--help/-h`（`ui-settings`は下のとおり）。`--verbose`は`build`と`server`。build: 位置引数`globs`、`--incremental`、`--force`、`--skip-unchanged`、`--verify-deps`（§11）、`--jobs <n|auto>`（`auto`は設定の`build.jobs`と同じく既定の数）。server: 位置引数なし、共通と`--verbose`だけ（`--force`・`--incremental`・`--jobs`・`--skip-unchanged`・`--out`・`--port`・`--open`などは渡すとエラー）。pages: `--out <file>`、`--incremental`（位置引数と、`--force`・`--jobs`・`--skip-unchanged`・`--verify-deps`・`--verbose`は読まず、渡すとエラー）。ui: `--port <n>`（既定は`devServer.port + 1`）、`--open`/`--no-open`（既定は`devServer.open`）。`--out`、`--force`、`--jobs`、`--skip-unchanged`、`--incremental`、`--verbose`、`--verify-deps`、位置引数は、`ui`に渡すとエラー。`--port`と`--open`は`ui`だけのフラグで、ほかのコマンドに渡すとエラー。ui-settings: `list`、`reset [--config <file>]`、`delete <config-file>`か`delete --all`（`ui`が保存した設定の確認と削除。§14.2）。`--all`は`ui-settings delete`だけのフラグで、ほかのコマンド・サブコマンドに渡すとエラー。`--config`は`reset`だけ。`--cache-dir`、`--port`、`--open`、`--no-open`、`--out`、`--force`、`--jobs`、`--skip-unchanged`、`--verify-deps`、`--incremental`、`--verbose`は、`ui-settings`に渡すとエラー。設定エラーは赤字で表示して exit 1。進捗表示（スピナー、done/total、`Build completed in Xs`）と色分けは v2 に準じる。
 
 `globs`（複数可）は、ビルドするページ・スタイル・スクリプトを、入力ファイルで絞る。相対パスは **cwd 基準**（打った場所からのパス。v2 と同じ）、絶対パスは基準を付けずに使う。`*` `?` `[` `]` `{` `}`を含むものは glob。含まないものはファイルのパスで、そのファイルが無ければエラー（exit 1）。ディレクトリのパスは、その中のすべてのファイル（`dir/**`）。ページ・スタイル・スクリプトを 1 つも選ばなかったもの（当たらない glob、ページでない画像のパスなど）は警告して、ビルドを続ける。先頭が`!`の否定はエラー。基準のディレクトリの名前にある、glob が読む文字（`(`や`|`を含む）はエスケープして照らす。コアは入力ファイルを、設定ファイルのディレクトリ・`dir.input`・たどったパスで名付け、途中のシンボリックリンクを解かない。`globs`も同じく書かれた形のまま照らす。cwd はシンボリックリンクを解いた実体のパスなので、CLI は設定ファイルのパスも実体にそろえる。glob の中の`\`はエスケープなので、Windows でも glob は`/`で区切って書く。
 
@@ -479,10 +483,12 @@ DOM を HTML に戻すときの書き方。`"linkedom"`（既定）は v2 の中
 	],
 	"warnings": [],
 	"elapsedMs": 1234,
+	// 前回のビルドが書いたページを描き直した理由。描き直したページがあるときだけ出る（初回は出ない）
+	"reasons": [["/a/", "data.posts changed"]],
 }
 ```
 
-`status`は`built`/`cached`（差分ビルドで飛ばした）/`unchanged`（`skipUnchanged`で、出力が同じバイト列だった）/`skipped`（`targets`の対象外）/`virtual`（仮想ページ。書き出さない）。`kind`は`style`/`script`。
+`status`は`built`/`cached`（差分ビルドで飛ばした）/`unchanged`（`skipUnchanged`で、出力が同じバイト列だった）/`skipped`（`targets`の対象外）/`virtual`（仮想ページ。書き出さない）。`kind`は`style`/`script`。`reasons`は`[url, 理由]`の組で、`kamado build --verbose`がそのページの行の後ろに書く。理由は、読んだ`data`のキーが変わった（`data.<key> changed`）、全キー依存で`data`が変わった、ページ・import したモジュール・ページの一覧（`nav()`・`breadcrumbs`）・設定が変わった、のどれか。値と URL は出さない（キー名だけ）。
 
 ### 14.1 ページの一覧: `kamado pages`
 
