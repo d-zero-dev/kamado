@@ -15,7 +15,7 @@ import { settingsCommand } from './ui/settings-command.js';
 import { defaultSettingsFile } from './ui/settings.js';
 
 const USAGE = `Usage:
-  kamado build [globs...] [--incremental] [--force] [--skip-unchanged]
+  kamado build [globs...] [--incremental] [--force] [--skip-unchanged] [--verify-deps]
                            [--jobs <n|auto>] [--cache-dir <dir>] [--config <file>] [--verbose]
   kamado server           [--config <file>] [--cache-dir <dir>] [--verbose]
   kamado pages            [--out <file>] [--incremental] [--cache-dir <dir>] [--config <file>]
@@ -98,6 +98,7 @@ async function main(argv: readonly string[]): Promise<number> {
 			incremental: { type: 'boolean', default: false },
 			force: { type: 'boolean', default: false },
 			'skip-unchanged': { type: 'boolean', default: false },
+			'verify-deps': { type: 'boolean', default: false },
 			jobs: { type: 'string' },
 			out: { type: 'string' },
 			'cache-dir': { type: 'string' },
@@ -133,6 +134,7 @@ async function main(argv: readonly string[]): Promise<number> {
 						incremental: values.incremental,
 						force: values.force,
 						skipUnchanged: values['skip-unchanged'],
+						verifyDeps: values['verify-deps'],
 						targets: rest,
 						jobs,
 						cacheDir:

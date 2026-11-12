@@ -25,6 +25,7 @@ export interface SettingsCommandFlags {
 	readonly config?: string;
 	readonly force?: boolean;
 	readonly 'skip-unchanged'?: boolean;
+	readonly 'verify-deps'?: boolean;
 	readonly verbose?: boolean;
 	readonly incremental?: boolean;
 	readonly jobs?: string;
@@ -66,6 +67,7 @@ function checkUnused(flags: SettingsCommandFlags): void {
 		['--port', flags.port],
 		['--skip-unchanged', flags['skip-unchanged'] || undefined],
 		['--verbose', flags.verbose || undefined],
+		['--verify-deps', flags['verify-deps'] || undefined],
 	];
 	for (const [name, value] of names) {
 		if (value !== undefined) {
