@@ -151,12 +151,6 @@ describe('when the script fails', () => {
 });
 
 describe('when there is nothing to apply', () => {
-	test('a script that returned nothing', () => {
-		const html = view({ state: state({ status: 'nothing' }) });
-		expect(html).toContain('The script returned nothing');
-		expect(html).toContain('Nothing was applied.');
-	});
-
 	test('a result that is what the files are', () => {
 		const html = view({ state: state({ status: 'nochange' }) });
 		expect(html).toContain('No changes');
@@ -184,7 +178,7 @@ describe('a result that cannot be applied', () => {
 				},
 			}),
 		});
-		expect(html).toContain('The result cannot be applied');
+		expect(html).toContain('What the script returned cannot be used');
 		expect(html).toContain(
 			'<li>row 1 (no): url must be a string that starts with /</li>',
 		);
@@ -306,6 +300,121 @@ describe('the differences to apply', () => {
 			'git cannot bring these changes back (this is not a repository',
 		);
 		expect(html).not.toContain('have changes that git cannot bring back');
+	});
+});
+
+describe('an export', () => {
+	const exporting = (over: Partial<SyncState>) =>
+		state({ direction: 'export', name: 'export', ...over });
+
+	test('shows that it writes, with no way to apply', () => {
+		const html = view({ state: exporting({ status: 'writing' }) });
+		expect(html).toContain('Exporting “Import from the sheet”…');
+		expect(html).toContain('class="spinner"');
+		expect(html).toContain('role="status"');
+		expect(html).not.toContain('Apply');
+		expect(view({ state: exporting({ status: 'writing' }), language: 'ja' })).toContain(
+			'「Import from the sheet」で書き出しています…',
+		);
+	});
+
+	test('says that what it writes to matches the files', () => {
+		const html = view({ state: exporting({ status: 'nochange' }) });
+		expect(html).toContain(
+			'What the script writes to matches the files of the local repository.',
+		);
+		expect(html).not.toContain('match what the script returned');
+		expect(view({ state: exporting({ status: 'nochange' }), language: 'ja' })).toContain(
+			'書き出し先のデータは、ローカルリポジトリのファイルと一致しています。',
+		);
+	});
+
+	test('says that no difference can be shown when the script has no read, and how many it writes', () => {
+		const review = exporting({
+			status: 'review',
+			diffed: false,
+			targets: 12,
+			summary: {
+				counts: COUNTS,
+				total: 0,
+				unsaved: { total: 0, listed: [] },
+				gitUnavailable: false,
+			},
+		});
+		const html = view({ state: review });
+		expect(html).toContain('No difference can be shown.');
+		expect(html).toContain('It exports 12 page(s).');
+		expect(html).not.toContain('role="tablist"');
+		const ja = view({ state: review, language: 'ja' });
+		expect(ja).toContain('差分は表示できません。');
+		expect(ja).toContain('12 件のページを書き出します。');
+	});
+
+	test('says what exporting does to the data it writes to, and not to the files, once', () => {
+		const html = view({
+			state: exporting({
+				status: 'review',
+				diffed: true,
+				summary: {
+					counts: { ...COUNTS, meta: 1 },
+					total: 1,
+					unsaved: { total: 0, listed: [] },
+					gitUnavailable: false,
+				},
+			}),
+			tab: 'meta',
+		});
+		expect(html).toContain('Exporting changes what the script writes to.');
+		expect(html).not.toContain('Applying changes');
+		expect(html.split('do not change').length - 1).toBe(1);
+	});
+
+	test('says that nothing was written when the script fails, and that the target may be half written when it failed writing', () => {
+		const failure = { message: 'no network', stack: null };
+		const failed = view({ state: exporting({ status: 'failed', failure }) });
+		expect(failed).toContain('Nothing was written.');
+		expect(failed).not.toContain('Nothing was applied.');
+		const writing = view({
+			state: exporting({ status: 'failed', failure, phase: 'write' }),
+		});
+		expect(writing).toContain('may be half written');
+		expect(writing).not.toContain('do not change');
+		expect(writing).not.toContain('Nothing was written.');
+		const ja = view({
+			state: exporting({ status: 'failed', failure, phase: 'write' }),
+			language: 'ja',
+		});
+		expect(ja).toContain('書き出し先は途中まで書き換わっている可能性があります。');
+		expect(ja).not.toContain('変わっていません');
+	});
+
+	test('says that nothing was written for what cannot be used, a conflict and a refusal', () => {
+		const refused = {
+			code: 'conflict',
+			message: 'a.html was changed',
+			failures: { total: 1, listed: [] },
+		};
+		for (const status of ['invalid', 'conflict', 'refused'] as const) {
+			const html = view({
+				state: exporting({
+					status,
+					problems: { total: 1, listed: ['row 1: must be an object'] },
+					refused,
+				}),
+			});
+			expect(html).toContain('Nothing was written.');
+			expect(html).not.toContain('Nothing was applied.');
+			const ja = view({
+				state: exporting({
+					status,
+					problems: { total: 1, listed: ['row 1: must be an object'] },
+					refused,
+				}),
+				language: 'ja',
+			});
+			expect(ja).toContain('何も書き出していません。');
+			expect(ja).not.toContain('何も適用していません。');
+		}
 	});
 });
 

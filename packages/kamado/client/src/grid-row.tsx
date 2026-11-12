@@ -9,6 +9,7 @@ import { EnumEditor } from './enum-editor.js';
 import { useI18n } from './i18n/context.js';
 import { ListEditor } from './list-editor.js';
 import { editKindOf } from './logic/columns.js';
+import { customCommand } from './logic/commands.js';
 import { cellDiffOf, diffNote, originLabel, originName } from './logic/diff.js';
 import { fixedCellOf } from './logic/fixed-cells.js';
 import { enumKindOf } from './logic/kinds.js';
@@ -216,6 +217,8 @@ interface RowProps {
 	readonly diff: PageDiff | undefined;
 	/** The `pages.overrides` file as the server names it, or `null` when the site has none. */
 	readonly overridesFile: string | null;
+	/** The `id` of the element that handles the commands of the buttons of a cell (`cell`, `revert`, `toggle`). */
+	readonly commandTarget: string;
 	readonly onCommit: (draft: string) => void;
 	readonly onCancel: () => void;
 	readonly onInvalid: (reason: string) => void;
@@ -303,6 +306,7 @@ export const GridRow = memo(function GridRow({
 	editing,
 	diff,
 	overridesFile,
+	commandTarget,
 	onCommit,
 	onCancel,
 	onInvalid,
@@ -347,6 +351,21 @@ export const GridRow = memo(function GridRow({
 				// change while a column is dragged, and the rows are not drawn again for it).
 				style={pinned ? { left: `var(--pin-${col})` } : undefined}
 				className={`cell${pinned ? ' pinned' : ''}${col === pinnedCount - 1 ? ' pin-end' : ''}${col === activeCol ? ' active' : ''}${readOnly ? ' readonly' : ''}`}>
+				{/* A cell that is not being edited is pressed with the pointer: the button that covers it
+				    sends the command that gives it the focus (a div cannot send one). It is for the
+				    pointer alone, as the grid is moved in with the keyboard: it is not a stop of Tab, and a
+				    screen reader is not told of it. It is over the text of the cell (so the text cannot be
+				    selected by dragging: a double click enters the edit), and the bar of a difference and
+				    the box of a boolean are over it. */}
+				{!isEditing && (
+					<button
+						type="button"
+						tabIndex={-1}
+						aria-hidden="true"
+						className="cell-hit"
+						{...customCommand(commandTarget, 'cell')}
+					/>
+				)}
 				{cellDiff !== undefined &&
 					(cellDiff.revertible ? (
 						// A button for the pointer: the keyboard puts a value back with Alt+Backspace in the
@@ -359,6 +378,7 @@ export const GridRow = memo(function GridRow({
 							data-revert=""
 							data-kind={cellDiff.kind}
 							aria-label={t('diff.revertCell')}
+							{...customCommand(commandTarget, 'revert')}
 						/>
 					) : (
 						<span aria-hidden="true" className="diff-mark" data-kind={cellDiff.kind} />
@@ -374,13 +394,16 @@ export const GridRow = memo(function GridRow({
 					<span className="cell-text">{text}</span>
 				) : (
 					<>
-						{/* The box is for the eye and the pointer (a click on it makes the edit, see `data-toggle`);
+						{/* The box is for the eye and the pointer (pressing it makes the edit, see `data-toggle`);
 						    the cell says `true` or `false` to a screen reader (a gridcell has no checked state to use). */}
-						<span
+						<button
+							type="button"
+							tabIndex={-1}
 							aria-hidden="true"
 							className="check"
 							data-toggle=""
 							data-checked={checked}
+							{...customCommand(commandTarget, 'toggle')}
 						/>
 						<span className="sr-only">{String(checked)}</span>
 					</>

@@ -211,9 +211,10 @@ export interface SyncFunction {
 /** How a sync stands. */
 export type SyncStatus =
 	| 'running'
+	/** The script of an export is writing: what is outside may be half written until it ends. */
+	| 'writing'
 	| 'failed'
 	| 'cancelled'
-	| 'nothing'
 	| 'nochange'
 	| 'invalid'
 	| 'review'
@@ -248,6 +249,14 @@ export interface SyncState {
 	/** How many lines were dropped from the start of the log. */
 	readonly dropped: number;
 	readonly failure?: { readonly message: string; readonly stack: string | null };
+	/** Which way the sync goes, once the script has said: an import changes the files, an export what is outside. */
+	readonly direction?: 'import' | 'export';
+	/** For an export: `false` when the script has no `read`, so no difference can be shown. */
+	readonly diffed?: boolean;
+	/** For an export: how many pages the script writes out. */
+	readonly targets?: number;
+	/** Where the script failed or was stopped: `write` means that what is outside may be half written. */
+	readonly phase?: 'read' | 'write';
 	readonly problems?: { readonly total: number; readonly listed: readonly string[] };
 	readonly summary?: {
 		readonly counts: Readonly<Record<SyncKind, number>>;

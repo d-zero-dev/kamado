@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 
 import { useI18n } from './i18n/context.js';
 import { holdsVirtualPages } from './logic/page-questions.js';
+import { useCommands } from './use-commands.js';
 
 interface PageDialogProps {
 	/** What is asked; `null` while no dialog is open. */
@@ -75,9 +76,19 @@ export function PageDialog({
 	};
 	const file = overridesFile ?? 'pages.overrides';
 
+	const commands = useCommands(
+		{
+			add: () => choose('add'),
+			virtualize: () => choose('virtualize'),
+			delete: () => choose('delete'),
+		},
+		dialog,
+	);
+
 	return (
 		<dialog
-			ref={dialog}
+			ref={commands.ref}
+			id={commands.id}
 			aria-labelledby="page-dialog-title"
 			className="dialog wordy"
 			onClose={() => {
@@ -112,16 +123,11 @@ export function PageDialog({
 						</p>
 					)}
 					<div className="actions">
-						<button
-							ref={cancelButton}
-							type="button"
-							onClick={() => {
-								dialog.current?.close();
-							}}>
+						<button ref={cancelButton} type="button" {...commands.builtin('close')}>
 							{t('dialog.cancel')}
 						</button>
 						{question.kind === 'addVirtual' && (
-							<button ref={addButton} type="button" onClick={() => choose('add')}>
+							<button ref={addButton} type="button" {...commands.run('add')}>
 								{t('pageDialog.addVirtual.confirm')}
 							</button>
 						)}
@@ -129,12 +135,12 @@ export function PageDialog({
 							<button
 								type="button"
 								disabled={!holdsVirtualPages(overridesFile)}
-								onClick={() => choose('virtualize')}>
+								{...commands.run('virtualize')}>
 								{t('pageDialog.virtualize')}
 							</button>
 						)}
 						{(question.kind === 'emptyPath' || question.kind === 'delete') && (
-							<button type="button" className="danger" onClick={() => choose('delete')}>
+							<button type="button" className="danger" {...commands.run('delete')}>
 								{t('pageDialog.delete')}
 							</button>
 						)}
