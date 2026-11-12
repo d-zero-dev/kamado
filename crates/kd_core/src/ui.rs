@@ -137,9 +137,34 @@ pub struct ServerSettings<'a> {
 	pub overrides: Option<&'a str>,
 	/// `ui.syncFunctions`, with the scripts made absolute
 	pub sync_functions: &'a [kd_config::SyncFunction],
+	/// `ui.defaultKeyOrder`, as written
+	pub default_key_order: Option<&'a [String]>,
+	/// `ui.defaultFixedKeys`, as written
+	pub default_fixed_keys: Option<&'a [String]>,
 }
 
 impl ServerSettings<'_> {
+	/// A list of column identifiers as the command serving the editor reads it: an array of
+	/// strings as written, or `null` when the config does not write it (`[]` is written, and
+	/// is not `null`).
+	fn columns_json(list: Option<&[String]>) -> Value {
+		list.map_or(Value::Null, |ids| {
+			Value::Array(ids.iter().cloned().map(Value::String).collect())
+		})
+	}
+
+	/// `ui.defaultKeyOrder` for the command serving the editor: the identifiers as written, or
+	/// `null`.
+	pub fn default_key_order_json(&self) -> Value {
+		Self::columns_json(self.default_key_order)
+	}
+
+	/// `ui.defaultFixedKeys` for the command serving the editor: the identifiers as written, or
+	/// `null`.
+	pub fn default_fixed_keys_json(&self) -> Value {
+		Self::columns_json(self.default_fixed_keys)
+	}
+
 	/// The operations of `ui.syncFunctions` as the command serving the editor reads them: an
 	/// array of `{ "name", "label", "script" }` (the label as written, the script absolute).
 	/// The command keeps the script paths to itself; the screen is told the names and labels
@@ -1779,6 +1804,8 @@ impl Ui {
 			output_dir: &config.dir.output,
 			overrides: config.pages.overrides.as_deref(),
 			sync_functions: &config.ui.sync_functions,
+			default_key_order: config.ui.default_key_order.as_deref(),
+			default_fixed_keys: config.ui.default_fixed_keys.as_deref(),
 		}
 	}
 

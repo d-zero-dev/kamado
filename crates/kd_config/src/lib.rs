@@ -285,6 +285,13 @@ pub struct UiConfig {
 	pub keys: Vec<(String, UiKey)>,
 	/// The operations of the sync button, in the order written.
 	pub sync_functions: Vec<SyncFunction>,
+	/// `ui.defaultKeyOrder`: the identifiers of the columns in the order the grid shows them
+	/// until a person has set an order of their own. `None` when not written (and `[]` is
+	/// written but names no column, which the screen treats as not written).
+	pub default_key_order: Option<Vec<String>>,
+	/// `ui.defaultFixedKeys`: the identifiers of the columns pinned to the left edge until a
+	/// person has pinned or unpinned one. `None` when not written; `Some([])` pins none.
+	pub default_fixed_keys: Option<Vec<String>>,
 }
 
 /// The whole configuration with defaults applied and paths made absolute.
@@ -634,10 +641,17 @@ pub fn parse(config_text: &str, root_dir: &str, package_json: Option<&str>) -> R
 
 	let ui = {
 		let o = root.obj("ui")?;
-		o.allow(&["keys", "syncFunctions"])?;
+		o.allow(&[
+			"keys",
+			"syncFunctions",
+			"defaultKeyOrder",
+			"defaultFixedKeys",
+		])?;
 		UiConfig {
 			keys: parse_ui_keys(&o)?,
 			sync_functions: parse_sync_functions(&o, &resolve)?,
+			default_key_order: parse_column_list(&o, "defaultKeyOrder")?,
+			default_fixed_keys: parse_column_list(&o, "defaultFixedKeys")?,
 		}
 	};
 
@@ -686,6 +700,86 @@ fn parse_ui_keys(ui: &Obj<'_>) -> R<Vec<(String, UiKey)>> {
 		));
 	}
 	Ok(keys)
+}
+
+/// The columns every row of the grid of `kamado ui` has, by their identifiers (RFC section 14.2).
+/// A key of the metadata is `meta:<key>`, so a key called `url` is another column. These are the
+/// identifiers `ui.defaultKeyOrder` and `ui.defaultFixedKeys` take besides `meta:<key>`; public
+/// so that the tests that hold the schema, and the list of the screen, to the same set can read it.
+///
+/// # Example
+///
+/// ```
+/// assert!(kd_config::UI_BUILTIN_COLUMNS.contains(&"inputPath"));
+/// assert!(!kd_config::UI_BUILTIN_COLUMNS.contains(&"title"));
+/// ```
+pub const UI_BUILTIN_COLUMNS: [&str; 7] = [
+	"url",
+	"virtual",
+	"inputPath",
+	"order",
+	"outputPath",
+	"parent",
+	"depth",
+];
+
+/// The longest identifier of a column, in UTF-16 code units (what `String.length` counts, as
+/// the server of `kamado ui` does for the identifiers it takes).
+const MAX_COLUMN_ID: usize = 256;
+
+/// The most columns a list names, as many as the settings of the screen hold.
+const MAX_COLUMN_IDS: usize = 500;
+
+/// `ui.defaultKeyOrder` and `ui.defaultFixedKeys`: an array of column identifiers (`url`,
+/// `virtual`, `inputPath`, `order`, `outputPath`, `parent`, `depth` or `meta:<key>`), the same
+/// as `columns.order` and `columns.pinned` of the settings of the screen.
+///
+/// A list names a column once, holds at most 500 of them, and each identifier is at most 256 UTF-16
+/// code units. The names are not looked up among the keys of the pages: a key that no page has
+/// gets no column, so a team can name a key before the first page has it.
+fn parse_column_list(ui: &Obj<'_>, key: &str) -> R<Option<Vec<String>>> {
+	let items = match ui.get(key) {
+		None => return Ok(None),
+		Some(Value::Array(items)) => items,
+		Some(_) => return Err(ui.err(key, "expected an array of column identifiers")),
+	};
+	if items.len() > MAX_COLUMN_IDS {
+		return Err(ui.err(
+			key,
+			format!("at most {MAX_COLUMN_IDS} columns, got {}", items.len()),
+		));
+	}
+	let mut ids: Vec<String> = Vec::with_capacity(items.len());
+	for (i, item) in items.iter().enumerate() {
+		let at = format!("{key}[{i}]");
+		let Value::String(id) = item else {
+			return Err(ui.err(&at, "expected a string"));
+		};
+		let named = match id.strip_prefix("meta:") {
+			Some(name) => !name.is_empty(),
+			None => UI_BUILTIN_COLUMNS.contains(&id.as_str()),
+		};
+		if !named {
+			return Err(ui.err(
+				&at,
+				format!(
+					"expected a column: {} or meta:<key>, got {id:?}",
+					UI_BUILTIN_COLUMNS.join(", ")
+				),
+			));
+		}
+		if id.encode_utf16().count() > MAX_COLUMN_ID {
+			return Err(ui.err(
+				&at,
+				format!("a column identifier is at most {MAX_COLUMN_ID} characters"),
+			));
+		}
+		if let Some(first) = ids.iter().position(|seen| seen == id) {
+			return Err(ui.err(&at, format!("{id:?} is already in {key}[{first}]")));
+		}
+		ids.push(id.clone());
+	}
+	Ok(Some(ids))
 }
 
 /// `ui.syncFunctions`: a list of `{ name, label, script }`.
@@ -1921,5 +2015,143 @@ mod tests {
 			fail(r#"{ "ui": { "keys": { "": { "label": "x" } } } }"#).path,
 			"ui.keys"
 		);
+	}
+
+	#[test]
+	fn ui_default_columns_default_to_none() {
+		let c = ok("{}");
+		assert_eq!(c.ui.default_key_order, None);
+		assert_eq!(c.ui.default_fixed_keys, None);
+		let c = ok(r#"{ "ui": {} }"#);
+		assert_eq!(c.ui.default_key_order, None);
+		assert_eq!(c.ui.default_fixed_keys, None);
+	}
+
+	#[test]
+	fn ui_default_columns_read_the_identifiers_in_the_order_written() {
+		let c = ok(r#"{ "ui": {
+			"defaultKeyOrder": ["url", "meta:title", "meta:layout", "inputPath", "meta:url"],
+			"defaultFixedKeys": ["meta:title", "url"]
+		} }"#);
+		assert_eq!(
+			c.ui.default_key_order.as_deref(),
+			Some(
+				&[
+					"url".to_string(),
+					"meta:title".to_string(),
+					"meta:layout".to_string(),
+					"inputPath".to_string(),
+					"meta:url".to_string(),
+				][..]
+			)
+		);
+		assert_eq!(
+			c.ui.default_fixed_keys.as_deref(),
+			Some(&["meta:title".to_string(), "url".to_string()][..])
+		);
+	}
+
+	#[test]
+	fn ui_default_columns_take_every_fixed_column_and_an_empty_list() {
+		let c = ok(r#"{ "ui": {
+			"defaultKeyOrder": ["url", "virtual", "inputPath", "order", "outputPath", "parent", "depth"],
+			"defaultFixedKeys": []
+		} }"#);
+		assert_eq!(c.ui.default_key_order.map(|l| l.len()), Some(7));
+		// `[]` is "pin none", not "not written".
+		assert_eq!(c.ui.default_fixed_keys, Some(Vec::new()));
+		assert_eq!(
+			ok(r#"{ "ui": { "defaultKeyOrder": [] } }"#)
+				.ui
+				.default_key_order,
+			Some(Vec::new())
+		);
+	}
+
+	#[test]
+	fn ui_default_columns_refuse_what_is_not_a_list_of_columns() {
+		for key in ["defaultKeyOrder", "defaultFixedKeys"] {
+			let e = fail(&format!(r#"{{ "ui": {{ "{key}": "url" }} }}"#));
+			assert_eq!(e.path, format!("ui.{key}"));
+			assert_eq!(e.message, "expected an array of column identifiers");
+			assert_eq!(
+				fail(&format!(r#"{{ "ui": {{ "{key}": null }} }}"#)).path,
+				format!("ui.{key}")
+			);
+			let e = fail(&format!(r#"{{ "ui": {{ "{key}": ["url", 1] }} }}"#));
+			assert_eq!(e.path, format!("ui.{key}[1]"));
+			assert_eq!(e.message, "expected a string");
+			for bad in ["title", "meta:", "URL", "", "metaTitle", "meta"] {
+				let e = fail(&format!(r#"{{ "ui": {{ "{key}": [{bad:?}] }} }}"#));
+				assert_eq!(e.path, format!("ui.{key}[0]"), "{bad:?}");
+				assert!(
+					e.message.starts_with("expected a column: url, virtual"),
+					"{bad:?}: {}",
+					e.message
+				);
+			}
+			let e = fail(&format!(
+				r#"{{ "ui": {{ "{key}": ["url", "meta:a", "url"] }} }}"#
+			));
+			assert_eq!(e.path, format!("ui.{key}[2]"));
+			assert_eq!(e.message, format!("\"url\" is already in {key}[0]"));
+		}
+	}
+
+	#[test]
+	fn ui_default_columns_limit_the_identifier_and_the_count() {
+		// 256 UTF-16 code units, `meta:` included, is the longest the server of `kamado ui` takes.
+		let longest = format!("meta:{}", "a".repeat(256 - "meta:".len()));
+		assert!(
+			ok(&format!(
+				r#"{{ "ui": {{ "defaultKeyOrder": ["{longest}"] }} }}"#
+			))
+			.ui
+			.default_key_order
+			.is_some()
+		);
+		let e = fail(&format!(
+			r#"{{ "ui": {{ "defaultKeyOrder": ["{longest}a"] }} }}"#
+		));
+		assert_eq!(e.path, "ui.defaultKeyOrder[0]");
+		assert_eq!(e.message, "a column identifier is at most 256 characters");
+		// A character outside the BMP is two code units, as it is for `String.length`.
+		let astral = format!("meta:{}", "\u{1F600}".repeat((256 - "meta:".len()) / 2 + 1));
+		let e = fail(&format!(
+			r#"{{ "ui": {{ "defaultFixedKeys": ["{astral}"] }} }}"#
+		));
+		assert_eq!(e.path, "ui.defaultFixedKeys[0]");
+		let fits = format!("meta:{}", "\u{1F600}".repeat((256 - "meta:".len()) / 2));
+		assert!(
+			ok(&format!(
+				r#"{{ "ui": {{ "defaultFixedKeys": ["{fits}"] }} }}"#
+			))
+			.ui
+			.default_fixed_keys
+			.is_some()
+		);
+
+		let many = |n: usize| {
+			(0..n)
+				.map(|i| format!("\"meta:k{i}\""))
+				.collect::<Vec<_>>()
+				.join(",")
+		};
+		assert_eq!(
+			ok(&format!(
+				r#"{{ "ui": {{ "defaultKeyOrder": [{}] }} }}"#,
+				many(500)
+			))
+			.ui
+			.default_key_order
+			.map(|l| l.len()),
+			Some(500)
+		);
+		let e = fail(&format!(
+			r#"{{ "ui": {{ "defaultKeyOrder": [{}] }} }}"#,
+			many(501)
+		));
+		assert_eq!(e.path, "ui.defaultKeyOrder");
+		assert_eq!(e.message, "at most 500 columns, got 501");
 	}
 }
