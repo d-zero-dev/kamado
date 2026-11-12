@@ -788,11 +788,90 @@ impl Trusted<'_> {
 	pub fn value_range(&self, path: &[Seg<'_>]) -> Result<(usize, usize), EditError> {
 		range_of(self.0, path, false)
 	}
+
+	/// The byte range of the value of every entry of the container at `path` (the items of an
+	/// array, the members of an object, in the order they are written), read in one pass. Why:
+	/// [`Trusted::value_range`] of each item reads the container again each time, and a batch
+	/// of edits of the items of an array of a hundred thousand would read it a hundred
+	/// thousand times.
+	///
+	/// # Errors
+	///
+	/// [`EditError::NoSuchPath`] if the path leads to no container.
+	///
+	/// # Example
+	///
+	/// ```
+	/// use kd_jsonc::edit::{Seg, trusted};
+	/// let text = r#"{ "pages": [ { "url": "/a/" }, 2 ] }"#;
+	/// let ranges = trusted(text).entry_ranges(&[Seg::Key("pages")]).unwrap();
+	/// assert_eq!(&text[ranges[0].0..ranges[0].1], r#"{ "url": "/a/" }"#);
+	/// assert_eq!(&text[ranges[1].0..ranges[1].1], "2");
+	/// ```
+	pub fn entry_ranges(&self, path: &[Seg<'_>]) -> Result<Vec<(usize, usize)>, EditError> {
+		let lay = locate(self.0, path, false)?;
+		Ok(lay
+			.entries
+			.iter()
+			.map(|e| (e.value_start, e.value_end))
+			.collect())
+	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn the_ranges_of_every_entry_are_read_in_one_pass() {
+		let text = "{\n\t// c\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\" }, // a\n\t\t[1, 2],\n\t\t\"x\"\n\t]\n}\n";
+		let ranges = trusted(text).entry_ranges(&[Seg::Key("pages")]).unwrap();
+		let got: Vec<&str> = ranges.iter().map(|&(a, b)| &text[a..b]).collect();
+		assert_eq!(got, vec![r#"{ "url": "/a/" }"#, "[1, 2]", r#""x""#]);
+		for (i, &(a, b)) in ranges.iter().enumerate() {
+			assert_eq!(
+				trusted(text)
+					.value_range(&[Seg::Key("pages"), Seg::Index(i)])
+					.unwrap(),
+				(a, b)
+			);
+		}
+		let members = trusted(r#"{ "a": 1, "b": [2] }"#)
+			.entry_ranges(&[])
+			.unwrap();
+		assert_eq!(members.len(), 2);
+		assert!(trusted(text).entry_ranges(&[Seg::Key("nope")]).is_err());
+	}
+
+	#[test]
+	fn the_ranges_of_the_entries_of_the_odd_shapes_an_array_can_have() {
+		let ranges = |text: &str, path: &[Seg<'_>]| -> Vec<String> {
+			trusted(text)
+				.entry_ranges(path)
+				.unwrap()
+				.into_iter()
+				.map(|(a, b)| text[a..b].to_string())
+				.collect()
+		};
+		let pages = [Seg::Key("pages")];
+		assert_eq!(ranges(r#"{ "pages": [] }"#, &pages), Vec::<String>::new());
+		assert_eq!(ranges(r#"{ "pages": [ ] }"#, &pages), Vec::<String>::new());
+		// a trailing comma, and strings and comments that hold what ends or separates a value
+		assert_eq!(
+			ranges("{ \"pages\": [ \"a,]\", /* ], */ \"b\" , ] }", &pages),
+			vec!["\"a,]\"", "\"b\""]
+		);
+		// the entries of a container deeper in the document
+		assert_eq!(
+			ranges(
+				r#"{ "a": { "pages": [1, [2, 3], {"k": [4]}] } }"#,
+				&[Seg::Key("a"), Seg::Key("pages")]
+			),
+			vec!["1", "[2, 3]", r#"{"k": [4]}"#]
+		);
+		// a path that leads to something that is not a container
+		assert!(trusted(r#"{ "pages": 1 }"#).entry_ranges(&pages).is_err());
+	}
 
 	fn s(v: &str) -> Value {
 		Value::String(v.to_string())
