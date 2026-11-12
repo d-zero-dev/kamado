@@ -283,6 +283,24 @@ button:disabled {
 	box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
 }
 
+/* The entries are in an element of their own (the note is not one of them), and are laid out
+   as they were when they were the children of the box. */
+.column-menu .entries {
+	display: grid;
+}
+
+/* What goes with the menu (the key and the description of the column): the lines of the text
+   stay lines (`pre-line`), and a long word, such as a URL in a description, is broken instead
+   of widening the menu past the window (`anywhere`). */
+.column-menu .note {
+	max-width: 24rem;
+	margin: 0 0 0.25rem;
+	padding: 0.25rem 0.5rem 0.5rem;
+	border-bottom: 1px solid var(--line);
+	overflow-wrap: anywhere;
+	white-space: pre-line;
+}
+
 .column-menu button {
 	border: 0;
 	border-radius: 4px;

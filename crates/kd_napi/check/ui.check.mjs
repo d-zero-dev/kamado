@@ -594,8 +594,10 @@ test('the server of kamado ui answers with what the core says, told without the 
 		assert.ok(!text.includes(site.root), 'an absolute path went to the screen');
 		const rows = JSON.parse(text);
 		// The fields the screen reads (client/src/types.ts) are the fields of the answer.
+		// Behavior change: the answer carries how the config presents the keys (`keys`)
 		assert.deepEqual(Object.keys(rows).toSorted(), [
 			'columns',
+			'keys',
 			'layouts',
 			'overridesFile',
 			'overridesHash',
@@ -604,6 +606,16 @@ test('the server of kamado ui answers with what the core says, told without the 
 			'version',
 			'warnings',
 		]);
+		// assert.deepEqual(Object.keys(rows).toSorted(), [ // previous
+		// 	'columns', // previous
+		// 	'layouts', // previous
+		// 	'overridesFile', // previous
+		// 	'overridesHash', // previous
+		// 	'pages', // previous
+		// 	'total', // previous
+		// 	'version', // previous
+		// 	'warnings', // previous
+		// ]); // previous
 		const about = rows.pages.find((p) => p.url === '/about/history.html');
 		// Behavior change: a row says its place in the plan (`order`)
 		assert.deepEqual(Object.keys(about).toSorted(), [
@@ -1224,5 +1236,60 @@ test('the difference from HEAD reaches the screen as RFC §14.2 says, and a reve
 		assert.equal(after.pages['/about/history.html'].meta.extra.kind, 'added');
 	} finally {
 		native().uiClose(handle);
+	}
+});
+
+test('ui.keys of the config reaches the screen as it is written, and adds no column', async () => {
+	const { createUiApp } = await import(
+		pathToFileURL(path.join(dist, 'ui', 'app.js')).href
+	);
+	const site = makeSite();
+	const keys = {
+		title: {
+			label: { ja: 'タイトル', en: 'Title' },
+			description: 'Written for /home/u/site/src and "quoted"\nin two lines',
+		},
+		nothing: { label: 'No page has this key' },
+	};
+	writeFileSync(
+		site.config,
+		JSON.stringify({
+			dir: { input: 'src', output: 'out' },
+			build: { cacheDir: '.cache' },
+			pages: { overrides: 'pages.overrides.json' },
+			ui: { keys },
+		}),
+	);
+	const handle = native().uiOpen(site.config, '{}');
+	try {
+		const settings = JSON.parse(native().uiServer(handle));
+		const app = createUiApp(
+			{
+				handle,
+				uiPages: (h, q) => native().uiPages(h, q),
+				uiRefresh: (h) => native().uiRefresh(h),
+				uiEdit: (h, e) => native().uiEdit(h, e),
+			},
+			{
+				uiDir: path.join(site.root, 'no-screen'),
+				token: 'a-token-for-the-check',
+				roots: {
+					rootDir: site.root,
+					inputDir: settings.inputDir,
+					outputDir: settings.outputDir,
+				},
+			},
+		);
+		const response = await app.request('http://localhost/api/pages?limit=100');
+		const rows = await response.json();
+		// the texts are the config's: they are not told without the directories (those are
+		// the ones kamado finds, and the author wrote this one)
+		assert.deepEqual(rows.keys, keys);
+		// the keys of the config are not columns: the columns are the keys the pages hold
+		assert.ok(!rows.columns.includes('nothing'));
+		assert.deepEqual(rows.columns, ['layout', 'navHidden', 'title']);
+	} finally {
+		native().uiClose(handle);
+		rmSync(site.root, { recursive: true, force: true });
 	}
 });

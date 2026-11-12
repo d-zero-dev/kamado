@@ -213,6 +213,41 @@ fn really_inside(dir: &str, target: &str) -> bool {
 	false
 }
 
+/// How the config presents the metadata keys (`ui.keys`, RFC §14.2), as the screen reads it:
+/// an object from key to `{ "label"?, "description"? }` in the order written, each a text or an
+/// object from language to text. A key the config gives neither is an empty object.
+///
+/// The texts go as written, not chosen for a language: the language is the screen's (the
+/// person can change it without the core being asked again), so the rule that picks a text
+/// (RFC §14.2) lives there and only there. The keys go whether or not a page has them; the
+/// columns are still the keys the pages hold.
+fn keys_json(ui: &kd_config::UiConfig) -> Value {
+	let label = |label: &kd_config::Label| match label {
+		kd_config::Label::Text(text) => Value::String(text.clone()),
+		kd_config::Label::Translations(pairs) => Value::Object(
+			pairs
+				.iter()
+				.map(|(language, text)| (language.clone(), Value::String(text.clone())))
+				.collect(),
+		),
+	};
+	Value::Object(
+		ui.keys
+			.iter()
+			.map(|(name, key)| {
+				let mut fields = Vec::new();
+				if let Some(l) = &key.label {
+					fields.push(("label".to_owned(), label(l)));
+				}
+				if let Some(d) = &key.description {
+					fields.push(("description".to_owned(), label(d)));
+				}
+				(name.clone(), Value::Object(fields))
+			})
+			.collect(),
+	)
+}
+
 /// The names a layout can be given: the files `<name>.tsx` and `<name>.jsx` directly in
 /// `pages.layouts.dir`, by the name without the extension, each once, in the order of their
 /// bytes. The rule is the one that finds the layout of a page (a name with a path or `.` or `..`
@@ -1947,6 +1982,7 @@ impl Ui {
 					None => Value::Null,
 				},
 			),
+			("keys".to_owned(), keys_json(&self.loaded.config.ui)),
 			("overridesHash".to_owned(), self.overrides_hash_json()),
 			("pages".to_owned(), Value::Array(rows)),
 			(

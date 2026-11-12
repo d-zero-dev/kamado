@@ -2355,3 +2355,54 @@ fn a_directory_that_is_a_link_is_not_removed() {
 	assert!(site.exists("src/link"));
 	assert!(site.exists("elsewhere"));
 }
+
+#[test]
+fn the_answer_carries_how_the_config_presents_the_keys() {
+	let site = Site::new("ui_keys");
+	site.write("src/index.html", "<p>x</p>");
+	let mut ui = site.open(
+		r#", "ui": { "keys": {
+			"title": { "label": { "ja": "タイトル", "en": "Title" }, "description": "Used for <title>" },
+			"navHidden": { "label": "Hidden" },
+			"layout": {}
+		} }"#,
+	);
+	let answer = all(&mut ui);
+	assert_eq!(
+		answer.get("keys").unwrap().to_json(),
+		r#"{"title":{"label":{"ja":"タイトル","en":"Title"},"description":"Used for <title>"},"navHidden":{"label":"Hidden"},"layout":{}}"#
+	);
+	// the keys of the config are not columns: no page has them
+	assert_eq!(answer.get("columns").unwrap().to_json(), "[]");
+}
+
+#[test]
+fn a_text_of_the_config_reaches_the_answer_with_its_quotes_and_lines() {
+	let site = Site::new("ui_keys_escaped");
+	site.write("src/index.html", "<p>x</p>");
+	let mut ui = site.open(
+		r#", "ui": { "keys": { "title": { "description": "He said \"hi\"\nand left \\ <b>" } } }"#,
+	);
+	let answer = all(&mut ui);
+	let description = answer
+		.get("keys")
+		.and_then(|k| k.get("title"))
+		.and_then(|t| t.get("description"))
+		.and_then(Value::as_str)
+		.unwrap()
+		.to_string();
+	assert_eq!(description, "He said \"hi\"\nand left \\ <b>");
+	// and as JSON text the answer is read back to the same string
+	assert_eq!(
+		json(&answer.to_json()).get("keys").unwrap().to_json(),
+		answer.get("keys").unwrap().to_json()
+	);
+}
+
+#[test]
+fn the_answer_has_no_keys_when_the_config_names_none() {
+	let site = Site::new("ui_keys_none");
+	site.write("src/index.html", "<p>x</p>");
+	let mut ui = site.open("");
+	assert_eq!(all(&mut ui).get("keys").unwrap().to_json(), "{}");
+}
