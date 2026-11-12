@@ -78,6 +78,17 @@ pub(crate) fn refresh(handle: &str) -> Result<String, String> {
 	})
 }
 
+/// Every page of the plan, for a sync: the entry of `kamado pages` with the hashes of its files,
+/// and the hash of `pages.overrides`.
+pub(crate) fn sync_pages(handle: &str) -> Result<String, String> {
+	with(handle, |ui| Ok(ui.sync_pages()))
+}
+
+/// The keys that cannot be edited, for the pages at `urls` (`{ "urls" }`), for a sync.
+pub(crate) fn sync_locked(handle: &str, query_json: &str) -> Result<String, String> {
+	with(handle, |ui| ui.sync_locked(query_json))
+}
+
 /// The git blob ids of the files the pages at `urls` are read from (`{ "urls", "format" }`).
 pub(crate) fn diff_files(handle: &str, query_json: &str) -> Result<String, String> {
 	with(handle, |ui| ui.diff_files(query_json))
@@ -99,7 +110,9 @@ pub(crate) fn edit_batch(handle: &str, batch_json: &str) -> Result<String, Strin
 }
 
 /// The port and the browser setting of `devServer`, and the input and output directories:
-/// `{ "port", "open", "inputDir", "outputDir", "overrides" }`.
+/// `{ "port", "open", "inputDir", "outputDir", "overrides", "syncFunctions" }` (`syncFunctions` is
+/// the operations of `ui.syncFunctions`, each `{ "name", "label", "script" }` with the script
+/// absolute).
 pub(crate) fn server(handle: &str) -> Result<String, String> {
 	with(handle, |ui| {
 		let settings = ui.server();
@@ -120,6 +133,7 @@ pub(crate) fn server(handle: &str) -> Result<String, String> {
 					.overrides
 					.map_or(Value::Null, |path| Value::String(path.to_owned())),
 			),
+			("syncFunctions".to_owned(), settings.sync_functions_json()),
 		])
 		.to_json())
 	})

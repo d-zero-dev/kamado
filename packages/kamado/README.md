@@ -46,15 +46,17 @@ kamado build [globs...] [--incremental] [--force] [--skip-unchanged] [--verify-d
 kamado server           [--cache-dir <dir>] [-c, --config <file>] [--verbose]
 kamado pages            [--out <file>] [--incremental] [--cache-dir <dir>] [-c, --config <file>]
 kamado ui               [--port <n>] [--open | --no-open] [--cache-dir <dir>] [-c, --config <file>]
+kamado sync <name|path> [-y, --yes] [--cache-dir <dir>] [-c, --config <file>]
 kamado ui-settings      list | reset [-c, --config <file>] | delete <config-file> | delete --all
 kamado --help           (-h)
 ```
 
-- `--config`/`-c`を省略すると、カレントディレクトリの`kamado.config.jsonc`を使う。`--cache-dir`は差分ビルドの manifest や plan cache の置き場を変える（`build`・`server`・`pages`・`ui`）。相対パスは**打った場所（cwd）基準**。
+- `--config`/`-c`を省略すると、カレントディレクトリの`kamado.config.jsonc`を使う。`--cache-dir`は差分ビルドの manifest や plan cache の置き場を変える（`build`・`server`・`pages`・`ui`・`sync`。`sync`では、ページの一覧を作るための plan cache の置き場）。相対パスは**打った場所（cwd）基準**。
 - `build`は設定の対象を全部出力する。`globs`を渡すとその入力だけ（相対パスは打った場所からのパス。ディレクトリはその中のすべて。無いファイルと、先頭が`!`の否定はエラー。何も選ばなかったものは警告）。`--incremental`は前回から変わっていないものを飛ばす（`--force`で無視）。`--jobs`は並列度（JSX の描画のワーカーと Rust のスレッドの数）で、`auto`（既定）は使える CPU の数から決める。JSX のページは、読んだ`data`のキーが変わったときだけ描き直す（`--verbose`が理由を書く）。`--verify-deps`は、描いたページを新しいワーカーで描き直して HTML を比べ、モジュールの変数にデータを貯めたページを見つけて失敗にする。重い計算を全ページで 1 回にしたいときは、`kamado/jsx`の`memo(fn)`を使う（引数を`Object.is`で比べる。`props.data`を渡すと、読んだキーが呼び出したページの依存になる）。
 - `pages`は、ビルドせずに全ページの一覧を JSON で書き出す（標準出力か`--out`。相対パスは打った場所からのパス）。1 ページが 1 要素で、URL・入出力のパス・`fileSlug`・`filePathStem`・`extension`・階層（`depth`と、親のディレクトリの`parent`）・仮想ページかどうか・マージ後の`meta`を持つ。ディレクトリマップをスプレッドシートに写すためのもの（形は`docs/v3/RFC.md` §14.1）。入力ファイルのない仮想ページ（`pages.overrides`）は`inputPath`と`extension`が`null`で、`outputPath`は書き出されないがあるはずの場所。`globs`と、読まないフラグ（`--force`・`--jobs`・`--skip-unchanged`・`--verbose`）は、渡すとエラー。`--incremental`は plan cache を読んで更新する。端末には、読み始めと終わり（と、計画の警告があれば`warning: ...`）を標準エラーに出す。
 - `server`はリクエストごとに依存ファイルを stat し、変わっていなければ前回の結果を返す。ファイルは書き出さない。ライブリロードはない。変更したコンポーネントはワーカーを作り直して反映する。応えるのは`localhost`・IP アドレス・`devServer.host`・`devServer.allowedHosts`宛ての要求だけで、別のサイトからの要求は`403`（`docs/v3/RFC.md` §12）。`devServer.host`が`localhost`（既定）なら`127.0.0.1`と`::1`の両方で待ち受ける。位置引数と、読まないフラグ（`--force`・`--incremental`・`--jobs`・`--skip-unchanged`・`--out`・`--port`など）は、渡すとエラー。
 - `ui`は、ページの URL とメタ（front matter など）をブラウザの表で編集し、元のファイルへ書き戻す。ページを足す・無くす・仮想ページにすることもできる。ページを表示するものではなく、ビルドも描画もしない（詳しくは下の「`kamado ui`」）。`globs`と、読まないフラグ（`--out`・`--force`・`--jobs`・`--skip-unchanged`・`--incremental`・`--verbose`）は、渡すとエラー。`--port`と`--open`/`--no-open`は`ui`だけのフラグで、ほかのコマンドに渡すとエラー。
+- `sync`は、プロジェクトのスクリプトを実行する（`ui.syncFunctions`の`name`か、ファイルのパスで指す）。返した「あるべき全ページの一覧」との差を見せて、確認のうえローカルリポジトリのファイルに適用する（`--yes`で確認を省く。端末でなければ`--yes`が要る）。スクリプトが失敗したときと、返した内容が適用できないときは、何も適用しない。書き方は下の「同期スクリプトの書き方」。位置引数は 1 つ。`--yes`は`sync`だけのフラグで、ほかのコマンドに渡すとエラー。
 - `ui-settings`は、`kamado ui`の画面が保存した設定を、プロジェクトごとに見る・消す（下の「画面の設定」）。ビルドも描画もしない。`--all`は`ui-settings delete`だけのフラグで、ほかのコマンドに渡すとエラー。
 
 ## `kamado ui`
@@ -86,14 +88,242 @@ kamado ui --port 4000 --no-open
   - 編集・検索・並べ替えと、保存した列の設定は、これまでどおりキーで動く。固定の列には効かず、どのページも持たないキーの列は足さない。
   - 設定ファイルは起動時に 1 回だけ読む。`ui.keys`を変えたら`kamado ui`を起動し直す（「Read again」はページを読み直すが、設定は読み直さない）。
   - 例: `{ "ui": { "keys": { "title": { "label": { "ja": "タイトル", "en": "Title" }, "description": "<title>とパンくずに使う" } } } }`は、`title`の列を、日本語の画面では「タイトル」、英語の画面では「Title」と呼ぶ。
+- **同期**: `ui.syncFunctions`に操作があると、ヘッダーに緑の「同期」ボタンが出る。押すと操作の一覧が開き、選ぶとスクリプトを実行する（実行中のダイアログにログとキャンセル。表は編集できない）。終わると、同じダイアログが差分の確認（件数と、削除・URL の移動・ページの追加・メタの変更ごとの一覧。ほかに、ファイルの移動・仮想化・実体化があれば）に変わり、「適用」で適用する。失敗したときは、メッセージと詳細とログを出して、「もう一度実行」できる。スクリプトを実行するのは、この操作と`kamado sync`だけで、`kamado ui`を開いただけでは実行しない。詳しくは「同期スクリプトの書き方」。
 - 画面の部品（`packages/kamado/client`）は、パッケージのビルド（`yarn build`）で`dist/ui`にまとまる。`yarn dev`（`tsc --watch`）は画面を作り直さない。
+
+## 同期スクリプトの書き方
+
+スプレッドシートなど、kamado の外にあるデータと、サイトのディレクトリマップ（ページの一覧）を同期するための仕組み。**スクリプトを 1 つ書いて設定に登録**すると、`kamado sync`と、`kamado ui`の画面の「同期」ボタンから実行できる。
+
+- **書き出し**（kamado → 外）: スクリプトが渡された一覧を外のデータに書く。何も返さない。kamado は何も変えない。
+- **取り込み**（外 → kamado）: スクリプトが外のデータから「あるべき全ページの一覧」を作って返す。kamado が今の一覧との差（追加・削除・URL の移動・仮想化・メタの変更）を見つけ、確認を経て、ローカルリポジトリのファイルに適用する。**差分を判定するのはスクリプトではなく kamado**。
+
+### 登録と実行
+
+`kamado.config.jsonc`の`ui.syncFunctions`に、操作ごとに`name`・`label`・`script`を書く。
+
+```jsonc
+{
+	"ui": {
+		"syncFunctions": [
+			{
+				"name": "export-sheet",
+				"label": { "ja": "シートへ書き出す", "en": "Export to the sheet" },
+				"script": "./scripts/sheet-export.mjs",
+			},
+			{
+				"name": "import-sheet",
+				"label": { "ja": "シートから取り込む", "en": "Import from the sheet" },
+				"script": "./scripts/sheet-import.mjs",
+			},
+		],
+	},
+}
+```
+
+- `name`は空でなく、操作ごとに違う文字列（文字の制限は無い）。`kamado sync <name>`で指す。
+- `label`は画面に出す名前。文字列か、言語（`en`・`ja`）をキーにした文字列のオブジェクト（画面の言語、`en`、`name`の順に探す）。必須。
+- `script`は、設定ファイルのあるディレクトリからの相対パス（絶対パスも可）。
+- 実行するのは同期を実行したときだけ。`kamado build`・`kamado server`・`kamado pages`と、`kamado ui`の起動・読み込みは、スクリプトを実行しない。
+
+```sh
+kamado sync import-sheet          # 差分を見せて、y と答えると適用する
+kamado sync import-sheet --yes    # 確認なしで適用する（端末でないと確認できないので、そのときはこちら）
+kamado sync ./scripts/sheet-import.mjs   # 登録していないスクリプトを、パスで指す（打った場所からの相対パス）
+```
+
+`--yes`（`-y`）を付けると、差分の要約は出ず、適用した件数だけが出る。適用せずに差分を見たいときは、`--yes`を付けずに、端末でない場所（標準入力をつながないなど）で実行する。要約を出して、適用せずにエラーで終わる。
+
+`kamado sync <引数>`は、引数が`name`に一致すればその操作を、一致しなければパスとして読む。ログと差分の要約は標準エラーに出る。終了コードは、終わったとき（適用した・差分が無い・確認で`n`と答えた）が 0、失敗したときと、適用できなかったときが 1、`Ctrl-C`でのキャンセル（実行中でも、確認の質問の途中でも）が 130。`kamado ui`では、ヘッダーの「同期」ボタンから操作を選ぶ。実行中はログが出て、終わると差分の確認が出る。
+
+**同期は、あなたのスクリプトを、あなたの権限で実行する。** 認証情報（API のキーなど）は環境変数で渡し、スクリプトやリポジトリに書かない。スクリプトは、`kamado`を実行したプロセスの環境変数をそのまま受け取る。
+
+### スクリプトの形
+
+ESM のモジュールで、default export が関数。`kamado`は変換しないので、Node がそのまま読み込める JavaScript（`.mjs`、または`"type": "module"`のパッケージの`.js`）にする。
+
+```js
+// scripts/sheet-import.mjs
+/** @type {import('kamado').SyncScript} */
+export default async (pages, ctx) => {
+	ctx.log('info', `${pages.length} pages now`);
+	return rows; // あるべき全ページ（下の「戻り値」）
+};
+```
+
+型は`kamado`から読める。`SyncScript`・`SyncPage`・`SyncContext`・`SyncResult`・`Label`（TypeScript なら`import type { SyncScript } from 'kamado'`）。
+
+**第 1 引数`pages`**は、同期を始めた時点のローカルリポジトリのファイルから作った、全ページの配列。`kamado pages`が書き出す一覧と同じ形・同じ順で、1 件は次のとおり（型は`PageMapEntry`）。
+
+| フィールド                              | 意味                                                                                                                                                                                                       |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`                                   | ページの URL（`/`、`/about/`、`/about/history.html`）。`/`で始まる                                                                                                                                         |
+| `inputPath`                             | ページのファイルの**絶対パス**。ファイルの無い仮想ページは`null`                                                                                                                                           |
+| `outputPath`                            | 書き出される場所の絶対パス（仮想ページは書き出されないが、あるはずの場所）                                                                                                                                 |
+| `fileSlug`・`filePathStem`・`extension` | ファイル名から決まる値（`extension`は`.html`・`.tsx`など。仮想ページは`null`）。`index`のページの`fileSlug`は親のディレクトリの名前で、ルートでは入力ディレクトリの名前（`src`など）になる。同期は読まない |
+| `depth`・`parent`                       | URL の階層の深さと、親のディレクトリの URL（ルートは`null`）                                                                                                                                               |
+| `virtual`                               | `pages.overrides`だけにあるページ（ファイルの無い、URL だけのページ）なら`true`                                                                                                                            |
+| `meta`                                  | ページのメタ（front matter・sidecar・`pages.overrides`をマージした全キー）。値は JSON                                                                                                                      |
+
+**第 2 引数`ctx`**:
+
+- `ctx.log(type, message)`は、`type`が`'info'`・`'warn'`・`'error'`の 1 行を、実行中の画面と`kamado sync`の標準エラーに出す。1 行が 2,000 文字を超えると切られる。画面は新しい 1,000 行だけを持ち、古い行は捨てて、捨てた数を出す。`kamado sync`の標準エラーには、全部の行が出る。制御文字は文字として見える形に直して出る。標準エラーの行は`[info] メッセージ`の形。
+- `ctx.inputDir`は、`dir.input`の絶対パス。シートに載せるパスを、マシンに依らない相対パスにするために使う（`path.relative(ctx.inputDir, page.inputPath)`）。
+
+スクリプトの標準出力・標準エラーは端末にそのまま出る。標準入力は読めない。スクリプトは設定ファイルのあるディレクトリで動く。相対パス（`readFile('./data.csv')`）は、`kamado`をどこから実行しても、そこからのパスになる。スクリプトの隣のファイルは`new URL('./data.json', import.meta.url)`でも指せる。
+
+### 戻り値
+
+| 返すもの                            | 意味                                                         |
+| ----------------------------------- | ------------------------------------------------------------ |
+| `undefined`・`null`（何も返さない） | 何も適用しない。書き出しのスクリプトはこれ                   |
+| ページの配列                        | **あるべき全ページ**。今あって、配列に無いページは削除される |
+
+配列の 1 件（`SyncPage`）は`{ url, inputPath?, virtual?, meta? }`。`pages`の 1 件をそのまま返してもよい（この 4 つだけを読み、ほかのフィールドは無視する）。配列の順は意味を持たない。
+
+- `url`: 必須。`/`で始まる文字列。同じ`url`は 2 回書けない。
+- `inputPath`: ページのファイルの場所。`dir.input`からの相対パス（`/`区切り。`about/index.html`）か、`dir.input`の中の絶対パス。`null`か省略は「言わない」。同じ`inputPath`は 2 回書けない。`virtual: true`の行に書けない。
+- `virtual`: ファイルの無いページなら`true`、ファイルのあるページなら`false`。今あるページでは、省略は「変えない」。**新しいページでは必須**。
+- `meta`: そのページのメタの**全体**。書いたキーは、値が違えば書き換え、無かったキーは足し、**書かなかったキーは消す**。`meta`ごと省略すると、メタに触らない。値は JSON（文字列・数値・真偽値・`null`・配列・オブジェクト）。`"1"`と`1`は別の値で、型を合わせるのはスクリプトの仕事。空の文字列`''`と、キーが無いことも別（`title: ''`と書けば、空の`title`を持つ）。シートの空のセルをキーが無いこととして扱うなら、そのキーを`meta`に入れない。
+
+#### どのページのことか（突き合わせ）
+
+kamado は、返された行が今のどのページかを、次の順で**決める**（ページの中身の似ていることからは推測しない）。
+
+1. 行の`inputPath`が、今のページのファイルと同じなら、同じページ。`url`が違えば、**URL の移動**（ファイルも新しい URL の場所へ移る）。
+2. 1 で当たらず、行の`url`が、まだ当たっていない今のページの`url`と同じなら、同じページ。
+3. どちらにも当たらない行は、**新しいページ**。`virtual: true`なら仮想ページを作り、`virtual: false`なら、`inputPath`があればその場所に、無ければ URL の場所にファイルを作る（`.html`は空のファイル。メタはそのファイルに書く）。
+4. どの行にも当たらない今のページは、**削除**（ファイルも消える）。
+
+だから、**URL を書き換えても本文を残したいなら、`inputPath`の列を残して返す**。`inputPath`を返さないと、URL を変えた行は、古いページの削除と、空の新しいページの作成になる。`inputPath`を変えても、URL がファイルの場所で決まるページ（ほとんどのページ）では何も移さない（ファイルを移すと URL が変わるため。ページを動かすには`url`を変える）。URL を変えたあと、古い`inputPath`のまま同じ戻り値をもう一度返しても、何も変わらない。URL が`pages.outputPathField`のキーで決まるページだけは、`inputPath`を変えるとファイルが移る。
+
+仮想ページを実体にする（ファイルを持たせる）には`virtual: false`を、ファイルのあるページを仮想ページにする（ファイルと sidecar は消え、メタは`pages.overrides`に残る）には`virtual: true`を返す（仮想ページにするには`pages.overrides`の設定が要る）。
+
+#### 返してはいけないもの（全件まとめて報告され、何も適用されない）
+
+報告の`row N (<url>)`の N は、返した配列の N 番目の行（1 から数える）。並びは、行そのものの誤り（行の順）が先で、そのあとに、ページの突き合わせで見つかったもの（新しいページの`virtual`の省略、編集できないキーの変更）が続く。
+
+次のどれか。
+
+- 戻り値が、配列でも`null`でもない。行がオブジェクトでない。
+- `url`が無い。`url`が`/`で始まらない。同じ`url`が 2 回ある。
+- 同じ`inputPath`が 2 回ある。`inputPath`が文字列か`null`でない。`inputPath`が`dir.input`の外にある。
+- `virtual`が真偽値でない。`virtual: true`の行に`inputPath`がある。**新しいページの`virtual`を省略している**。
+- `meta`がオブジェクトでない。
+- 今あるページが仮想ページで、行が`inputPath`を持つのに`virtual: false`を書いていない（ファイルを持たせたいのかどうかを、`virtual`で言わせる）。
+- 編集できないキー（YAML のアンカーを使った front matter など）の値を、変更・削除している。
+
+### 例
+
+外部パッケージなしで試せるように、JSON のファイルを「外のデータ」に見立てる。
+
+```js
+// scripts/export.mjs（書き出し）
+import { writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+// the file next to the script: a relative path would be relative to where kamado was run
+const SHEET = new URL('./sheet.json', import.meta.url);
+
+export default async (pages, ctx) => {
+	const rows = pages.map((page) => ({
+		url: page.url,
+		// マシンに依らない、dir.input からの相対パス。仮想ページは null
+		inputPath:
+			page.inputPath === null ? null : path.relative(ctx.inputDir, page.inputPath),
+		virtual: page.virtual,
+		// メタの全体。実際のシートでは、よく見るキー（title など）を列にし、残りのキーを 1 つの列に JSON で入れる
+		meta: page.meta,
+	}));
+	writeFileSync(SHEET, JSON.stringify(rows, null, '\t'));
+	ctx.log('info', `wrote ${rows.length} rows`);
+	// 何も返さない: kamado は何も変えない
+};
+```
+
+```js
+// scripts/import.mjs（取り込み）
+import { readFileSync } from 'node:fs';
+
+const SHEET = new URL('./sheet.json', import.meta.url);
+
+export default async (pages, ctx) => {
+	const rows = JSON.parse(readFileSync(SHEET, 'utf8'));
+	ctx.log('info', `${rows.length} rows in the sheet`);
+	return rows.map((row) => ({
+		url: row.url,
+		// 書き出した inputPath を残す。URL を書き換えた行が、移動として扱われる
+		inputPath: row.inputPath,
+		virtual: row.virtual,
+		// メタの全体。ここに無いキーは消える（書き出したメタをそのまま返せば、何も変わらない）
+		meta: row.meta,
+	}));
+};
+```
+
+Google Sheets を使うなら、骨子は次のとおり（`googleapis`はこのプロジェクトで入れる。認証情報は環境変数で渡し、リポジトリには入れない）。
+
+```js
+import path from 'node:path';
+
+import { google } from 'googleapis';
+
+// GOOGLE_APPLICATION_CREDENTIALS（サービスアカウントの鍵のパス）と SHEET_ID を環境変数に置く
+const auth = new google.auth.GoogleAuth({
+	scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+});
+const sheets = google.sheets({ version: 'v4', auth });
+
+export default async (pages, ctx) => {
+	const header = ['url', 'inputPath', 'virtual', 'title'];
+	const values = pages.map((page) => [
+		page.url,
+		page.inputPath === null ? '' : path.relative(ctx.inputDir, page.inputPath),
+		page.virtual,
+		page.meta.title ?? '',
+	]);
+	await sheets.spreadsheets.values.update({
+		spreadsheetId: process.env.SHEET_ID,
+		range: 'pages!A1',
+		valueInputOption: 'RAW',
+		requestBody: { values: [header, ...values] },
+	});
+	ctx.log('info', `wrote ${values.length} rows`);
+};
+```
+
+取り込みは、`sheets.spreadsheets.values.get`で行を読み、上の取り込みの例と同じ形（`url`・`inputPath`・`virtual`・`meta`）に直して返す。シートの空のセルは空の文字列で届くので、`inputPath`は空なら`null`にし、`virtual`は文字列`"TRUE"`・`"FALSE"`を真偽値に直す。メタのキーの空のセルは、キーを入れないか、空の文字列を値にするかを決める（上のとおり、別の値になる）。
+
+### 往復で崩さない書き方
+
+- シートに`url`と`inputPath`の列を**残す**。取り込みでは、書き出したときの`inputPath`をそのまま返す。
+- 値の型はスクリプトで合わせる。シートから来る数値や真偽値は、文字列で届くことが多い。メタの`1`と`"1"`は別の値として比べられ、違えば書き換わる。
+- 取り込みの前にコミットしておく。結果は`git diff`で確かめ、不要なら`git reset`で戻し、シートを直して取り込み直す。同期は、シートとリポジトリの変更を突き合わせない（マージしない）。書き出したあとにリポジトリで足したページや値は、次に返した一覧に無ければ消える。
+- 2 つのページが互いの URL を取る行（入れ替え）は、適用の前後で`url`と`inputPath`の組の一覧が同じになるので、同じ戻り値をもう一度返すと、また入れ替える。取り込みのたびに、そのとき渡された一覧から作り直す使い方では起きない。
+
+### 確認と、失敗したとき
+
+- 差分があると、適用の前に要約（削除・URL の移動・ファイルの移動・仮想化・実体化・追加・メタの変更。件数と一覧）が出る。承認は全体に対して 1 回。警告の対象は、削除・仮想化・移動で消えるファイルと、同期が書き換える`pages.overrides`。`pages.overrides`を書き換えるのは、仮想ページを消す・足す・仮想化する・実体化するときと、仮想ページのキーを変えるとき。これらに**コミットされていない変更**（まだコミットしていない新しいファイルと、git の対象外のファイルも含む）があると、その名前が警告に出る。git が使えないときは「git で戻せない」と出る。差分が無ければ、確認なしで「変更なし」。
+- 適用は、全部か、1 つもか。スクリプトの実行中や確認を待つあいだにファイルが変わっていたら、何も適用せずに知らせる（もう一度実行する）。
+- スクリプトの失敗は、**何も適用しない**。次のどれも失敗: 例外を投げた・Promise が reject した、捕まえられなかった例外、**戻り値を返す前に終わった**（`process.exit()`は、終了コードが 0 でも失敗）、読み込みに失敗した・default export が関数でない、戻り値が`undefined`・`null`・配列のどれでもない（JSON にできない値を含む）。画面は「同期に失敗しました」と、メッセージと詳細（スタック）とログを出し、「もう一度実行」できる。`kamado sync`は標準エラーに出して終了コード 1。失敗までにスクリプトが外にしたこと（シートへの書き込みの途中）は、kamado は戻さない。実行にタイムアウトは無い（止めるのはキャンセル）。
+- 画面の「キャンセル」と`kamado sync`の`Ctrl-C`は、スクリプトのプロセスを止める。
+
+### よくある間違い
+
+- 変えたいページだけを返してしまう。**返さなかったページは削除される**。変えないページも返す（`pages`の`map`で作るのが安全）。
+- `meta`に変えたいキーだけを書いてしまう。**書かなかったキーは消える**。`{ ...page.meta, title: '…' }`のように、元のメタに足す。
+- 新しいページに`virtual`を書き忘れる（エラーになる）。
+- URL を書き換えたのに`inputPath`を返さない（削除と空のページの作成になり、本文が消える）。
+- `inputPath`に絶対パスを載せたシートをチームで共有する（マシンごとに違う）。`ctx.inputDir`からの相対パスにする。
+- 書き出しのスクリプトが何かの配列を返してしまう（それが「あるべき全ページ」として適用される）。書き出しは何も返さない。
+- スクリプトの中で`process.exit()`を呼ぶ（失敗になる）。
 
 ## プログラムから
 
 ```ts
 import path from 'node:path';
 
-import { build, pages, start, ui } from 'kamado';
+import { build, pages, start, sync, ui } from 'kamado';
 
 // All take the absolute path of the config file, not an object.
 const config = path.resolve('kamado.config.jsonc');
@@ -113,7 +343,14 @@ await server.close();
 const editor = await ui(config, { open: false });
 console.log(editor.url);
 await editor.close();
+
+// Runs a sync script (an operation of ui.syncFunctions by its name, or a file) and applies what it
+// returns. Without `yes: true` it applies nothing and throws when there are changes.
+const { applied, summary } = await sync(config, 'import-sheet', { yes: true });
+console.log(applied, summary.counts);
 ```
+
+`sync(config, target, options?)`は`kamado sync`と同じ（第 2 引数は`name`かスクリプトのパス（打った場所ではなく、プロセスのカレントディレクトリからの相対パス））。オプションは`yes`（確認なしで適用する。無いと、差分があれば何も適用せずに例外）・`cacheDir`・`write`（`ctx.log`の行の出し先。既定は標準エラー）で、`{ applied, summary }`を返す。失敗したとき（スクリプトの失敗、適用できない戻り値、適用の拒否、確認されない差分）は`SyncError`で reject し、`kind`（`failed`・`invalid`・`cancelled`・`refused`・`unconfirmed`）と、`problems`・`failures`・`summary`・`scriptStack`を持つ。
 
 `ui()`のオプションは`port`・`open`・`cacheDir`・`write`（ログの行の出し先）・`uiDir`（画面の配布物。既定はパッケージの`dist/ui`）・`settingsFile`（画面の設定の保存先。既定は上の場所）で、`{ url, close() }`を返す。`close()`は待ち受けをやめる（`build.incremental`のときは、plan cache も書く）。
 

@@ -51,7 +51,9 @@ node --test crates/kd_napi/check/load.check.mjs
 
 ページの編集（`ui*`。RFC §14.2）は、`yarn build`のあとに`node --test crates/kd_napi/check/ui.check.mjs`で、実物のアドオンを通す。コアの単体テスト（`crates/kd_core/src/ui/tests.rs`）が同じ処理をアドオンなしで確かめ、こちらは JSON がアドオンを越えても RFC の形であることと、編集がディスクのファイルだけを変えることを確かめる。ファイルを書き戻す 3 つの実装（`kd_yaml::edit`の front matter、`kd_jsonc::edit`の JSONC、`kd_js::meta_edit`の`export const meta`）に oracle は無く、YAML と TS は手書きのテストだけで確かめる（書き戻しの規則は「触らない部分のバイトを変えない」で、同じ書式にそろえる oracle が無い）。JSONC は下の表の`jsonc-parser`の golden で、結果の値だけ照合する。
 
-ページの追加・仮想化・実体化・削除と、行が必ず持つ列は`page_tests.rs`が確かめる。一括編集（`uiEditBatch`）は`batch_tests.rs`で、移動の順序付けの関数は`moves.rs`の中のテストで確かめる。
+ページの追加・仮想化・実体化・削除と、行が必ず持つ列は`page_tests.rs`が確かめる。一括編集（`uiEditBatch`）は`batch_tests.rs`で、同期のためのコアの答え（`uiSyncPages`・`uiSyncLocked`・`uiServer`の`syncFunctions`）は`sync_tests.rs`で、移動の順序付けの関数は`moves.rs`の中のテストで確かめる。
+
+同期（`ui.syncFunctions`、`kamado sync`、`sync()`。RFC §14.2）は、次のように確かめる。差分（`packages/kamado/src/sync/diff.ts`）・子プロセス（`runner.ts`）・未コミットの確認（`unsaved.ts`。実物の git）・流れ（`session.ts`）・画面のためのサーバー側（`controller.ts`、`ui/app.ts`の`/api/sync...`）・CLI（`command.ts`）は、それぞれの`*.spec.ts`で、スクリプトは本物の子プロセスで動かす。画面（`client/src/sync-view.tsx`）は`sync-view.spec.tsx`で状態ごとの描画を確かめる。**正しさの法則**は、`yarn build`のあと`node --test crates/kd_napi/check/sync.check.mjs`で、実物のコアに書き戻して確かめる。渡された一覧をそのまま返すと、変更なし。適用したあとの一覧は、戻り値と一致する（`url`・`virtual`・`meta`）。適用した直後に同じ戻り値をもう一度渡すと、変更なし（URL の入れ替えを除く）。失敗したスクリプトと、途中で変わったファイルは、1 バイトも変えない。引用符・バッククォート・`${}`・`*/`・改行・`---`・`__proto__`を含む値とキーは、読み戻すと同じ。ケースは固定の種の乱数で作る（失敗した種が分かる）。ページの編集や一覧を変えたときに同期が追従しているかは、`sync/coverage.spec.ts`が、`diff.ts`の`EDIT_OPS`・`ENTRY_FIELDS`の表をコアのソースと比べて見つける（`CLAUDE.md`の「連動して変える箇所」）。画面の配線（`app.tsx`の同期ボタンとダイアログ）にはテストが無く、ブラウザでの確認が守りになる: 同期の操作を設定した git のサイトで`kamado ui`を開き、「同期」ボタンの操作の一覧（言語を替えてラベルが替わること）、実行中のログとキャンセル、差分の確認（件数のタブ。件数が 0 のものが薄く押せないこと。未コミットの変更のあるファイルを消す差分で警告が出ること）、「適用」のあとの一覧と状態欄、失敗（メッセージ・詳細・ログ・「もう一度実行」）、戻り値が不正なときの一覧、`Escape`で実行中が止まること、を見る。`kamado sync <name>`は、端末あり・端末なし・`--yes`の 3 通りで実行する。10 万ページの計測（`benchmarks`の生成器ではなく、front matter だけの HTML を 100 個ずつのディレクトリに置いたサイトでよい）では、一覧の取得（`uiSyncPages`）が 0.2 秒、`pages`を渡して返させるのが約 0.5 秒、差分が約 0.6 秒。編集できないキーの取得（`uiSyncLocked`）は、10 万件で約 25 秒になる。キーを書き換えるページの分だけなので、1,000 ページを変えるなら全体で 2〜3 秒。
 
 相対パスの`cacheDir`の基準（API は設定ファイルのディレクトリ、CLI の`--cache-dir`は cwd。RFC §13）は、`node --test crates/kd_napi/check/cache-dir.check.mjs`で、実物のアドオンと CLI を通す（`yarn build`のあと）。
 
@@ -80,7 +82,7 @@ panic は、途中まで更新した状態を残しうる。開発サーバー�
 
 ## Node 側のパッケージ（`packages/kamado`）
 
-v3 の本体パッケージ（`packages/kamado`、npm 名`kamado`）。v2 は`v2`ブランチで保守している。中身は CLI、`build()`/`start()`/`pages()`、JSX の描画ワーカー、開発サーバー（hono）、esbuild の呼び出し、アドオンの読み込みで、ランタイム依存は`esbuild`と`hono`/`@hono/node-server`だけ。使い方は`packages/kamado/README.md`、設定の補完用に`schema.json`を同梱している（キーは`kd_config`のテストが双方向に照合する）。
+v3 の本体パッケージ（`packages/kamado`、npm 名`kamado`）。v2 は`v2`ブランチで保守している。中身は CLI、`build()`/`start()`/`pages()`/`ui()`/`sync()`、JSX の描画ワーカー、開発サーバー（hono）、esbuild の呼び出し、アドオンの読み込みで、ランタイム依存は`esbuild`と`hono`/`@hono/node-server`だけ。使い方は`packages/kamado/README.md`、設定の補完用に`schema.json`を同梱している（キーは`kd_config`のテストが双方向に照合する）。
 
 ```sh
 cargo build --release -p kd_napi   # アドオンを先に作る

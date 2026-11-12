@@ -263,12 +263,28 @@ pub struct UiKey {
 	pub description: Option<Label>,
 }
 
+/// One operation of the sync button of `kamado ui` (and of `kamado sync <name>`): a script of
+/// the project that returns the pages the site should have (RFC section 14.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncFunction {
+	/// What `kamado sync <name>` and the screen call the operation by. Not empty, and not
+	/// the name of another operation; any other character is allowed, because the command
+	/// looks at the names before it takes its argument for a path.
+	pub name: String,
+	/// The name of the operation on the screen.
+	pub label: Label,
+	/// Absolute path of the script (relative to the directory of the config file when written).
+	pub script: String,
+}
+
 /// The `ui` section: what `kamado ui` shows, shared with the team through the repository. The
 /// build and the dev server do not read it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UiConfig {
 	/// Metadata key → how the screen presents it, in the order written.
 	pub keys: Vec<(String, UiKey)>,
+	/// The operations of the sync button, in the order written.
+	pub sync_functions: Vec<SyncFunction>,
 }
 
 /// The whole configuration with defaults applied and paths made absolute.
@@ -618,9 +634,10 @@ pub fn parse(config_text: &str, root_dir: &str, package_json: Option<&str>) -> R
 
 	let ui = {
 		let o = root.obj("ui")?;
-		o.allow(&["keys"])?;
+		o.allow(&["keys", "syncFunctions"])?;
 		UiConfig {
 			keys: parse_ui_keys(&o)?,
+			sync_functions: parse_sync_functions(&o, &resolve)?,
 		}
 	};
 
@@ -669,6 +686,47 @@ fn parse_ui_keys(ui: &Obj<'_>) -> R<Vec<(String, UiKey)>> {
 		));
 	}
 	Ok(keys)
+}
+
+/// `ui.syncFunctions`: a list of `{ name, label, script }`.
+///
+/// Every field is required. The label has no fallback here (the screen falls back to the
+/// name when a label has no text for its language, see `Label`), but it must be written, so
+/// that the person who adds an operation names it. Names are compared as written: the names
+/// are looked up before a path, so no character is excluded.
+fn parse_sync_functions(ui: &Obj<'_>, resolve: &dyn Fn(&str) -> String) -> R<Vec<SyncFunction>> {
+	let items = match ui.get("syncFunctions") {
+		None => return Ok(Vec::new()),
+		Some(Value::Array(items)) => items,
+		Some(_) => return Err(ui.err("syncFunctions", "expected an array")),
+	};
+	let mut functions: Vec<SyncFunction> = Vec::with_capacity(items.len());
+	for (i, item) in items.iter().enumerate() {
+		let o = Obj::new(item, &format!("{}syncFunctions[{i}].", ui.prefix()))?;
+		o.allow(&["name", "label", "script"])?;
+		let text = |key: &str| -> R<String> {
+			match o.opt_str(key)? {
+				None => Err(o.err(key, "required")),
+				Some(s) if s.is_empty() => Err(o.err(key, "must not be empty")),
+				Some(s) => Ok(s),
+			}
+		};
+		let name = text("name")?;
+		if let Some(first) = functions.iter().position(|f| f.name == name) {
+			return Err(o.err(
+				"name",
+				format!("\"{name}\" is already the name of ui.syncFunctions[{first}]"),
+			));
+		}
+		let label = parse_label(&o, "label")?.ok_or_else(|| o.err("label", "required"))?;
+		let script = resolve(&text("script")?);
+		functions.push(SyncFunction {
+			name,
+			label,
+			script,
+		});
+	}
+	Ok(functions)
 }
 
 /// A text, or an object from language to text; `null` and a missing key are no label, as for
@@ -1709,6 +1767,131 @@ mod tests {
 			e.message.contains(r#"duplicate key "title""#),
 			"{}",
 			e.message
+		);
+	}
+
+	#[test]
+	fn sync_functions_default_to_none() {
+		assert!(ok("{}").ui.sync_functions.is_empty());
+		assert!(ok(r#"{ "ui": {} }"#).ui.sync_functions.is_empty());
+		assert!(
+			ok(r#"{ "ui": { "syncFunctions": [] } }"#)
+				.ui
+				.sync_functions
+				.is_empty()
+		);
+	}
+
+	#[test]
+	fn sync_functions_read_a_name_a_label_and_the_path_of_a_script() {
+		let cfg = ok(r#"{ "ui": { "syncFunctions": [
+			{ "name": "import-sheet", "label": { "ja": "取り込む", "en": "Import" }, "script": "./scripts/import.mjs" },
+			{ "name": "export", "label": "Export", "script": "/abs/export.mjs" }
+		] } }"#);
+		assert_eq!(
+			cfg.ui.sync_functions,
+			vec![
+				SyncFunction {
+					name: "import-sheet".to_string(),
+					label: Label::Translations(vec![
+						("ja".to_string(), "取り込む".to_string()),
+						("en".to_string(), "Import".to_string()),
+					]),
+					// relative to the directory of the config file, as every path of the config
+					script: "/site/scripts/import.mjs".to_string(),
+				},
+				SyncFunction {
+					name: "export".to_string(),
+					label: Label::Text("Export".to_string()),
+					script: "/abs/export.mjs".to_string(),
+				},
+			]
+		);
+	}
+
+	#[test]
+	fn a_name_may_hold_any_character_but_must_not_be_empty_or_repeated() {
+		// `kamado sync <name|path>` looks at the names first, so a name is not limited to a
+		// shape a path cannot have
+		let cfg = ok(r#"{ "ui": { "syncFunctions": [
+			{ "name": "./a b/ü.mjs", "label": "x", "script": "a.mjs" }
+		] } }"#);
+		assert_eq!(cfg.ui.sync_functions[0].name, "./a b/ü.mjs");
+		let e = fail(
+			r#"{ "ui": { "syncFunctions": [{ "name": "", "label": "x", "script": "a.mjs" }] } }"#,
+		);
+		assert_eq!(e.path, "ui.syncFunctions[0].name");
+		assert_eq!(e.message, "must not be empty");
+		let e = fail(
+			r#"{ "ui": { "syncFunctions": [
+				{ "name": "a", "label": "x", "script": "a.mjs" },
+				{ "name": "a", "label": "y", "script": "b.mjs" }
+			] } }"#,
+		);
+		assert_eq!(e.path, "ui.syncFunctions[1].name");
+		assert_eq!(
+			e.message,
+			"\"a\" is already the name of ui.syncFunctions[0]"
+		);
+	}
+
+	#[test]
+	fn a_sync_function_needs_a_name_a_label_and_a_script() {
+		for (text, path, message) in [
+			(r#"{ "label": "x", "script": "a.mjs" }"#, "name", "required"),
+			(r#"{ "name": "a", "script": "a.mjs" }"#, "label", "required"),
+			(
+				r#"{ "name": "a", "label": null, "script": "a.mjs" }"#,
+				"label",
+				"required",
+			),
+			(r#"{ "name": "a", "label": "x" }"#, "script", "required"),
+			(
+				r#"{ "name": "a", "label": "x", "script": "" }"#,
+				"script",
+				"must not be empty",
+			),
+			(
+				r#"{ "name": "a", "label": "x", "script": 1 }"#,
+				"script",
+				"expected a string",
+			),
+			(
+				r#"{ "name": 1, "label": "x", "script": "a.mjs" }"#,
+				"name",
+				"expected a string",
+			),
+			(
+				r#"{ "name": "a", "label": 1, "script": "a.mjs" }"#,
+				"label",
+				"expected a string or an object of strings",
+			),
+		] {
+			let e = fail(&format!(r#"{{ "ui": {{ "syncFunctions": [{text}] }} }}"#));
+			assert_eq!(e.path, format!("ui.syncFunctions[0].{path}"), "{text}");
+			assert_eq!(e.message, message, "{text}");
+		}
+	}
+
+	#[test]
+	fn sync_functions_are_a_list_of_objects_and_null_is_not_one() {
+		let e = fail(r#"{ "ui": { "syncFunctions": null } }"#);
+		assert_eq!(e.path, "ui.syncFunctions");
+		assert_eq!(e.message, "expected an array");
+		assert_eq!(
+			fail(r#"{ "ui": { "syncFunctions": {} } }"#).path,
+			"ui.syncFunctions"
+		);
+		let e = fail(r#"{ "ui": { "syncFunctions": ["a.mjs"] } }"#);
+		assert_eq!(e.path, "ui.syncFunctions[0]");
+		assert_eq!(e.message, "expected an object");
+		let e = fail(
+			r#"{ "ui": { "syncFunctions": [{ "name": "a", "label": "x", "script": "a.mjs", "fn": 1 }] } }"#,
+		);
+		assert_eq!(e.path, "ui.syncFunctions[0].fn");
+		assert!(
+			e.message
+				.starts_with("unknown option (allowed: name, label, script")
 		);
 	}
 

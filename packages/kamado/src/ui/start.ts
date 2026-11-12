@@ -1,3 +1,4 @@
+import type { SyncFunctionConfig } from '../sync/sync.js';
 import type { ServerType } from '@hono/node-server';
 
 import { randomBytes } from 'node:crypto';
@@ -12,10 +13,12 @@ import { assertKnownOptions } from '../known-options.js';
 import { native } from '../native.js';
 import { close as closeServer, listen, listenAddresses } from '../server/listen.js';
 import { openBrowser } from '../server/start.js';
+import { createSyncController, type SyncController } from '../sync/controller.js';
 
 import { createUiApp } from './app.js';
 import { cachedReadGit } from './git.js';
 import { createHeadDiff } from './head-diff.js';
+import { scrub } from './paths.js';
 import { createSettingsStore, defaultSettingsFile } from './settings.js';
 
 /**
@@ -146,6 +149,7 @@ export async function ui(
 	};
 
 	let servers: ServerType[];
+	let sync: SyncController | undefined;
 	let url: string;
 	let open: boolean;
 	let wanted = options.port;
@@ -160,6 +164,11 @@ export async function ui(
 			 * screen then names no such file, and everything else works as it did.
 			 */
 			overrides?: string | null;
+			/**
+			 * The operations of `ui.syncFunctions`. Read as none when the core does not say it: the
+			 * screen then has no button, and everything else works as it did.
+			 */
+			syncFunctions?: SyncFunctionConfig[];
 		};
 		const port = options.port ?? dev.port + 1;
 		wanted = port;
@@ -187,6 +196,17 @@ export async function ui(
 			// on the screen.
 			write(`warning: ${settingsWarning} (${settingsFile})\n`);
 		}
+		const roots = {
+			rootDir: path.dirname(configPath),
+			inputDir: dev.inputDir,
+			outputDir: dev.outputDir,
+		};
+		sync = createSyncController({
+			editor: { handle, ...core },
+			functions: dev.syncFunctions ?? [],
+			cwd: path.dirname(configPath),
+			scrub: (text) => scrub(text, roots),
+		});
 		const app = createUiApp(
 			{
 				handle,
@@ -205,11 +225,8 @@ export async function ui(
 					typeof dev.overrides === 'string'
 						? relativeFile(path.dirname(configPath), dev.overrides)
 						: null,
-				roots: {
-					rootDir: path.dirname(configPath),
-					inputDir: dev.inputDir,
-					outputDir: dev.outputDir,
-				},
+				roots,
+				sync,
 			},
 		);
 		servers = await listen(
@@ -221,6 +238,7 @@ export async function ui(
 		const actual = typeof bound === 'object' && bound !== null ? bound.port : port;
 		url = `http://localhost:${actual}/`;
 	} catch (error) {
+		sync?.close();
 		release();
 		const { code, address } = (error ?? {}) as NodeJS.ErrnoException & {
 			address?: string;
@@ -242,6 +260,8 @@ export async function ui(
 
 	let stopping = false;
 	const shutdown = () => {
+		// What a sync started runs in a process of its own, and must not outlive the editor.
+		sync?.close();
 		if (stopping) {
 			// A second signal: the first is waiting on connections that do not end. The
 			// plan cache is still written before the process goes.
@@ -270,6 +290,7 @@ export async function ui(
 		close: async () => {
 			process.off('SIGINT', shutdown);
 			process.off('SIGTERM', shutdown);
+			sync?.close();
 			await closeServers();
 			release();
 		},

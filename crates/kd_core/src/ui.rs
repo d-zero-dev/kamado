@@ -135,6 +135,29 @@ pub struct ServerSettings<'a> {
 	pub output_dir: &'a str,
 	/// `pages.overrides`, absolute, if the site has one
 	pub overrides: Option<&'a str>,
+	/// `ui.syncFunctions`, with the scripts made absolute
+	pub sync_functions: &'a [kd_config::SyncFunction],
+}
+
+impl ServerSettings<'_> {
+	/// The operations of `ui.syncFunctions` as the command serving the editor reads them: an
+	/// array of `{ "name", "label", "script" }` (the label as written, the script absolute).
+	/// The command keeps the script paths to itself; the screen is told the names and labels
+	/// only.
+	pub fn sync_functions_json(&self) -> Value {
+		Value::Array(
+			self.sync_functions
+				.iter()
+				.map(|f| {
+					Value::Object(vec![
+						("name".to_owned(), Value::String(f.name.clone())),
+						("label".to_owned(), label_json(&f.label)),
+						("script".to_owned(), Value::String(f.script.clone())),
+					])
+				})
+				.collect(),
+		)
+	}
 }
 
 /// The editor of the pages of one site.
@@ -230,6 +253,19 @@ fn really_inside(dir: &str, target: &str) -> bool {
 	false
 }
 
+/// A label as written: the text, or the object from language to text.
+fn label_json(label: &kd_config::Label) -> Value {
+	match label {
+		kd_config::Label::Text(text) => Value::String(text.clone()),
+		kd_config::Label::Translations(pairs) => Value::Object(
+			pairs
+				.iter()
+				.map(|(language, text)| (language.clone(), Value::String(text.clone())))
+				.collect(),
+		),
+	}
+}
+
 /// How the config presents the metadata keys (`ui.keys`, RFC §14.2), as the screen reads it:
 /// an object from key to `{ "label"?, "description"? }` in the order written, each a text or an
 /// object from language to text. A key the config gives neither is an empty object.
@@ -239,25 +275,16 @@ fn really_inside(dir: &str, target: &str) -> bool {
 /// (RFC §14.2) lives there and only there. The keys go whether or not a page has them; the
 /// columns are still the keys the pages hold.
 fn keys_json(ui: &kd_config::UiConfig) -> Value {
-	let label = |label: &kd_config::Label| match label {
-		kd_config::Label::Text(text) => Value::String(text.clone()),
-		kd_config::Label::Translations(pairs) => Value::Object(
-			pairs
-				.iter()
-				.map(|(language, text)| (language.clone(), Value::String(text.clone())))
-				.collect(),
-		),
-	};
 	Value::Object(
 		ui.keys
 			.iter()
 			.map(|(name, key)| {
 				let mut fields = Vec::new();
 				if let Some(l) = &key.label {
-					fields.push(("label".to_owned(), label(l)));
+					fields.push(("label".to_owned(), label_json(l)));
 				}
 				if let Some(d) = &key.description {
-					fields.push(("description".to_owned(), label(d)));
+					fields.push(("description".to_owned(), label_json(d)));
 				}
 				(name.clone(), Value::Object(fields))
 			})
@@ -1751,6 +1778,7 @@ impl Ui {
 			input_dir: &config.dir.input,
 			output_dir: &config.dir.output,
 			overrides: config.pages.overrides.as_deref(),
+			sync_functions: &config.ui.sync_functions,
 		}
 	}
 
@@ -2110,6 +2138,148 @@ impl Ui {
 		}
 		present.extend(missing);
 		present
+	}
+
+	/// Every page of the plan, for a sync (RFC §14.2, "同期"): what a script is given and what
+	/// the difference of its answer is made from. A JSON object with `version`,
+	/// `overridesHash`, `inputDir` and `overridesFile` (absolute, or `null`), `outputPathField` (the key that decides the URL,
+	/// or `null`), `warnings`, and `pages`: for each page, in the order of the plan, the entry
+	/// of `kamado pages` (RFC §14.1) with `hashes` (`input` and `sidecar`, as `pages` gives
+	/// them). The keys that cannot be edited are not here: see `sync_locked`.
+	///
+	/// The rows of `pages` are not made for this: a sync needs every page at once, with the paths
+	/// of the entry and the slug and stem and extension, which the rows (made for a screen of at
+	/// most 5,000) do not carry. The hashes are those the rows carry, so that a page edit asked
+	/// after this is told the same thing as one asked after `pages`.
+	pub fn sync_pages(&mut self) -> String {
+		let n = self.plan.pages.len();
+		let mut pages = Vec::with_capacity(n);
+		for page in &self.plan.pages {
+			let Value::Object(mut fields) = crate::page_map::entry_json(page) else {
+				continue;
+			};
+			let hash_of = |path: &str| {
+				page.deps
+					.get(path)
+					.map(|d| d.hash.as_str())
+					.filter(|h| *h != kd_build::MISSING_FILE_HASH)
+					.map_or(Value::Null, |h| Value::String(h.to_owned()))
+			};
+			let (input, sidecar) = if page.is_virtual {
+				(Value::Null, Value::Null)
+			} else {
+				(
+					hash_of(&page.file.input_path),
+					hash_of(&crate::sidecar_path(&page.file.input_path)),
+				)
+			};
+			fields.push((
+				"hashes".to_owned(),
+				Value::Object(vec![
+					("input".to_owned(), input),
+					("sidecar".to_owned(), sidecar),
+				]),
+			));
+			pages.push(Value::Object(fields));
+		}
+		Value::Object(vec![
+			("version".to_owned(), Value::Number(self.version as f64)),
+			("overridesHash".to_owned(), self.overrides_hash_json()),
+			(
+				"inputDir".to_owned(),
+				Value::String(self.loaded.config.dir.input.clone()),
+			),
+			(
+				"overridesFile".to_owned(),
+				self.loaded
+					.config
+					.pages
+					.overrides
+					.clone()
+					.map_or(Value::Null, Value::String),
+			),
+			(
+				"outputPathField".to_owned(),
+				self.output_path_field()
+					.map_or(Value::Null, |f| Value::String(f.to_owned())),
+			),
+			("pages".to_owned(), Value::Array(pages)),
+			(
+				"warnings".to_owned(),
+				Value::Array(
+					self.plan
+						.warnings
+						.iter()
+						.map(|w| Value::String(w.clone()))
+						.collect(),
+				),
+			),
+		])
+		.to_json()
+	}
+
+	/// The keys that cannot be edited, for the pages at `urls` (`{ "urls": [...] }`), for a sync
+	/// (RFC §14.2, "同期"): `{ "version", "locked": { "<url>": { "<key>": "<why>" } } }`, with an
+	/// object (maybe empty) for each URL a page has, and none for a URL no page has.
+	///
+	/// Apart from `sync_pages` because it is the expensive half: telling whether a key can be
+	/// edited reads and parses the page file, which for 100,000 pages is most of the time of
+	/// listing them. A sync needs it for the pages whose keys it would change, and only for them.
+	///
+	/// # Errors
+	///
+	/// A message when `query_json` is not `{ "urls": [strings] }`.
+	pub fn sync_locked(&mut self, query_json: &str) -> Result<String, String> {
+		let query = kd_jsonc::parse(query_json).map_err(|e| format!("sync: invalid JSON: {e}"))?;
+		let Some(Value::Array(urls)) = query.get("urls") else {
+			return Err("sync: `urls` (an array of strings) is required".to_owned());
+		};
+		let mut wanted = Vec::with_capacity(urls.len());
+		let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+		for url in urls {
+			let Value::String(url) = url else {
+				return Err("sync: `urls` must hold strings".to_owned());
+			};
+			// A URL asked for twice is told once: the answer is an object, and a key written
+			// twice is not one that reads back.
+			if seen.insert(url.as_str()) {
+				wanted.push(url.as_str());
+			}
+		}
+		let at: HashMap<&str, usize> = self
+			.plan
+			.pages
+			.iter()
+			.enumerate()
+			.map(|(i, page)| (page.file.url.as_str(), i))
+			.collect();
+		let found: Vec<(String, usize)> = wanted
+			.iter()
+			.filter_map(|url| at.get(url).map(|&i| ((*url).to_owned(), i)))
+			.collect();
+		drop(at);
+		let mut locked = Vec::with_capacity(found.len());
+		for (url, i) in found {
+			let row = self.page_json(i);
+			let mut keys = Vec::new();
+			if let Some(Value::Object(meta)) = row.get("meta") {
+				for (key, cell) in meta {
+					if cell.get("editable") == Some(&Value::Bool(false)) {
+						let why = match cell.get("reason") {
+							Some(Value::String(r)) => r.clone(),
+							_ => "the key cannot be edited".to_owned(),
+						};
+						keys.push((key.clone(), Value::String(why)));
+					}
+				}
+			}
+			locked.push((url, Value::Object(keys)));
+		}
+		Ok(Value::Object(vec![
+			("version".to_owned(), Value::Number(self.version as f64)),
+			("locked".to_owned(), Value::Object(locked)),
+		])
+		.to_json())
 	}
 
 	/// A page of rows, as the JSON of RFC §14.2. `query_json` is
@@ -3548,5 +3718,7 @@ mod batch_tests;
 mod diff_tests;
 #[cfg(test)]
 mod page_tests;
+#[cfg(test)]
+mod sync_tests;
 #[cfg(test)]
 mod tests;

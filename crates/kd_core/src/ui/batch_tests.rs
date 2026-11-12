@@ -1,6 +1,7 @@
 //! A batch of edits made as one (RFC §14.2, "一括編集"): all or none, in an order that finds
 //! the places free, with the hashes checked once before anything is written.
 
+use super::batch::{Item, overlaps};
 use super::*;
 
 const OVERRIDES: &str = r#", "pages": { "overrides": "pages.overrides.json" }"#;
@@ -1689,4 +1690,167 @@ fn a_page_made_where_a_page_is_that_the_batch_leaves_is_refused_before_anything_
 		],
 	);
 	assert!(ok(&answer), "{answer:?}");
+}
+
+#[test]
+fn a_key_set_at_a_url_the_batch_made_names_the_page_that_was_made_not_the_one_moved_off_it() {
+	let site = Site::new("key_on_made_url");
+	site.write("src/a/index.html", &html("OLD", "a"));
+	site.write("pages.overrides.json", r#"{ "version": 1, "pages": [] }"#);
+	let mut ui = site.open(OVERRIDES);
+	let r = rows(&mut ui);
+	let answer = batch(
+		&mut ui,
+		&[
+			("/a/", expect(&r, "/a/"), move_to("/b/")),
+			(
+				"/a/",
+				overrides_only(&r),
+				r#"{"op":"create","path":null}"#.to_string(),
+			),
+			("/a/", overrides_only(&r), set("title", "NEW")),
+		],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	// the page that was moved keeps its title; the page that was made has the new one
+	assert!(site.read("src/b/index.html").contains("title: OLD"));
+	let now = rows(&mut ui);
+	let made = page(&now, "/a/");
+	assert_eq!(made.get("virtual"), Some(&Value::Bool(true)));
+	assert_eq!(
+		made.get("meta")
+			.and_then(|m| m.get("title"))
+			.and_then(|t| t.get("value")),
+		Some(&Value::String("NEW".to_string()))
+	);
+	let moved = page(&now, "/b/");
+	assert_eq!(
+		moved
+			.get("meta")
+			.and_then(|m| m.get("title"))
+			.and_then(|t| t.get("value")),
+		Some(&Value::String("OLD".to_string()))
+	);
+}
+
+#[test]
+fn a_page_given_a_file_at_a_url_the_batch_made_is_the_page_that_was_made() {
+	let site = Site::new("materialize_on_made_url");
+	site.write("src/a/index.html", &html("OLD", "a"));
+	site.write("pages.overrides.json", r#"{ "version": 1, "pages": [] }"#);
+	let mut ui = site.open(OVERRIDES);
+	let r = rows(&mut ui);
+	let answer = batch(
+		&mut ui,
+		&[
+			("/a/", expect(&r, "/a/"), move_to("/b/")),
+			(
+				"/a/",
+				overrides_only(&r),
+				r#"{"op":"create","path":null}"#.to_string(),
+			),
+			(
+				"/a/",
+				overrides_only(&r),
+				r#"{"op":"materialize","path":null}"#.to_string(),
+			),
+		],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	// the made page has its file at /a/; the moved page is still at /b/
+	assert!(site.exists("src/a/index.html"));
+	assert!(site.read("src/b/index.html").contains("title: OLD"));
+	let now = rows(&mut ui);
+	assert_eq!(page(&now, "/a/").get("virtual"), Some(&Value::Bool(false)));
+}
+
+#[test]
+fn a_page_made_at_the_url_a_keyed_page_keeps_when_its_file_moves_is_refused_before_anything_is_written()
+ {
+	let site = Site::new("create_over_keyed_move");
+	site.write("src/k.html", "---\ntitle: K\npath: /a/\n---\n<p>k</p>");
+	site.write("pages.overrides.json", r#"{ "version": 1, "pages": [] }"#);
+	let mut ui = site
+		.open(r#", "pages": { "overrides": "pages.overrides.json", "outputPathField": "path" }"#);
+	let r = rows(&mut ui);
+	let before = site.snapshot();
+	let answer = batch(
+		&mut ui,
+		&[
+			("/a/", expect(&r, "/a/"), move_path("k2.html")),
+			(
+				"/a/",
+				overrides_only(&r),
+				r#"{"op":"create","path":null}"#.to_string(),
+			),
+			// an edit that is wrong by itself: it is told with the others only when the checks that
+			// come before anything is written find the create wrong too
+			(
+				"/nope/",
+				"{}".to_string(),
+				r#"{"op":"deletePage"}"#.to_string(),
+			),
+		],
+	);
+	assert!(!ok(&answer), "{answer:?}");
+	let mut told = errors(&answer);
+	told.sort();
+	assert_eq!(
+		told,
+		vec![(1, "collision".to_string()), (2, "notFound".to_string())],
+		"{answer:?}"
+	);
+	assert_eq!(site.snapshot(), before);
+}
+
+#[test]
+fn a_page_made_at_the_url_a_file_that_moves_gives_up_is_still_allowed() {
+	let site = Site::new("create_over_plain_move");
+	site.write("src/a/index.html", &html("OLD", "a"));
+	site.write("pages.overrides.json", r#"{ "version": 1, "pages": [] }"#);
+	let mut ui = site.open(OVERRIDES);
+	let r = rows(&mut ui);
+	let answer = batch(
+		&mut ui,
+		&[
+			("/a/", expect(&r, "/a/"), move_path("z/index.html")),
+			(
+				"/a/",
+				overrides_only(&r),
+				r#"{"op":"create","path":null}"#.to_string(),
+			),
+		],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	let now = rows(&mut ui);
+	assert!(has_page(&now, "/z/"));
+	assert_eq!(page(&now, "/a/").get("virtual"), Some(&Value::Bool(true)));
+}
+
+#[test]
+fn the_check_of_edits_that_exclude_each_other_is_not_the_product_of_the_pages_that_go_and_the_edits()
+ {
+	// A batch that deletes a tenth of a hundred thousand pages has ten thousand pages that go and
+	// a hundred thousand edits. Looking at every edit for each page that goes is a thousand
+	// million comparisons; found once by URL, it is a hundred thousand.
+	let n = 60_000;
+	let items: Vec<Item> = (0..n)
+		.map(|i| Item {
+			index: i,
+			edit: Edit {
+				url: format!("/p{i}/"),
+				expect: Value::Object(Vec::new()),
+				change: Change::DeletePage,
+			},
+		})
+		.collect();
+	let mut errors = Vec::new();
+	let started = std::time::Instant::now();
+	overlaps(&items, &mut errors);
+	let took = started.elapsed();
+	assert!(errors.is_empty());
+	assert!(
+		took < std::time::Duration::from_secs(2),
+		"{n} deletes took {took:?} to check"
+	);
 }
