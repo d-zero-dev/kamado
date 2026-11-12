@@ -1359,14 +1359,16 @@ fn what_could_not_be_put_back_is_said_and_the_rest_is_put_back() {
 	fs::remove_file(format!("{}/made/empty/.keep", site.root)).unwrap();
 	let root = &site.root;
 	// "gone.txt" was made from "a.txt" and does not exist; "dir" cannot be written as a file
-	let stuck = put_back(
-		&[(format!("{root}/a.txt"), format!("{root}/gone.txt"))],
-		&[
-			(format!("{root}/kept.txt"), Some(b"old".to_vec())),
-			(format!("{root}/dir"), Some(b"x".to_vec())),
+	let mut journal = Journal {
+		events: vec![
+			Event::Rename(format!("{root}/a.txt"), format!("{root}/gone.txt")),
+			Event::Write(format!("{root}/kept.txt"), Some(b"old".to_vec())),
+			Event::Write(format!("{root}/dir"), Some(b"x".to_vec())),
+			Event::MadeDirs(vec![format!("{root}/made/empty"), format!("{root}/made")]),
 		],
-		&[format!("{root}/made/empty"), format!("{root}/made")],
-	);
+		..Journal::default()
+	};
+	let stuck = journal.put_back();
 	assert_eq!(stuck.len(), 2, "{stuck:?}");
 	assert!(stuck[0].starts_with(&format!("{root}/dir: ")), "{stuck:?}");
 	assert!(
@@ -1375,7 +1377,7 @@ fn what_could_not_be_put_back_is_said_and_the_rest_is_put_back() {
 	);
 	assert_eq!(site.read("kept.txt"), "old");
 	assert!(!site.exists("made"));
-	assert_eq!(put_back(&[], &[], &[]), Vec::<String>::new());
+	assert_eq!(Journal::default().put_back(), Vec::<String>::new());
 }
 
 #[test]
