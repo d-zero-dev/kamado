@@ -23,6 +23,9 @@ export function summarize(report: BuildReport, verbose: boolean): string {
 	const parts = [...counts.entries()].map(([status, n]) => `${n} ${status}`);
 	const lines: string[] = [];
 	if (verbose) {
+		for (const line of report.data ?? []) {
+			lines.push(`  ${styleText('dim', line)}`);
+		}
 		const reasons = new Map(report.reasons);
 		for (const page of report.pages) {
 			const why = reasons.get(page.url);

@@ -259,3 +259,36 @@ test('the dev server renders a page again only when a key it read changed', asyn
 		await server.close();
 	}
 });
+
+test('a change to data.values rebuilds every JSX page, because the config is part of the build', async () => {
+	const dir = path.join(root, 'values-site');
+	mkdirSync(path.join(dir, 'src'), { recursive: true });
+	writeFileSync(path.join(dir, 'package.json'), '{}');
+	writeFileSync(
+		path.join(dir, 'src', 'a.tsx'),
+		'export default (p: any) => <html><body>{p.data.title}</body></html>;\n',
+	);
+	writeFileSync(
+		path.join(dir, 'src', 'b.tsx'),
+		'export default () => <html><body>no data</body></html>;\n',
+	);
+	const file = path.join(dir, 'kamado.config.jsonc');
+	const write = (title) =>
+		writeFileSync(
+			file,
+			`{ "dir": { "input": "src", "output": "htdocs" }, "data": { "values": { "title": "${title}" } }, "build": { "cacheDir": ".cache", "incremental": true } }\n`,
+		);
+	const run = async () => {
+		const report = await build(file, { incremental: true });
+		return Object.fromEntries(
+			report.pages.map((p) => [path.basename(p.outputPath), p.status]),
+		);
+	};
+
+	write('one');
+	assert.deepEqual(await run(), { 'a.html': 'built', 'b.html': 'built' });
+	assert.deepEqual(await run(), { 'a.html': 'cached', 'b.html': 'cached' });
+
+	write('two');
+	assert.deepEqual(await run(), { 'a.html': 'built', 'b.html': 'built' });
+});

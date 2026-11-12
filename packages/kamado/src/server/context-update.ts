@@ -6,6 +6,8 @@ export interface ContextUpdate {
 	readonly pages: readonly (readonly [number, PageEntry])[];
 	/** The new data, or `null` when it did not change. */
 	readonly data: Record<string, unknown> | null;
+	/** With new data: the data files that failed (an empty object when none did). */
+	readonly dataErrors?: Readonly<Record<string, string>> | null;
 }
 
 /**
@@ -28,5 +30,12 @@ export function applyUpdate(
 	for (const [index, page] of update.pages) {
 		pages[index] = page;
 	}
-	return { site: context.site, data: update.data ?? context.data, pages };
+	// The failures go with the data: new data replaces them, no new data keeps them.
+	const dataErrors = update.data === null ? context.dataErrors : update.dataErrors;
+	return {
+		site: context.site,
+		data: update.data ?? context.data,
+		pages,
+		...(dataErrors && Object.keys(dataErrors).length > 0 ? { dataErrors } : {}),
+	};
 }

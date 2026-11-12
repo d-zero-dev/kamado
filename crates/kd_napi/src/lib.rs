@@ -207,6 +207,30 @@ unsafe fn args<const N: usize>(
 	(argv, argc.min(N))
 }
 
+/// What the Node side made of the data files that are scripts:
+/// `{ "<key>": { "value": … } | { "error": "…" } }`.
+pub(crate) fn executed_from(
+	value: &kd_jsonc::Value,
+) -> Result<Vec<(String, kd_core::Executed)>, String> {
+	let shape = "expected { <key>: { value } | { error: string } }";
+	let kd_jsonc::Value::Object(members) = value else {
+		return Err(format!("executed data: {shape}"));
+	};
+	members
+		.iter()
+		.map(|(key, entry)| {
+			let executed = match (entry.get("value"), entry.get("error")) {
+				(Some(value), None) => kd_core::Executed::Value(value.clone()),
+				(None, Some(kd_jsonc::Value::String(why))) => {
+					kd_core::Executed::Failed(why.clone())
+				}
+				_ => return Err(format!("executed data {key:?}: {shape}")),
+			};
+			Ok((key.clone(), executed))
+		})
+		.collect()
+}
+
 fn build_options_from_json(json: &str) -> Result<kd_core::BuildOptions, String> {
 	let value = kd_jsonc::parse(json).map_err(|e| format!("build options: {e}"))?;
 	let b = |key: &str| -> Result<bool, String> {
@@ -255,6 +279,10 @@ fn build_options_from_json(json: &str) -> Result<kd_core::BuildOptions, String> 
 		Some(kd_jsonc::Value::String(s)) => Some(s.clone()),
 		Some(_) => return Err("build options: esbuildBinary must be a string".to_string()),
 	};
+	let executed_data = match value.get("executedData") {
+		None | Some(kd_jsonc::Value::Null) => Vec::new(),
+		Some(v) => executed_from(v)?,
+	};
 	Ok(kd_core::BuildOptions {
 		incremental: b("incremental")?,
 		force: b("force")?,
@@ -266,6 +294,7 @@ fn build_options_from_json(json: &str) -> Result<kd_core::BuildOptions, String> 
 		esbuild_version,
 		esbuild_binary,
 		serving: b("serving")?,
+		executed_data,
 	})
 }
 
@@ -396,6 +425,34 @@ unsafe fn prepare(env: napi_env, info: napi_callback_info) -> napi_value {
 	match session::prepare(&config, &options, &runtime) {
 		Ok(json) => unsafe { string(api, env, &json) },
 		Err(message) => unsafe { throw_message(api, env, message) },
+	}
+}
+
+/// `dataPlan(configPath, optionsJson, runtimeUrl)` -> JSON of the data files that are
+/// scripts, compiled to run: `{ cacheDir, modules: [{ key, source, module, sources }] }`.
+unsafe fn data_plan(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<3>(
+			env,
+			info,
+			c"dataPlan: expected (configPath, optionsJson, runtimeUrl) strings",
+			|[config, options, runtime]| Ok(session::data_plan(&config, &options, &runtime)?),
+		)
+	}
+}
+
+/// `serveSetData(handle, executedJson)` -> `"{}"`: what the data files that are scripts
+/// made of themselves, for the dev server to render the pages with.
+unsafe fn serve_set_data(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<2>(
+			env,
+			info,
+			c"serveSetData: expected (handle, executedJson) strings",
+			|[handle, executed]| serve::set_data(&handle, &executed),
+		)
 	}
 }
 
@@ -920,6 +977,7 @@ unsafe fn register(env: napi_env, exports: napi_value) -> napi_value {
 		export_guarded!(api, env, exports, c"build", build);
 		export_guarded!(api, env, exports, c"pages", pages);
 		export_guarded!(api, env, exports, c"prepare", prepare);
+		export_guarded!(api, env, exports, c"dataPlan", data_plan);
 		export_guarded!(api, env, exports, c"feed", feed);
 		export_guarded!(api, env, exports, c"finish", finish);
 		export_guarded!(api, env, exports, c"abort", abort);
@@ -934,6 +992,7 @@ unsafe fn register(env: napi_env, exports: napi_value) -> napi_value {
 			serve_finish_render_reads
 		);
 		export_guarded!(api, env, exports, c"serveFinishScript", serve_finish_script);
+		export_guarded!(api, env, exports, c"serveSetData", serve_set_data);
 		export_guarded!(api, env, exports, c"serveCancel", serve_cancel);
 		export_guarded!(api, env, exports, c"serveClose", serve_close);
 		export_guarded!(api, env, exports, c"uiOpen", ui_open);

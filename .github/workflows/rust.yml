@@ -127,3 +127,9 @@ jobs:
       # --verify-deps finds a page that depends on what another page left in a module (RFC §11).
       - name: Rebuild pages by the data keys they read
         run: node --test crates/kd_napi/check/data-keys.check.mjs
+
+      # The data files that are scripts run in a build and in the dev server, a page is built
+      # again only when a key it read changed, and a file that fails fails only its readers
+      # (RFC §3.2).
+      - name: Run the data files that are scripts
+        run: node --test crates/kd_napi/check/data-scripts.check.mjs
