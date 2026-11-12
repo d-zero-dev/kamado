@@ -159,3 +159,29 @@ fn schema_nested_html_options_match_the_parser() {
 		);
 	}
 }
+
+#[test]
+fn schema_ui_options_match_the_parser() {
+	let root = schema();
+	let dir = r#""dir": { "input": "src", "output": "out" }"#;
+	let ui = root.get("properties").unwrap().get("ui").unwrap();
+	check(
+		&root,
+		"ui",
+		ui,
+		&format!(r#"{{ {dir}, "ui": {{ "nope": 1 }} }}"#),
+	);
+	let key = ui
+		.get("properties")
+		.unwrap()
+		.get("keys")
+		.unwrap()
+		.get("additionalProperties")
+		.unwrap();
+	check(
+		&root,
+		"ui.keys.<key>",
+		key,
+		&format!(r#"{{ {dir}, "ui": {{ "keys": {{ "title": {{ "nope": 1 }} }} }} }}"#),
+	);
+}
