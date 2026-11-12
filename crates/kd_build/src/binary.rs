@@ -17,7 +17,9 @@
 //!           kind(0 = missing, 1 = hash follows) [32 hash bytes]
 //! entries:  count, then per entry: output(string id), input(string id),
 //!           env(string id), output size, dep count, dep file ids,
-//!           warning count, warning string ids, replaced-chars length, UTF-8 bytes
+//!           warning count, warning string ids, replaced-chars length, UTF-8 bytes,
+//!           data kind (0 = none, 1 = every key: hash string id,
+//!           2 = keys: count, then per key: key string id, hash string id)
 //! sha-256 of everything before it (32 bytes)
 //!
 //! Replaced characters are written inline (not through the string table) so a
@@ -29,7 +31,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::{Dep, Entry, MANIFEST_VERSION, MISSING_FILE_HASH, Manifest};
+use crate::{DataDeps, Dep, Entry, MANIFEST_VERSION, MISSING_FILE_HASH, Manifest};
 
 const MAGIC: &[u8; 3] = b"KDM";
 
@@ -95,7 +97,7 @@ pub fn encode(manifest: &Manifest) -> Option<Vec<u8>> {
 	let mut file_ids: HashMap<(u64, &Dep), u64> = HashMap::new();
 	let mut files: Vec<(u64, &Dep)> = Vec::new();
 	// output, input, env, size, deps, warning string ids, replaced chars (owned: not in the table)
-	type Pending = (u64, u64, u64, u64, Vec<u64>, Vec<u64>, String);
+	type Pending = (u64, u64, u64, u64, Vec<u64>, Vec<u64>, String, Vec<u64>);
 	let mut entries: Vec<Pending> = Vec::with_capacity(manifest.entries.len());
 	for (output, e) in &manifest.entries {
 		let mut deps = Vec::with_capacity(e.deps.len());
@@ -108,6 +110,19 @@ pub fn encode(manifest: &Manifest) -> Option<Vec<u8>> {
 			deps.push(id);
 		}
 		let warnings: Vec<u64> = e.warnings.iter().map(|w| strings.id(w)).collect();
+		// kind, then the string ids that follow it.
+		let data: Vec<u64> = match &e.data {
+			DataDeps::None => vec![0],
+			DataDeps::All(hash) => vec![1, strings.id(hash)],
+			DataDeps::Keys(keys) => {
+				let mut ids = vec![2, keys.len() as u64];
+				for (key, hash) in keys {
+					ids.push(strings.id(key));
+					ids.push(strings.id(hash));
+				}
+				ids
+			}
+		};
 		entries.push((
 			strings.id(output),
 			strings.id(&e.input_path),
@@ -116,6 +131,7 @@ pub fn encode(manifest: &Manifest) -> Option<Vec<u8>> {
 			deps,
 			warnings,
 			e.replaced_chars.iter().collect(),
+			data,
 		));
 	}
 
@@ -141,7 +157,7 @@ pub fn encode(manifest: &Manifest) -> Option<Vec<u8>> {
 		}
 	}
 	put(&mut out, entries.len() as u64);
-	for (output, input, env, size, deps, warnings, replaced) in &entries {
+	for (output, input, env, size, deps, warnings, replaced, data) in &entries {
 		put(&mut out, *output);
 		put(&mut out, *input);
 		put(&mut out, *env);
@@ -156,6 +172,9 @@ pub fn encode(manifest: &Manifest) -> Option<Vec<u8>> {
 		}
 		put(&mut out, replaced.len() as u64);
 		out.extend_from_slice(replaced.as_bytes());
+		for id in data {
+			put(&mut out, *id);
+		}
 	}
 	let digest = kd_hash::sha256(&out);
 	out.extend_from_slice(&digest);
@@ -326,6 +345,21 @@ pub fn decode(bytes: &[u8]) -> Option<Manifest> {
 			.ok()?
 			.chars()
 			.collect();
+		let data = match r.varint()? {
+			0 => DataDeps::None,
+			1 => DataDeps::All(string(r.varint()?)?.to_owned()),
+			2 => {
+				let key_count = r.count()?;
+				let mut keys = Vec::with_capacity(key_count);
+				for _ in 0..key_count {
+					let key = string(r.varint()?)?.to_owned();
+					let hash = string(r.varint()?)?.to_owned();
+					keys.push((key, hash));
+				}
+				DataDeps::Keys(keys)
+			}
+			_ => return None,
+		};
 		entries.insert(
 			output.to_owned(),
 			Entry {
@@ -335,6 +369,7 @@ pub fn decode(bytes: &[u8]) -> Option<Manifest> {
 				deps,
 				warnings,
 				replaced_chars,
+				data,
 			},
 		);
 	}
@@ -372,6 +407,7 @@ mod tests {
 					deps,
 					warnings: Vec::new(),
 					replaced_chars: Vec::new(),
+					data: DataDeps::Keys(vec![("posts".to_owned(), "c".repeat(64))]),
 				},
 			);
 		}
@@ -431,6 +467,75 @@ mod tests {
 		let digest = kd_hash::sha256(&garbage);
 		garbage.extend_from_slice(&digest);
 		assert_eq!(decode(&garbage), None);
+	}
+
+	#[test]
+	fn what_a_page_read_of_the_data_round_trips_in_every_form() {
+		let mut m = sample(3);
+		let forms = [
+			DataDeps::None,
+			DataDeps::All("d".repeat(64)),
+			DataDeps::Keys(vec![
+				("posts".to_owned(), "e".repeat(64)),
+				("site".to_owned(), "f".repeat(64)),
+			]),
+		];
+		for (entry, form) in m.entries.values_mut().zip(forms.iter()) {
+			entry.data = form.clone();
+		}
+		let decoded = decode(&encode(&m).unwrap()).unwrap();
+		let got: Vec<&DataDeps> = decoded.entries.values().map(|e| &e.data).collect();
+		assert_eq!(got, forms.iter().collect::<Vec<_>>());
+	}
+
+	/// The bytes of a manifest of one entry whose data part is `tail`, with a valid digest.
+	fn with_data_part(tail: &[u64]) -> Vec<u8> {
+		let mut m = sample(1);
+		m.entries.values_mut().next().unwrap().data = DataDeps::None;
+		let mut bytes = encode(&m).unwrap();
+		bytes.truncate(bytes.len() - 32);
+		// The last byte of an entry with `DataDeps::None` is its kind (0).
+		bytes.pop();
+		for v in tail {
+			put(&mut bytes, *v);
+		}
+		let digest = kd_hash::sha256(&bytes);
+		bytes.extend_from_slice(&digest);
+		bytes
+	}
+
+	#[test]
+	fn a_data_part_that_is_not_what_was_written_is_refused() {
+		assert!(
+			decode(&with_data_part(&[0])).is_some(),
+			"the control decodes"
+		);
+		assert_eq!(decode(&with_data_part(&[3])), None, "an unknown kind");
+		assert_eq!(
+			decode(&with_data_part(&[1, 9_999])),
+			None,
+			"a string that is not there"
+		);
+		assert_eq!(
+			decode(&with_data_part(&[2, 1])),
+			None,
+			"a key list cut short"
+		);
+		assert_eq!(
+			decode(&with_data_part(&[2, 1_000_000, 0, 0])),
+			None,
+			"more keys than there are bytes"
+		);
+	}
+
+	#[test]
+	fn a_manifest_of_the_version_before_is_not_read() {
+		let mut other = encode(&sample(1)).unwrap();
+		other.truncate(other.len() - 32);
+		other[3] = (MANIFEST_VERSION - 1) as u8;
+		let digest = kd_hash::sha256(&other);
+		other.extend_from_slice(&digest);
+		assert_eq!(decode(&other), None);
 	}
 
 	#[test]

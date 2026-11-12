@@ -117,7 +117,8 @@ pub(crate) fn feed(handle: &str, mut bytes: &[u8]) -> Result<(), String> {
 }
 
 /// Finishes a build with what JavaScript made, as JSON:
-/// `{ "pages": [[page, "html"], …], "scripts": [{ "id", "code", "inputs": […] }, …] }`.
+/// `{ "pages": [[page, "html"], …], "scripts": [{ "id", "code", "inputs": […] }, …],
+/// "reads": [[page, ["key", …] or null], …] }` (`reads`: the keys of `data` each page read; `null` is every key).
 /// The result is the report as JSON.
 ///
 /// # Errors
@@ -170,9 +171,38 @@ pub(crate) fn finish(handle: &str, results_json: &str) -> Result<String, String>
 		})();
 		scripts.push(parsed.ok_or("results: each script must be { id, code, inputs: [path, …] }")?);
 	}
-	let report = entry.prepared.finish(rendered, scripts)?;
+	let read_items = match value.get("reads") {
+		None => &[][..],
+		Some(Value::Array(items)) => items.as_slice(),
+		Some(_) => return Err("results: reads must be an array".to_owned()),
+	};
+	let mut reads = Vec::with_capacity(read_items.len());
+	for item in read_items {
+		let parsed = (|| {
+			let pair = item.as_array().filter(|a| a.len() == 2)?;
+			let page = pair[0].as_f64().filter(|p| p.fract() == 0.0 && *p >= 0.0)? as usize;
+			let keys = match &pair[1] {
+				// Every key.
+				Value::Null => None,
+				keys @ Value::Array(_) => Some(string_array(keys)?),
+				_ => return None,
+			};
+			Some((page, keys))
+		})();
+		reads.push(parsed.ok_or("results: each read must be [page, [key, …] or null]")?);
+	}
+	let report = entry.prepared.finish_with_reads(rendered, scripts, reads)?;
 	kd_core::write_report(&entry.loaded.config, &report)?;
 	Ok(report.to_json())
+}
+
+/// The strings of a JSON array, or `None` when it is not an array or holds anything else.
+pub(crate) fn string_array(value: &Value) -> Option<Vec<String>> {
+	value
+		.as_array()?
+		.iter()
+		.map(|v| v.as_str().map(str::to_owned))
+		.collect()
 }
 
 /// Forgets a prepared build (the caller gave up on it).
@@ -252,6 +282,64 @@ mod tests {
 				.unwrap_err()
 				.contains("no prepared build")
 		);
+		let _ = fs::remove_dir_all(&root);
+	}
+
+	/// Prepares a site of one JSX page and returns the handle.
+	fn one_page(name: &str) -> (String, String) {
+		let root = site(name);
+		fs::write(
+			format!("{root}/src/index.tsx"),
+			"export default () => <p>x</p>;\n",
+		)
+		.unwrap();
+		fs::write(
+			format!("{root}/kamado.config.jsonc"),
+			r#"{ "dir": { "input": "src", "output": "out" }, "build": { "cacheDir": ".cache" } }"#,
+		)
+		.unwrap();
+		let prepared = prepare(
+			&format!("{root}/kamado.config.jsonc"),
+			"{}",
+			"file:///runtime.js",
+		)
+		.unwrap();
+		let handle = kd_jsonc::parse(&prepared)
+			.unwrap()
+			.get("handle")
+			.and_then(|h| h.as_str())
+			.unwrap()
+			.to_owned();
+		(root, handle)
+	}
+
+	#[test]
+	fn a_record_of_the_data_a_page_read_must_have_the_shape_it_is_given_in() {
+		for (name, reads) in [
+			("not-array", r#""reads":1"#),
+			("not-pair", r#""reads":[[0]]"#),
+			("negative", r#""reads":[[-1,["a"]]]"#),
+			("fraction", r#""reads":[[0.5,["a"]]]"#),
+			("key-not-string", r#""reads":[[0,[1]]]"#),
+			("neither-list-nor-null", r#""reads":[[0,"a"]]"#),
+		] {
+			let (root, handle) = one_page(&format!("reads-{name}"));
+			let results = format!(r#"{{"pages":[[0,"<p>x</p>"]],{reads}}}"#);
+			let error = finish(&handle, &results).unwrap_err();
+			assert!(error.contains("read"), "{name}: {error}");
+			let _ = fs::remove_dir_all(&root);
+		}
+	}
+
+	#[test]
+	fn a_record_for_a_page_that_does_not_exist_is_refused_and_null_means_every_key() {
+		let (root, handle) = one_page("reads-unknown-page");
+		let error =
+			finish(&handle, r#"{"pages":[[0,"<p>x</p>"]],"reads":[[7,["a"]]]}"#).unwrap_err();
+		assert!(error.contains("page 7"), "{error}");
+		let (_, handle) = one_page("reads-null");
+		let report = finish(&handle, r#"{"pages":[[0,"<p>x</p>"]],"reads":[[0,null]]}"#).unwrap();
+		assert!(report.contains("\"status\":\"built\""));
 		let _ = fs::remove_dir_all(&root);
 	}
 

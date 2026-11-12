@@ -123,6 +123,8 @@ enum Pending {
 		/// may change while the worker renders; the result belongs to the
 		/// environment it was rendered in, so a later request sees it stale.
 		env: String,
+		/// The data when the render was requested, for the same reason as `env`.
+		data: crate::data::Hashes,
 	},
 	Script {
 		index: usize,
@@ -480,11 +482,7 @@ impl Serve {
 	/// The environment digest of pages JavaScript renders.
 	fn env_js(&self, st: &State) -> String {
 		kd_hash::to_hex(&kd_hash::sha256(
-			format!(
-				"{}\0{}\0{}\0{}",
-				self.env, st.data.hash, st.epoch, self.runtime
-			)
-			.as_bytes(),
+			format!("{}\0{}\0{}", self.env, st.epoch, self.runtime).as_bytes(),
 		))
 	}
 
@@ -657,7 +655,6 @@ impl Serve {
 			st.data = crate::data::load(&self.loaded.config)?;
 			st.data_stamp = stamp;
 			st.data_dirty = true;
-			st.cache.clear();
 		}
 		Ok(())
 	}
@@ -676,7 +673,8 @@ impl Serve {
 			let page = &st.plan.pages[index];
 			let verdict =
 				kd_build::check_inputs(&cached.entry, &page.file.input_path, &env, &fingerprinter);
-			if !matches!(verdict, kd_build::Verdict::Stale) {
+			let data_kept = !js || st.data.hashes.unchanged(&cached.entry.data);
+			if data_kept && !matches!(verdict, kd_build::Verdict::Stale) {
 				let cached = st.cache.get_mut(&index).expect("it was just read");
 				if let kd_build::Verdict::UpToDate(refreshed) = verdict {
 					cached.entry = refreshed;
@@ -758,7 +756,16 @@ impl Serve {
 		}
 		let token = self.token();
 		let env = self.env_js(st);
-		st.pending.insert(token, Pending::Page { index, deps, env });
+		let data = st.data.hashes.clone();
+		st.pending.insert(
+			token,
+			Pending::Page {
+				index,
+				deps,
+				env,
+				data,
+			},
+		);
 		Ok(Outcome::Served(Served::Render(Render {
 			token,
 			job,
@@ -1133,7 +1140,7 @@ impl Serve {
 		index: usize,
 		rendered: Option<&str>,
 		render_deps: &BTreeMap<String, kd_build::Dep>,
-		requested_env: Option<String>,
+		requested: Option<(String, kd_build::DataDeps)>,
 	) -> Result<String, String> {
 		let page = &st.plan.pages[index];
 		let source = rendered.unwrap_or_else(|| page.body.as_deref().unwrap_or_default());
@@ -1149,12 +1156,14 @@ impl Serve {
 		let mut deps = page.deps.clone();
 		deps.extend(render_deps.clone());
 		deps.extend(out.deps);
-		let env = if let Some(env) = requested_env {
-			env
+		let (env, data) = if let Some(requested) = requested {
+			requested
 		} else if needs_js(page) {
-			self.env_js(st)
+			// Not rendered here: nothing says what data it was rendered from, so it has no
+			// record, and the next request renders it again.
+			(self.env_js(st), kd_build::DataDeps::None)
 		} else {
-			self.env.clone()
+			(self.env.clone(), kd_build::DataDeps::None)
 		};
 		let entry = kd_build::Entry {
 			input_path: page.file.input_path.clone(),
@@ -1163,6 +1172,7 @@ impl Serve {
 			deps,
 			warnings: Vec::new(),
 			replaced_chars: Vec::new(),
+			data,
 		};
 		st.cache.insert(
 			index,
@@ -1187,11 +1197,38 @@ impl Serve {
 	///
 	/// An unknown token, or the message of a failing HTML stage.
 	pub fn finish_render(&self, token: u64, html: &str) -> Result<Served, String> {
+		self.finish_render_with_reads(token, html, None)
+	}
+
+	/// [`Serve::finish_render`] with the keys of `data` the page read (`None`:
+	/// every key). The page is served again from the cache until one of them changes.
+	///
+	/// # Errors
+	///
+	/// As [`Serve::finish_render`].
+	pub fn finish_render_with_reads(
+		&self,
+		token: u64,
+		html: &str,
+		reads: Option<&[String]>,
+	) -> Result<Served, String> {
 		let mut st = self.lock();
-		let Some(Pending::Page { index, deps, env }) = st.pending.remove(&token) else {
+		let Some(Pending::Page {
+			index,
+			deps,
+			env,
+			data,
+		}) = st.pending.remove(&token)
+		else {
 			return Err(format!("no page is waiting for token {token}"));
 		};
-		let body = self.process(&mut st, index, Some(html), &deps, Some(env))?;
+		let body = self.process(
+			&mut st,
+			index,
+			Some(html),
+			&deps,
+			Some((env, data.deps_of(reads))),
+		)?;
 		Ok(Served::Text {
 			content_type: "text/html",
 			body,
@@ -1263,6 +1300,7 @@ impl Serve {
 							deps: built.deps,
 							warnings: Vec::new(),
 							replaced_chars: Vec::new(),
+							data: kd_build::DataDeps::None,
 						},
 					},
 				);
@@ -1347,6 +1385,7 @@ impl Serve {
 						deps,
 						warnings: Vec::new(),
 						replaced_chars: Vec::new(),
+						data: kd_build::DataDeps::None,
 					},
 				},
 			);
@@ -1739,6 +1778,83 @@ mod tests {
 			update.get("data").map(Value::to_json),
 			Some(r#"{"n":22}"#.to_owned())
 		);
+	}
+
+	#[test]
+	fn a_change_to_data_rerenders_only_the_pages_that_read_that_key() {
+		let site = Site::new("jsx-data-keys");
+		site.write(
+			"src/a.tsx",
+			"export default (p: any) => <p>{p.data.alpha}</p>;\n",
+		);
+		site.write(
+			"src/b.tsx",
+			"export default (p: any) => <p>{p.data.beta}</p>;\n",
+		);
+		site.write("data/alpha.json", "1");
+		site.write("data/beta.json", "1");
+		let serve = site.serve(r#", "data": { "dir": "data" }"#);
+		let a = render(serve.request("/a.html").unwrap());
+		serve
+			.finish_render_with_reads(a.token, "<p>1</p>", Some(&["alpha".to_owned()]))
+			.unwrap();
+		let b = render(serve.request("/b.html").unwrap());
+		serve
+			.finish_render_with_reads(b.token, "<p>1</p>", Some(&["beta".to_owned()]))
+			.unwrap();
+
+		site.write("data/beta.json", "2");
+		// The page that did not read `beta` is served as it was; no render.
+		assert_eq!(text(serve.request("/a.html").unwrap()).1, "<p>1</p>\n");
+		// The page that did is rendered again.
+		assert!(matches!(
+			serve.request("/b.html").unwrap(),
+			Served::Render(_)
+		));
+	}
+
+	/// A site of one page that reads `data.alpha`, served, with `data/alpha.json` = 1.
+	fn alpha_site(name: &str) -> (Site, Serve) {
+		let site = Site::new(name);
+		site.write(
+			"src/a.tsx",
+			"export default (p: any) => <p>{p.data.alpha}</p>;\n",
+		);
+		site.write("data/alpha.json", "1");
+		site.write("data/beta.json", "1");
+		let serve = site.serve(r#", "data": { "dir": "data" }"#);
+		(site, serve)
+	}
+
+	#[test]
+	fn a_page_is_recorded_with_the_data_it_was_rendered_from_and_not_the_data_of_the_moment_it_finished()
+	 {
+		let (site, serve) = alpha_site("jsx-data-snapshot");
+		let a = render(serve.request("/a.html").unwrap());
+		// The data changes while the worker renders; the HTML is of the old data.
+		site.write("data/alpha.json", "2");
+		serve
+			.finish_render_with_reads(a.token, "<p>1</p>", Some(&["alpha".to_owned()]))
+			.unwrap();
+		assert!(matches!(
+			serve.request("/a.html").unwrap(),
+			Served::Render(_)
+		));
+	}
+
+	#[test]
+	fn a_page_finished_without_a_record_of_its_reads_depends_on_every_key() {
+		let (site, serve) = alpha_site("jsx-data-every-key");
+		let a = render(serve.request("/a.html").unwrap());
+		serve.finish_render(a.token, "<p>1</p>").unwrap();
+		assert_eq!(text(serve.request("/a.html").unwrap()).1, "<p>1</p>\n");
+
+		site.write("data/beta.json", "2");
+
+		assert!(matches!(
+			serve.request("/a.html").unwrap(),
+			Served::Render(_)
+		));
 	}
 
 	#[test]
