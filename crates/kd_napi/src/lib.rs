@@ -527,6 +527,21 @@ unsafe fn serve_finish_render(env: napi_env, info: napi_callback_info) -> napi_v
 	}
 }
 
+/// `serveFinishRenderReads(handle, token, html, readsJson)` -> JSON answer.
+unsafe fn serve_finish_render_reads(env: napi_env, info: napi_callback_info) -> napi_value {
+	// SAFETY: env/info belong to this call.
+	unsafe {
+		string_call::<4>(
+			env,
+			info,
+			c"serveFinishRenderReads: expected (handle, token, html, readsJson) strings",
+			|[handle, token, html, reads]| {
+				serve::finish_render_reads(&handle, &token, &html, &reads)
+			},
+		)
+	}
+}
+
 /// `serveFinishScript(handle, token, outputJson)` -> JSON answer.
 unsafe fn serve_finish_script(env: napi_env, info: napi_callback_info) -> napi_value {
 	// SAFETY: env/info belong to this call.
@@ -911,6 +926,13 @@ unsafe fn register(env: napi_env, exports: napi_value) -> napi_value {
 		export_guarded!(api, env, exports, c"serveOpen", serve_open);
 		export_guarded!(api, env, exports, c"serveRequest", serve_request);
 		export_guarded!(api, env, exports, c"serveFinishRender", serve_finish_render);
+		export_guarded!(
+			api,
+			env,
+			exports,
+			c"serveFinishRenderReads",
+			serve_finish_render_reads
+		);
 		export_guarded!(api, env, exports, c"serveFinishScript", serve_finish_script);
 		export_guarded!(api, env, exports, c"serveCancel", serve_cancel);
 		export_guarded!(api, env, exports, c"serveClose", serve_close);

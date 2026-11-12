@@ -33,7 +33,7 @@ use kd_jsonc::Value;
 pub mod binary;
 
 /// Bump when the format or the meaning of recorded data changes.
-pub const MANIFEST_VERSION: u64 = 4;
+pub const MANIFEST_VERSION: u64 = 5;
 
 /// Recorded as the hash of a dependency that could not be read.
 pub const MISSING_FILE_HASH: &str = "missing";
@@ -129,6 +129,24 @@ pub struct Entry {
 	/// Characters that became `?` inside `<script>` or `<style>` under Shift_JIS.
 	/// Kept so a cached page still feeds the aggregated Shift_JIS warning.
 	pub replaced_chars: Vec<char>,
+	/// What of `data` the output depends on. Not part of `env`: a change to a key the
+	/// page never read must not rebuild it.
+	pub data: DataDeps,
+}
+
+/// The `data` keys a page that JavaScript renders depends on, with the hash of
+/// each at the time the output was written.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum DataDeps {
+	/// Not a page that reads `data` (HTML, or nothing recorded).
+	#[default]
+	None,
+	/// Every key: the page listed them, failed, or was never traced. The hash is
+	/// that of the whole `data`.
+	All(String),
+	/// The top-level keys the page read, in the order of the first read, each with
+	/// its hash (an absent key has the hash of nothing, see `kd_core::data`).
+	Keys(Vec<(String, String)>),
 }
 
 /// Verifying traces keyed by output path.
@@ -250,20 +268,30 @@ impl Manifest {
 					.map(|w| Value::String(w.clone()))
 					.collect();
 				let replaced: String = e.replaced_chars.iter().collect();
-				(
-					output.clone(),
-					Value::Object(vec![
-						("inputPath".to_string(), Value::String(e.input_path.clone())),
-						("env".to_string(), Value::String(e.env.clone())),
-						(
-							"outputSize".to_string(),
-							Value::Number(e.output_size as f64),
-						),
-						("deps".to_string(), Value::Object(deps)),
-						("warnings".to_string(), Value::Array(warnings)),
-						("replacedChars".to_string(), Value::String(replaced)),
-					]),
-				)
+				let data = match &e.data {
+					DataDeps::None => None,
+					DataDeps::All(hash) => Some(Value::String(hash.clone())),
+					DataDeps::Keys(keys) => Some(Value::Object(
+						keys.iter()
+							.map(|(k, h)| (k.clone(), Value::String(h.clone())))
+							.collect(),
+					)),
+				};
+				let mut fields = vec![
+					("inputPath".to_string(), Value::String(e.input_path.clone())),
+					("env".to_string(), Value::String(e.env.clone())),
+					(
+						"outputSize".to_string(),
+						Value::Number(e.output_size as f64),
+					),
+					("deps".to_string(), Value::Object(deps)),
+					("warnings".to_string(), Value::Array(warnings)),
+					("replacedChars".to_string(), Value::String(replaced)),
+				];
+				if let Some(data) = data {
+					fields.push(("data".to_string(), data));
+				}
+				(output.clone(), Value::Object(fields))
 			})
 			.collect();
 		Value::Object(vec![
@@ -520,6 +548,7 @@ pub fn check_inputs(
 		deps,
 		warnings: entry.warnings.clone(),
 		replaced_chars: entry.replaced_chars.clone(),
+		data: entry.data.clone(),
 	})
 }
 
@@ -587,9 +616,27 @@ mod tests {
 				deps,
 				warnings: vec!["a warning".to_owned()],
 				replaced_chars: vec!['〜'],
+				data: DataDeps::None,
 			},
 		);
 		Manifest { entries }
+	}
+
+	#[test]
+	fn the_json_view_shows_what_a_page_read_of_the_data() {
+		let mut m = sample();
+		let entry = m.entries.get_mut("/out/index.html").unwrap();
+		entry.data = DataDeps::Keys(vec![("posts".to_owned(), "c".repeat(64))]);
+		assert!(
+			m.to_json()
+				.ends_with(&format!(r#""data":{{"posts":"{}"}}}}}}}}"#, "c".repeat(64)))
+		);
+		let entry = m.entries.get_mut("/out/index.html").unwrap();
+		entry.data = DataDeps::All("d".repeat(64));
+		assert!(
+			m.to_json()
+				.ends_with(&format!(r#""data":"{}"}}}}}}"#, "d".repeat(64)))
+		);
 	}
 
 	#[test]
@@ -597,7 +644,8 @@ mod tests {
 		let m = sample();
 		assert_eq!(
 			m.to_json(),
-			r#"{"version":4,"entries":{"/out/index.html":{"inputPath":"/in/index.tsx","env":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","outputSize":456,"deps":{"/in/index.tsx":[123,1700000000,123456789,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"/in/optional.json":[0,0,0,"missing"]},"warnings":["a warning"],"replacedChars":"〜"}}}"#
+			// Behavior change: the manifest is version 5
+			r#"{"version":5,"entries":{"/out/index.html":{"inputPath":"/in/index.tsx","env":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","outputSize":456,"deps":{"/in/index.tsx":[123,1700000000,123456789,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"/in/optional.json":[0,0,0,"missing"]},"warnings":["a warning"],"replacedChars":"〜"}}}"# // r#"{"version":4,"entries":{"/out/index.html":{"inputPath":"/in/index.tsx","env":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","outputSize":456,"deps":{"/in/index.tsx":[123,1700000000,123456789,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"/in/optional.json":[0,0,0,"missing"]},"warnings":["a warning"],"replacedChars":"〜"}}}"#, // previous
 		);
 		let root = temp_root("roundtrip");
 		let path = manifest_path(&format!("{root}/nested/cache"));
@@ -687,6 +735,7 @@ mod tests {
 			deps: map,
 			warnings: Vec::new(),
 			replaced_chars: Vec::new(),
+			data: DataDeps::None,
 		}
 	}
 

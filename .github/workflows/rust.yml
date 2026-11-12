@@ -122,3 +122,8 @@ jobs:
       # directory the command was typed in for --cache-dir (RFC §13).
       - name: Resolve a relative cache directory
         run: node --test crates/kd_napi/check/cache-dir.check.mjs
+
+      # A JSX page is rebuilt when a key of data it read changes and not otherwise, and
+      # --verify-deps finds a page that depends on what another page left in a module (RFC §11).
+      - name: Rebuild pages by the data keys they read
+        run: node --test crates/kd_napi/check/data-keys.check.mjs

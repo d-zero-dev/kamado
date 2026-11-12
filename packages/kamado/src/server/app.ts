@@ -230,14 +230,27 @@ export function createApp(
 				}
 				const { token } = current;
 				let html: string;
+				// Every key, until the renderer says which ones the page read.
+				const seen: { reads: readonly string[] | null } = { reads: null };
 				try {
-					html = await renderer.render(current.job);
+					html = await renderer.render(current.job, (keys) => {
+						seen.reads = keys;
+					});
 				} catch (error) {
 					// The core keeps what it needs to finish the page until told.
 					cancel(handle, token);
 					throw error;
 				}
-				current = JSON.parse(core.serveFinishRender(handle, token, html)) as Answer;
+				current = JSON.parse(
+					seen.reads === null
+						? core.serveFinishRender(handle, token, html)
+						: core.serveFinishRenderReads(
+								handle,
+								token,
+								html,
+								JSON.stringify(seen.reads),
+							),
+				) as Answer;
 
 				break;
 			}

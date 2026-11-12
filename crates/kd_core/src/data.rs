@@ -2,17 +2,84 @@
 //! and HTML / text read as strings), keyed by file name without extension,
 //! with `data.values` on top. Static data only: v3 never runs a data file.
 
+use std::collections::HashMap;
 use std::fs;
+use std::sync::Arc;
 
 use kd_config::Config;
 use kd_jsonc::Value;
 
-/// The merged data and its hash (part of the environment digest of every
-/// page that is rendered by JavaScript: any change to the data rebuilds
-/// them).
+/// The merged data and the hashes that pages are checked against: a page
+/// rendered by JavaScript is rebuilt when a key it read changed.
 pub(crate) struct Data {
 	pub value: Value,
-	pub hash: String,
+	/// The hashes, kept apart from `value`: the value goes to the renderers while
+	/// the build goes on deciding which pages are up to date.
+	pub hashes: Hashes,
+}
+
+/// The hash of `data` as a whole and of each top-level key.
+///
+/// Shared, not copied: the dev server takes one for each page it renders, and a build
+/// compares it with the record of every page.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Hashes(Arc<HashesInner>);
+
+#[derive(Debug, Default)]
+struct HashesInner {
+	whole: String,
+	keys: HashMap<String, String>,
+	/// The hash of a key that is not there: of nothing at all.
+	absent: String,
+}
+
+impl Hashes {
+	/// The hash of one top-level key: of its value in JSON, or, for a key that is
+	/// not there, of nothing at all (a page that read a missing key must be
+	/// rebuilt when the key appears, and not when another one changes).
+	pub(crate) fn key_hash(&self, key: &str) -> &str {
+		self.0.keys.get(key).unwrap_or(&self.0.absent)
+	}
+
+	/// What a page that read `keys` (`None`: every key) depends on, to be stored
+	/// in the manifest.
+	pub(crate) fn deps_of(&self, keys: Option<&[String]>) -> kd_build::DataDeps {
+		match keys {
+			None => kd_build::DataDeps::All(self.0.whole.clone()),
+			Some(keys) => kd_build::DataDeps::Keys(
+				keys.iter()
+					.map(|k| (k.clone(), self.key_hash(k).to_owned()))
+					.collect(),
+			),
+		}
+	}
+
+	/// Why the page is out of date, for `--verbose`: the first key it read that changed,
+	/// or that it depends on every key. `None` when nothing it read changed.
+	pub(crate) fn why_changed(&self, deps: &kd_build::DataDeps) -> Option<String> {
+		match deps {
+			kd_build::DataDeps::None => Some("there is no record of what the page read".to_owned()),
+			kd_build::DataDeps::All(hash) => (*hash != self.0.whole)
+				.then(|| "the page depends on every key of data, and data changed".to_owned()),
+			kd_build::DataDeps::Keys(keys) => keys
+				.iter()
+				.find(|(k, h)| self.key_hash(k) != h.as_str())
+				.map(|(k, _)| format!("data.{k} changed")),
+		}
+	}
+
+	/// Whether what the page depended on is as it was.
+	pub(crate) fn unchanged(&self, deps: &kd_build::DataDeps) -> bool {
+		match deps {
+			// A page rendered by JavaScript always has a record; none means it was
+			// not traced, so it is rebuilt.
+			kd_build::DataDeps::None => false,
+			kd_build::DataDeps::All(hash) => *hash == self.0.whole,
+			kd_build::DataDeps::Keys(keys) => {
+				keys.iter().all(|(k, h)| self.key_hash(k) == h.as_str())
+			}
+		}
+	}
 }
 
 /// A cheap stamp of the data directory: the name, size and modification time
@@ -112,9 +179,21 @@ pub(crate) fn load(config: &Config) -> Result<Data, String> {
 			}
 		}
 	}
+	let keys: HashMap<String, String> = members
+		.iter()
+		.map(|(k, v)| {
+			let hash = kd_hash::sha256(format!("=\0{}", v.to_json()).as_bytes());
+			(k.clone(), kd_hash::to_hex(&hash))
+		})
+		.collect();
 	let value = Value::Object(members);
 	let hash = kd_hash::to_hex(&kd_hash::sha256(value.to_json().as_bytes()));
-	Ok(Data { value, hash })
+	let hashes = Hashes(Arc::new(HashesInner {
+		whole: hash,
+		keys,
+		absent: kd_hash::to_hex(&kd_hash::sha256(b"-")),
+	}));
+	Ok(Data { value, hashes })
 }
 
 #[cfg(test)]
@@ -166,6 +245,68 @@ mod tests {
 			message.contains("site.jsonc: .jsonc files are not read as data"),
 			"{message}"
 		);
+		let _ = fs::remove_dir_all(&dir);
+	}
+
+	#[test]
+	fn a_page_depends_on_the_keys_it_read_and_not_on_the_others() {
+		let dir = scratch("keys");
+		fs::write(format!("{dir}/data/a.json"), "{\"n\":1}").unwrap();
+		fs::write(format!("{dir}/data/b.json"), "{\"n\":1}").unwrap();
+		let before = load(&config(&dir)).unwrap();
+		let read = ["a".to_owned(), "missing".to_owned()];
+		let deps = before.hashes.deps_of(Some(&read));
+		fs::write(format!("{dir}/data/b.json"), "{\"n\":2}").unwrap();
+		let other_key = load(&config(&dir)).unwrap();
+		fs::write(format!("{dir}/data/a.json"), "{\"n\":2}").unwrap();
+		let own_key = load(&config(&dir)).unwrap();
+		fs::write(format!("{dir}/data/missing.json"), "1").unwrap();
+		let added = load(&config(&dir)).unwrap();
+
+		assert!(before.hashes.unchanged(&deps));
+		assert!(other_key.hashes.unchanged(&deps), "b is not read");
+		assert!(!own_key.hashes.unchanged(&deps), "a changed");
+		assert!(
+			!added.hashes.unchanged(&deps),
+			"a key that was missing appeared"
+		);
+		assert!(
+			!other_key.hashes.unchanged(&before.hashes.deps_of(None)),
+			"every key"
+		);
+		assert!(!before.hashes.unchanged(&kd_build::DataDeps::None));
+		let _ = fs::remove_dir_all(&dir);
+	}
+
+	#[test]
+	fn why_a_page_is_out_of_date_names_the_key_and_never_the_value() {
+		let dir = scratch("why");
+		fs::write(format!("{dir}/data/a.json"), "{\"secret\":1}").unwrap();
+		fs::write(format!("{dir}/data/b.json"), "1").unwrap();
+		let before = load(&config(&dir)).unwrap();
+		let keys = ["a".to_owned(), "b".to_owned()];
+		let by_keys = before.hashes.deps_of(Some(&keys));
+		let every = before.hashes.deps_of(None);
+		fs::write(format!("{dir}/data/b.json"), "2").unwrap();
+		let after = load(&config(&dir)).unwrap();
+
+		assert_eq!(
+			after.hashes.why_changed(&by_keys).as_deref(),
+			Some("data.b changed")
+		);
+		assert!(
+			after
+				.hashes
+				.why_changed(&every)
+				.is_some_and(|w| w.contains("every key"))
+		);
+		assert!(
+			after
+				.hashes
+				.why_changed(&kd_build::DataDeps::None)
+				.is_some_and(|w| w.contains("no record"))
+		);
+		assert_eq!(before.hashes.why_changed(&by_keys), None);
 		let _ = fs::remove_dir_all(&dir);
 	}
 

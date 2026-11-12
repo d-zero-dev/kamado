@@ -55,6 +55,13 @@ export interface Native {
 	serveRequest(handle: string, urlPath: string, rendererStarted: '1' | '0'): string;
 	/** Takes the HTML rendered for a `render` answer; the result is JSON. */
 	serveFinishRender(handle: string, token: string, html: string): string;
+	/** `serveFinishRender` with the keys of `data` the page read, as a JSON array. */
+	serveFinishRenderReads(
+		handle: string,
+		token: string,
+		html: string,
+		readsJson: string,
+	): string;
 	/** Takes what esbuild built for a `script` answer; the result is JSON. */
 	serveFinishScript(handle: string, token: string, outputJson: string): string;
 	serveCancel(handle: string, token: string): string;

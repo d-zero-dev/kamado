@@ -12,6 +12,7 @@ export type CliFlag =
 	| 'incremental'
 	| 'force'
 	| 'skip-unchanged'
+	| 'verify-deps'
 	| 'jobs'
 	| 'out'
 	| 'port'
@@ -48,9 +49,17 @@ const COMMON = ['config', 'cache-dir'] as const satisfies readonly CliFlag[];
 export const COMMAND_ALLOWLIST: Readonly<Record<string, CommandAllowlist>> = {
 	build: {
 		positionals: true,
-		allowed: [...COMMON, 'verbose', 'incremental', 'force', 'skip-unchanged', 'jobs'],
+		allowed: [
+			...COMMON,
+			'verbose',
+			'incremental',
+			'force',
+			'skip-unchanged',
+			'verify-deps',
+			'jobs',
+		],
 		takes:
-			'--incremental, --force, --skip-unchanged, --jobs, --verbose, --cache-dir and --config',
+			'--incremental, --force, --skip-unchanged, --verify-deps, --jobs, --verbose, --cache-dir and --config',
 	},
 	server: {
 		positionals: false,
@@ -85,6 +94,7 @@ const FLAG_CLI: Record<CliFlag, string> = {
 	incremental: '--incremental',
 	force: '--force',
 	'skip-unchanged': '--skip-unchanged',
+	'verify-deps': '--verify-deps',
 	jobs: '--jobs',
 	out: '--out',
 	port: '--port',
@@ -122,6 +132,7 @@ const ALL_FLAGS: readonly CliFlag[] = [
 	'port',
 	'skip-unchanged',
 	'verbose',
+	'verify-deps',
 	'yes',
 ];
 

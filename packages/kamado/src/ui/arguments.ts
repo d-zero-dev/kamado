@@ -4,6 +4,7 @@ import { checkCommandArguments } from '../cli-arguments.js';
 export interface UiUnusedFlags {
 	readonly force?: boolean;
 	readonly 'skip-unchanged'?: boolean;
+	readonly 'verify-deps'?: boolean;
 	readonly verbose?: boolean;
 	readonly incremental?: boolean;
 	readonly jobs?: string;

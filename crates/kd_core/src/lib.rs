@@ -865,6 +865,9 @@ pub struct Report {
 	pub assets: Vec<AssetResult>,
 	pub warnings: Vec<String>,
 	pub elapsed_ms: u128,
+	/// Why a page that an earlier build wrote was built again: `(url, reason)`.
+	/// Pages built for the first time have none. For `--verbose`.
+	pub reasons: Vec<(String, String)>,
 }
 
 impl Report {
@@ -911,7 +914,7 @@ impl Report {
 				])
 			})
 			.collect();
-		Value::Object(vec![
+		let mut fields = vec![
 			("version".to_string(), Value::Number(1.0)),
 			("pages".to_string(), Value::Array(pages)),
 			("assets".to_string(), Value::Array(assets)),
@@ -928,8 +931,19 @@ impl Report {
 				"elapsedMs".to_string(),
 				Value::Number(self.elapsed_ms as f64),
 			),
-		])
-		.to_json()
+		];
+		// Only when there is one, so that a report of a first build is what it was.
+		if !self.reasons.is_empty() {
+			let reasons = self
+				.reasons
+				.iter()
+				.map(|(url, why)| {
+					Value::Array(vec![Value::String(url.clone()), Value::String(why.clone())])
+				})
+				.collect();
+			fields.push(("reasons".to_string(), Value::Array(reasons)));
+		}
+		Value::Object(fields).to_json()
 	}
 }
 
@@ -2059,6 +2073,85 @@ mod tests {
 		let chunk = fs::read_to_string(other.main.as_deref().unwrap()).unwrap();
 		assert!(chunk.contains("<p>other</p>"));
 		assert!(!chunk.contains("import.meta"));
+	}
+
+	#[test]
+	fn a_change_to_data_rebuilds_only_the_pages_that_read_that_key() {
+		let (site, loaded) = jsx_site("keys");
+		site.write("data/other.json", "{ \"b\": 1 }");
+		let first = prepare_incremental(&loaded);
+		let page_of = |p: &Prepared, url: &str| {
+			p.jobs()
+				.iter()
+				.find(|j| p.page_url(j.page) == url)
+				.unwrap()
+				.page
+		};
+		let (about, index) = (page_of(&first, "/about.html"), page_of(&first, "/"));
+		let rendered: Vec<(usize, String)> = first
+			.jobs()
+			.iter()
+			.map(|j| (j.page, "<html><body><p>x</p></body></html>".to_owned()))
+			.collect();
+		// `/` read `nav`; `/about.html` read `other`.
+		let reads = vec![
+			(index, Some(vec!["nav".to_owned()])),
+			(about, Some(vec!["other".to_owned()])),
+		];
+		first
+			.finish_with_reads(rendered, Vec::new(), reads)
+			.unwrap();
+
+		site.write("data/other.json", "{ \"b\": 2 }");
+		let second = prepare_incremental(&loaded);
+		let rebuilt: Vec<&str> = second
+			.jobs()
+			.iter()
+			.map(|j| second.page_url(j.page))
+			.collect();
+		assert_eq!(rebuilt, ["/about.html"], "only the page that read `other`");
+
+		let rendered: Vec<(usize, String)> = second
+			.jobs()
+			.iter()
+			.map(|j| (j.page, "<html><body><p>x</p></body></html>".to_owned()))
+			.collect();
+		let reads = vec![(about, Some(vec!["other".to_owned()]))];
+		let report = second
+			.finish_with_reads(rendered, Vec::new(), reads)
+			.unwrap();
+		assert_eq!(
+			statuses(&report),
+			[
+				("/about.html", "built"),
+				("/", "cached"),
+				("/plain.html", "cached")
+			]
+		);
+
+		// `--verbose` says which key made it stale.
+		assert_eq!(
+			report.reasons,
+			[("/about.html".to_owned(), "data.other changed".to_owned())]
+		);
+
+		// A page that listed the keys (`None`) depends on all of them.
+		site.write("data/other.json", "{ \"b\": 3 }");
+		let third = prepare_incremental(&loaded);
+		assert_eq!(third.jobs().len(), 1, "about read `other` again");
+		let mut listed = third.jobs().iter().map(|j| j.page).collect::<Vec<_>>();
+		listed.sort_unstable();
+		let rendered = vec![(listed[0], "<html><body><p>x</p></body></html>".to_owned())];
+		third
+			.finish_with_reads(rendered, Vec::new(), vec![(listed[0], None)])
+			.unwrap();
+		site.write("data/other.json", "{ \"b\": 4 }");
+		let fourth = prepare_incremental(&loaded);
+		assert_eq!(
+			fourth.jobs().len(),
+			1,
+			"the page that listed the keys is rebuilt"
+		);
 	}
 
 	fn loaded_url(prepared: &Prepared, page: usize) -> &str {

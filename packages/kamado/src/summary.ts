@@ -23,8 +23,13 @@ export function summarize(report: BuildReport, verbose: boolean): string {
 	const parts = [...counts.entries()].map(([status, n]) => `${n} ${status}`);
 	const lines: string[] = [];
 	if (verbose) {
+		const reasons = new Map(report.reasons);
 		for (const page of report.pages) {
-			lines.push(`  ${styleText('dim', page.status.padEnd(9))} ${page.url}`);
+			const why = reasons.get(page.url);
+			lines.push(
+				`  ${styleText('dim', page.status.padEnd(9))} ${page.url}` +
+					(why === undefined ? '' : styleText('dim', ` (${why})`)),
+			);
 		}
 		for (const asset of report.assets) {
 			lines.push(`  ${styleText('dim', asset.status.padEnd(9))} ${asset.outputPath}`);

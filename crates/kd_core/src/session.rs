@@ -92,6 +92,8 @@ pub struct Prepared {
 	context: Option<String>,
 	/// What esbuild has to build, as JSON (`None` when no script is stale).
 	script_request: Option<String>,
+	/// Why each page that an earlier build wrote is built again: `(page index, reason)`.
+	reasons: Vec<(usize, String)>,
 }
 
 /// Read-only state shared by the pool jobs of the second step.
@@ -99,6 +101,9 @@ struct Shared {
 	plan: Plan,
 	env: String,
 	env_js: String,
+	/// What `data` was when the build began: the entries of the pages record the
+	/// hash of each key they read.
+	data_hashes: crate::data::Hashes,
 	/// The environment digest of the scripts.
 	env_scripts: String,
 	/// The environment digest of the stylesheets.
@@ -537,9 +542,15 @@ fn chunk_text(runtime: &str, functions: &[PageFunction]) -> String {
 	text
 }
 
+/// Whether the keys of `data` that the page read when its output was written are
+/// as they were. A page that JavaScript does not render reads none.
+fn data_unchanged(page: &Page, hashes: &crate::data::Hashes, entry: &kd_build::Entry) -> bool {
+	!needs_js(page) || hashes.unchanged(&entry.data)
+}
+
 /// The environment digest of pages that JavaScript renders: they read the
-/// whole page list (`nav()`, `breadcrumbs`) and the data, so a change to
-/// either rebuilds them.
+/// whole page list (`nav()`, `breadcrumbs`), so a change to it rebuilds them.
+/// The data is not in it: a page depends on the keys it read (`DataDeps`).
 fn pages_digest(plan: &Plan, jobs: usize) -> String {
 	// One hash per page, on several threads, then the hashes in the order of the plan:
 	// the order is what `nav()` and `pages` list, so reordering the pages (the order of
@@ -719,12 +730,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	let any_js = plan.pages.iter().any(needs_js);
 	let env_js = if any_js {
 		kd_hash::to_hex(&kd_hash::sha256(
-			format!(
-				"{env}\0{}\0{}\0{runtime}",
-				data.hash,
-				pages_digest(&plan, jobs)
-			)
-			.as_bytes(),
+			format!("{env}\0{}\0{runtime}", pages_digest(&plan, jobs)).as_bytes(),
 		))
 	} else {
 		env.clone()
@@ -757,8 +763,9 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	// and is done on several threads.
 	enum First {
 		Done(Decision),
-		Build,
-		Compile,
+		/// To build, and why when an earlier build had written it.
+		Build(Option<String>),
+		Compile(Option<String>),
 	}
 	let first: Vec<First> = parallel::map(&plan.pages, jobs, |page| {
 		if page.is_virtual {
@@ -769,6 +776,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 			return First::Done(Decision::Skipped);
 		}
 		let page_env = if needs_js(page) { &env_js } else { &env };
+		let mut why: Option<String> = None;
 		if let Some(entry) = previous.entries.get(&page.file.output_path) {
 			match kd_build::check(
 				entry,
@@ -777,25 +785,35 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 				page_env,
 				&fingerprinter,
 			) {
-				kd_build::Verdict::Unchanged => {
+				kd_build::Verdict::Unchanged if data_unchanged(page, &data.hashes, entry) => {
 					return First::Done(Decision::Cached {
 						entry: entry.clone(),
 						refresh: false,
 					});
 				}
-				kd_build::Verdict::UpToDate(refreshed) => {
+				kd_build::Verdict::UpToDate(refreshed)
+					if data_unchanged(page, &data.hashes, &refreshed) =>
+				{
 					return First::Done(Decision::Cached {
 						entry: refreshed,
 						refresh: true,
 					});
 				}
-				kd_build::Verdict::Stale => {}
+				kd_build::Verdict::Unchanged => why = data.hashes.why_changed(&entry.data),
+				kd_build::Verdict::UpToDate(refreshed) => {
+					why = data.hashes.why_changed(&refreshed.data);
+				}
+				kd_build::Verdict::Stale => {
+					why = Some(
+						"the page, a module it imports, the list of pages, or the configuration changed".to_owned(),
+					);
+				}
 			}
 		}
 		if needs_js(page) {
-			First::Compile
+			First::Compile(why)
 		} else {
-			First::Build
+			First::Build(why)
 		}
 	});
 	// The pages that have to be built need their bodies, which the plan cache
@@ -803,14 +821,14 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	let needing_body: Vec<usize> = first
 		.iter()
 		.enumerate()
-		.filter(|(_, f)| matches!(f, First::Build | First::Compile))
+		.filter(|(_, f)| matches!(f, First::Build(_) | First::Compile(_)))
 		.map(|(i, _)| i)
 		.collect();
 	crate::load_bodies(&mut plan, &needing_body, jobs)?;
 	let to_compile: Vec<usize> = first
 		.iter()
 		.enumerate()
-		.filter(|(_, f)| matches!(f, First::Compile))
+		.filter(|(_, f)| matches!(f, First::Compile(_)))
 		.map(|(i, _)| i)
 		.collect();
 	// The planner read the source of the pages it did not take from its cache;
@@ -821,7 +839,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 			continue;
 		}
 		let text = page.body.take();
-		if matches!(first, First::Compile)
+		if matches!(first, First::Compile(_))
 			&& let Some(text) = text
 			&& let Some(dep) = page.deps.get(&page.file.input_path)
 		{
@@ -850,11 +868,17 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 	let mut compiled = compiled.into_iter();
 	let mut decisions = Vec::with_capacity(plan.pages.len());
 	let mut render_jobs = Vec::new();
+	// Why a page that an earlier build wrote is built again, by page index.
+	let mut reasons: Vec<(usize, String)> = Vec::new();
 	for (i, (page, first)) in plan.pages.iter().zip(first).enumerate() {
 		match first {
 			First::Done(decision) => decisions.push(decision),
-			First::Build => decisions.push(Decision::Build { render: None }),
-			First::Compile => {
+			First::Build(why) => {
+				reasons.extend(why.map(|w| (i, w)));
+				decisions.push(Decision::Build { render: None });
+			}
+			First::Compile(why) => {
+				reasons.extend(why.map(|w| (i, w)));
 				// The errors come in page order, as they did when pages were
 				// compiled one after the other.
 				let Compiled {
@@ -1005,6 +1029,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		.to_json()
 	});
 
+	let data_hashes = data.hashes.clone();
 	let context = if render_jobs.is_empty() {
 		None
 	} else {
@@ -1036,6 +1061,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 			plan,
 			env,
 			env_js,
+			data_hashes,
 			env_scripts,
 			env_styles,
 			style_settings,
@@ -1065,6 +1091,7 @@ pub fn prepare(loaded: &Loaded, options: &BuildOptions, runtime: &str) -> Result
 		render_jobs,
 		context,
 		script_request,
+		reasons,
 	})
 }
 
@@ -1162,6 +1189,22 @@ impl Prepared {
 		rendered: Vec<(usize, String)>,
 		scripts: Vec<ScriptOutput>,
 	) -> Result<Report, String> {
+		self.finish_with_reads(rendered, scripts, Vec::new())
+	}
+
+	/// [`Prepared::finish`] with the keys of `data` that JavaScript read for each page
+	/// it rendered (`None` for a page that depends on every key). A page that has
+	/// no record depends on every key too.
+	///
+	/// # Errors
+	///
+	/// As [`Prepared::finish`], and a record for a page that does not exist.
+	pub fn finish_with_reads(
+		self,
+		rendered: Vec<(usize, String)>,
+		scripts: Vec<ScriptOutput>,
+		reads: Vec<(usize, Option<Vec<String>>)>,
+	) -> Result<Report, String> {
 		let Prepared {
 			shared,
 			decisions,
@@ -1173,6 +1216,7 @@ impl Prepared {
 			render_jobs,
 			context: _,
 			script_request: _,
+			reasons,
 		} = self;
 		let mut script_by_asset: Vec<Option<ScriptOutput>> = vec![None; shared.assets.len()];
 		for output in scripts {
@@ -1209,6 +1253,18 @@ impl Prepared {
 				));
 			}
 		}
+		let mut reads_by_page: Vec<Option<Vec<String>>> = vec![None; shared.plan.pages.len()];
+		for (page, keys) in reads {
+			match reads_by_page.get_mut(page) {
+				Some(slot) => *slot = keys,
+				None => {
+					return Err(format!(
+						"a data record for page {page}, which does not exist"
+					));
+				}
+			}
+		}
+		let reads_by_page = Arc::new(reads_by_page);
 		let decisions = Arc::new(decisions);
 		let html_by_page = Arc::new(html_by_page);
 		let page_count = shared.plan.pages.len();
@@ -1229,8 +1285,15 @@ impl Prepared {
 				let shared = Arc::clone(&shared);
 				let decisions = Arc::clone(&decisions);
 				let html_by_page = Arc::clone(&html_by_page);
+				let reads_by_page = Arc::clone(&reads_by_page);
 				s.spawn(move || {
-					let outcome = finish_one(&shared, &decisions[i], i, html_by_page[i].as_deref());
+					let outcome = finish_one(
+						&shared,
+						&decisions[i],
+						i,
+						html_by_page[i].as_deref(),
+						reads_by_page[i].as_deref(),
+					);
 					shared.results.lock().unwrap_or_else(|e| e.into_inner())[i] = Some(outcome);
 				});
 			}
@@ -1302,6 +1365,10 @@ impl Prepared {
 			assets: Vec::with_capacity(asset_results.len()),
 			warnings: shared.plan.warnings.clone(),
 			elapsed_ms: 0,
+			reasons: reasons
+				.into_iter()
+				.map(|(i, why)| (shared.plan.pages[i].file.url.clone(), why))
+				.collect(),
 		};
 		// A partial build (targets) keeps the entries it did not touch. Any
 		// other build starts a manifest of its own, and the entries that are
@@ -1381,7 +1448,13 @@ impl Prepared {
 	}
 }
 
-fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&str>) -> Outcome {
+fn finish_one(
+	shared: &Shared,
+	decision: &Decision,
+	i: usize,
+	rendered: Option<&str>,
+	reads: Option<&[String]>,
+) -> Outcome {
 	let page = &shared.plan.pages[i];
 	let result = |status| PageResult {
 		url: page.file.url.clone(),
@@ -1443,6 +1516,11 @@ fn finish_one(shared: &Shared, decision: &Decision, i: usize, rendered: Option<&
 		deps,
 		warnings: out.warnings.clone(),
 		replaced_chars: replaced.clone(),
+		data: if render.is_some() {
+			shared.data_hashes.deps_of(reads)
+		} else {
+			kd_build::DataDeps::None
+		},
 	};
 	Ok((result(status), Some(entry), out.warnings, replaced))
 }
@@ -1582,6 +1660,7 @@ fn finish_asset(shared: &Shared, i: usize, script: Option<&ScriptOutput>) -> Ass
 		deps: built.deps,
 		warnings: warnings.clone(),
 		replaced_chars: Vec::new(),
+		data: kd_build::DataDeps::None,
 	});
 	Ok((result(status), entry, warnings))
 }

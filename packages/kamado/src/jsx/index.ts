@@ -29,6 +29,7 @@ import type {
 
 export { basePathOf } from '../base-path.js';
 export type { HtmlChild } from './runtime.js';
+export { memo } from './memo.js';
 export {
 	Fragment,
 	Markup,

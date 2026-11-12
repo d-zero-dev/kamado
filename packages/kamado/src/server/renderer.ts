@@ -9,7 +9,11 @@ interface Slot {
 	readonly worker: Worker;
 	readonly waiting: Map<
 		number,
-		{ resolve: (html: string) => void; reject: (error: Error) => void }
+		{
+			resolve: (html: string) => void;
+			reject: (error: Error) => void;
+			onReads?: (keys: readonly string[] | null) => void;
+		}
 	>;
 	retired: boolean;
 }
@@ -60,17 +64,21 @@ export class ServeRenderer {
 	/**
 	 * Renders one job.
 	 * @param job - What the core asked for
+	 * @param onReads - Called with the keys of `data` the page read (`null`: every key)
 	 * @returns The HTML of the page
 	 * @throws {Error} with the message of the failure in the worker
 	 */
-	render(job: RenderJob): Promise<string> {
+	render(
+		job: RenderJob,
+		onReads?: (keys: readonly string[] | null) => void,
+	): Promise<string> {
 		const slot = this.#slot;
 		if (!slot) {
 			return Promise.reject(new Error('the renderer was not started'));
 		}
 		const id = this.#nextId++;
 		return new Promise<string>((resolve, reject) => {
-			slot.waiting.set(id, { resolve, reject });
+			slot.waiting.set(id, { resolve, reject, onReads });
 			slot.worker.postMessage({ type: 'render', id, job });
 		});
 	}
@@ -87,16 +95,25 @@ export class ServeRenderer {
 			workerData: { context, runtimeUrl: this.#runtimeUrl },
 		});
 		const slot: Slot = { worker, waiting: new Map(), retired: false };
-		worker.on('message', (message: { id: number; html?: string; error?: string }) => {
-			const entry = slot.waiting.get(message.id);
-			slot.waiting.delete(message.id);
-			if (message.error === undefined) {
-				entry?.resolve(message.html ?? '');
-			} else {
-				entry?.reject(new Error(message.error));
-			}
-			this.#stopWhenDone(slot);
-		});
+		worker.on(
+			'message',
+			(message: {
+				id: number;
+				html?: string;
+				reads?: readonly string[] | null;
+				error?: string;
+			}) => {
+				const entry = slot.waiting.get(message.id);
+				slot.waiting.delete(message.id);
+				if (message.error === undefined) {
+					entry?.onReads?.(message.reads ?? null);
+					entry?.resolve(message.html ?? '');
+				} else {
+					entry?.reject(new Error(message.error));
+				}
+				this.#stopWhenDone(slot);
+			},
+		);
 		const lose = (error: Error) => {
 			for (const entry of slot.waiting.values()) {
 				entry.reject(error);

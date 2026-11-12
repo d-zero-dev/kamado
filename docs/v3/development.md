@@ -1,8 +1,8 @@
 # v3 の開発手順
 
-Rust のワークスペース（`crates/`）、Node 側のパッケージ（`packages/kamado`）、ベンチマーク・比較ツール（`benchmarks/`）の使い方。仕様は`RFC.md`、設計判断の根拠は`spike-results.md`を参照。
+Rust のワークスペース（`crates/`）、Node 側のパッケージ（`packages/kamado`と`packages/@kamado-io/oxlint`）、ベンチマーク・比較ツール（`benchmarks/`）の使い方。仕様は`RFC.md`、設計判断の根拠は`spike-results.md`を参照。
 
-このリポジトリの`kamado`は v3 で、npm のワークスペースは`packages/kamado`の 1 つだけ（Lerna は版の管理と公開のために残している）。v2 は`v2`ブランチで保守していて、このブランチには無い。v2 の出力を比べる必要があるもの（oracle）は、公開済みの v2 を npm から取って使う（「v2 の oracle」）。
+このリポジトリの`kamado`は v3 で、npm のワークスペースは`packages/kamado`と`packages/@kamado-io/oxlint`の 2 つ（Lerna は版の管理と公開のために残している。`forcePublish`で、2 つは常に同じ版になる）。v2 は`v2`ブランチで保守していて、このブランチには無い。v2 の出力を比べる必要があるもの（oracle）は、公開済みの v2 を npm から取って使う（「v2 の oracle」）。
 
 ## Rust
 
@@ -57,6 +57,8 @@ node --test crates/kd_napi/check/load.check.mjs
 
 相対パスの`cacheDir`の基準（API は設定ファイルのディレクトリ、CLI の`--cache-dir`は cwd。RFC §13）は、`node --test crates/kd_napi/check/cache-dir.check.mjs`で、実物のアドオンと CLI を通す（`yarn build`のあと）。
 
+`data`のキー単位の依存（読んだキーが変わったページだけを描き直すこと、`--verify-deps`が状態を持ち越すページを見つけること。RFC §11）は、`node --test crates/kd_napi/check/data-keys.check.mjs`で、同じく実物を通す。10 万ページでの計測は、`node benchmarks/v3/generate-jsx-fixtures.ts --pages=100000 --out=<dir>`で作ったサイトを`kamado build --incremental`で 2 回回し、使われていないキーのファイルを`data.dir`に足して変えてもう 1 回回す（全ページが`cached`になること）。
+
 `kamado ui`の画面は`packages/kamado/client`（React）で、`yarn build`が型を検査して、`scripts/build-ui.mjs`が esbuild で`packages/kamado/dist/ui`にまとめる（`yarn dev`は画面を作り直さない）。React は`packages/kamado`の devDependencies で、bundle に入るので、パッケージの実行時の依存は増えない。画面の論理は DOM の無い関数（`client/src/logic/`）に分けて Vitest で、サーバー（`src/ui/`）は`app.request`で確かめる。小さな部品（`column-menu.tsx`・`options-dialog.tsx`）は、`react-dom/server`で HTML にして確かめる（`client/src/*.spec.tsx`。操作は確かめない）。サーバーが実物のコアの答えを正しく中継し、絶対パスを出さないことは、`ui.check.mjs`が実物のアドオンで確かめる（画面が読む JSON の項目もそこで固定する）。配布物に画面が入っていることは、`node scripts/check-package-ui.mjs packages/kamado`（ローカルでは`yarn build`のあと。publish のワークフローは展開したパッケージに対して）が確かめる。
 
 画面の設定の保存（`packages/kamado/src/ui/settings.ts`）は、一時ディレクトリのファイルで Vitest が確かめる（同時に保存して項目が消えないこと、壊れたファイルの退避、新しい版を書かないこと、パスがブラウザに出ないこと）。`kamado ui-settings`は`KAMADO_UI_SETTINGS`を一時ファイルにして動かせる。ルートの`vitest.config.ts`は、同じ環境変数を一時ディレクトリのファイルに向ける。設定ファイルを明示しない`ui()`のテストが、実行する人の`~/.config/kamado/ui-settings.json`を読んだり、壊れているものを退避したりしないため。表示言語の辞書（`client/src/i18n/messages.ts`）は、両言語に同じ項目があることを Vitest が確かめる。
@@ -89,6 +91,33 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 ```
 
 アドオンは`KAMADO_NATIVE_ADDON`で指定したファイル、なければ`target/release`、`target/debug`の順に探す。
+
+## Node 側のパッケージ（`packages/@kamado-io/oxlint`）
+
+`kamado/jsx`の TSX に向けた oxlint の規則（npm 名`@kamado-io/oxlint`。`kamado`と同じ版で公開する）。kamado は 1 回だけ HTML に描画して JavaScript を送らないので、意味を持たない書き方をエラーにする。対象は、`react`の値、関数の`onClick`、`'use client'`、`async`のコンポーネント、モジュールの変数の書き換え、コンポーネントの中の`fs`と`fetch`である。規則の一覧と使い方は`packages/@kamado-io/oxlint/README.md`。
+
+```sh
+yarn build                                    # tsc で dist/ を作る
+yarn vitest run packages/@kamado-io/oxlint    # 規則の spec と、実物の oxlint を通す spec
+```
+
+テストは 2 層ある。規則ごとの spec（`src/rules/*.spec.ts`）は ESLint の`Linter`で JS と JSX の範囲を確かめる（oxlint と ESLint が共有する API で書いてあるため）。`src/oxlint.spec.ts`は実物の oxlint を子プロセスで動かして、TypeScript の構文（`import type`など）、パッケージ名でのプラグインの解決（`exports`と`dist/`）、`overrides`、設定ファイルの 2 つの形式（`.oxlintrc.json`と`oxlint.config.mts`）を確かめる。
+
+期待は`fixtures/app/`のファイルの`// ✗ 規則名`の注釈が持つ（行末のコメントはその行を、単独のコメントは次の行を指す）。規則を足すときは、規則の spec と、`invalid.tsx`への注釈つきの例を足す（`oxlint.spec.ts`が、全部の規則が`invalid.tsx`に出ることを確かめる）。oxlint は`dist/`を読むので、`yarn build`のあとでないと spec は動かない。
+
+規則の名前は`@kamado-io/<規則>`で、`meta.name`が接頭辞になる（`@d-zero/oxlint-plugin`の`@d-zero/no-click-event`と同じ形）。
+
+**版の上げ方**（安定版から）。規則の追加と、既存の規則が見つけるものの拡大は、マイナーとして扱う。規則の削除、名前や`messageId`の変更、報告の縮小（見つけていたものを見つけなくなること）は、メジャーとして扱う。このパッケージは`recommended`を持たず、利用者が規則を自分で挙げるので、新しい規則は自動では有効にならない。既存の規則の拡大は、同じ名前のまま新しい報告を出すので、利用者の lint が赤くなることがある。そのため、変更の説明（コミットの本文）に、新しく報告されるものを書く。`kamado`と同じ版で公開するので、このパッケージだけの変更でも、版は`kamado`と一緒に上がる。
+
+`oxlint`と`eslint`（このパッケージの devDependencies）は、`.github/renovate.json`のグループに入れていない。片方だけ版が上がっても、ビルドと型検査は通るため（`eslint`は型と規則の spec に、`oxlint`は`oxlint.spec.ts`にだけ使う）。`oxlint`が上がると、`oxlint.spec.ts`の期待（行と規則）が変わることがあり、そのときは Renovate の PR の中で直す。
+
+**最初の公開は手で行う（1 回だけ）。** npm の Trusted Publishing は、まだ npm にないパッケージには設定できない。そのため`@kamado-io/oxlint`の最初の版だけは、次の手順で公開する。**次のタグを push する前に**済ませる（`publish.yml`の`check`ジョブが、npm にこのパッケージがあることを公開の前に確かめる）。
+
+1. 古い成果物が tarball に入らないように、`packages/@kamado-io/oxlint/dist`を消してから`yarn build`し、`yarn workspace @kamado-io/oxlint pack --out "$PWD/kamado-io-oxlint.tgz"`で tarball を作る。版は`package.json`の今の版で、`lerna.json`と同じ。
+2. `@kamado-io`に権限のあるアカウントで`npm login`し、`npm publish ./kamado-io-oxlint.tgz --access public --tag <dist-tag>`を実行する。dist-tag は、`publish.yml`が版から決めるものと同じにする（`-alpha`は`alpha`、`-beta`は`beta`、`-rc`は`rc`、それ以外の prerelease は`next`、安定版は`latest`）。tarball は、自分のディレクトリに置いたものだけを使い、公開したら消す。
+3. npmjs.com のパッケージの設定（Settings の Trusted Publisher）で、GitHub Actions、リポジトリ`d-zero-dev/kamado`、ワークフロー`publish.yml`を登録する。
+
+手で公開した版には provenance が付かない（npm が付けるのは、CI の OIDC で公開したときだけ）。次の版からは、`kamado`と同じタグの push で、同じワークフローが provenance 付きで公開する。
 
 ## 何を更新したら、何を作り直すか
 

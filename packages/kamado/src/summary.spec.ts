@@ -59,6 +59,19 @@ describe('summarize', () => {
 		]);
 	});
 
+	test('says why a page was built again when verbose', () => {
+		const lines = plain(
+			summarize({ ...report, reasons: [['/b/', 'data.posts changed']] }, true),
+		).split('\n');
+
+		expect(lines).toEqual([
+			'  built     /',
+			'  cached    /a/',
+			'  built     /b/ (data.posts changed)',
+			'Build completed in 1.23s (2 built, 1 cached)',
+		]);
+	});
+
 	test('prints warnings before the totals', () => {
 		const withWarning: BuildReport = {
 			...report,

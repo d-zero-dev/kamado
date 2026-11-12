@@ -6,7 +6,9 @@
  */
 import type { BuildOptions, BuildReport } from './build.js';
 import type { RenderContext } from './props.js';
-import type { Rendered, RenderJob } from './render.js';
+import type { DataReads, Rendered, RenderJob } from './render.js';
+
+import { createHash } from 'node:crypto';
 
 import { BUILD_OPTION_KEYS } from './build.js';
 import { assertKnownOptions } from './known-options.js';
@@ -42,6 +44,51 @@ function frames(rendered: readonly Rendered[]): Buffer {
 		at += 8 + length;
 	}
 	return buffer;
+}
+
+/**
+ * A short digest of HTML, to compare two renderings without keeping both.
+ * @param html - What a page rendered to
+ */
+function digestOf(html: string): string {
+	return createHash('sha256').update(html).digest('hex');
+}
+
+/**
+ * Renders the pages again, each in a worker that has rendered nothing before, and fails
+ * when one differs from the first rendering (`--verify-deps`, RFC section 11).
+ * @param jobs - What was rendered
+ * @param context - Site, data and the page list
+ * @param digests - The digest of each page's first rendering
+ * @param parallelism - Number of workers
+ * @throws {Error} naming the pages whose HTML depends on something that was not recorded
+ */
+async function verifyRendering(
+	jobs: readonly RenderJob[],
+	context: RenderContext,
+	digests: ReadonlyMap<number, string>,
+	parallelism: number | undefined,
+): Promise<void> {
+	const differing: string[] = [];
+	await renderJobs(jobs, context, {
+		runtimeUrl: RUNTIME_URL,
+		parallelism,
+		isolate: true,
+		onRendered: (rendered) => {
+			for (const [page, html] of rendered) {
+				if (digests.get(page) !== digestOf(html)) {
+					differing.push(context.pages[page]?.inputPath ?? `page ${page}`);
+				}
+			}
+		},
+	});
+	if (differing.length > 0) {
+		throw new Error(
+			`--verify-deps: ${differing.length} page(s) rendered differently in a fresh worker, so ` +
+				`their HTML depends on something other than their props and data (a variable of a ` +
+				`module that keeps data, the time, a random number?):\n${differing.map((p) => `  ${p}`).join('\n')}`,
+		);
+	}
 }
 
 /** What `prepare` of the core returns. */
@@ -88,7 +135,7 @@ export async function buildFrom(
 			);
 		}
 	};
-	const { onProgress, ...coreOptions } = options;
+	const { onProgress, verifyDeps, ...coreOptions } = options;
 	const targets =
 		options.targets === undefined
 			? undefined
@@ -112,12 +159,24 @@ export async function buildFrom(
 		// Pages render in worker threads while esbuild bundles the scripts. The
 		// HTML goes to the core as each batch is done, not after the last one.
 		let done = 0;
+		// The keys of `data` each page read: the core rebuilds a page when one of them changes.
+		const reads: DataReads[] = [];
+		// With `verifyDeps`: what each page rendered to, to compare with a fresh worker's.
+		const digests = new Map<number, string>();
 		const [, scripts] = await Promise.all([
 			prepared.context && prepared.jobs.length > 0
 				? renderJobs(prepared.jobs, prepared.context, {
 						runtimeUrl: RUNTIME_URL,
 						parallelism: options.jobs,
+						onReads: (batch) => {
+							reads.push(...batch);
+						},
 						onRendered: (rendered) => {
+							if (verifyDeps) {
+								for (const [page, html] of rendered) {
+									digests.set(page, digestOf(html));
+								}
+							}
 							core.feed(prepared.handle, frames(rendered));
 							done += rendered.length;
 							onProgress?.(done, prepared.jobs.length);
@@ -127,7 +186,11 @@ export async function buildFrom(
 			prepared.scripts ? buildScripts(prepared.scripts) : [],
 		]);
 		lap('rendered');
-		const results = JSON.stringify({ scripts });
+		if (verifyDeps && prepared.context) {
+			await verifyRendering(prepared.jobs, prepared.context, digests, options.jobs);
+			lap('verified');
+		}
+		const results = JSON.stringify(reads.length > 0 ? { scripts, reads } : { scripts });
 		lap('serialized');
 		const report = JSON.parse(core.finish(prepared.handle, results)) as BuildReport;
 		lap('finished');

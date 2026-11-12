@@ -16,7 +16,7 @@ disable-model-invocation: true
 
 v3 は、ネイティブアドオン（Rust の `kd_napi`）をプラットフォームごとにビルドし、`kamado` に全プラットフォーム分（`native/<os>-<arch>/kd_napi.node`）を同梱して公開する（`docs/v3/RFC.md` §18。プラットフォーム別のパッケージには分けない）。`publish.yml` は次の順に進み、どこかで失敗したら公開に進まない。
 
-1. `check`: Cargo の版（`scripts/sync-cargo-version.mjs --check`）、`packages/kamado` の版、タグが `lerna.json` の版と一致しているか。dist-tag を決める
+1. `check`: Cargo の版（`scripts/sync-cargo-version.mjs --check`）、`packages/kamado` と `packages/@kamado-io/oxlint` の版、タグが `lerna.json` の版と一致しているか。`@kamado-io/oxlint` が npm にあるか（最初の版は手で公開する。`docs/v3/development.md`）。dist-tag を決める
 2. `addon`: 4 プラットフォーム（darwin-arm64、darwin-x64、linux-x64、linux-arm64）の実機でアドオンをビルドし、読み込みを確認する
 3. `package`: 集めて `native/` に置き、`yarn build` と `yarn pack` で tarball を作る
 4. `smoke`: tarball を 5 つの実機で展開し、同梱のアドオンが読み込めることを確認する（`scripts/check-package-addon.mjs`）
@@ -28,7 +28,7 @@ v2 のリリースは `v2` ブランチで行う。公開済みの v2（`kamado@
 
 # 対象パッケージ
 
-v3 の対象は `kamado`（`packages/kamado`）の 1 つで、**無スコープ**で公開する（`npm view` 等のコマンド例でスコープを付けない）。版は Lerna が `lerna.json` の `version` で管理する（Cargo の版も同じ値に揃う）。
+v3 の対象は 2 つ。`kamado`（`packages/kamado`）は**無スコープ**で公開する（`npm view` 等のコマンド例でスコープを付けない）。`@kamado-io/oxlint`（`packages/@kamado-io/oxlint`。`kamado/jsx` 向けの oxlint の規則）は**スコープ付き**で、`kamado` と同じ版・同じ dist-tag で公開する。版は Lerna が `lerna.json` の `version` で管理し（`forcePublish` で、変更のないパッケージも同じ版に上がる）、Cargo の版も同じ値に揃う。
 
 # 手順
 
@@ -204,7 +204,7 @@ git merge main --no-edit
 
 ## 12. 失敗時の対処
 
-- **sigstore の transient 409**: `gh run rerun --failed` で失敗したジョブだけ再実行する。公開するのは `kamado` の 1 パッケージだけなので、部分 publish は起きない
+- **sigstore の transient 409**: `gh run rerun --failed` で失敗したジョブだけ再実行する。公開するパッケージは 2 つなので、1 つ目だけが公開されて 2 つ目が失敗する部分 publish は起きうる。`@kamado-io/oxlint` を先に公開する順にしてあるので、失敗しても `kamado` は出ない（`kamado` は oxlint に依存しないので、oxlint だけが先にあっても害はない）。再実行すれば、npm にある版は飛ばして、残りだけが公開される。`@kamado-io/oxlint` は、`kamado` とは別に npm の trusted publisher の設定が要る（最初の版を手で公開したあとに設定する。`docs/v3/development.md`）
 - **`check` / `addon` / `smoke` の失敗**: 公開には進んでいない。原因を直す。タグが指すコミットに修正が要るときは、タグの付け直しになるので、ユーザーに確認する（`v*` タグの作成・削除は CODEOWNERS のみ）
 - **publish の前に確認したいとき**: `gh workflow run publish.yml --ref <branch>` で予行ができる（publish ジョブは動かない）
 - **誤ったバージョンを publish した**: unpublish は原則不可。`npm deprecate <package>@<version> "<理由>"` で非推奨化し、修正版を新バージョンとして publish する。この判断は必ずユーザーに確認を取る

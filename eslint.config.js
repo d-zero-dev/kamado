@@ -6,6 +6,10 @@ import dz from '@d-zero/eslint-config';
 export default [
 	...dz.configs.node,
 	{
+		// The code that the rules of `@kamado-io/oxlint` are run on, and that breaks them on purpose.
+		ignores: ['packages/@kamado-io/*/fixtures/**'],
+	},
+	{
 		// The frozen copy of kamado v2 that the differential specs compare with (see its README.md).
 		ignores: ['packages/*/oracle/**'],
 	},
