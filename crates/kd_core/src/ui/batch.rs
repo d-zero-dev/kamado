@@ -143,9 +143,9 @@ impl PlanIndex {
 }
 
 /// An edit of a batch, with its place in the request.
-struct Item {
-	index: usize,
-	edit: Edit,
+pub(super) struct Item {
+	pub(super) index: usize,
+	pub(super) edit: Edit,
 }
 
 /// When an edit is made, in the order of the batch: first what frees places (a page that goes),
@@ -702,10 +702,14 @@ impl Ui {
 					let freed = |u: &str| {
 						items.iter().any(|i| {
 							i.edit.url == u
-								&& matches!(
-									i.edit.change,
-									Change::DeletePage | Change::MoveUrl(_) | Change::MovePath(_)
-								)
+								&& match i.edit.change {
+									Change::DeletePage | Change::MoveUrl(_) => true,
+									// A page whose URL a key decides keeps it when its file moves.
+									Change::MovePath(_) => self.by_url.get(u).is_some_and(|&p| {
+										!self.url_from_field(&self.plan.pages[p])
+									}),
+									_ => false,
+								}
 						})
 					};
 					if let Some(url) = url
@@ -903,6 +907,23 @@ impl Ui {
 		// The moves of URLs, then the moves of files, each in an order that finds the places free.
 		self.make_url_moves(items, &mut now)?;
 		self.make_path_moves(items, &mut now)?;
+		// The URLs of the pages the batch makes: what comes after a page is made at a URL names
+		// the page that is made, and not the page that was at that URL and has been moved off it
+		// (`now` maps the URL of that one to the place it went).
+		let made_urls: std::collections::HashSet<&str> = items
+			.iter()
+			.filter_map(|i| match &i.edit.change {
+				Change::Create { url: Some(url), .. } => Some(url.as_str()),
+				_ => None,
+			})
+			.collect();
+		let named = |now: &std::collections::HashMap<String, String>, url: &str| {
+			if made_urls.contains(url) {
+				url.to_string()
+			} else {
+				current(now, url)
+			}
+		};
 		// The pages that are made, then the pages that are given a file (one that is made can be
 		// given one, whatever the order of the request), then the keys.
 		for phase_now in [Phase::Creates, Phase::Materializes] {
@@ -910,7 +931,7 @@ impl Ui {
 				.iter()
 				.filter(|i| phase(&i.edit.change) == Some(phase_now))
 			{
-				let url = current(&now, &item.edit.url);
+				let url = named(&now, &item.edit.url);
 				self.make_one(&url, &item.edit.change, &item.edit.expect)
 					.map_err(|f| (item.index, f))?;
 			}
@@ -918,7 +939,7 @@ impl Ui {
 		let keys: Vec<(&Item, String)> = items
 			.iter()
 			.filter(|i| phase(&i.edit.change) == Some(Phase::Keys))
-			.map(|item| (item, current(&now, &item.edit.url)))
+			.map(|item| (item, named(&now, &item.edit.url)))
 			.collect();
 		self.make_keys(&keys, &no_file_at_start)
 	}
@@ -1327,7 +1348,7 @@ fn parse_batch(batch_json: &str) -> Result<Vec<Item>, String> {
 
 /// The edits that cannot be made together, whatever order: one page changed in ways that
 /// exclude each other, and two pages that take the same place. Every one is told.
-fn overlaps(items: &[Item], errors: &mut Errors) {
+pub(super) fn overlaps(items: &[Item], errors: &mut Errors) {
 	use std::collections::HashMap;
 	let mut told = |index: usize, code: &'static str, message: String| {
 		errors.push((index, Fail { code, message }));
@@ -1361,12 +1382,21 @@ fn overlaps(items: &[Item], errors: &mut Errors) {
 			_ => None,
 		})
 		.collect();
+	// The edits of each URL, found once: looking at every edit for each page that goes is the
+	// product of the two, which for a batch that deletes a tenth of a hundred thousand pages is
+	// ten thousand times a hundred thousand.
+	let mut at_url: HashMap<&str, Vec<&Item>> = HashMap::new();
+	for item in items {
+		at_url.entry(item.edit.url.as_str()).or_default().push(item);
+	}
 	for url in &gone {
-		let all: Vec<&Item> = items
-			.iter()
+		let all: Vec<&Item> = at_url
+			.get(url)
+			.into_iter()
+			.flatten()
+			.copied()
 			.filter(|i| {
-				i.edit.url == *url
-					&& !matches!(i.edit.change, Change::Create { .. })
+				!matches!(i.edit.change, Change::Create { .. })
 					// what comes after a page is made at the URL names the page that is made
 					&& !(created.contains(url)
 						&& matches!(i.edit.change, Change::Materialize(_) | Change::Key(_)))
