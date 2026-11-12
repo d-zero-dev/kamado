@@ -121,9 +121,25 @@ export interface Native {
 	 */
 	uiDiff(handle: string, queryJson: string): string;
 	/**
+	 * Every page, for a sync (RFC §14.2): the result is JSON, `{ version, overridesHash, inputDir,
+	 * overridesFile, outputPathField, warnings, pages }` (`overridesFile` is the absolute path of
+	 * `pages.overrides`, or `null`). Each page is the entry of `kamado pages` (RFC §14.1, with
+	 * absolute paths) plus `hashes` (`{ input, sidecar }`, the hashes of its files as `uiPages` gives
+	 * them). `outputPathField` is the key that decides the URL, or `null`.
+	 */
+	uiSyncPages(handle: string): string;
+	/**
+	 * The keys that cannot be edited, for some pages (`{ urls }`), for a sync: the result is JSON,
+	 * `{ version, locked: { <url>: { <key>: <why> } } }`, with an entry for each URL a page has. Apart
+	 * from `uiSyncPages` because telling it reads and parses the page file, which is most of the time
+	 * of listing 100,000 pages; a sync asks only for the pages whose keys it would change.
+	 */
+	uiSyncLocked(handle: string, queryJson: string): string;
+	/**
 	 * What the config says that the command serving the editor needs: the result is
-	 * `{ port, open, inputDir, outputDir, overrides }` (`devServer.port`, `devServer.open`, `dir.*`, and
-	 * the absolute path of `pages.overrides`, or `null`).
+	 * `{ port, open, inputDir, outputDir, overrides, syncFunctions }` (`devServer.port`,
+	 * `devServer.open`, `dir.*`, the absolute path of `pages.overrides` or `null`, and the operations of
+	 * `ui.syncFunctions`, each `{ name, label, script }` with the label as written and the script absolute).
 	 */
 	uiServer(handle: string): string;
 	/** Forgets an editor; the result is `{ warning }`. */

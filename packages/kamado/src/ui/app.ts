@@ -7,7 +7,10 @@
  * - the branch and commit of the site's repository (`GET /api/git`, see `git.ts`);
  * - the difference of pages from that commit and the edit that goes back to it (`POST /api/diff`
  *   and `POST /api/revert`, see `head-diff.ts`);
- * - the settings the screen keeps between runs (`GET` and `PUT /api/settings`, see `settings.ts`).
+ * - the settings the screen keeps between runs (`GET` and `PUT /api/settings`, see `settings.ts`);
+ * - the sync of the screen (`/api/sync...`, see `sync/controller.ts`): the screen names an
+ *   operation of the config and reads what happens, and applies what it was shown by the
+ *   id of it. No path and no edit comes from a request.
  *
  * Why a token for every call that is not a GET: the screen writes the source files of the
  * project, and a page of another site can make a browser send a request to `localhost`. The
@@ -22,6 +25,7 @@ import type { GitInfo } from './git.js';
 import type { HeadDiff } from './head-diff.js';
 import type { Roots } from './paths.js';
 import type { native } from '../native.js';
+import type { SyncController } from '../sync/controller.js';
 import type { Hono as HonoApp } from 'hono';
 
 import { createHash, timingSafeEqual } from 'node:crypto';
@@ -67,6 +71,13 @@ const MAX_BODY = 1024 * 1024;
  */
 const MAX_SETTINGS_BODY = 64 * 1024;
 
+/**
+ * The largest body of a request of the sync: a name of an operation, or an id. A name has no
+ * limit of characters in the config, so this is not small, but the body of a sync request is
+ * never more than that.
+ */
+const MAX_SYNC_BODY = 16 * 1024;
+
 /** Where the page of the screen has the token (replaced when the page is served). */
 export const TOKEN_PLACEHOLDER = '__KAMADO_TOKEN__';
 
@@ -100,6 +111,10 @@ export interface UiAppOptions {
 	 * file, with `/` (no absolute path goes to the screen). `null` or absent when the site has none.
 	 */
 	readonly overridesFile?: string | null;
+	/**
+	 * The sync the screen runs (`/api/sync...`). Without it the routes do not exist.
+	 */
+	readonly sync?: SyncController;
 }
 
 /** A row, as far as this module reads it. */
@@ -538,6 +553,117 @@ export function createUiApp(editor: Editor, options: UiAppOptions): HonoApp {
 			}
 		},
 	);
+
+	const { sync } = options;
+	if (sync !== undefined) {
+		const syncBody = bodyLimit({
+			maxSize: MAX_SYNC_BODY,
+			onError: (ctx) =>
+				ctx.json({ error: 'invalid', message: 'the body is too large' }, 413),
+		});
+		/**
+		 * Reads a field of a body that is an object with a string in it.
+		 * @param ctx - The context
+		 * @param ctx.req - The request
+		 * @param ctx.req.json - Reads the body
+		 * @param field - The field
+		 */
+		const textField = async (
+			ctx: { req: { json: () => Promise<unknown> } },
+			field: string,
+		): Promise<string | null> => {
+			try {
+				const body = (await ctx.req.json()) as Record<string, unknown> | null;
+				const value = typeof body === 'object' && body !== null ? body[field] : undefined;
+				return typeof value === 'string' ? value : null;
+			} catch {
+				return null;
+			}
+		};
+
+		app.get('/api/sync', (ctx) => ctx.json({ functions: sync.functions() }));
+
+		app.post('/api/sync/run', syncBody, async (ctx) => {
+			const name = await textField(ctx, 'name');
+			if (name === null) {
+				return ctx.json({ error: 'invalid', message: 'the body is not { name }' }, 400);
+			}
+			const started = sync.run(name);
+			if (started.ok) {
+				return ctx.json({ id: started.id }, 202);
+			}
+			return started.error === 'busy'
+				? ctx.json({ error: 'busy', message: 'a sync is already running' }, 409)
+				: ctx.json({ error: 'unknown', message: 'there is no such operation' }, 404);
+		});
+
+		app.get('/api/sync/state', (ctx) => {
+			const id = ctx.req.query('id');
+			const after = integerOf(ctx.req.query('after'), 0);
+			if (id === undefined || id.length > 64 || after === null) {
+				return ctx.json(
+					{ error: 'invalid', message: 'id is the id of a sync, and after is a number' },
+					400,
+				);
+			}
+			const state = sync.state(id, after);
+			return state === null
+				? ctx.json({ error: 'unknown', message: 'there is no such sync' }, 404)
+				: ctx.json(state);
+		});
+
+		app.get('/api/sync/changes', (ctx) => {
+			const id = ctx.req.query('id');
+			const kind = ctx.req.query('kind');
+			const offset = integerOf(ctx.req.query('offset'), 0);
+			const limit = integerOf(ctx.req.query('limit'), 100);
+			if (
+				id === undefined ||
+				id.length > 64 ||
+				kind === undefined ||
+				offset === null ||
+				limit === null
+			) {
+				return ctx.json(
+					{
+						error: 'invalid',
+						message:
+							'id, kind, offset and limit are needed, and offset and limit are numbers',
+					},
+					400,
+				);
+			}
+			const changes = sync.changes(id, kind, offset, limit);
+			return changes === null
+				? ctx.json({ error: 'unknown', message: 'there are no such changes' }, 404)
+				: ctx.json(changes);
+		});
+
+		app.post('/api/sync/apply', syncBody, async (ctx) => {
+			const id = await textField(ctx, 'id');
+			if (id === null || id.length > 64) {
+				return ctx.json({ error: 'invalid', message: 'the body is not { id }' }, 400);
+			}
+			const applied = sync.apply(id);
+			if (!applied.ok) {
+				return applied.error === 'unknown'
+					? ctx.json({ error: 'unknown', message: 'there is no such sync' }, 404)
+					: ctx.json(
+							{ error: 'notReady', message: 'that sync is not waiting to be applied' },
+							409,
+						);
+			}
+			return ctx.json(sync.state(id, Number.MAX_SAFE_INTEGER));
+		});
+
+		app.post('/api/sync/cancel', syncBody, async (ctx) => {
+			const id = await textField(ctx, 'id');
+			if (id === null || id.length > 64) {
+				return ctx.json({ error: 'invalid', message: 'the body is not { id }' }, 400);
+			}
+			return ctx.json({ cancelled: sync.cancel(id) });
+		});
+	}
 
 	const { settings } = options;
 	if (settings !== undefined) {

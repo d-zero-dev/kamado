@@ -17,7 +17,8 @@ export type CliFlag =
 	| 'port'
 	| 'open'
 	| 'no-open'
-	| 'all';
+	| 'all'
+	| 'yes';
 
 /** The flags as `parseArgs` gives them. */
 export type CliFlags = {
@@ -69,6 +70,11 @@ export const COMMAND_ALLOWLIST: Readonly<Record<string, CommandAllowlist>> = {
 		allowed: [...COMMON, 'port', 'open', 'no-open'],
 		takes: '--port, --open, --no-open, --cache-dir and --config',
 	},
+	sync: {
+		positionals: true,
+		allowed: [...COMMON, 'yes'],
+		takes: '--yes, --cache-dir and --config',
+	},
 };
 
 /** How a flag is written on the command line. */
@@ -85,6 +91,7 @@ const FLAG_CLI: Record<CliFlag, string> = {
 	open: '--open',
 	'no-open': '--no-open',
 	all: '--all',
+	yes: '--yes',
 };
 
 /**
@@ -98,6 +105,7 @@ const ONLY: Partial<Record<CliFlag, string>> = {
 	open: 'only ui does',
 	'no-open': 'only ui does',
 	all: 'only ui-settings delete does',
+	yes: 'only sync does',
 };
 
 /** Every flag `parseArgs` may set, in a stable order for refusals. */
@@ -114,6 +122,7 @@ const ALL_FLAGS: readonly CliFlag[] = [
 	'port',
 	'skip-unchanged',
 	'verbose',
+	'yes',
 ];
 
 /**
@@ -132,7 +141,7 @@ function wasGiven(name: CliFlag, flags: CliFlags): boolean {
 
 /**
  * Refuses positionals and flags the command does not take.
- * @param command - The command name (`build`, `server`, `pages`, `ui`)
+ * @param command - The command name (`build`, `server`, `pages`, `ui`, `sync`)
  * @param positionals - Arguments after the command
  * @param flags - What `parseArgs` returned
  * @throws {Error} naming what is not taken

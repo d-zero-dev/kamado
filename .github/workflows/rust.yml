@@ -112,6 +112,12 @@ jobs:
       - name: Edit the pages through the addon
         run: node --test crates/kd_napi/check/ui.check.mjs
 
+      # A sync (RFC §14.2): what is applied makes the pages what the script returned, what is
+      # returned again changes nothing, and a sync that fails or finds a file changed leaves every
+      # byte as it was. The cases are made from fixed seeds.
+      - name: Sync the pages with a script through the addon
+        run: node --test crates/kd_napi/check/sync.check.mjs
+
       # A relative cache directory is relative to the config file for the API and to the
       # directory the command was typed in for --cache-dir (RFC §13).
       - name: Resolve a relative cache directory
