@@ -67,7 +67,7 @@ export interface Native {
 	uiOpen(configPath: string, optionsJson: string): string;
 	/**
 	 * A page of rows: `queryJson` is `{ offset, limit, q?, sort? }`; the result is JSON
-	 * (`version`, `total`, `columns`, `layouts`, `overridesHash`, `pages`, `warnings`).
+	 * (`version`, `total`, `columns`, `layouts`, `keys`, `overridesHash`, `pages`, `warnings`).
 	 * `layouts` is the names of the files in `pages.layouts.dir` (`null` when that is not set,
 	 * `[]` when the directory is not there), as read when the handle was opened or refreshed.
 	 */
