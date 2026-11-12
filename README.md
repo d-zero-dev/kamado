@@ -22,15 +22,16 @@ This is **v3**: the core is written in Rust (standard library only), with a thin
 
 ## Repository Structure
 
-| Path              | Description                                                                             |
-| ----------------- | --------------------------------------------------------------------------------------- |
-| `crates/`         | Rust workspace (`kd_*`). No external crates                                             |
-| `packages/kamado` | The Node layer: the `kamado` package (CLI, `build()`/`start()`/`pages()`, `kamado/jsx`) |
-| `docs/v3`         | RFC, migration guide, development guide                                                 |
-| `benchmarks/`     | Output comparison harness and fixture generator (`v3`), the v2 baseline (`v2-baseline`) |
-| `scripts/`        | Generators for tables and golden files, differential tests                              |
+| Path                         | Description                                                                             |
+| ---------------------------- | --------------------------------------------------------------------------------------- |
+| `crates/`                    | Rust workspace (`kd_*`). No external crates                                             |
+| `packages/kamado`            | The Node layer: the `kamado` package (CLI, `build()`/`start()`/`pages()`, `kamado/jsx`) |
+| `packages/@kamado-io/oxlint` | The `@kamado-io/oxlint` package: oxlint rules for the JSX of kamado                     |
+| `docs/v3`                    | RFC, migration guide, development guide                                                 |
+| `benchmarks/`                | Output comparison harness and fixture generator (`v3`), the v2 baseline (`v2-baseline`) |
+| `scripts/`                   | Generators for tables and golden files, differential tests                              |
 
-Lerna is kept for versioning and publishing the single workspace package.
+Lerna is kept for versioning and publishing the two workspace packages (`kamado` and `@kamado-io/oxlint`, always at the same version).
 
 ## Development
 
