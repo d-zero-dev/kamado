@@ -29,6 +29,8 @@
 		//
 		// Deliberate typo of `incremental` in unknown-option tests and JSDoc examples.
 		"incrementl",
+		// The status of a sync that found nothing to change (`SyncStatus`, RFC section 14.2).
+		"nochange",
 		"amet",
 		"ampb",
 		"envx",
