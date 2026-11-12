@@ -4,17 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 概要
 
-kamado — オンデマンド静的サイトジェネレータ（v3）。コアは Rust（標準ライブラリのみ）で書き、Node 側は薄い層（CLI、`build()`/`start()`/`pages()`、JSX の描画ワーカー、開発サーバー、esbuild の呼び出し、ネイティブアドオンの読み込み）だけを持つ。npm パッケージは`kamado`の 1 つ（Lerna は版の管理と publish のために残している）。v2（`@kamado-io/*-compiler`を含む）は`v2`ブランチで保守していて、このブランチには無い。
+kamado — オンデマンド静的サイトジェネレータ（v3）。コアは Rust（標準ライブラリのみ）で書き、Node 側は薄い層（CLI、`build()`/`start()`/`pages()`、JSX の描画ワーカー、開発サーバー、esbuild の呼び出し、ネイティブアドオンの読み込み）だけを持つ。npm パッケージは`kamado`と、`kamado/jsx`向けの oxlint の規則`@kamado-io/oxlint`の 2 つ（Lerna は版の管理と publish のために残している）。v2（`@kamado-io/*-compiler`を含む）は`v2`ブランチで保守していて、このブランチには無い。
 
 ## プロジェクト構成
 
 作業前に以下のファイルを確認し、プロジェクトの状態を把握すること:
 
-- `package.json` — scripts、devDependencies、Volta（Node 26/Yarn 4）。ワークスペースは`packages/*`
-- `lerna.json` — 版（正本。リリースのたびに変わるのでここには書かない）と publish の設定。`packages/*`
+- `package.json` — scripts、devDependencies、Volta（Node 26/Yarn 4）。ワークスペースは`packages/*`と`packages/@kamado-io/*`
+- `lerna.json` — 版（正本。リリースのたびに変わるのでここには書かない）と publish の設定。`packages/*`と`packages/@kamado-io/*`
 - `Cargo.toml` — Rust のワークスペース（`crates/*`）。外部クレートなし
 - `crates/` — Rust のコア（`kd_*`）。各クレートの担当は`docs/v3/development.md`
 - `packages/kamado/` — Node 側のパッケージ（npm 名`kamado`、bin `kamado`、`kamado/jsx`）。公開のパイプラインは`.github/workflows/publish.yml`（`docs/v3/RFC.md` §18）
+- `packages/@kamado-io/oxlint/` — `kamado/jsx`の TSX 向けの oxlint の規則（npm 名`@kamado-io/oxlint`）。`kamado`と同じ版・同じ`publish.yml`で公開する。テストと最初の公開の手順は`docs/v3/development.md`
 - `docs/v3/` — 仕様`RFC.md`、v2 からの移行手順`MIGRATION.md`、開発手順`development.md`、設計判断の根拠`spike-results.md`
 - `benchmarks/v3/` — 比較ハーネスと fixture 生成器。`benchmarks/v2-baseline/` — v2 の基準出力を作る単独のプロジェクト（自前の`yarn.lock`）
 - `scripts/` — テーブルと golden ファイルの生成、差分テスト、`check-rust-no-external-crates.mjs`

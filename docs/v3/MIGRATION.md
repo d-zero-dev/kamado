@@ -2,7 +2,7 @@
 
 この文書は **AI が上から順に実行できる手順書**です。各ステップに「やること」「確認すること」を書いてあります。仕様の根拠は`docs/v3/RFC.md`（破壊的変更の一覧は §2）。
 
-v3 はこのリポジトリの`packages/kamado`（npm 名`kamado`、bin は`kamado`、JSX のランタイムは`kamado/jsx`）です。alpha の開発中で、dist-tag `alpha`で公開します（`docs/v3/RFC.md` §18）。v2 は`v2`ブランチで保守しています。公開済みの v2（`kamado@2.0.0-alpha.17`など）は npm に残っています。`@kamado-io/*`の 5 つのパッケージ（page/script/style/pug/jsx のコンパイラ）は v3 にはなく、機能は`kamado`に組み込まれています（RFC §2 の #3、#22）。
+v3 はこのリポジトリの`packages/kamado`（npm 名`kamado`、bin は`kamado`、JSX のランタイムは`kamado/jsx`）です。alpha の開発中で、dist-tag `alpha`で公開します（`docs/v3/RFC.md` §18）。v2 は`v2`ブランチで保守しています。公開済みの v2（`kamado@2.0.0-alpha.17`など）は npm に残っています。`@kamado-io/*`の 5 つのパッケージ（page/script/style/pug/jsx のコンパイラ）は v3 にはなく、機能は`kamado`に組み込まれています（RFC §2 の #3、#22）。同じ名前の空間に、`kamado/jsx`向けの oxlint の規則`@kamado-io/oxlint`が別に増えました（`packages/@kamado-io/oxlint`）。
 
 v3 は v2 と**出力（HTML）がバイト一致**することを目標にしています。移行の合格条件は「同じ入力から、v2 と v3 の出力ディレクトリを比べて差がない（差があるなら §11 の意図した差だけ）」ことです。
 
@@ -209,7 +209,7 @@ export default ({ meta }: { meta: { title: string } }) => (
 
 - JSX の空白は React と同じ規則（行頭行末の空白と改行は消える。意図した空白は`{' '}`）。Pug の空白との差は、出力の比較で見つかります。
 - `<br>`などの空要素は`<br />`と書く。
-- 関数の props（`onClick`など）は無視されます（警告）。
+- HTML の要素に渡した関数の props（`onClick`など）は無視されます。警告は出ないので、`@kamado-io/oxlint`で見つけます（下の「型検査と lint に通す」）。
 - hooks（`useState`など）と Context は使えません。コンポーネントは**純粋関数**（同じ props から同じ出力。モジュールの変数を書き換えない）。ワーカーが並列に描画するので、破ると結果が不定になります。
 - `import`できるもの: 相対パスと`pages.alias`の別名の TS/TSX/JSON、npm パッケージ（ESM）。CSS の import はできません。
 - TS は **erasable な構文だけ**（`enum`/`namespace`/パラメータプロパティは不可。`const`オブジェクトで置き換える）。
@@ -256,6 +256,7 @@ yarn build
   - `style`の CSS の文字列と、`hidden="until-found"`（`@types/react`の型に無い値）は`as any`を付けて出す。条件式の枝の`false`と`null`（`cond ? "_blank" : false`、`cond ? "noopener" : null`）は`undefined`にする。Pug は、`false`や`null`の属性を出さず、`undefined`と同じに扱う。`disabled`のような真偽値の prop は、`false`に意味があるので残し、`null`だけを`undefined`にする。
   - 型を通すために`any`が入る。出力は必ず読み、必要なら型を付け直す。
   - import は`@d-zero/eslint-config`の`import-x/order`の並び（組み込み、パッケージ、`../`、`./`、index の順で、グループの間は空行、中はパスの昇順。index は`.`/`./`/`./index`/`./index.js`だけで、`./index.tsx`は`./`に入る）で出し、`import type { PageProps } from 'kamado/jsx'`を同じ規則で混ぜる。分割代入は、再代入される名前だけを`let`にして`const`と分ける（オブジェクトパターンの引数も同じ。プロパティごとに分け、`...rest`を含む階層や、分けられない塊は、`let`にする名前を別名で受けて後から`let a = _a;`と宣言する）。
+  - oxlint を使うなら、`@kamado-io/oxlint`を devDependency に足して、規則を有効にする。hooks・`async`のコンポーネント・HTML の要素の関数の`on*`・モジュールの変数の書き換え・コンポーネントの中のファイルの読み込みと`fetch`を、エラーにする。設定の例は`packages/@kamado-io/oxlint/README.md`。
   - eslint には、変換結果の TSX にだけ当てる設定を足す（flat config）。次の規則は、変換結果と合わない。
     - `@typescript-eslint/no-explicit-any`: 外す。`--fix`（lint-staged の pre-commit も）が`any`を`unknown`に書き換えて、型が通らなくなる。
     - `@typescript-eslint/no-unused-vars`: `argsIgnorePattern: '^_'`にする。使わない`props`の引数は`_props`で出る。あとから`props`を使わなくなった部品も、`_props`に直す。

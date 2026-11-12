@@ -1,8 +1,8 @@
 # v3 の開発手順
 
-Rust のワークスペース（`crates/`）、Node 側のパッケージ（`packages/kamado`）、ベンチマーク・比較ツール（`benchmarks/`）の使い方。仕様は`RFC.md`、設計判断の根拠は`spike-results.md`を参照。
+Rust のワークスペース（`crates/`）、Node 側のパッケージ（`packages/kamado`と`packages/@kamado-io/oxlint`）、ベンチマーク・比較ツール（`benchmarks/`）の使い方。仕様は`RFC.md`、設計判断の根拠は`spike-results.md`を参照。
 
-このリポジトリの`kamado`は v3 で、npm のワークスペースは`packages/kamado`の 1 つだけ（Lerna は版の管理と公開のために残している）。v2 は`v2`ブランチで保守していて、このブランチには無い。v2 の出力を比べる必要があるもの（oracle）は、公開済みの v2 を npm から取って使う（「v2 の oracle」）。
+このリポジトリの`kamado`は v3 で、npm のワークスペースは`packages/kamado`と`packages/@kamado-io/oxlint`の 2 つ（Lerna は版の管理と公開のために残している。`forcePublish`で、2 つは常に同じ版になる）。v2 は`v2`ブランチで保守していて、このブランチには無い。v2 の出力を比べる必要があるもの（oracle）は、公開済みの v2 を npm から取って使う（「v2 の oracle」）。
 
 ## Rust
 
@@ -87,6 +87,33 @@ node packages/kamado/dist/cli.js build --config path/to/kamado.config.jsonc --ve
 ```
 
 アドオンは`KAMADO_NATIVE_ADDON`で指定したファイル、なければ`target/release`、`target/debug`の順に探す。
+
+## Node 側のパッケージ（`packages/@kamado-io/oxlint`）
+
+`kamado/jsx`の TSX に向けた oxlint の規則（npm 名`@kamado-io/oxlint`。`kamado`と同じ版で公開する）。kamado は 1 回だけ HTML に描画して JavaScript を送らないので、意味を持たない書き方をエラーにする。対象は、`react`の値、関数の`onClick`、`'use client'`、`async`のコンポーネント、モジュールの変数の書き換え、コンポーネントの中の`fs`と`fetch`である。規則の一覧と使い方は`packages/@kamado-io/oxlint/README.md`。
+
+```sh
+yarn build                                    # tsc で dist/ を作る
+yarn vitest run packages/@kamado-io/oxlint    # 規則の spec と、実物の oxlint を通す spec
+```
+
+テストは 2 層ある。規則ごとの spec（`src/rules/*.spec.ts`）は ESLint の`Linter`で JS と JSX の範囲を確かめる（oxlint と ESLint が共有する API で書いてあるため）。`src/oxlint.spec.ts`は実物の oxlint を子プロセスで動かして、TypeScript の構文（`import type`など）、パッケージ名でのプラグインの解決（`exports`と`dist/`）、`overrides`、設定ファイルの 2 つの形式（`.oxlintrc.json`と`oxlint.config.mts`）を確かめる。
+
+期待は`fixtures/app/`のファイルの`// ✗ 規則名`の注釈が持つ（行末のコメントはその行を、単独のコメントは次の行を指す）。規則を足すときは、規則の spec と、`invalid.tsx`への注釈つきの例を足す（`oxlint.spec.ts`が、全部の規則が`invalid.tsx`に出ることを確かめる）。oxlint は`dist/`を読むので、`yarn build`のあとでないと spec は動かない。
+
+規則の名前は`@kamado-io/<規則>`で、`meta.name`が接頭辞になる（`@d-zero/oxlint-plugin`の`@d-zero/no-click-event`と同じ形）。
+
+**版の上げ方**（安定版から）。規則の追加と、既存の規則が見つけるものの拡大は、マイナーとして扱う。規則の削除、名前や`messageId`の変更、報告の縮小（見つけていたものを見つけなくなること）は、メジャーとして扱う。このパッケージは`recommended`を持たず、利用者が規則を自分で挙げるので、新しい規則は自動では有効にならない。既存の規則の拡大は、同じ名前のまま新しい報告を出すので、利用者の lint が赤くなることがある。そのため、変更の説明（コミットの本文）に、新しく報告されるものを書く。`kamado`と同じ版で公開するので、このパッケージだけの変更でも、版は`kamado`と一緒に上がる。
+
+`oxlint`と`eslint`（このパッケージの devDependencies）は、`.github/renovate.json`のグループに入れていない。片方だけ版が上がっても、ビルドと型検査は通るため（`eslint`は型と規則の spec に、`oxlint`は`oxlint.spec.ts`にだけ使う）。`oxlint`が上がると、`oxlint.spec.ts`の期待（行と規則）が変わることがあり、そのときは Renovate の PR の中で直す。
+
+**最初の公開は手で行う（1 回だけ）。** npm の Trusted Publishing は、まだ npm にないパッケージには設定できない。そのため`@kamado-io/oxlint`の最初の版だけは、次の手順で公開する。**次のタグを push する前に**済ませる（`publish.yml`の`check`ジョブが、npm にこのパッケージがあることを公開の前に確かめる）。
+
+1. 古い成果物が tarball に入らないように、`packages/@kamado-io/oxlint/dist`を消してから`yarn build`し、`yarn workspace @kamado-io/oxlint pack --out "$PWD/kamado-io-oxlint.tgz"`で tarball を作る。版は`package.json`の今の版で、`lerna.json`と同じ。
+2. `@kamado-io`に権限のあるアカウントで`npm login`し、`npm publish ./kamado-io-oxlint.tgz --access public --tag <dist-tag>`を実行する。dist-tag は、`publish.yml`が版から決めるものと同じにする（`-alpha`は`alpha`、`-beta`は`beta`、`-rc`は`rc`、それ以外の prerelease は`next`、安定版は`latest`）。tarball は、自分のディレクトリに置いたものだけを使い、公開したら消す。
+3. npmjs.com のパッケージの設定（Settings の Trusted Publisher）で、GitHub Actions、リポジトリ`d-zero-dev/kamado`、ワークフロー`publish.yml`を登録する。
+
+手で公開した版には provenance が付かない（npm が付けるのは、CI の OIDC で公開したときだけ）。次の版からは、`kamado`と同じタグの push で、同じワークフローが provenance 付きで公開する。
 
 ## 何を更新したら、何を作り直すか
 

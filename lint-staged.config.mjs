@@ -10,5 +10,9 @@ export default lintStagedConfigGenerator({
 			stylelint: 'packages/*/client/**',
 			markuplint: 'packages/*/client/**',
 		},
+		{
+			// The TSX of the fixtures breaks the rules of @kamado-io/oxlint on purpose.
+			markuplint: 'packages/@kamado-io/*/fixtures/**',
+		},
 	],
 });
