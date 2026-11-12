@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { recordDataReads, tracedData } from './data-trace.js';
+import { recordDataReads, tracedData, withFailures } from './data-trace.js';
 
 const data = { posts: [1, 2], site: { name: 'S' }, news: [] };
 
@@ -121,5 +121,41 @@ describe('recordDataReads', () => {
 		expect(trace.keys()).toBeNull();
 		expect(tracedData({})).toBeUndefined();
 		expect(tracedData(null)).toBeUndefined();
+	});
+});
+
+describe('withFailures', () => {
+	test('gives the data back as it is when nothing failed', () => {
+		expect(withFailures(data)).toBe(data);
+		expect(withFailures(data, {})).toBe(data);
+	});
+
+	test('a page that reads a failed key fails with the reason, and the others read on', () => {
+		const view = withFailures({ posts: [1] }, { news: 'timed out' }) as Record<
+			string,
+			unknown
+		>;
+
+		expect(view['posts']).toEqual([1]);
+		expect(() => view['news']).toThrow(
+			'data.news is not available, its data file failed: timed out',
+		);
+	});
+
+	test('the spread and JSON.stringify fail too, instead of leaving the key out', () => {
+		const view = withFailures({ posts: [1] }, { news: 'refused' });
+
+		expect(() => ({ ...view })).toThrow('refused');
+		expect(() => JSON.stringify(view)).toThrow('refused');
+		expect(Object.keys(view)).toEqual(['posts', 'news']);
+	});
+
+	test('the recording view still records the key a page tried to read', () => {
+		const trace = recordDataReads(withFailures({}, { news: 'x' }));
+
+		expect(() => (trace.data as Record<string, unknown>)['news']).toThrow();
+		trace.fail();
+
+		expect(trace.keys()).toBeNull();
 	});
 });

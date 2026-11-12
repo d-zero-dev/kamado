@@ -9,6 +9,7 @@ import type { RenderJob } from '../render.js';
 import type { ScriptRequest } from '../scripts.js';
 import type { ContextUpdate } from './context-update.js';
 import type { ProxyRule } from './proxy.js';
+import type { ExecutedData } from '../data-files.js';
 
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
@@ -88,7 +89,18 @@ export interface AppOptions {
 	 * a panic in the native core left the server unusable; without it, that
 	 * request and every later one are a 500.
 	 */
-	readonly reopen?: () => string;
+	readonly reopen?: () => string | Promise<string>;
+	/**
+	 * The data files that are scripts (RFC section 3.2). Asked before each request: when one
+	 * ran again and made something different, the core is given the values of all of them
+	 * before it answers.
+	 */
+	readonly data?: {
+		/** Runs what is out of date; `true` when the core has to be told. */
+		readonly refresh: () => Promise<boolean>;
+		/** What the core takes for each key. */
+		readonly executed: () => ExecutedData;
+	};
 }
 
 /**
@@ -111,6 +123,10 @@ function leftServerUnusable(error: unknown): boolean {
 function messageOf(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
+
+/** The paths of files that no page produces, which are served without the data files. */
+const ASSET_EXTENSION =
+	/\.(?:css|m?js|map|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp[34]|webm|pdf|zip)$/i;
 
 /** How long a failure to open the server again stands before the next try. */
 const REOPEN_RETRY_MS = 1000;
@@ -161,7 +177,7 @@ export function createApp(
 	 * @throws {Error} when the server cannot be opened (the project's config no
 	 *   longer loads, say); the same failure stands for {@link REOPEN_RETRY_MS}
 	 */
-	const reopen = async (used: string): Promise<void> => {
+	const reopenOnce = async (used: string): Promise<void> => {
 		if (!options.reopen || server !== used) {
 			return;
 		}
@@ -172,7 +188,7 @@ export function createApp(
 			throw new Error(reopenFailure.reason);
 		}
 		try {
-			server = options.reopen();
+			server = await options.reopen();
 		} catch (error) {
 			reopenFailure = { used, at: performance.now(), reason: messageOf(error) };
 			throw error;
@@ -181,10 +197,28 @@ export function createApp(
 		await renderer.close();
 	};
 
+	// The opening that is going on, for the requests that fail while it does: opening takes
+	// time (the data files are planned again), and they must not each open the server.
+	let reopening: { readonly used: string; readonly promise: Promise<void> } | undefined;
+	const reopen = (used: string): Promise<void> => {
+		if (reopening?.used === used) {
+			return reopening.promise;
+		}
+		const promise = reopenOnce(used).finally(() => {
+			if (reopening?.promise === promise) {
+				reopening = undefined;
+			}
+		});
+		reopening = { used, promise };
+		return promise;
+	};
+
 	// The handles the core gave up while telling it to forget an answer: the
 	// request reports its own error, and is still the one to open the server
 	// again.
 	const goneWhileCancelling = new Set<string>();
+	// The data files made something new that the core was not given yet.
+	let dataToGive = false;
 
 	/**
 	 * Tells the core that the JavaScript behind an answer failed. A failure to
@@ -213,6 +247,17 @@ export function createApp(
 		pathname: string,
 		handle: string,
 	): Promise<{ answer: Answer; kind: string }> => {
+		// A page may read the data, whatever its extension is; a stylesheet, a script or an image
+		// does not, and must not wait for a data file that is running.
+		if (options.data && !ASSET_EXTENSION.test(pathname)) {
+			// Until the core has taken the values: a failure to give them (it refused them) is
+			// tried again by the next request, and not forgotten.
+			dataToGive = (await options.data.refresh()) || dataToGive;
+			if (dataToGive) {
+				core.serveSetData(handle, JSON.stringify(options.data.executed()));
+				dataToGive = false;
+			}
+		}
 		let current = JSON.parse(
 			core.serveRequest(handle, pathname, renderer.started ? '1' : '0'),
 		) as Answer;

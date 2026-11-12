@@ -9,8 +9,10 @@ import type { RenderContext } from './props.js';
 import type { DataReads, Rendered, RenderJob } from './render.js';
 
 import { createHash } from 'node:crypto';
+import path from 'node:path';
 
 import { BUILD_OPTION_KEYS } from './build.js';
+import { DataFiles, readDataPlan } from './data-files.js';
 import { assertKnownOptions } from './known-options.js';
 import { native } from './native.js';
 import { renderJobs } from './render.js';
@@ -140,11 +142,22 @@ export async function buildFrom(
 		options.targets === undefined
 			? undefined
 			: resolveTargets(options.targets, targetBase);
+	// The data files that are scripts run before the core plans the build: it hashes what
+	// they made, and a page is built again only when a key it read changed.
+	const dataLog: string[] = [];
+	const dataFiles = new DataFiles(readDataPlan(configPath, options.cacheDir), {
+		root: path.dirname(configPath),
+		verbose: (line) => dataLog.push(line),
+	});
+	await dataFiles.runAll();
+	const executedData = dataFiles.executed();
+	lap('data files');
 	const prepared = JSON.parse(
 		core.prepare(
 			configPath,
 			JSON.stringify({
 				...coreOptions,
+				...(Object.keys(executedData).length === 0 ? {} : { executedData }),
 				...(targets === undefined ? {} : { targets }),
 				// The banner's dates are local time, which the core cannot tell.
 				tzOffsetMinutes: 0 - new Date().getTimezoneOffset(),
@@ -190,7 +203,11 @@ export async function buildFrom(
 			await verifyRendering(prepared.jobs, prepared.context, digests, options.jobs);
 			lap('verified');
 		}
-		const results = JSON.stringify(reads.length > 0 ? { scripts, reads } : { scripts });
+		const results = JSON.stringify({
+			scripts,
+			...(reads.length > 0 ? { reads } : {}),
+			...(dataLog.length > 0 ? { data: dataLog } : {}),
+		});
 		lap('serialized');
 		const report = JSON.parse(core.finish(prepared.handle, results)) as BuildReport;
 		lap('finished');

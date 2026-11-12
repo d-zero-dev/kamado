@@ -20,7 +20,14 @@ const renderJobs =
 const buildScripts = vi.fn<(request: unknown) => Promise<unknown[]>>();
 
 vi.mock('./native.js', () => ({
-	native: () => ({ prepare, finish, abort, feed }),
+	native: () => ({
+		prepare,
+		finish,
+		abort,
+		feed,
+		// A site with no data file that is a script.
+		dataPlan: () => '{"cacheDir":"","dataDir":null,"modules":[]}',
+	}),
 }));
 vi.mock('./render.js', () => ({
 	renderJobs: (

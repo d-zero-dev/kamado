@@ -31,6 +31,13 @@ export interface Native {
 	 */
 	prepare(configPath: string, optionsJson: string, runtimeUrl: string): string;
 	/**
+	 * Compiles the data files that are scripts (`.ts`, `.mts`, `.js`, `.mjs` in `data.dir`)
+	 * for Node to run before `prepare`. The result is JSON: `{ cacheDir, dataDir, modules:
+	 * [{ key, source, module, sources }] }` (see `DataPlan` in `data-files.ts`). `optionsJson`
+	 * takes `cacheDir`.
+	 */
+	dataPlan(configPath: string, optionsJson: string, runtimeUrl: string): string;
+	/**
 	 * Finishes a prepared build with `{ pages: [[page, html], ...], scripts:
 	 * [{ id, code, inputs }, ...] }`; the result is a report.
 	 */
@@ -62,6 +69,11 @@ export interface Native {
 		html: string,
 		readsJson: string,
 	): string;
+	/**
+	 * Gives the dev server what the data files that are scripts made of themselves, for all
+	 * of them: `{ <key>: { value } | { error } }`.
+	 */
+	serveSetData(handle: string, executedJson: string): string;
 	/** Takes what esbuild built for a `script` answer; the result is JSON. */
 	serveFinishScript(handle: string, token: string, outputJson: string): string;
 	serveCancel(handle: string, token: string): string;

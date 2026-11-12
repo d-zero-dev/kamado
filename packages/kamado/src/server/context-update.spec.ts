@@ -60,4 +60,20 @@ describe('applyUpdate', () => {
 		expect(next.pages).not.toBe(context.pages);
 		expect(context.pages[0]!.meta['title']).toBe('Home');
 	});
+
+	test('new data replaces the failures of data files, and no new data keeps them', () => {
+		const failed: RenderContext = { ...context, dataErrors: { news: 'timed out' } };
+
+		const kept = applyUpdate(failed, { pages: [], data: null });
+		const fixed = applyUpdate(failed, { pages: [], data: { n: 2 }, dataErrors: {} });
+		const other = applyUpdate(failed, {
+			pages: [],
+			data: { n: 2 },
+			dataErrors: { rates: 'refused' },
+		});
+
+		expect(kept.dataErrors).toEqual({ news: 'timed out' });
+		expect(fixed.dataErrors).toBeUndefined();
+		expect(other.dataErrors).toEqual({ rates: 'refused' });
+	});
 });
