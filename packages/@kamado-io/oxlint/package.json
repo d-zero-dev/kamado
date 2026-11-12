@@ -39,7 +39,7 @@
 		}
 	},
 	"devDependencies": {
-		"eslint": "9.39.5",
+		"eslint": "10.14.0",
 		"oxlint": "1.91.0",
 		"typescript": "6.0.3"
 	},
