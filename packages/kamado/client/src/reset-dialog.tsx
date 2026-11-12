@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import { useI18n } from './i18n/context.js';
+import { useCommands } from './use-commands.js';
 
 interface ResetDialogProps {
 	/** Whether the question is asked. */
@@ -42,9 +43,21 @@ export function ResetDialog({ open, onConfirm, onCancel }: ResetDialogProps) {
 		}
 	}, [open]);
 
+	const commands = useCommands(
+		{
+			confirm: () => {
+				chosen.current = true;
+				dialog.current?.close();
+				onConfirm();
+			},
+		},
+		dialog,
+	);
+
 	return (
 		<dialog
-			ref={dialog}
+			ref={commands.ref}
+			id={commands.id}
 			aria-labelledby="reset-title"
 			className="dialog"
 			onClose={() => {
@@ -69,21 +82,10 @@ export function ResetDialog({ open, onConfirm, onCancel }: ResetDialogProps) {
 					<p>{t('reset.note')}</p>
 					<div className="actions">
 						{/* The focus starts here: what is reset is not got back. */}
-						<button
-							type="button"
-							autoFocus
-							onClick={() => {
-								dialog.current?.close();
-							}}>
+						<button type="button" autoFocus {...commands.builtin('close')}>
 							{t('dialog.cancel')}
 						</button>
-						<button
-							type="button"
-							onClick={() => {
-								chosen.current = true;
-								dialog.current?.close();
-								onConfirm();
-							}}>
+						<button type="button" {...commands.run('confirm')}>
 							{t('reset.confirm')}
 						</button>
 					</div>

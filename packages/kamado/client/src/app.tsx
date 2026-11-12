@@ -1790,6 +1790,8 @@ function Screen({
 		previous: () => go(page - 1),
 		next: () => go(page + 1),
 		readAgain: reloadWhenIdle,
+		// The button of the footer asks whether to put the settings back to the defaults.
+		reset: () => setResetting(true),
 		syncMenu: (button) => {
 			if (syncMenu !== null) {
 				setSyncMenu(null);
@@ -2102,10 +2104,7 @@ function Screen({
 						compared={diffs !== null}
 					/>
 				</section>
-				<button
-					type="button"
-					className="reset-settings"
-					onClick={() => setResetting(true)}>
+				<button type="button" className="reset-settings" {...commands.run('reset')}>
 					{t('reset.button')}
 				</button>
 			</footer>
