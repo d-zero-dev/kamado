@@ -54,7 +54,9 @@ describe('the cells of the columns every row has', () => {
 	});
 
 	test('what the plan makes of the page is shown and read only', () => {
-		expect(fixedCellOf(PAGE, 'order')).toEqual({ text: '12', readOnly: true });
+		// Behavior change: the number of the place in the plan is no column any more (RFC section 14.2): `order` is a key of the metadata
+		expect(fixedCellOf(PAGE, 'order')).toBeNull();
+		// expect(fixedCellOf(PAGE, 'order')).toEqual({ text: '12', readOnly: true }); // previous
 		expect(fixedCellOf(PAGE, 'outputPath')).toEqual({
 			text: 'about/team.html',
 			readOnly: true,

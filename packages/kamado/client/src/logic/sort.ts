@@ -6,8 +6,8 @@
 /** The column the rows are ordered by, and which way; `null` is the order of the plan. */
 export interface SortState {
 	/**
-	 * The identifier of the column: `url`, `inputPath`, `virtual`, `order`, `outputPath`,
-	 * `parent`, `depth` or `meta:<key>`.
+	 * The identifier of the column: `url`, `inputPath`, `virtual`, `outputPath`, `parent`,
+	 * `depth` or `meta:<key>` (not `meta:order`).
 	 */
 	readonly key: string;
 	readonly desc: boolean;
@@ -35,18 +35,37 @@ export function columnKey(name: string, fixed: boolean): string {
  */
 export const MAX_SORT_KEY = 256;
 
+/** The column of the key that places a page (`order`, RFC section 6). */
+export const ORDER_COLUMN = 'meta:order';
+
 /**
- * Whether the server takes the column's identifier as a sort.
+ * Whether the server takes the column's identifier at all (as a sort, or in the layout of the
+ * columns it keeps).
+ * @param key - The identifier of the column
+ * @example
+ * ```ts
+ * isColumnId('meta:order'); // true
+ * isColumnId('meta:'); // false
+ * ```
+ */
+export function isColumnId(key: string): boolean {
+	// `meta:` with no name is what a key that is the empty string makes: the server refuses it.
+	return key.length <= MAX_SORT_KEY && key !== 'meta:';
+}
+
+/**
+ * Whether the server takes the column's identifier as a sort. `meta:order` is not one: it
+ * places a page among its siblings only, and ordering all the pages by it would mean nothing.
  * @param key - The identifier of the column
  * @example
  * ```ts
  * canSort('meta:title'); // true
+ * canSort('meta:order'); // false
  * canSort(`meta:${'k'.repeat(300)}`); // false
  * ```
  */
 export function canSort(key: string): boolean {
-	// `meta:` with no name is what a key that is the empty string makes: the server refuses it.
-	return key.length <= MAX_SORT_KEY && key !== 'meta:';
+	return isColumnId(key) && key !== ORDER_COLUMN;
 }
 
 /**

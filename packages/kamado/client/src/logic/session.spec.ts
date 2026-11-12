@@ -23,7 +23,6 @@ function row(url: string, title = 'T'): Row {
 		inputPath: `${url.slice(1)}index.html`,
 		outputPath: `${url.slice(1)}index.html`,
 		virtual: false,
-		order: 1,
 		depth: 1,
 		parent: '/',
 		hashes: { input: `h-${url}`, sidecar: null },
@@ -33,6 +32,7 @@ function row(url: string, title = 'T'): Row {
 
 const ROWS: Rows = {
 	version: 1,
+	offset: 0,
 	total: 2,
 	columns: ['title'],
 	overridesHash: 'o1',

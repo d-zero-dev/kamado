@@ -21,7 +21,7 @@
 			"items": {
 				"type": "string",
 				"maxLength": 256,
-				"pattern": "^(url|virtual|inputPath|order|outputPath|parent|depth|meta:[\\s\\S]+)$"
+				"pattern": "^(url|virtual|inputPath|outputPath|parent|depth|meta:[\\s\\S]+)$"
 			}
 		},
 		"label": {
@@ -298,7 +298,7 @@
 					}
 				},
 				"defaultKeyOrder": {
-					"description": "The order of the columns of the table until a person sets one on the screen (what the screen saves in ui-settings.json wins). The identifiers: url, virtual, inputPath, order, outputPath, parent, depth, or meta:<key> for a key of the metadata. A column this list does not name goes after the ones it names, in the default order. A key that no page has gets no column.",
+					"description": "The order of the columns of the table until a person sets one on the screen (what the screen saves in ui-settings.json wins). The identifiers: url, virtual, inputPath, outputPath, parent, depth, or meta:<key> for a key of the metadata (meta:order for the key that places a page). A column this list does not name goes after the ones it names, in the default order. A key that no page has gets no column.",
 					"allOf": [{ "$ref": "#/definitions/columnList" }]
 				},
 				"defaultFixedKeys": {

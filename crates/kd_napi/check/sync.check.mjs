@@ -918,3 +918,97 @@ test('a page whose url a key decides moves its file and keeps its url, and retur
 		rmSync(site.root, { recursive: true, force: true });
 	}
 });
+
+test('order is a key like the others: the numbers a script returns place the pages, and the same rows returned again change nothing', async () => {
+	const site = makeSite();
+	const opened = open(site);
+	try {
+		const snapshot = opened.pages();
+		const numbers = { '/service/': -2, '/about/': '5' };
+		const rows = given(snapshot).map((entry) =>
+			entry.url in numbers
+				? { ...entry, meta: { ...entry.meta, order: numbers[entry.url] } }
+				: entry,
+		);
+		const file = scriptReturning(site, rows);
+		const prepared = await prepare(opened, site, file);
+		assert.equal(prepared.kind, 'review');
+		assert.equal(prepared.apply().ok, true);
+		const urls = opened.pages().pages.map((page) => page.url);
+		// a number below 0 goes before the pages that have none, a number above 0 after them, and
+		// the pages below a page go with it
+		assert.equal(urls[0], '/');
+		assert.equal(urls[1], '/service/');
+		assert.equal(urls.at(-2), '/about/');
+		assert.equal(urls.at(-1), '/about/history.html');
+		// the number is written in the file the page is, and the page is what it was in the rest
+		assert.ok(site.read('src/service/index.html').includes('order: -2'));
+		assert.ok(site.read('src/about/index.html').includes('order: "5"'));
+		const again = await prepare(opened, site, file);
+		assert.equal(again.kind, 'nochange');
+		// the order of the rows returned does not place a page
+		const reversed = await prepare(
+			opened,
+			site,
+			scriptReturning(site, given(opened.pages()).toReversed()),
+		);
+		assert.equal(reversed.kind, 'nochange');
+	} finally {
+		opened.close();
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});
+
+test('order is deleted like any key: rows without it take it away, and the pages go back among the others', async () => {
+	const site = makeSite();
+	const opened = open(site);
+	try {
+		const place = async (numbers) => {
+			const rows = given(opened.pages()).map((entry) =>
+				entry.url in numbers
+					? { ...entry, meta: { ...entry.meta, order: numbers[entry.url] } }
+					: entry,
+			);
+			const prepared = await prepare(opened, site, scriptReturning(site, rows));
+			assert.equal(prepared.kind, 'review');
+			assert.equal(prepared.apply().ok, true);
+		};
+		await place({ '/service/': -2 });
+		assert.equal(opened.pages().pages[1].url, '/service/');
+		// the rows come back without the key: it goes from the file
+		const without = given(opened.pages()).map((entry) => ({
+			...entry,
+			meta: Object.fromEntries(
+				Object.entries(entry.meta).filter(([key]) => key !== 'order'),
+			),
+		}));
+		const prepared = await prepare(opened, site, scriptReturning(site, without));
+		assert.equal(prepared.kind, 'review');
+		assert.equal(prepared.apply().ok, true);
+		assert.ok(!site.read('src/service/index.html').includes('order'));
+		const urls = opened.pages().pages.map((page) => page.url);
+		assert.notEqual(urls[1], '/service/');
+		// a number that is the same number written as a text is another value (as `1` and `"1"`
+		// are), and is written; the place is the same
+		const numbers = given(opened.pages()).map((entry) =>
+			entry.url === '/service/' ? { ...entry, meta: { ...entry.meta, order: 3 } } : entry,
+		);
+		await prepare(opened, site, scriptReturning(site, numbers)).then((p) => p.apply());
+		const before = opened.pages().pages.map((page) => page.url);
+		const texts = given(opened.pages()).map((entry) =>
+			entry.url === '/service/'
+				? { ...entry, meta: { ...entry.meta, order: '3' } }
+				: entry,
+		);
+		const spelled = await prepare(opened, site, scriptReturning(site, texts));
+		assert.equal(spelled.kind, 'review');
+		assert.equal(spelled.apply().ok, true);
+		assert.deepEqual(
+			opened.pages().pages.map((page) => page.url),
+			before,
+		);
+	} finally {
+		opened.close();
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});

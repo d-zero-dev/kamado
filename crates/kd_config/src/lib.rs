@@ -713,11 +713,10 @@ fn parse_ui_keys(ui: &Obj<'_>) -> R<Vec<(String, UiKey)>> {
 /// assert!(kd_config::UI_BUILTIN_COLUMNS.contains(&"inputPath"));
 /// assert!(!kd_config::UI_BUILTIN_COLUMNS.contains(&"title"));
 /// ```
-pub const UI_BUILTIN_COLUMNS: [&str; 7] = [
+pub const UI_BUILTIN_COLUMNS: [&str; 6] = [
 	"url",
 	"virtual",
 	"inputPath",
-	"order",
 	"outputPath",
 	"parent",
 	"depth",
@@ -731,8 +730,9 @@ const MAX_COLUMN_ID: usize = 256;
 const MAX_COLUMN_IDS: usize = 500;
 
 /// `ui.defaultKeyOrder` and `ui.defaultFixedKeys`: an array of column identifiers (`url`,
-/// `virtual`, `inputPath`, `order`, `outputPath`, `parent`, `depth` or `meta:<key>`), the same
-/// as `columns.order` and `columns.pinned` of the settings of the screen.
+/// `virtual`, `inputPath`, `outputPath`, `parent`, `depth` or `meta:<key>`), the same as
+/// `columns.order` and `columns.pinned` of the settings of the screen. The key that places a page
+/// is `meta:order` like any other key of the metadata (RFC section 6).
 ///
 /// A list names a column once, holds at most 500 of them, and each identifier is at most 256 UTF-16
 /// code units. The names are not looked up among the keys of the pages: a key that no page has
@@ -2054,7 +2054,7 @@ mod tests {
 	#[test]
 	fn ui_default_columns_take_every_fixed_column_and_an_empty_list() {
 		let c = ok(r#"{ "ui": {
-			"defaultKeyOrder": ["url", "virtual", "inputPath", "order", "outputPath", "parent", "depth"],
+			"defaultKeyOrder": ["url", "virtual", "inputPath", "outputPath", "parent", "depth", "meta:order"],
 			"defaultFixedKeys": []
 		} }"#);
 		assert_eq!(c.ui.default_key_order.map(|l| l.len()), Some(7));
@@ -2081,7 +2081,9 @@ mod tests {
 			let e = fail(&format!(r#"{{ "ui": {{ "{key}": ["url", 1] }} }}"#));
 			assert_eq!(e.path, format!("ui.{key}[1]"));
 			assert_eq!(e.message, "expected a string");
-			for bad in ["title", "meta:", "URL", "", "metaTitle", "meta"] {
+			// `order` is the key that places a page, and a column of the metadata like the others:
+			// `meta:order`.
+			for bad in ["title", "meta:", "URL", "", "metaTitle", "meta", "order"] {
 				let e = fail(&format!(r#"{{ "ui": {{ "{key}": [{bad:?}] }} }}"#));
 				assert_eq!(e.path, format!("ui.{key}[0]"), "{bad:?}");
 				assert!(

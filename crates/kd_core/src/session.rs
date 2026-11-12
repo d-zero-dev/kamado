@@ -553,8 +553,8 @@ fn data_unchanged(page: &Page, hashes: &crate::data::Hashes, entry: &kd_build::E
 /// The data is not in it: a page depends on the keys it read (`DataDeps`).
 fn pages_digest(plan: &Plan, jobs: usize) -> String {
 	// One hash per page, on several threads, then the hashes in the order of the plan:
-	// the order is what `nav()` and `pages` list, so reordering the pages (the order of
-	// `pages.overrides`) must rebuild the pages that show them.
+	// the order is what `nav()` and `pages` list, so the same pages in another order (another
+	// `order`, a page that came or went) must rebuild the pages that show them.
 	let hashes: Vec<[u8; 32]> = parallel::map(&plan.pages, jobs, |p| {
 		let mut input = String::with_capacity(p.file.url.len() + 64);
 		input.push_str(&p.file.url);
@@ -1862,5 +1862,33 @@ mod tests {
 			]
 		);
 		assert_eq!(replaced_warnings([]), Vec::<String>::new());
+	}
+
+	#[test]
+	fn the_digest_of_the_page_list_follows_the_order_of_the_pages() {
+		let page = |url: &str| Page {
+			file: kd_site::PageFile {
+				input_path: format!("/in{url}"),
+				output_path: format!("/out{url}"),
+				file_slug: String::new(),
+				file_path_stem: String::new(),
+				url: url.to_string(),
+				extension: ".html".to_string(),
+			},
+			kind: PageKind::Html,
+			meta: Vec::new(),
+			body: None,
+			body_pending: false,
+			deps: BTreeMap::new(),
+			is_virtual: false,
+			lastmod: None,
+		};
+		let plan = |urls: &[&str]| Plan {
+			pages: urls.iter().map(|u| page(u)).collect(),
+			warnings: Vec::new(),
+		};
+		let one = pages_digest(&plan(&["/a.html", "/b.html"]), 1);
+		assert_eq!(one, pages_digest(&plan(&["/a.html", "/b.html"]), 2));
+		assert_ne!(one, pages_digest(&plan(&["/b.html", "/a.html"]), 1));
 	}
 }

@@ -105,6 +105,8 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
  * @param q - The search, if any
  * @param sort - The order of the rows, or `null` for the order of the plan
  * @param signal - To drop an answer that is not wanted any more
+ * @param locate - The URL of a page whose window is wanted instead of the one at `offset` (the
+ * answer says where the window it holds starts, in `offset`)
  */
 export function fetchRows(
 	offset: number,
@@ -112,6 +114,7 @@ export function fetchRows(
 	q: string,
 	sort: SortState | null,
 	signal?: AbortSignal,
+	locate?: string,
 ): Promise<Rows> {
 	const query = new URLSearchParams({
 		offset: String(offset),
@@ -120,6 +123,9 @@ export function fetchRows(
 	});
 	if (q !== '') {
 		query.set('q', q);
+	}
+	if (locate !== undefined) {
+		query.set('locate', locate);
 	}
 	return call<Rows>(`/api/pages?${query.toString()}`, { signal });
 }

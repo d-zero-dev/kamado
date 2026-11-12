@@ -36,7 +36,7 @@ const { native } = await import(pathToFileURL(path.join(dist, 'native.js')).href
 
 /**
  * A small site: an HTML page with front matter and a sidecar, a TSX page, a page of a
- * directory, and a `pages.overrides` file that orders them and declares a virtual page.
+ * directory, and a `pages.overrides` file that overrides meta and declares a virtual page.
  * @returns {{ root: string, config: string, read: (rel: string) => string }} the site
  */
 function makeSite() {
@@ -90,11 +90,17 @@ test('the rows say where each value comes from, in the order of the plan', () =>
 	try {
 		const rows = JSON.parse(native().uiPages(handle, query));
 		assert.equal(rows.total, 4);
+		// Behavior change: the order of `pages` is the one `order` and the URLs make (RFC section 6): a page before what hangs from it, the children in the natural order of their URLs; `columns` always has `order` (RFC section 14.2): the key that places a page is a column even when no page has it
 		assert.deepEqual(
 			rows.pages.map((p) => p.url),
-			['/about/', '/ext/', '/about/history.html', '/'],
+			['/', '/about/', '/about/history.html', '/ext/'],
 		);
-		assert.deepEqual(rows.columns, ['layout', 'navHidden', 'title']);
+		assert.deepEqual(rows.columns, ['layout', 'navHidden', 'order', 'title']);
+		// assert.deepEqual(
+		// 	rows.pages.map((p) => p.url),
+		// 	['/about/', '/ext/', '/about/history.html', '/'],
+		// );
+		// assert.deepEqual(rows.columns, ['layout', 'navHidden', 'title']); // previous
 		const top = rows.pages.find((p) => p.url === '/');
 		assert.equal(top.meta.title.origin, 'inFile');
 		assert.equal(top.meta.layout.origin, 'sidecar');
@@ -138,12 +144,19 @@ test('sort orders every page, with the pages that have no value last either way'
 		assert.equal(urls({ key: 'virtual' }).at(-1), '/ext/');
 		assert.equal(urls({ key: 'virtual', desc: true })[0], '/ext/');
 		// Only `/about/` has `navHidden`; the others follow in the order of the plan.
+		// Behavior change: the order of `pages` is the one `order` and the URLs make (RFC section 6): a page before what hangs from it, the children in the natural order of their URLs
 		assert.deepEqual(urls({ key: 'meta:navHidden', desc: true }), [
 			'/about/',
-			'/ext/',
-			'/about/history.html',
 			'/',
+			'/about/history.html',
+			'/ext/',
 		]);
+		// assert.deepEqual(urls({ key: 'meta:navHidden', desc: true }), [
+		// 	'/about/',
+		// 	'/ext/',
+		// 	'/about/history.html',
+		// 	'/',
+		// ]); // previous
 		// A window is cut after the sort.
 		assert.deepEqual(urls({ key: 'url' }, { offset: 1, limit: 2 }), [
 			'/about/',
@@ -178,8 +191,11 @@ test('the values of a key are counted over every page, most often first', () => 
 		const title = values('meta:title');
 		assert.equal(title.total, 3);
 		assert.deepEqual(
+			// Behavior change: the order of `pages` is the one `order` and the URLs make (RFC section 6): a page before what hangs from it, the children in the natural order of their URLs
 			title.values.map((v) => v.value),
-			['Ext', 'History', 'Top'],
+			['Top', 'History', 'Ext'],
+			// title.values.map((v) => v.value),
+			// ['Ext', 'History', 'Top'], // previous
 		);
 		// A boolean is a value of its own type; a key that no page has is no value.
 		assert.deepEqual(values('meta:navHidden').values, [{ value: false, count: 1 }]);
@@ -436,7 +452,9 @@ test('a module, a sidecar, a deleted key and a key that makes the URL', () => {
 	try {
 		let rows = JSON.parse(native().uiPages(handle, query));
 		const find = (url) => rows.pages.find((p) => p.url === url);
-		assert.deepEqual(rows.columns, ['layout', 'n', 'title']);
+		// Behavior change: `columns` always has `order` (RFC section 14.2): the key that places a page is a column even when no page has it
+		assert.deepEqual(rows.columns, ['layout', 'n', 'order', 'title']);
+		// assert.deepEqual(rows.columns, ['layout', 'n', 'title']); // previous
 		assert.equal(find('/p/page.html').meta.layout.origin, 'sidecar');
 
 		// the module and the sidecar are edited, each in its own file
@@ -694,10 +712,12 @@ test('the server of kamado ui answers with what the core says, told without the 
 		const rows = JSON.parse(text);
 		// The fields the screen reads (client/src/types.ts) are the fields of the answer.
 		// Behavior change: the answer carries how the config presents the keys (`keys`)
+		// Behavior change: the answer carries where its window starts (`offset`)
 		assert.deepEqual(Object.keys(rows).toSorted(), [
 			'columns',
 			'keys',
 			'layouts',
+			'offset',
 			'overridesFile',
 			'overridesHash',
 			'pages',
@@ -705,6 +725,17 @@ test('the server of kamado ui answers with what the core says, told without the 
 			'version',
 			'warnings',
 		]);
+		// assert.deepEqual(Object.keys(rows).toSorted(), [ // previous
+		// 	'columns', // previous
+		// 	'keys', // previous
+		// 	'layouts', // previous
+		// 	'overridesFile', // previous
+		// 	'overridesHash', // previous
+		// 	'pages', // previous
+		// 	'total', // previous
+		// 	'version', // previous
+		// 	'warnings', // previous
+		// ]); // previous
 		// assert.deepEqual(Object.keys(rows).toSorted(), [ // previous
 		// 	'columns', // previous
 		// 	'layouts', // previous
@@ -717,17 +748,28 @@ test('the server of kamado ui answers with what the core says, told without the 
 		// ]); // previous
 		const about = rows.pages.find((p) => p.url === '/about/history.html');
 		// Behavior change: a row says its place in the plan (`order`)
+		// Behavior change: a row carries no number of its place in the plan (RFC section 14.2): `order` is a key of the metadata
 		assert.deepEqual(Object.keys(about).toSorted(), [
 			'depth',
 			'hashes',
 			'inputPath',
 			'meta',
-			'order',
 			'outputPath',
 			'parent',
 			'url',
 			'virtual',
 		]);
+		// assert.deepEqual(Object.keys(about).toSorted(), [ // previous
+		// 	'depth', // previous
+		// 	'hashes', // previous
+		// 	'inputPath', // previous
+		// 	'meta', // previous
+		// 	'order', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'url', // previous
+		// 	'virtual', // previous
+		// ]); // previous
 		// assert.deepEqual(Object.keys(about).toSorted(), [ // previous
 		// 	'depth', // previous
 		// 	'hashes', // previous
@@ -762,10 +804,15 @@ test('the server of kamado ui answers with what the core says, told without the 
 		]);
 		assert.equal(values.key, 'meta:title');
 		assert.deepEqual(Object.keys(values.values[0]).toSorted(), ['count', 'value']);
+		// Behavior change: the order of `pages` is the one `order` and the URLs make (RFC section 6): a page before what hangs from it, the children in the natural order of their URLs
 		assert.deepEqual(
 			values.values.map((v) => v.value),
-			['Ext', 'History', 'Top'],
+			['Top', 'History', 'Ext'],
 		);
+		// assert.deepEqual( // previous
+		// 	values.values.map((v) => v.value), // previous
+		// 	['Ext', 'History', 'Top'], // previous
+		// ); // previous
 		const refused = await get('/api/values?key=title');
 		assert.equal(refused.status, 400);
 
@@ -943,9 +990,10 @@ test('a page is made, made virtual, given a file again and removed, and only its
 		assert.equal(made.page.url, '/news/');
 		assert.equal(made.page.virtual, false);
 		assert.equal(site.read('src/news/index.html'), '');
-		// after the two pages of `pages.overrides`, then in the order of the files:
-		// /about/history.html, /, /news/
-		assert.equal(made.page.order, 5);
+		// the page is at the place its `order` and its url give it, which no row says
+		// Behavior change: a row carries no number of its place in the plan (RFC section 14.2): `order` is a key of the metadata
+		assert.equal(made.page.order, undefined);
+		// assert.equal(made.page.order, 5); // previous
 
 		// a virtual page: an entry after the last one of `pages.overrides`
 		const virtual = edit({
@@ -1024,10 +1072,15 @@ test('a page is made, made virtual, given a file again and removed, and only its
 		});
 		assert.equal(service.ok, true, JSON.stringify(service));
 		const after = JSON.parse(native().uiPages(handle, query));
+		// Behavior change: the order of `pages` is the one `order` and the URLs make (RFC section 6): a page before what hangs from it, the children in the natural order of their URLs
 		assert.deepEqual(
 			after.pages.map((p) => p.url),
-			['/about/', '/ext/', '/about/history.html', '/'],
+			['/', '/about/', '/about/history.html', '/ext/'],
 		);
+		// assert.deepEqual( // previous
+		// 	after.pages.map((p) => p.url), // previous
+		// 	['/about/', '/ext/', '/about/history.html', '/'], // previous
+		// ); // previous
 		// the file is what it was before the pages came and went, to the byte
 		assert.equal(
 			site.read('pages.overrides.json'),
@@ -1036,7 +1089,7 @@ test('a page is made, made virtual, given a file again and removed, and only its
 		assert.deepEqual(others(), before);
 
 		// The columns every row has are sorts: the rows come in the order of each, both ways.
-		// (The plan is /about/, /ext/, /about/history.html, /.)
+		// (The plan is /, /about/, /about/history.html, /ext/.)
 		const sortedBy = (key, desc) =>
 			JSON.parse(
 				native().uiPages(
@@ -1045,7 +1098,6 @@ test('a page is made, made virtual, given a file again and removed, and only its
 				),
 			).pages.map((p) => p.url);
 		const orders = {
-			order: ['/about/', '/ext/', '/about/history.html', '/'],
 			// the files below the output directory: index.html, about/index.html, about/history.html, ext/index.html
 			outputPath: ['/', '/about/', '/about/history.html', '/ext/'],
 			// the page above: / for /about/ and /ext/, /about/ for the history; / has none and is last
@@ -1054,7 +1106,6 @@ test('a page is made, made virtual, given a file again and removed, and only its
 			depth: ['/', '/about/', '/ext/', '/about/history.html'],
 		};
 		const reversed = {
-			order: ['/', '/about/history.html', '/ext/', '/about/'],
 			outputPath: ['/ext/', '/about/history.html', '/about/', '/'],
 			// the page without a value is last this way too
 			parent: ['/about/history.html', '/about/', '/ext/', '/'],
@@ -1386,7 +1437,9 @@ test('ui.keys of the config reaches the screen as it is written, and adds no col
 		assert.deepEqual(rows.keys, keys);
 		// the keys of the config are not columns: the columns are the keys the pages hold
 		assert.ok(!rows.columns.includes('nothing'));
-		assert.deepEqual(rows.columns, ['layout', 'navHidden', 'title']);
+		// Behavior change: `columns` always has `order` (RFC section 14.2): the key that places a page is a column even when no page has it
+		assert.deepEqual(rows.columns, ['layout', 'navHidden', 'order', 'title']);
+		// assert.deepEqual(rows.columns, ['layout', 'navHidden', 'title']); // previous
 	} finally {
 		native().uiClose(handle);
 		rmSync(site.root, { recursive: true, force: true });
@@ -1631,4 +1684,41 @@ test('ui.syncFunctions of the config reaches the command with the scripts made a
 test('a request for a sync of a handle that is not open throws', () => {
 	assert.throws(() => native().uiSyncPages('0'), /no editor/);
 	assert.throws(() => native().uiSyncPages(), /expected \(handle\) string/);
+});
+
+test('the window of a located page is told, and the key that places a page is a column and no sort', () => {
+	const site = makeSite();
+	const handle = native().uiOpen(site.config, '{}');
+	try {
+		const window = (extra) =>
+			JSON.parse(
+				native().uiPages(handle, JSON.stringify({ limit: 2, offset: 0, ...extra })),
+			);
+		// the plan is /, /about/, /about/history.html, /ext/: the page that is fourth is in the
+		// window that starts at 2
+		const located = window({ locate: '/ext/' });
+		assert.equal(located.offset, 2);
+		assert.deepEqual(
+			located.pages.map((p) => p.url),
+			['/about/history.html', '/ext/'],
+		);
+		assert.equal(window({ locate: '/nope/' }).offset, 0);
+		assert.equal(window({ offset: 2 }).offset, 2);
+		// the key `order` is a column, and refused as a sort (and so is the number of the place)
+		assert.ok(window({}).columns.includes('order'));
+		for (const key of ['order', 'meta:order']) {
+			assert.throws(
+				() =>
+					native().uiPages(
+						handle,
+						JSON.stringify({ offset: 0, limit: 1, sort: { key } }),
+					),
+				/sort\.key/,
+				key,
+			);
+		}
+	} finally {
+		native().uiClose(handle);
+		rmSync(site.root, { recursive: true, force: true });
+	}
 });

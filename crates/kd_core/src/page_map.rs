@@ -186,9 +186,13 @@ mod tests {
 			format!(
 				concat!(
 					r#"{{"version":1,"pages":["#,
-					r#"{{"url":"/about/history.html","inputPath":"{root}/src/about/history.tsx","outputPath":"{root}/out/about/history.html","fileSlug":"history","filePathStem":"/about/history","extension":".tsx","depth":2,"parent":"/about/","virtual":false,"meta":{{"title":"History"}}}},"#,
+					// Behavior change: the order of `pages` is the one `order` and the URLs make (RFC section 6): a page before what hangs from it, the children in the natural order of their URLs
+					r#"{{"url":"/","inputPath":"{root}/src/index.html","outputPath":"{root}/out/index.html","fileSlug":"src","filePathStem":"/index","extension":".html","depth":0,"parent":null,"virtual":false,"meta":{{"title":"Home"}}}},"#,
 					r#"{{"url":"/about/","inputPath":"{root}/src/about/index.html","outputPath":"{root}/out/about/index.html","fileSlug":"about","filePathStem":"/about/index","extension":".html","depth":1,"parent":"/","virtual":false,"meta":{{"title":"About","layout":"sub"}}}},"#,
-					r#"{{"url":"/","inputPath":"{root}/src/index.html","outputPath":"{root}/out/index.html","fileSlug":"src","filePathStem":"/index","extension":".html","depth":0,"parent":null,"virtual":false,"meta":{{"title":"Home"}}}}"#,
+					r#"{{"url":"/about/history.html","inputPath":"{root}/src/about/history.tsx","outputPath":"{root}/out/about/history.html","fileSlug":"history","filePathStem":"/about/history","extension":".tsx","depth":2,"parent":"/about/","virtual":false,"meta":{{"title":"History"}}}}"#,
+					// r#"{{"url":"/about/history.html","inputPath":"{root}/src/about/history.tsx","outputPath":"{root}/out/about/history.html","fileSlug":"history","filePathStem":"/about/history","extension":".tsx","depth":2,"parent":"/about/","virtual":false,"meta":{{"title":"History"}}}},"#,
+					// r#"{{"url":"/about/","inputPath":"{root}/src/about/index.html","outputPath":"{root}/out/about/index.html","fileSlug":"about","filePathStem":"/about/index","extension":".html","depth":1,"parent":"/","virtual":false,"meta":{{"title":"About","layout":"sub"}}}},"#,
+					// r#"{{"url":"/","inputPath":"{root}/src/index.html","outputPath":"{root}/out/index.html","fileSlug":"src","filePathStem":"/index","extension":".html","depth":0,"parent":null,"virtual":false,"meta":{{"title":"Home"}}}}"#, // previous
 					r#"],"warnings":[]}}"#,
 				),
 				root = root
@@ -209,8 +213,10 @@ mod tests {
 			] }"#,
 		);
 		let map = site.map(r#", "pages": { "overrides": "pages.json" }"#);
-		// The pages of the file first, in its order; the others after them.
-		assert_eq!(urls(&map), ["/about/", "/service/", "/"]);
+		// The entries of the file do not place the pages.
+		// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the root first, then its children in the natural order of their URLs
+		assert_eq!(urls(&map), ["/", "/about/", "/service/"]);
+		// assert_eq!(urls(&map), ["/about/", "/service/", "/"]); // previous
 		assert_eq!(
 			Value::Object(vec![(
 				"meta".to_owned(),
@@ -277,7 +283,9 @@ mod tests {
 		.unwrap();
 		let built: Vec<&str> = report.pages.iter().map(|p| p.url.as_str()).collect();
 		assert_eq!(urls(&map), built);
-		assert_eq!(built, ["/a/b.html", "/"]);
+		// Behavior change: the order of `pages` is the one `order` and the URLs make (RFC section 6): a page before what hangs from it, the children in the natural order of their URLs
+		assert_eq!(built, ["/", "/a/b.html"]);
+		// assert_eq!(built, ["/a/b.html", "/"]); // previous
 	}
 
 	#[test]
@@ -347,7 +355,9 @@ mod tests {
 		site.write("src/a/index.html", "<p>a</p>");
 		site.write("src/a/b.html", "<p>b</p>");
 		let map = site.map(r#", "pages": { "outputExtension": "" }"#);
-		assert_eq!(urls(&map), ["/a/b", "/a/"]);
+		// Behavior change: the order of `pages` is the one `order` and the URLs make (RFC section 6): a page before what hangs from it, the children in the natural order of their URLs
+		assert_eq!(urls(&map), ["/a/", "/a/b"]);
+		// assert_eq!(urls(&map), ["/a/b", "/a/"]); // previous
 		let b = entry(&map, "/a/b");
 		// The extension is the one of the source; the URL has none.
 		assert_eq!(text(b, "extension"), ".html");
@@ -367,7 +377,9 @@ mod tests {
 		site.write("src/x/index.html", "<p>x</p>");
 		site.write("src/x/a.html", "<p>a</p>");
 		let map = site.map(r#", "pages": { "outputExtension": ".HTML" }"#);
-		assert_eq!(urls(&map), ["/x/a.HTML", "/x/index.HTML"]);
+		// Behavior change: the order of `pages` is the one `order` and the URLs make (RFC section 6): a page before what hangs from it, the children in the natural order of their URLs
+		assert_eq!(urls(&map), ["/x/index.HTML", "/x/a.HTML"]);
+		// assert_eq!(urls(&map), ["/x/a.HTML", "/x/index.HTML"]); // previous
 		let index = entry(&map, "/x/index.HTML");
 		assert_eq!(index.get("depth").unwrap().as_f64(), Some(1.0));
 		assert_eq!(text(index, "parent"), "/");

@@ -16,7 +16,7 @@ import {
 import { canSort } from './sort.js';
 
 /** The columns that say what the plan makes of a page. */
-const PLAN_COLUMNS = ['order', 'outputPath', 'parent', 'depth'];
+const PLAN_COLUMNS = ['outputPath', 'parent', 'depth'];
 
 describe('the columns of what the plan makes of a page', () => {
 	test('are fixed columns, after the three of the page itself and before the keys', () => {
@@ -26,7 +26,6 @@ describe('the columns of what the plan makes of a page', () => {
 	});
 
 	test.each([
-		['order', 96],
 		['outputPath', 384],
 		['parent', 320],
 		['depth', 96],
@@ -41,8 +40,8 @@ describe('the columns of what the plan makes of a page', () => {
 	test('are not pinned until the person pins them', () => {
 		const known = columnIds(['title']);
 		expect(layoutOf(known, emptyLayout()).pinnedCount).toBe(1);
-		const pinned = pinColumn(emptyLayout(), known, 'order');
-		expect(layoutOf(known, pinned).shown.slice(0, 2)).toEqual(['url', 'order']);
+		const pinned = pinColumn(emptyLayout(), known, 'outputPath');
+		expect(layoutOf(known, pinned).shown.slice(0, 2)).toEqual(['url', 'outputPath']);
 	});
 
 	test('are put after the columns of a saved layout that does not name them', () => {
@@ -77,9 +76,9 @@ describe('a key of the metadata that has the name of one of them', () => {
 	);
 
 	test('is a column of its own beside the fixed one', () => {
-		const known = columnIds(['order']);
-		expect(known).toContain('order');
-		expect(known).toContain('meta:order');
+		const known = columnIds(['depth']);
+		expect(known).toContain('depth');
+		expect(known).toContain('meta:depth');
 		expect(new Set(known).size).toBe(known.length);
 	});
 });

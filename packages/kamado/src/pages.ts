@@ -94,7 +94,7 @@ export interface PageMapEntry {
  */
 export interface PageMap {
 	readonly version: 1;
-	/** In the order of `pages` and `nav()`: the pages of `pages.overrides` first, in its order. */
+	/** In the order of `pages` and `nav()`: the meta `order` places a page among its siblings (RFC section 6). */
 	readonly pages: readonly PageMapEntry[];
 	/** The warnings of the plan (`outputPathConflict`, a plan cache that could not be written). */
 	readonly warnings: readonly string[];

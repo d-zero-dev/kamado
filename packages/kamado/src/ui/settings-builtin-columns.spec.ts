@@ -18,12 +18,16 @@ describe('the columns every row has', () => {
 	});
 
 	test('are named in the message that refuses a column, as the RFC lists them', () => {
+		// Behavior change: the number of the place in the plan is no column any more (RFC section 14.2): `order` is a key of the metadata
 		expect(COLUMN_NAMES).toBe(
-			'url, virtual, inputPath, order, outputPath, parent, depth or meta:<key>',
+			'url, virtual, inputPath, outputPath, parent, depth or meta:<key>',
 		);
+		// expect(COLUMN_NAMES).toBe( // previous
+		// 	'url, virtual, inputPath, order, outputPath, parent, depth or meta:<key>', // previous
+		// ); // previous
 	});
 
-	test.each(['order', 'outputPath', 'parent', 'depth'])(
+	test.each(['outputPath', 'parent', 'depth'])(
 		'%s is taken as a sort and in the three lists of a layout',
 		(id) => {
 			expect(isSortKey(id)).toBe(true);
@@ -49,11 +53,11 @@ describe('the columns every row has', () => {
 					[KEY]: {
 						updatedAt: '2026-01-02T03:04:05.000Z',
 						pageSize: 500,
-						sort: { key: 'order', desc: true },
+						sort: { key: 'depth', desc: true },
 						columns: {
 							order: ['depth', 'url', 'parent'],
 							pinned: ['outputPath'],
-							widths: { order: 100 },
+							widths: { depth: 100 },
 						},
 					},
 				},
@@ -61,11 +65,11 @@ describe('the columns every row has', () => {
 		);
 		expect(read.state).toBe('ok');
 		expect(read.state === 'ok' ? read.settings.projects[KEY] : undefined).toMatchObject({
-			sort: { key: 'order', desc: true },
+			sort: { key: 'depth', desc: true },
 			columns: {
 				order: ['depth', 'url', 'parent'],
 				pinned: ['outputPath'],
-				widths: { order: 100 },
+				widths: { depth: 100 },
 			},
 		});
 	});

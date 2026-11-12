@@ -209,9 +209,10 @@ enum Reload {
 	Done,
 	/// The input file is gone: the plan has to be walked again.
 	Gone,
-	/// The `outputPathField` of the page says another output path than the plan has: the page
-	/// is somewhere else, and two pages may now want the same path, so every page is put
-	/// together again.
+	/// The `outputPathField` of the page says another output path than the plan has (the page
+	/// is somewhere else, and two pages may now want the same path), or its `order` is another
+	/// number than the plan has (the pages are in another order): every page is put together
+	/// again.
 	Moved,
 }
 
@@ -906,6 +907,11 @@ impl Serve {
 		if let Some(field) = self.loaded.config.pages.output_path_field.as_deref()
 			&& output_path_value(&page.meta, field) != output_path_value(&reloaded.meta, field)
 		{
+			return Ok(Reload::Moved);
+		}
+		// What `order` places is a place in the plan: the pages are put in their order again
+		// (the numbers of the pages move), as for a page that went to another URL.
+		if crate::nav_order::order_of(&page.meta) != crate::nav_order::order_of(&reloaded.meta) {
 			return Ok(Reload::Moved);
 		}
 		let page = &mut st.plan.pages[index];
@@ -2547,7 +2553,9 @@ mod tests {
 	fn a_change_of_pages_overrides_reaches_the_renderer_as_the_whole_context() {
 		let (site, serve) = overrides_site("overrides");
 		let first = render(serve.request("/").unwrap());
-		assert_eq!(first.job.page, 1, "the pages of the file come first");
+		// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the root is first, whatever the file lists
+		assert_eq!(first.job.page, 0, "the root comes first");
+		// assert_eq!(first.job.page, 1, "the pages of the file come first"); // previous
 		serve.finish_render(first.token, "<p>home</p>").unwrap();
 
 		site.write("pages.overrides.json", OVERRIDES_TWO);
@@ -2564,7 +2572,9 @@ mod tests {
 		let again = render(serve.request("/").unwrap());
 
 		assert!(!again.restart);
-		assert_eq!(again.job.page, 2, "the page is where the new order puts it");
+		// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the root is first, whatever the file lists
+		assert_eq!(again.job.page, 0, "the page is where the new order puts it");
+		// assert_eq!(again.job.page, 2, "the page is where the new order puts it"); // previous
 		let context =
 			kd_jsonc::parse(again.context.as_deref().expect("the whole context")).unwrap();
 		let pages = context.get("pages").and_then(|p| p.as_array()).unwrap();
@@ -2610,7 +2620,9 @@ mod tests {
 		// Mended: the plan is made from it.
 		site.write("pages.overrides.json", OVERRIDES_TWO);
 		let again = render(serve.request("/").unwrap());
-		assert_eq!(again.job.page, 2);
+		// Behavior change: the entries of `pages.overrides` no longer place a page (RFC section 6): the root is first, whatever the file lists
+		assert_eq!(again.job.page, 0);
+		// assert_eq!(again.job.page, 2); // previous
 	}
 
 	#[test]
@@ -2702,7 +2714,9 @@ mod tests {
 		// It was rendered with the context from before: the page is rendered again, with the
 		// whole new one.
 		let again = render(serve.request("/").unwrap());
-		assert_eq!(again.job.page, 1);
+		// Behavior change: the root is first, so a page that sorts before `aaa.html` does not move the root's index
+		assert_eq!(again.job.page, 0);
+		// assert_eq!(again.job.page, 1); // previous
 		assert!(again.context.is_some());
 	}
 
@@ -2872,5 +2886,99 @@ mod tests {
 		assert!(is_within("/site/src/a", "/site/src"));
 		assert!(!is_within("/site/src2", "/site/src"));
 		assert!(!is_within("/site", "/site/src"));
+	}
+
+	/// A site of three JSX pages, the root and `b` and `c` below it, none with an `order`: the
+	/// plan lists `/`, `/b.html`, `/c.html`.
+	fn order_site(name: &str) -> (Site, Serve) {
+		let site = Site::new(name);
+		site.write(
+			"src/index.tsx",
+			"export const meta = { title: 'Home' };\nexport default () => <div>home</div>;\n",
+		);
+		site.write(
+			"src/b.tsx",
+			"export const meta = { title: 'B' };\nexport default () => <div>b</div>;\n",
+		);
+		site.write(
+			"src/c.tsx",
+			"export const meta = { title: 'C' };\nexport default () => <div>c</div>;\n",
+		);
+		let serve = site.serve("");
+		(site, serve)
+	}
+
+	#[test]
+	fn a_page_whose_order_changed_is_where_the_plan_now_puts_it() {
+		let (site, serve) = order_site("order-changed");
+		let first = render(serve.request("/c.html").unwrap());
+		assert_eq!(first.job.page, 2);
+		serve.finish_render(first.token, "<div>c</div>").unwrap();
+
+		site.write(
+			"src/c.tsx",
+			"export const meta = { title: 'C', order: -1 };\nexport default () => <div>c</div>;\n",
+		);
+		let again = render(serve.request("/c.html").unwrap());
+		assert_eq!(
+			again.job.page, 1,
+			"c has the lowest order among its siblings"
+		);
+		assert_eq!(serve.replans(), 1);
+		assert!(
+			again.context.is_some(),
+			"the whole context goes with the new order"
+		);
+		serve.finish_render(again.token, "<div>c</div>").unwrap();
+
+		// The same number written another way is the same place: nothing is planned again.
+		site.write(
+			"src/c.tsx",
+			"export const meta = { title: 'C', order: '-1' };\nexport default () => <div>c</div>;\n",
+		);
+		let third = render(serve.request("/c.html").unwrap());
+		assert_eq!(third.job.page, 1);
+		assert_eq!(serve.replans(), 1);
+	}
+
+	#[test]
+	fn a_render_under_way_finishes_for_its_page_where_the_plan_now_puts_it_when_its_index_moves() {
+		let (site, serve) = order_site("replan-inflight-order");
+		let first = render(serve.request("/c.html").unwrap());
+		assert_eq!(first.job.page, 2);
+
+		// A page that sorts before it: its index moves.
+		site.write("src/aaa.html", "<p>aaa</p>");
+		assert_eq!(text(serve.request("/aaa.html").unwrap()).1, "<p>aaa</p>\n");
+		assert_eq!(serve.replans(), 1);
+
+		let served = serve.finish_render(first.token, "<div>c</div>").unwrap();
+		assert_eq!(text(served).1, "<div>c</div>\n");
+
+		// It was rendered with the context from before: the page is rendered again, with the
+		// whole new one, at the place the plan has it now.
+		let again = render(serve.request("/c.html").unwrap());
+		assert_eq!(again.job.page, 3);
+		assert!(again.context.is_some());
+	}
+
+	#[test]
+	fn an_order_written_in_a_sidecar_or_taken_away_puts_the_plan_in_order_again() {
+		let (site, serve) = order_site("order-sidecar");
+		let first = render(serve.request("/c.html").unwrap());
+		assert_eq!(first.job.page, 2);
+		serve.finish_render(first.token, "<div>c</div>").unwrap();
+
+		site.write("src/c.json", r#"{ "order": -1 }"#);
+		let moved = render(serve.request("/c.html").unwrap());
+		assert_eq!(moved.job.page, 1);
+		assert_eq!(serve.replans(), 1);
+		serve.finish_render(moved.token, "<div>c</div>").unwrap();
+
+		// Taking the number away puts the page back where it was.
+		site.write("src/c.json", "{}");
+		let back = render(serve.request("/c.html").unwrap());
+		assert_eq!(back.job.page, 2);
+		assert_eq!(serve.replans(), 2);
 	}
 }

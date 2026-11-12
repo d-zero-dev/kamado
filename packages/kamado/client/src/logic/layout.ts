@@ -12,7 +12,7 @@
 import type { Translate } from '../i18n/translate.js';
 
 import { metaColumns } from './columns.js';
-import { canSort, columnKey } from './sort.js';
+import { columnKey, isColumnId } from './sort.js';
 
 /**
  * The narrowest and the widest a column is made, in pixels, and the most columns a list names.
@@ -39,14 +39,14 @@ export const DEFAULT_PINNED: readonly string[] = ['url'];
 
 /**
  * The columns before the keys of the metadata, which every row has: what a page is (its URL,
- * whether it is virtual, its file) and what the plan makes of it (its place in the plan, the
- * file it is written to, the page above it, how deep it is). The last four are read only.
+ * whether it is virtual, its file) and what the plan makes of it (the file it is written to,
+ * the page above it, how deep it is). The last three are read only. The key that places a page
+ * (`order`) is a key of the metadata, a column like the others.
  */
 const BUILTIN: readonly string[] = [
 	'url',
 	'virtual',
 	'inputPath',
-	'order',
 	'outputPath',
 	'parent',
 	'depth',
@@ -61,8 +61,6 @@ const BUILTIN_WIDTHS: Readonly<Record<string, number>> = {
 	url: 448,
 	virtual: 96,
 	inputPath: 384,
-	// As wide as `virtual`: a number of a few digits needs less, the name in the header does not.
-	order: 96,
 	outputPath: 384,
 	parent: 320,
 	depth: 96,
@@ -174,7 +172,7 @@ function heldOrder(state: ColumnState): readonly string[] | undefined {
  * @example
  * ```ts
  * columnIds(['b', 'a']);
- * // ['url', 'virtual', 'inputPath', 'order', 'outputPath', 'parent', 'depth', 'meta:a', 'meta:b']
+ * // ['url', 'virtual', 'inputPath', 'outputPath', 'parent', 'depth', 'meta:a', 'meta:b']
  * ```
  */
 export function columnIds(keys: readonly string[]): string[] {
@@ -568,14 +566,14 @@ export function settingsOf(state: ColumnState, known: readonly string[]): Column
 	const there = new Set(known);
 	// What the settings already hold about a column that is not there now (a key that no page has
 	// at the moment) is kept after the columns that are, so that it is found again if the key comes
-	// back. A column the server would refuse (`canSort`: an empty key, or one that is too long) is
+	// back. A column the server would refuse (`isColumnId`: an empty key, or one that is too long) is
 	// left out, or the whole layout would be refused.
 	const list = (
 		shown: readonly string[],
 		held: readonly string[] | undefined,
 	): string[] =>
 		[...new Set([...shown, ...(held ?? []).filter((id) => !there.has(id))])]
-			.filter((id) => canSort(id))
+			.filter((id) => isColumnId(id))
 			.slice(0, MAX_COLUMNS);
 	return fitSettings({
 		// The order is saved once the person has set one: a layout that only pins a column does not
@@ -587,7 +585,7 @@ export function settingsOf(state: ColumnState, known: readonly string[]): Column
 		pinned: list(pinnedOf(state, known), heldPinned(state)),
 		widths: Object.fromEntries(
 			Object.entries(state.widths)
-				.filter(([id]) => canSort(id))
+				.filter(([id]) => isColumnId(id))
 				.slice(0, MAX_COLUMNS),
 		),
 	});

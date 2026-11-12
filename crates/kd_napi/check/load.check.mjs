@@ -102,14 +102,24 @@ test('build writes HTML pages and returns a report', () => {
 		addon.build(path.join(site, 'kamado.config.jsonc'), JSON.stringify({ jobs: 2 })),
 	);
 	assert.equal(report.version, 1);
+	// Behavior change: the order of `pages` is the one `order` and the URLs make (RFC section 6): a page before what hangs from it
 	assert.deepEqual(
 		report.pages.map((p) => [p.url, p.status]),
 		[
-			['/about/', 'built'],
 			['/', 'built'],
+			['/about/', 'built'],
 		],
 	);
-	assert.deepEqual(report.pages[1].meta, { title: 'Home' });
+	// assert.deepEqual(
+	// 	report.pages.map((p) => [p.url, p.status]),
+	// 	[
+	// 		['/about/', 'built'],
+	// 		['/', 'built'],
+	// 	],
+	// ); // previous
+	// Behavior change: the order of `pages` is the one `order` and the URLs make (RFC section 6): a page before what hangs from it
+	assert.deepEqual(report.pages[0].meta, { title: 'Home' });
+	// assert.deepEqual(report.pages[1].meta, { title: 'Home' }); // previous
 	assert.equal(
 		readFileSync(path.join(site, 'out', 'index.html'), 'utf8'),
 		'<h1>Home</h1>\n',
