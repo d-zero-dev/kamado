@@ -171,8 +171,10 @@ function runsWhenLoaded(scope: Scope.Scope): boolean {
  * imported are seen only by the writes that cannot be anything else (`config.a = 1`): a
  * method of that name can be the function of a library (`_.set(o, 'a', 1)`).
  *
- * Why not offer a helper for the memo: what is worth memoizing is computed from the props,
- * and the render of the next page may not see it.
+ * Why the message points to `memo` of `kamado/jsx` and not to a variable of the module: a result
+ * kept in a variable depends on which pages the worker rendered before it, and the core cannot
+ * tell which keys of `data` it came from. `memo` keeps the result and still gives the page the
+ * keys the call read.
  */
 export const noModuleState: Rule.RuleModule = {
 	meta: {
@@ -183,7 +185,7 @@ export const noModuleState: Rule.RuleModule = {
 		},
 		messages: {
 			noModuleState:
-				'"{{name}}" is a variable of the module, and a render must not change it: pages are rendered one after another in several threads, so the HTML would depend on the order. Keep the value inside the function, or compute it from the props.',
+				'"{{name}}" is a variable of the module, and a render must not change it: pages are rendered one after another in several threads, so the HTML would depend on the order. Keep the value inside the function, compute it from the props, or keep a result for the pages that share it with `memo` of `kamado/jsx`.',
 		},
 		schema: [],
 	},
