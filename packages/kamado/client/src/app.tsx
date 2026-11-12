@@ -93,6 +93,7 @@ import {
 	widthOf,
 	type ColumnState,
 } from './logic/layout.js';
+import { movesPage, pageOfLocated } from './logic/order.js';
 import {
 	filesOf,
 	pathEditOf,
@@ -115,6 +116,7 @@ import { createSaver } from './logic/settings-save.js';
 import {
 	ariaSortOf,
 	canSort,
+	isColumnId,
 	sameSort,
 	sortAfterFailure,
 	type SortState,
@@ -356,6 +358,12 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 	const reading = useRef<Reading>('busy');
 	const qRef = useRef('');
 	const pendingFocus = useRef<string | null>(null);
+	// The page whose window the next reading of the list asks for (an edit of `order` may have
+	// put it in another window), and the sort the rows are in now (`apply` runs from the queue,
+	// where the state it was made with is old).
+	const pendingLocate = useRef<string | null>(null);
+	const sortNow = useRef(sort);
+	sortNow.current = sort;
 	// What was done to the page the focus is to go to, when it was not moved (it was added, made
 	// virtual or given a file): said once the list was read again, in place of "Moved to".
 	const pendingSaid = useRef<string | null>(null);
@@ -501,14 +509,28 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 					needRefresh.current = false;
 					await refreshSite();
 				}
+				const locate = pendingLocate.current;
 				const result = await fetchRows(
 					page * pageSize,
 					pageSize,
 					q,
 					sort,
 					controller.signal,
+					locate ?? undefined,
 				);
 				if (controller.signal.aborted) {
+					// Asked again before this answer came: the page is still to be found.
+					return;
+				}
+				pendingLocate.current = null;
+				// The page was found in another window of the list: that window is read (the
+				// focus, still wanted, goes to the page there).
+				const located =
+					locate !== null && result.pages.some((row) => row.url === locate)
+						? pageOfLocated(page * pageSize, result.offset, pageSize)
+						: null;
+				if (located !== null) {
+					setPage(located);
 					return;
 				}
 				const instead = pageToReadInstead(
@@ -733,9 +755,17 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 						// whose list was never read) is not said of this one.
 						pendingSaid.current = null;
 						reload(true);
+					} else if (movesPage(change, sortNow.current)) {
+						// What `order` says places the page among its siblings: the list is read again
+						// from the core (it has put the plan in order), at the window the page is in
+						// now, and the focus follows the page.
+						pendingFocus.current = result.page.url;
+						pendingSaid.current = said;
+						pendingLocate.current = result.page.url;
+						reload(false);
 					} else if (change.op === 'virtualize' || change.op === 'materialize') {
-						// The page has another place in the plan (the pages of `pages.overrides` come
-						// first), and other files: the list is read again, and the focus follows it.
+						// The page has other files (and the hashes of them), and a virtual page has no
+						// input path: the list is read again, and the focus follows the page.
 						pendingFocus.current = result.page.url;
 						pendingSaid.current = said;
 						reload(true);
@@ -1538,7 +1568,7 @@ function Screen({ settings, settingsUnreadable, locale, onLocale }: ScreenProps)
 			// Only a column of metadata has values to choose among.
 			// (and one whose name the settings can keep: the same limit as a sort's column).
 			// The options of the `layout` column are the files of the layouts directory.
-			...(id.startsWith('meta:') && canSort(id) && !optionsFromFiles(id, layouts)
+			...(id.startsWith('meta:') && isColumnId(id) && !optionsFromFiles(id, layouts)
 				? enumKindOf(kinds, id) === undefined
 					? [{ id: 'kindEnum', label: t('column.kindChoose') }]
 					: [

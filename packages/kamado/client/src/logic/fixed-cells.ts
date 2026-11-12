@@ -28,21 +28,18 @@ export interface FixedCell {
  *
  * `url`, `inputPath` and `virtual` are edited: a URL moves the page, a path moves its file (or
  * gives a virtual page one, so the cell of a virtual page is edited too), and `virtual` is a
- * box that is turned over. `order`, `outputPath`, `parent` and `depth` are read only.
+ * box that is turned over. `outputPath`, `parent` and `depth` are read only.
  * @param row - The page
  * @param column - The identifier of the column
  * @example
  * ```ts
  * fixedCellOf(row, 'virtual'); // { text: '', readOnly: false, checked: false }
- * fixedCellOf(row, 'order'); // { text: '3', readOnly: true }
+ * fixedCellOf(row, 'depth'); // { text: '2', readOnly: true }
  * fixedCellOf(row, 'meta:title'); // null
  * ```
  */
 export function fixedCellOf(
-	row: Pick<
-		Row,
-		'depth' | 'inputPath' | 'order' | 'outputPath' | 'parent' | 'url' | 'virtual'
-	>,
+	row: Pick<Row, 'depth' | 'inputPath' | 'outputPath' | 'parent' | 'url' | 'virtual'>,
 	column: string,
 ): FixedCell | null {
 	switch (column) {
@@ -54,9 +51,6 @@ export function fixedCellOf(
 		}
 		case 'inputPath': {
 			return { text: row.inputPath ?? '', readOnly: false };
-		}
-		case 'order': {
-			return { text: String(row.order), readOnly: true };
 		}
 		case 'outputPath': {
 			return { text: row.outputPath, readOnly: true };

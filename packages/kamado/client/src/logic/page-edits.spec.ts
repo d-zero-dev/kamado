@@ -25,7 +25,6 @@ function row(url: string, inputPath: string | null, sidecar: string | null = nul
 		inputPath,
 		outputPath: 'out.html',
 		virtual: inputPath === null,
-		order: 1,
 		depth: 1,
 		parent: '/',
 		hashes: { input: inputPath === null ? null : 'h', sidecar },
@@ -193,6 +192,7 @@ describe('what is said of a page once the list was read again', () => {
 describe('the list after a page was removed', () => {
 	const rows: Rows = {
 		version: 3,
+		offset: 0,
 		total: 12,
 		columns: ['title'],
 		overridesHash: 'o1',

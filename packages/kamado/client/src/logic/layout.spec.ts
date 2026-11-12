@@ -37,11 +37,11 @@ const shown = (state: ColumnState, known: readonly string[] = KNOWN) =>
 describe('columnIds', () => {
 	test('puts the fixed columns first and the keys after them, in the order of their names', () => {
 		// Behavior change: the fixed columns are seven: what the plan makes of a page (order, outputPath, parent, depth) follows the three
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
 		expect(KNOWN).toEqual([
 			'url',
 			'virtual',
 			'inputPath',
-			'order',
 			'outputPath',
 			'parent',
 			'depth',
@@ -49,21 +49,43 @@ describe('columnIds', () => {
 			'meta:b',
 			'meta:c',
 		]);
+		// expect(KNOWN).toEqual([ // previous
+		// 	'url', // previous
+		// 	'virtual', // previous
+		// 	'inputPath', // previous
+		// 	'order', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'depth', // previous
+		// 	'meta:a', // previous
+		// 	'meta:b', // previous
+		// 	'meta:c', // previous
+		// ]); // previous
 		// expect(KNOWN).toEqual(['url', 'virtual', 'inputPath', 'meta:a', 'meta:b', 'meta:c']); // previous
 	});
 
 	test('names a key `url` as a key, not as the URL', () => {
 		// Behavior change: the fixed columns are seven (order, outputPath, parent, depth follow the three)
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
 		expect(columnIds(['url'])).toEqual([
 			'url',
 			'virtual',
 			'inputPath',
-			'order',
 			'outputPath',
 			'parent',
 			'depth',
 			'meta:url',
 		]);
+		// expect(columnIds(['url'])).toEqual([ // previous
+		// 	'url', // previous
+		// 	'virtual', // previous
+		// 	'inputPath', // previous
+		// 	'order', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'depth', // previous
+		// 	'meta:url', // previous
+		// ]); // previous
 		// expect(columnIds(['url'])).toEqual(['url', 'virtual', 'inputPath', 'meta:url']); // previous
 	});
 });
@@ -82,7 +104,9 @@ describe('layoutOf', () => {
 		expect(layout.shown).toEqual(KNOWN);
 		expect(layout.pinnedCount).toBe(1);
 		// Behavior change: the fixed columns are seven, and order, outputPath, parent and depth have widths of their own
-		expect(layout.widths).toEqual([448, 96, 384, 96, 384, 320, 96, 224, 224, 224]);
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
+		expect(layout.widths).toEqual([448, 96, 384, 384, 320, 96, 224, 224, 224]);
+		// expect(layout.widths).toEqual([448, 96, 384, 96, 384, 320, 96, 224, 224, 224]); // previous
 		// expect(layout.widths).toEqual([448, 96, 384, 224, 224, 224]); // previous
 		expect(layout.lefts).toEqual([0]);
 	});
@@ -95,6 +119,7 @@ describe('layoutOf', () => {
 		};
 		const layout = layoutOf(KNOWN, state);
 		// Behavior change: the fixed columns are seven (order, outputPath, parent, depth follow the three)
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
 		expect(layout.shown).toEqual([
 			'meta:b',
 			'url',
@@ -103,11 +128,23 @@ describe('layoutOf', () => {
 			'meta:a',
 			'virtual',
 			'inputPath',
-			'order',
 			'outputPath',
 			'parent',
 			'depth',
 		]);
+		// expect(layout.shown).toEqual([ // previous
+		// 	'meta:b', // previous
+		// 	'url', // previous
+		// 	// The rest: the saved order first, the columns the order does not name after them. // previous
+		// 	'meta:c', // previous
+		// 	'meta:a', // previous
+		// 	'virtual', // previous
+		// 	'inputPath', // previous
+		// 	'order', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'depth', // previous
+		// ]); // previous
 		// expect(layout.shown).toEqual([ // previous
 		// 	'meta:b', // previous
 		// 	'url', // previous
@@ -142,18 +179,30 @@ describe('layoutOf', () => {
 		expect(layout.pinnedCount).toBe(0);
 		// The order, then the columns it does not name in their own order (a new key goes last).
 		// Behavior change: the fixed columns are seven (order, outputPath, parent, depth follow the three)
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
 		expect(layout.shown).toEqual([
 			'meta:c',
 			'url',
 			'virtual',
 			'inputPath',
-			'order',
 			'outputPath',
 			'parent',
 			'depth',
 			'meta:a',
 			'meta:b',
 		]);
+		// expect(layout.shown).toEqual([ // previous
+		// 	'meta:c', // previous
+		// 	'url', // previous
+		// 	'virtual', // previous
+		// 	'inputPath', // previous
+		// 	'order', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'depth', // previous
+		// 	'meta:a', // previous
+		// 	'meta:b', // previous
+		// ]); // previous
 		// expect(layout.shown).toEqual([ // previous
 		// 	'meta:c', // previous
 		// 	'url', // previous
@@ -228,18 +277,30 @@ describe('pinColumn and unpinColumn', () => {
 	test('pin a column after the pinned ones and unpin it back to its place in the order', () => {
 		const pinned = pinColumn(emptyLayout(), KNOWN, 'meta:b');
 		// Behavior change: the fixed columns are seven (order, outputPath, parent, depth follow the three)
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
 		expect(shown(pinned)).toEqual([
 			'url',
 			'meta:b',
 			'virtual',
 			'inputPath',
-			'order',
 			'outputPath',
 			'parent',
 			'depth',
 			'meta:a',
 			'meta:c',
 		]);
+		// expect(shown(pinned)).toEqual([ // previous
+		// 	'url', // previous
+		// 	'meta:b', // previous
+		// 	'virtual', // previous
+		// 	'inputPath', // previous
+		// 	'order', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'depth', // previous
+		// 	'meta:a', // previous
+		// 	'meta:c', // previous
+		// ]); // previous
 		// expect(shown(pinned)).toEqual([ // previous
 		// 	'url', // previous
 		// 	'meta:b', // previous
@@ -277,11 +338,11 @@ describe('moveColumn', () => {
 	test('moves a column one place left or right among the columns that are not pinned', () => {
 		const right = moveColumn(emptyLayout(), KNOWN, 'virtual', 1);
 		// Behavior change: the fixed columns are seven (order, outputPath, parent, depth follow the three)
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
 		expect(shown(right)).toEqual([
 			'url',
 			'inputPath',
 			'virtual',
-			'order',
 			'outputPath',
 			'parent',
 			'depth',
@@ -289,6 +350,18 @@ describe('moveColumn', () => {
 			'meta:b',
 			'meta:c',
 		]);
+		// expect(shown(right)).toEqual([ // previous
+		// 	'url', // previous
+		// 	'inputPath', // previous
+		// 	'virtual', // previous
+		// 	'order', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'depth', // previous
+		// 	'meta:a', // previous
+		// 	'meta:b', // previous
+		// 	'meta:c', // previous
+		// ]); // previous
 		// expect(shown(right)).toEqual([ // previous
 		// 	'url', // previous
 		// 	'inputPath', // previous
@@ -322,11 +395,11 @@ describe('moveColumn', () => {
 		const state = pinColumn(emptyLayout(), KNOWN, 'meta:a');
 		const moved = moveColumn(state, KNOWN, 'virtual', 1);
 		// Behavior change: the fixed columns are seven (order, outputPath, parent, depth follow the three)
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
 		expect(shown(unpinColumn(moved, KNOWN, 'meta:a'))).toEqual([
 			'url',
 			'inputPath',
 			'virtual',
-			'order',
 			'outputPath',
 			'parent',
 			'depth',
@@ -334,6 +407,18 @@ describe('moveColumn', () => {
 			'meta:b',
 			'meta:c',
 		]);
+		// expect(shown(unpinColumn(moved, KNOWN, 'meta:a'))).toEqual([ // previous
+		// 	'url', // previous
+		// 	'inputPath', // previous
+		// 	'virtual', // previous
+		// 	'order', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'depth', // previous
+		// 	'meta:a', // previous
+		// 	'meta:b', // previous
+		// 	'meta:c', // previous
+		// ]); // previous
 		// expect(shown(unpinColumn(moved, KNOWN, 'meta:a'))).toEqual([ // previous
 		// 	'url', // previous
 		// 	'inputPath', // previous
@@ -364,12 +449,12 @@ describe('moveColumnTo', () => {
 	test('puts a column in the place of another that is in the same group', () => {
 		const moved = moveColumnTo(emptyLayout(), KNOWN, 'meta:c', 'virtual');
 		// Behavior change: the fixed columns are seven (order, outputPath, parent, depth follow the three)
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
 		expect(shown(moved)).toEqual([
 			'url',
 			'meta:c',
 			'virtual',
 			'inputPath',
-			'order',
 			'outputPath',
 			'parent',
 			'depth',
@@ -381,15 +466,27 @@ describe('moveColumnTo', () => {
 		// 	'meta:c', // previous
 		// 	'virtual', // previous
 		// 	'inputPath', // previous
+		// 	'order', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'depth', // previous
+		// 	'meta:a', // previous
+		// 	'meta:b', // previous
+		// ]); // previous
+		// expect(shown(moved)).toEqual([ // previous
+		// 	'url', // previous
+		// 	'meta:c', // previous
+		// 	'virtual', // previous
+		// 	'inputPath', // previous
 		// 	'meta:a', // previous
 		// 	'meta:b', // previous
 		// ]); // previous
 		const other = moveColumnTo(emptyLayout(), KNOWN, 'virtual', 'meta:b');
 		// Behavior change: the fixed columns are seven (order, outputPath, parent, depth follow the three)
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
 		expect(shown(other)).toEqual([
 			'url',
 			'inputPath',
-			'order',
 			'outputPath',
 			'parent',
 			'depth',
@@ -398,6 +495,18 @@ describe('moveColumnTo', () => {
 			'virtual',
 			'meta:c',
 		]);
+		// expect(shown(other)).toEqual([ // previous
+		// 	'url', // previous
+		// 	'inputPath', // previous
+		// 	'order', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'depth', // previous
+		// 	'meta:a', // previous
+		// 	'meta:b', // previous
+		// 	'virtual', // previous
+		// 	'meta:c', // previous
+		// ]); // previous
 		// expect(shown(other)).toEqual([ // previous
 		// 	'url', // previous
 		// 	'inputPath', // previous
@@ -473,12 +582,12 @@ describe('stateOf and settingsOf', () => {
 			'meta:b',
 		);
 		// Behavior change: the fixed columns are seven (order, outputPath, parent, depth follow the three)
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
 		expect(settingsOf(state, KNOWN)).toEqual({
 			order: [
 				'url',
 				'inputPath',
 				'virtual',
-				'order',
 				'outputPath',
 				'parent',
 				'depth',
@@ -489,6 +598,22 @@ describe('stateOf and settingsOf', () => {
 			pinned: ['url', 'meta:b'],
 			widths: { 'meta:a': 100 },
 		});
+		// expect(settingsOf(state, KNOWN)).toEqual({ // previous
+		// 	order: [ // previous
+		// 		'url', // previous
+		// 		'inputPath', // previous
+		// 		'virtual', // previous
+		// 		'order', // previous
+		// 		'outputPath', // previous
+		// 		'parent', // previous
+		// 		'depth', // previous
+		// 		'meta:a', // previous
+		// 		'meta:b', // previous
+		// 		'meta:c', // previous
+		// 	], // previous
+		// 	pinned: ['url', 'meta:b'], // previous
+		// 	widths: { 'meta:a': 100 }, // previous
+		// }); // previous
 		// expect(settingsOf(state, KNOWN)).toEqual({ // previous
 		// 	order: ['url', 'inputPath', 'virtual', 'meta:a', 'meta:b', 'meta:c'], // previous
 		// 	pinned: ['url', 'meta:b'], // previous
@@ -504,12 +629,12 @@ describe('stateOf and settingsOf', () => {
 		};
 		const saved = settingsOf(state, KNOWN);
 		// Behavior change: the fixed columns are seven (order, outputPath, parent, depth follow the three)
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
 		expect(saved.order).toEqual([
 			'meta:c',
 			'url',
 			'virtual',
 			'inputPath',
-			'order',
 			'outputPath',
 			'parent',
 			'depth',
@@ -517,6 +642,19 @@ describe('stateOf and settingsOf', () => {
 			'meta:b',
 			'meta:gone',
 		]);
+		// expect(saved.order).toEqual([ // previous
+		// 	'meta:c', // previous
+		// 	'url', // previous
+		// 	'virtual', // previous
+		// 	'inputPath', // previous
+		// 	'order', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'depth', // previous
+		// 	'meta:a', // previous
+		// 	'meta:b', // previous
+		// 	'meta:gone', // previous
+		// ]); // previous
 		// expect(saved.order).toEqual([ // previous
 		// 	'meta:c', // previous
 		// 	'url', // previous
@@ -536,16 +674,26 @@ describe('stateOf and settingsOf', () => {
 		const known = columnIds(['', 'k'.repeat(300), 'title']);
 		const saved = settingsOf({ order: [], pinned: undefined, widths: {} }, known);
 		// Behavior change: the fixed columns are seven (order, outputPath, parent, depth follow the three)
+		// Behavior change: the fixed columns are six: the number of the place in the plan is no column (RFC section 14.2), and `order` is a key of the metadata, a column among the keys
 		expect(saved.order).toEqual([
 			'url',
 			'virtual',
 			'inputPath',
-			'order',
 			'outputPath',
 			'parent',
 			'depth',
 			'meta:title',
 		]);
+		// expect(saved.order).toEqual([ // previous
+		// 	'url', // previous
+		// 	'virtual', // previous
+		// 	'inputPath', // previous
+		// 	'order', // previous
+		// 	'outputPath', // previous
+		// 	'parent', // previous
+		// 	'depth', // previous
+		// 	'meta:title', // previous
+		// ]); // previous
 		// expect(saved.order).toEqual(['url', 'virtual', 'inputPath', 'meta:title']); // previous
 		const withWidth = settingsOf(resizeColumn(emptyLayout(), 'meta:', 100), known);
 		expect(withWidth.widths).toEqual({});

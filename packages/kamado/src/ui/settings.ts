@@ -63,13 +63,13 @@ export const MAX_SORT_KEY = 256;
 
 /**
  * The columns every row has, by their identifiers (RFC section 14.2): what a page is (`url`,
- * `virtual`, `inputPath`) and what the plan makes of it (`order`, `outputPath`, `parent`,
- * `depth`). A key of the metadata is `meta:<key>`, so a key of one of these names is another
- * column. The core takes the same ones as a sort; `crates/kd_napi/check/ui.check.mjs` asks the
- * core for a sort by each, so that one added here and not there is found.
+ * `virtual`, `inputPath`) and what the plan makes of it (`outputPath`, `parent`, `depth`). A
+ * key of the metadata is `meta:<key>`, so a key of one of these names is another column. The
+ * core takes the same ones as a sort; `crates/kd_napi/check/ui.check.mjs` asks the core for a
+ * sort by each, so that one added here and not there is found.
  * @example
  * ```ts
- * BUILTIN_COLUMNS.has('order'); // true
+ * BUILTIN_COLUMNS.has('depth'); // true
  * BUILTIN_COLUMNS.has('title'); // false (a key of the metadata is `meta:title`)
  * ```
  */
@@ -77,7 +77,6 @@ export const BUILTIN_COLUMNS: ReadonlySet<string> = new Set([
 	'url',
 	'virtual',
 	'inputPath',
-	'order',
 	'outputPath',
 	'parent',
 	'depth',
@@ -87,27 +86,48 @@ export const BUILTIN_COLUMNS: ReadonlySet<string> = new Set([
  * The identifiers a column can have, as a message that refuses one says them.
  * @example
  * ```ts
- * COLUMN_NAMES; // 'url, virtual, inputPath, order, outputPath, parent, depth or meta:<key>'
+ * COLUMN_NAMES; // 'url, virtual, inputPath, outputPath, parent, depth or meta:<key>'
  * ```
  */
 export const COLUMN_NAMES = `${[...BUILTIN_COLUMNS].join(', ')} or meta:<key>`;
 
+/** The column of the key that places a page (`order`, RFC section 6): no sort. */
+const ORDER_COLUMN = 'meta:order';
+
 /**
- * Whether `key` names a column of the screen: `url`, `inputPath`, `virtual`, `order`,
- * `outputPath`, `parent`, `depth` or `meta:<key>` (RFC section 14.2).
+ * Whether `key` names a column of the screen: `url`, `inputPath`, `virtual`, `outputPath`,
+ * `parent`, `depth` or `meta:<key>` (RFC section 14.2). A column can be pinned, moved and
+ * given a width whichever it is; whether it can be a sort is {@link isSortKey}.
  * @param key - A column's identifier
  * @example
  * ```ts
- * isSortKey('meta:title'); // true
- * isSortKey('order'); // true
- * isSortKey('title'); // false
+ * isColumnId('meta:title'); // true
+ * isColumnId('meta:order'); // true
+ * isColumnId('order'); // false (the key that places a page is the column `meta:order`)
+ * isColumnId('title'); // false
  * ```
  */
-export function isSortKey(key: string): boolean {
+export function isColumnId(key: string): boolean {
 	return (
 		BUILTIN_COLUMNS.has(key) ||
 		(key.startsWith('meta:') && key.length > 'meta:'.length && key.length <= MAX_SORT_KEY)
 	);
+}
+
+/**
+ * Whether `key` names a column the rows can be sorted by: any column ({@link isColumnId})
+ * but `meta:order`, which places a page among its siblings only (RFC section 6), so that
+ * ordering all the pages by it would mean nothing.
+ * @param key - A column's identifier
+ * @example
+ * ```ts
+ * isSortKey('meta:title'); // true
+ * isSortKey('meta:order'); // false
+ * isSortKey('title'); // false
+ * ```
+ */
+export function isSortKey(key: string): boolean {
+	return isColumnId(key) && key !== ORDER_COLUMN;
 }
 
 /** The column the rows are ordered by, and which way. */
@@ -135,7 +155,7 @@ export const MAX_COLUMNS = 500;
  * How the columns are laid out. Every field is left out when the screen has not set it: the
  * order of the columns, which are pinned (`pinned` left out is the default, the URL; an empty
  * list is every column unpinned) and the widths of the columns that are not the default width.
- * The columns are named as a sort names them (see {@link isSortKey}).
+ * The columns are named as the columns of the screen are (see {@link isColumnId}).
  */
 export interface ColumnSettings {
 	readonly order?: readonly string[];
@@ -403,7 +423,7 @@ function readColumns(value: unknown): ColumnSettings | undefined {
 			? [
 					...new Set(
 						items.filter(
-							(item): item is string => typeof item === 'string' && isSortKey(item),
+							(item): item is string => typeof item === 'string' && isColumnId(item),
 						),
 					),
 				].slice(0, MAX_COLUMNS)
@@ -414,7 +434,7 @@ function readColumns(value: unknown): ColumnSettings | undefined {
 	if (isRecord(value.widths)) {
 		widths = {};
 		for (const [key, width] of Object.entries(value.widths).slice(0, MAX_COLUMNS)) {
-			if (isSortKey(key) && isWidth(width)) {
+			if (isColumnId(key) && isWidth(width)) {
 				setOwn(widths, key, width);
 			}
 		}
@@ -463,7 +483,7 @@ function checkKinds(value: unknown): { kinds: Record<string, EnumKind>; whole: b
 	let bytes = 2;
 	for (const [key, kind] of Object.entries(value)) {
 		if (
-			!isSortKey(key) ||
+			!isColumnId(key) ||
 			!key.startsWith('meta:') ||
 			!isRecord(kind) ||
 			kind.type !== 'enum' ||
@@ -637,7 +657,7 @@ function parseColumns(value: unknown): ColumnSettings | null {
 		if (
 			!Array.isArray(items) ||
 			items.length > MAX_COLUMNS ||
-			!items.every((item) => typeof item === 'string' && isSortKey(item)) ||
+			!items.every((item) => typeof item === 'string' && isColumnId(item)) ||
 			new Set(items).size !== items.length
 		) {
 			throw new Error(
@@ -654,7 +674,7 @@ function parseColumns(value: unknown): ColumnSettings | null {
 		if (
 			entries === undefined ||
 			entries.length > MAX_COLUMNS ||
-			!entries.every(([key, width]) => isSortKey(key) && isWidth(width))
+			!entries.every(([key, width]) => isColumnId(key) && isWidth(width))
 		) {
 			throw new Error(
 				`"columns.widths" maps at most ${MAX_COLUMNS} columns to a whole number of pixels from ${MIN_COLUMN_WIDTH} to ${MAX_COLUMN_WIDTH}`,
