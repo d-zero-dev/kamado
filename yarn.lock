@@ -371,7 +371,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@csstools/css-parser-algorithms@npm:^4.0.0":
+"@csstools/css-parser-algorithms@npm:^4.0.0, @csstools/css-parser-algorithms@npm:^4.0.2":
   version: 4.0.2
   resolution: "@csstools/css-parser-algorithms@npm:4.0.2"
   peerDependencies:
@@ -392,14 +392,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@csstools/css-tokenizer@npm:^4.0.0":
+"@csstools/css-tokenizer@npm:^4.0.0, @csstools/css-tokenizer@npm:^4.0.2":
   version: 4.0.2
   resolution: "@csstools/css-tokenizer@npm:4.0.2"
   checksum: 10c0/748b42450064cca6a54d2bb8a719cb765c6433b8988ed8855f39c9814b8ef30c4daab235ffee9dacb0388916d6e250ec6bee454e8353d06161228e129e4272ae
   languageName: node
   linkType: hard
 
-"@csstools/media-query-list-parser@npm:^5.0.0":
+"@csstools/media-query-list-parser@npm:^5.0.0, @csstools/media-query-list-parser@npm:^5.0.2":
   version: 5.0.2
   resolution: "@csstools/media-query-list-parser@npm:5.0.2"
   peerDependencies:
@@ -409,7 +409,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@csstools/selector-resolve-nested@npm:^4.0.1":
+"@csstools/selector-resolve-nested@npm:^4.0.1, @csstools/selector-resolve-nested@npm:^4.0.2":
   version: 4.0.2
   resolution: "@csstools/selector-resolve-nested@npm:4.0.2"
   peerDependencies:
@@ -418,7 +418,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@csstools/selector-specificity@npm:^6.0.0":
+"@csstools/selector-specificity@npm:^6.0.0, @csstools/selector-specificity@npm:^6.0.1":
   version: 6.0.1
   resolution: "@csstools/selector-specificity@npm:6.0.1"
   peerDependencies:
@@ -8226,7 +8226,7 @@ __metadata:
     pug-parser: "npm:6.0.0"
     react: "npm:19.3.1"
     react-dom: "npm:19.3.1"
-    stylelint: "npm:17.16.0"
+    stylelint: "npm:18.0.0"
     textlint: "npm:15.8.0"
     typescript: "npm:6.0.3"
     vitest: "npm:4.1.12"
@@ -10825,7 +10825,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"postcss-safe-parser@npm:^7.0.1":
+"postcss-safe-parser@npm:^7.0.1, postcss-safe-parser@npm:^7.1.0":
   version: 7.1.0
   resolution: "postcss-safe-parser@npm:7.1.0"
   peerDependencies:
@@ -10922,7 +10922,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"postcss@npm:^8.5.26, postcss@npm:^8.5.28":
+"postcss@npm:^8.5.26, postcss@npm:^8.5.28, postcss@npm:^8.5.31":
   version: 8.5.32
   resolution: "postcss@npm:8.5.32"
   dependencies:
@@ -12304,6 +12304,35 @@ __metadata:
   bin:
     stylelint: bin/stylelint.mjs
   checksum: 10c0/68d13ddac44ab77344c9c6204b5981629f9a44829e3a87a63634ece51af0101814eda05ec05273b43967f82e2c9f407a1b455e503a86a63080f88738ac736824
+  languageName: node
+  linkType: hard
+
+"stylelint@npm:18.0.0":
+  version: 18.0.0
+  resolution: "stylelint@npm:18.0.0"
+  dependencies:
+    "@csstools/css-calc": "npm:^3.4.3"
+    "@csstools/css-parser-algorithms": "npm:^4.0.2"
+    "@csstools/css-syntax-patches-for-csstree": "npm:^1.1.15"
+    "@csstools/css-tokenizer": "npm:^4.0.2"
+    "@csstools/media-query-list-parser": "npm:^5.0.2"
+    "@csstools/selector-resolve-nested": "npm:^4.0.2"
+    "@csstools/selector-specificity": "npm:^6.0.1"
+    colord: "npm:^2.10.0"
+    cosmiconfig: "npm:^10.0.1"
+    css-tree: "npm:^3.2.1"
+    ignore: "npm:^7.0.14"
+    import-meta-resolve: "npm:^4.2.0"
+    picomatch: "npm:^4.0.7"
+    postcss: "npm:^8.5.31"
+    postcss-safe-parser: "npm:^7.1.0"
+    postcss-selector-parser: "npm:^7.1.7"
+    postcss-value-parser: "npm:^4.2.0"
+    tinyglobby: "npm:^0.2.17"
+    write-file-atomic: "npm:^8.0.0"
+  bin:
+    stylelint: bin/stylelint.mjs
+  checksum: 10c0/e5465ea0db70c500c367dd55a5564a37639154c26f48f8ebb5b375a9f26c3cf27300fed4c919f876edd2e0dea73139eaf062c26a0786e63c8b23273a3f12ac8f
   languageName: node
   linkType: hard
 
