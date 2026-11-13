@@ -47,6 +47,9 @@ export default lintStagedConfigGenerator(
 	{
 		ignore: [
 			{
+				// `.oxfmtrc.json` ignores the CHANGELOGs, and oxfmt fails when every file it is given is
+				// ignored, so a commit of the CHANGELOGs alone (a release) must not hand them to it.
+				oxfmt: 'CHANGELOG.md',
 				textlint: 'CHANGELOG.md',
 			},
 			{
