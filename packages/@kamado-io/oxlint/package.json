@@ -1,6 +1,6 @@
 {
 	"name": "@kamado-io/oxlint",
-	"version": "3.0.0-alpha.6",
+	"version": "3.0.0-alpha.7",
 	"description": "Oxlint rules for the JSX of kamado: what a page that is rendered once to HTML cannot do",
 	"repository": {
 		"type": "git",
