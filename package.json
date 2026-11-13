@@ -79,7 +79,7 @@
 		"mdn-data": "2.37.2",
 		"npm-run-all2": "9.0.4",
 		"oxfmt": "0.62.0",
-		"oxlint": "1.77.0",
+		"oxlint": "1.91.0",
 		"oxlint-tsgolint": "7.0.2005",
 		"postcss": "8.5.25",
 		"postcss-custom-media": "12.0.1",
@@ -95,7 +95,7 @@
 		"vitest": "4.1.12"
 	},
 	"resolutions": {
-		"nx/undici": "8.12.3"
+		"nx/undici": "8.12.4"
 	},
 	"packageManager": "yarn@4.18.1",
 	"volta": {
