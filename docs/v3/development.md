@@ -109,7 +109,7 @@ yarn vitest run packages/@kamado-io/oxlint    # 規則の spec と、実物の o
 
 **版の上げ方**（安定版から）。規則の追加と、既存の規則が見つけるものの拡大は、マイナーとして扱う。規則の削除、名前や`messageId`の変更、報告の縮小（見つけていたものを見つけなくなること）は、メジャーとして扱う。このパッケージは`recommended`を持たず、利用者が規則を自分で挙げるので、新しい規則は自動では有効にならない。既存の規則の拡大は、同じ名前のまま新しい報告を出すので、利用者の lint が赤くなることがある。そのため、変更の説明（コミットの本文）に、新しく報告されるものを書く。`kamado`と同じ版で公開するので、このパッケージだけの変更でも、版は`kamado`と一緒に上がる。
 
-`oxlint`と`eslint`（このパッケージの devDependencies）は、`.github/renovate.json`のグループに入れていない。片方だけ版が上がっても、ビルドと型検査は通るため（`eslint`は型と規則の spec に、`oxlint`は`oxlint.spec.ts`にだけ使う）。`oxlint`が上がると、`oxlint.spec.ts`の期待（行と規則）が変わることがあり、そのときは Renovate の PR の中で直す。
+`eslint`（このパッケージの devDependencies）は、`.github/renovate.json`のグループに入れていない。上がっても、ビルドと型検査は通るため（型と規則の spec にだけ使う）。`oxlint`は、ルートの`oxlint-tsgolint`と同じ`oxlint`のグループに入っている（ルートの lint が使う版とそろえる）。`oxlint`が上がると、`oxlint.spec.ts`の期待（行と規則）が変わることがあり、そのときは Renovate の PR の中で直す。
 
 **最初の公開は手で行う（1 回だけ）。** npm の Trusted Publishing は、まだ npm にないパッケージには設定できない。そのため`@kamado-io/oxlint`の最初の版だけは、次の手順で公開する。**次のタグを push する前に**済ませる（`publish.yml`の`check`ジョブが、npm にこのパッケージがあることを公開の前に確かめる）。
 
@@ -118,6 +118,18 @@ yarn vitest run packages/@kamado-io/oxlint    # 規則の spec と、実物の o
 3. npmjs.com のパッケージの設定（Settings の Trusted Publisher）で、GitHub Actions、リポジトリ`d-zero-dev/kamado`、ワークフロー`publish.yml`を登録する。
 
 手で公開した版には provenance が付かない（npm が付けるのは、CI の OIDC で公開したときだけ）。次の版からは、`kamado`と同じタグの push で、同じワークフローが provenance 付きで公開する。
+
+## lint
+
+`yarn lint`（修正あり）と`yarn lint:check`（修正なし。CI）は、oxlint（型情報つき）、stylelint、markuplint、oxfmt、textlint、rustfmt、clippy をこの順に実行する。ESLint・Prettier・cspell は使わない。
+
+- **型情報つきの oxlint は、`yarn build`のあと**に動かす（`lib/*.d.ts`などの宣言を読む）。pre-commit の oxlint は型情報なしで、型情報の規則は CI で初めて報告される。
+- **`oxlint --disable-nested-config`**: `packages/@kamado-io/oxlint/fixtures/app/`は、`.oxlintrc.json`と`oxlint.config.mts`を両方持つ（`oxlint.spec.ts`が、どちらでも同じ報告になることを確かめるため）。oxlint は 1 つのディレクトリに両方あると設定の読み込みで失敗するので、ルートの lint は入れ子の設定を探さない。対象外の指定は`oxlint.config.mts`の`ignorePatterns`。
+- **`@d-zero/no-click-event`**: ボタンのクリックは`command`/`commandfor`（Invoker Commands API）で送り、`onClick`・`addEventListener('click')`は書かない。リポジトリ全体で error。`kamado ui`の画面（`packages/kamado/client`）の markuplint も、`security/no-event-handler-attr`を`click`だけに絞って同じことを見張る（`.markuplintrc.json`）。`onChange`・`onKeyDown`などその他のイベントは許可する。markuplint の React の仕様が属性として持たないイベント（`onDoubleClick`・`onPointer*`）は、`no-unknown-attr`の`allowAttrs`に挙げてある。新しいイベントを使うときは、ここに足す。
+- **markuplint**: 対象は`packages/kamado/client`。`@d-zero/markuplint-config`の`index`は class の命名（`l-`/`p-`/`c-`）を含むので、`base`と`jsx`だけを extends する。`index.html`は部品を React が描く殻で、`h1`は`app.tsx`が描くので、`a11y/required-h1`をこの 1 ファイルだけ無効にしてある。ポインタ専用のボタン（`aria-hidden="true"`と`tabIndex={-1}`。`grid-row.tsx`の`cell-hit`と`check`）は、設計どおり支援技術に見せないので、`a11y/wai-aria/interaction-in-hidden`をその形のボタンだけ無効にしてある（`nodeRules`）。設定ファイルは JSON でコメントを書けないので、理由はここに置く。
+- **stylelint**: 対象は`packages/**/*.css`（今は`kamado ui`の`style.css`だけ）。`@d-zero/stylelint-config`の`base`と`order`を extends する。`base`は論理プロパティ（`margin-inline-start`、`inset-block-start`など）と個別の transform プロパティ（`translate`、`rotate`）を求める。`values`（`display`・`flex`・`z-index`・単位の流儀）と`name`（class の命名）は入れていない。
+- **抑制**: oxlint の規則と実装の食い違いで抑制した箇所には、行の抑制（`oxlint-disable-next-line <規則> -- <理由>`）か、ファイルの先頭の抑制に理由を書く。`jsx/runtime.ts`の`typescript/no-base-to-string`は、React の` + value`と同じ変換（`valueOf`が先）を保つために、ファイルごと外してある（`String(value)`は`valueOf`のあるオブジェクトで結果が変わる）。文字列の`[...text]`は、2 単位の文字を割らないために使っている（`unicorn/prefer-spread`と`typescript/no-misused-spread`が食い違うので、後者を行ごとに外してある）。
+- **`@d-zero/eslint-config`と`eslint`**: `scripts/pug-to-tsx-types.spec.ts`が、変換器の import の並びを`import-x/order`に通して確かめるので、oracle としてルートの devDependencies に残している（`yarn lint`は使わない。Renovate の対象外。ルートの`eslint`も、設定が固定する版のまま）。ESLint 専用だった規則（`import-x`・`sort-class-members`・`eslint-plugin-regexp`・`#private`の強制）は oxlint に移していない。
 
 ## 何を更新したら、何を作り直すか
 
@@ -183,7 +195,7 @@ Pug から TSX への変換器（`scripts/pug-to-tsx.mjs`）は、小さな Pug 
 
 `fuzz-html-chain.mjs`の第 4 引数に`on`（圧縮あり）を渡して作ったコーパスは、`chain_matches_v2`に`KD_CHAIN_MINIFY=on`を付けて回す（圧縮の JS/CSS は両側とも切る）。付けない（または`off`）と v3 の圧縮を切る。ほかの値はエラー。
 
-`scripts/`と`benchmarks/`は、ルートの`yarn lint:eslint`の対象外（prettier と cspell だけが見る）。
+`scripts/`と`benchmarks/`も、`yarn lint`（oxlint と oxfmt）の対象。`benchmarks/v2-baseline/`は単独のプロジェクトなので対象外。
 
 ## v2 の oracle
 
@@ -223,7 +235,7 @@ v3 の出力と比べるには「比較ハーネスとベンチマーク」の`c
 
 `crates/kd_css/tests/rules.rs`は`generate-css-rule-tests.mjs`が書くので、手では編集しない。手で書くテストは`crates/kd_css/tests/rules_hand.rs`に置く。
 
-**4. HTML の整形・圧縮と JSX（`kd_html`・`kd_js`のテーブルと、ランダム入力の差分テスト）**: v2 の`@kamado-io/page-compiler`が使う`prettier`・`html-minifier-terser`・`character-entities`と、`@kamado-io/jsx-compiler`が使う`esbuild`を、同じ版でルートの`devDependencies`に固定する（`npm view @kamado-io/page-compiler@2.0.0-alpha.17 dependencies`と`npm view @kamado-io/jsx-compiler@2.0.0-alpha.17 dependencies`で読める）。`prettier`と`esbuild`は、このリポジトリが別の用途でも使う（`yarn lint`の整形と、`kamado`のランタイム依存）ので、oracle は`kamado-v2`と同じ`npm:`の別名にする: `prettier-v2`と`esbuild-v2`。ルートの`prettier`と`esbuild`は oracle ではなく、Renovate が通常どおり上げる。`html-minifier-terser`（`@types/html-minifier-terser`も）と`character-entities`は別名にしない。これらは Renovate の対象から外してある（`.github/renovate.json`）。使うスクリプトは次のとおり。
+**4. HTML の整形・圧縮と JSX（`kd_html`・`kd_js`のテーブルと、ランダム入力の差分テスト）**: v2 の`@kamado-io/page-compiler`が使う`prettier`・`html-minifier-terser`・`character-entities`と、`@kamado-io/jsx-compiler`が使う`esbuild`を、同じ版でルートの`devDependencies`に固定する（`npm view @kamado-io/page-compiler@2.0.0-alpha.17 dependencies`と`npm view @kamado-io/jsx-compiler@2.0.0-alpha.17 dependencies`で読める）。`esbuild`は、`kamado`のランタイム依存でもあるので、oracle は`kamado-v2`と同じ`npm:`の別名にする: `esbuild-v2`。`prettier`も同じ別名の`prettier-v2`で、ルートに`prettier`は無い。ルートの`esbuild`は oracle ではなく、Renovate が通常どおり上げる。`yarn lint`の整形は oxfmt で、prettier は oracle としてだけ入っている。`html-minifier-terser`（`@types/html-minifier-terser`も）と`character-entities`は別名にしない。これらは Renovate の対象から外してある（`.github/renovate.json`）。使うスクリプトは次のとおり。
 
 - `scripts/generate-prettier-tables.mjs`（`prettier-v2`のプラグインから表を読む）、`scripts/generate-jsx-entities.mjs`（`esbuild-v2`に尋ねる）、`scripts/generate-entities.mjs`、`scripts/generate-minifier-tables.mjs`、`scripts/generate-minify-golden.mjs`
 - `scripts/v2-print.mjs`（`prettier-v2`と`html-minifier-terser`を v2 と同じ設定で動かす。`fuzz-html-print.mjs`・`fuzz-html-json.mjs`・`fuzz-html-pipeline.mjs`・`fuzz-html-chain.mjs`・`fuzz-html-minify.mjs`が使う）、`scripts/check-kd-js-jsx.mjs`（`esbuild-v2`で case を bundle する）

@@ -1,5 +1,5 @@
 ---
-description: Always run lint, build, and test commands after completing code changes
+description: Always run build, lint, and test commands after completing code changes
 globs: *,**/*
 alwaysApply: true
 ---
@@ -20,17 +20,18 @@ alwaysApply: true
 
 After completing any code changes, you MUST run the following commands in order **from the repository root**:
 
-1. **Lint Check**: `yarn lint`
-   - Runs ESLint across all packages
-   - Fix all linter errors and warnings before proceeding
-   - Never leave lint warnings unresolved
-   - Ask user permission before disabling ESLint rules
-
-2. **Build Check**: `yarn build`
+1. **Build Check**: `yarn build`
    - Builds the Node package via Lerna
    - Ensure all packages build successfully
    - Verify import paths are correct
    - Check for TypeScript compilation errors
+   - It comes first: the type-aware rules of oxlint read the declarations that it writes
+
+2. **Lint Check**: `yarn lint`
+   - Runs oxlint, stylelint, markuplint, oxfmt, textlint, rustfmt and clippy
+   - Fix all linter errors and warnings before proceeding
+   - Never leave lint warnings unresolved
+   - Ask user permission before disabling oxlint rules
 
 3. **Test Check**: `yarn test`
    - Run all test suites across all packages via Vitest
@@ -41,9 +42,7 @@ After completing any code changes, you MUST run the following commands in order 
 
 After completing any Rust changes, you MUST also run the following commands **from the repository root**, one command per call:
 
-1. `cargo fmt --all`
-2. `cargo clippy --locked --offline --all-targets -- -D warnings`
-3. `cargo test --locked --offline --workspace`
+1. `cargo test --locked --offline --workspace` (`cargo fmt` and `cargo clippy` are part of `yarn lint`)
 
 Do NOT add external crates (CI runs `node scripts/check-rust-no-external-crates.mjs`).
 
@@ -93,13 +92,13 @@ This is acceptable for:
 Before reporting task completion or proposing a commit, you MUST run the full suite:
 
 ```bash
-# 1. Lint first
-yarn lint
-
-# 2. Build if lint passes
+# 1. Build first (the type-aware lint reads its declarations)
 yarn build
 
-# 3. Test ALL suites if build passes
+# 2. Lint if the build passes
+yarn lint
+
+# 3. Test ALL suites if lint passes
 yarn test
 
 # 4. Only then report completion or proceed to commit

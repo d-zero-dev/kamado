@@ -6,10 +6,10 @@ description: プルリクエストの作成とプッシュ（プリフライト�
 1. `dev` や `main` ではないトピックブランチにいることを確認する。
 2. **base 追従（コンフリクト予防）**: `git fetch origin dev` を実行し、`git log HEAD..origin/dev --oneline` で base が進んでいないか確認する。進んでいれば push 前に `git merge origin/dev` で取り込む。**rebase はしない** — worktree では rebase 中の `git commit --amend` で husky のフック解決が壊れることがあり、merge ならレビュー済みの履歴がそのまま残る。ドキュメント系のコンフリクトは機械的に解決せず、base 側で追加された内容を方針（README / JSDoc / `docs/v3` の役割分担）に沿って取り込むこと。
 3. **プリフライトチェック（必須 — 省略不可）:**
-   - `yarn lint`、`yarn build`、`yarn test` がこのセッション内でまだ実行・成功していない場合、続行する前に**今すぐ実行**する。base を取り込んだ場合は取り込み後に再実行する。
-   - Rust（`crates/`、`Cargo.toml`、`scripts/`）に変更がある場合は、`cargo fmt --all -- --check`、`cargo clippy --locked --offline --all-targets -- -D warnings`、`cargo test --locked --offline --workspace`、`node scripts/check-rust-no-external-crates.mjs` も実行する（CI の `rust.yml` と同じ。コマンドは 1 回の呼び出しに 1 つ）。
+   - `yarn build`、`yarn lint`（型情報つきの oxlint が`yarn build`の出力を読むので、build が先。rustfmt と clippy も含む）、`yarn test` がこのセッション内でまだ実行・成功していない場合、続行する前に**今すぐ実行**する。base を取り込んだ場合は取り込み後に再実行する。
+   - Rust（`crates/`、`Cargo.toml`、`scripts/`）に変更がある場合は、`cargo test --locked --offline --workspace`、`node scripts/check-rust-no-external-crates.mjs` も実行する（CI の `rust.yml` と同じ。コマンドは 1 回の呼び出しに 1 つ）。
    - 全てがパスしなければならない。失敗があれば続行前に修正する。
-   - **`yarn lint` が prettier で意図しない再整形を出した場合は要注意**: コミット済みの整形と食い違う差分は prettier のバージョン差異による drift の可能性がある。自分の変更と無関係な再整形は取り込まず、ユーザーに報告する。
+   - **`yarn lint` が oxfmt で意図しない再整形を出した場合は要注意**: コミット済みの整形と食い違う差分は oxfmt のバージョン差異による drift の可能性がある。自分の変更と無関係な再整形は取り込まず、ユーザーに報告する。
 4. 適切な `git` コマンドを使って現在のトピックブランチの変更をレビューする。
    - **機密・案件情報とサンプル慣例のダブルチェック**: base branch との全 diff（`git diff origin/dev...HEAD`）に対して、`.claude/skills/git/SKILL.md` の「機密・案件情報の検出」と「サンプル値の慣例チェック」を再実行する。コミット単位のチェックをすり抜けた企業名・顧客情報・実在ドメイン・未取得ドメイン・案件識別子・実データ断片がないかを PR 全体で確認する。検出したら汎用値へ書き換えて追加コミットする。
 5. **PR body を一時ファイルに保存する**: scratchpad ディレクトリに PR body（markdown）を書き出す。タイトルは英語、本文は日本語で書く。**PR body は diff の要約であり会話の要約ではない** — セッション中に出てきた顧客名・案件名・社外秘情報は、diff 自体に含まれていない限り書き込まない。以下の 3 つの節は見出しの文字列をこのとおりに書く（スクリプトとレビューが見出しで節を探す）。
