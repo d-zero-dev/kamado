@@ -1,0 +1,39 @@
+{
+	"extends": ["@d-zero/markuplint-config/base", "@d-zero/markuplint-config/jsx"],
+	"pretenders": {
+		"auto": true
+	},
+	"rules": {
+		"security/no-event-handler-attr": {
+			"rules": {
+				"no-event-handler-attr": ["click"]
+			}
+		},
+		"no-unknown-attr": {
+			"options": {
+				"allowAttrs": [
+					"onDoubleClick",
+					"onPointerCancel",
+					"onPointerDown",
+					"onPointerMove",
+					"onPointerUp"
+				]
+			}
+		}
+	},
+	"overrides": {
+		"packages/kamado/client/index.html": {
+			"rules": {
+				"a11y/required-h1": false
+			}
+		}
+	},
+	"nodeRules": [
+		{
+			"selector": "button[aria-hidden=\"true\"][tabindex=\"-1\"]",
+			"rules": {
+				"a11y/wai-aria/interaction-in-hidden": false
+			}
+		}
+	]
+}

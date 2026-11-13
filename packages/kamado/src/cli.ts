@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* eslint-disable no-console -- the CLI's job is to print */
+/* oxlint-disable no-console -- the CLI's job is to print */
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';

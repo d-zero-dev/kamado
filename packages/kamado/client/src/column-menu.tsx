@@ -140,6 +140,8 @@ export function ColumnMenu({ label, note, anchor, items, onChoose, onClose }: Me
 		// The note is outside the element with `role="menu"`: the children of a menu are its
 		// entries, and a paragraph among them is not one. The menu still points at it with
 		// `aria-describedby`, which can name any element.
+		// The keys of the entries come up to this element, which holds the menu and its note.
+		// oxlint-disable-next-line jsx-a11y/no-static-element-interactions
 		<div
 			ref={commands.ref}
 			id={commands.id}

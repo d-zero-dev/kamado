@@ -46,7 +46,7 @@ allowed-tools: Bash(node ${CLAUDE_SKILL_DIR}/scripts/leftovers.mjs *)
 - [ ] 7. /security-review — 指摘を台帳に入れ、訳して全部直した
 - [ ] 8. qa-engineer（別コンテキストのサブエージェント）— 指摘を台帳に入れて直した
 - [ ] 9. product-manager（別コンテキストのサブエージェント）— 指摘を台帳に入れて直した。/code-review を 1 回再実行した
-- [ ] 10. yarn lint クリーン（+ Rust に変更があれば cargo fmt / clippy）
+- [ ] 10. yarn build のあと yarn lint クリーン（rustfmt と clippy を含む）
 - [ ] 11. yarn test グリーン（+ Rust に変更があれば cargo test と外部クレート検査）
 - [ ] 12. 先送り項目の棚卸し — 未対応のものが残っていない。Carry-over の全項目を Issue にした
 - [ ] 13. コミット済み（git スキル）
@@ -63,7 +63,7 @@ allowed-tools: Bash(node ${CLAUDE_SKILL_DIR}/scripts/leftovers.mjs *)
 7. **`/security-review`**: Skill ツールで `security-review` を起動する。結果を待ち、全指摘を台帳に入れ、訳して全部直す
 8. **`qa-engineer` を別コンテキストで**: コードを書いたモデルに採点させない。Agent ツールでサブエージェントを起動し、`.claude/skills/qa-engineer/SKILL.md` を読ませてから `git diff origin/dev...HEAD` をレビューさせる。プロンプトには base ブランチ、合意スコープの要約（数行）、「指摘は軽微なものも含めてすべて `file:line` で報告し、編集はしない」を書く。返ってきた指摘を全部台帳に入れて直す
 9. **`product-manager` を別コンテキストで**: 手順 8 と同じ方法で `.claude/skills/product-manager/SKILL.md` を使う（ドキュメント整合 — JSDoc 配置・コメント原則・`docs/v3` と実装の一致 — を含む）。手順 8 と 9 は独立しているので、2 つのサブエージェントを同じメッセージで起動する。手順 6〜9 の全指摘が `fixed` か `user:` の状態になったら、`/code-review medium` をもう 1 回だけ実行する（検証 → 修正 → 再検証のループを 1 周に限る。新しい指摘は直して台帳に加え、3 周目は回さない）
-10. `yarn lint` を実行し、エラーを修正。Rust に変更がある場合は `cargo fmt --all` と `cargo clippy --locked --offline --all-targets -- -D warnings` も実行する（コマンドは 1 回の呼び出しに 1 つ）
+10. `yarn build` のあとに `yarn lint` を実行し、エラーを修正する（型情報つきの oxlint が`yarn build`の出力を読む。`yarn lint`は rustfmt と clippy も実行する）
 11. `yarn test` を実行し、失敗を修正。Rust に変更がある場合は `cargo test --locked --offline --workspace` と `node scripts/check-rust-no-external-crates.mjs` も実行する。`yarn test` は Rust のワークスペースに届かない
 12. **先送り項目の棚卸し**: 計画ファイルを読み直す。この実行で後回しにした・飛ばした・「あとで」と書いたものを応答に列挙し、1 つずつこのセッションのツール結果に対して閉じる（指せる結果が無い項目は開いたまま）。順に: (a) 計画や会話で挙がった lint / test 以外の検証（再現、v2 の oracle との比較、`benchmarks/v3` の計測、手動確認、dry run）— 未実行のものは今実行して出力を見せる。実行できないもの（実データが無い等）はそう言って、ユーザーに免除か PR を開けたままにするかを確認し、免除は次のセッションが見つけられる場所に記録する (b) `Findings` 台帳の全指摘が `fixed` か `user:` の状態になっている (c) 手順 6〜9 で出たスコープ外の指摘のうち `Carry-over` 台帳にまだ無いものを、手順 5 と同じように聞く。次に **`Carry-over` 台帳の全項目を、1 件ずつ `create-issue` スキルで Issue にする**。箇条書きがそのまま再現記録であり、`create-issue` が下書きごとに `AskUserQuestion` で確認する。作成したら計画ファイルの該当項目の末尾に ` — Filed as #N` を付ける。`Filed as #N` の無い項目が 1 つでも残っている間は手順 13 に進まない (d) 確認せずに置いた前提（コマンドの出力形式、ツールの有無、フィールド名）— 今確認する (e) 先送りが diff に残す痕跡: `git diff origin/dev | grep -nE '^\+.*(TODO|FIXME|XXX|\.skip\(|\.todo\(|skipIf\(|#\[ignore)'` を実行して出力を見せる。空でなければならない。空のリストも「何を確認したか」を添えて報告する。閉じる過程でコードが変わったら手順 10〜11 をやり直す。開いた項目が残ったままコミットしない
 13. `/git` の手順でコミットする（領域ごと、依存元から順に。全部コミットしてから手順 14 へ）

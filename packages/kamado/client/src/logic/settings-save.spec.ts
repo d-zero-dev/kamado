@@ -58,7 +58,7 @@ describe('createSaver', () => {
 
 	test('a change made while another is on its way is sent after it, and only the last one reports success', async () => {
 		const sent: SettingsPatch[] = [];
-		const reports: (unknown | null)[] = [];
+		const reports: unknown[] = [];
 		let finishFirst: () => void = () => {};
 		const save = createSaver(
 			(patch) => {

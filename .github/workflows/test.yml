@@ -56,6 +56,15 @@ jobs:
       - name: Compile
         run: yarn build
 
+      # `yarn lint:check` runs rustfmt and clippy too. The version is the one of rust.yml, publish.yml
+      # and bench-cold.yml, which pin it there (and not in a rust-toolchain.toml, which makes every
+      # local `cargo` reinstall it): change all of them together.
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.98.1
+          rustc --version
+
       - name: Lint
         run: yarn lint:check
 

@@ -60,6 +60,8 @@ function setup(
 ) {
 	const calls: { url: string; init: RequestInit }[] = [];
 	const fakeFetch = vi.fn((url: string | URL | Request, init?: RequestInit) => {
+		// The proxy calls it with a string or a `URL`, never a `Request`: the text of both is the address.
+		// oxlint-disable-next-line typescript/no-base-to-string
 		calls.push({ url: String(url), init: init ?? {} });
 		return Promise.resolve(respond());
 	});

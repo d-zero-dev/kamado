@@ -46,6 +46,7 @@ function classSource(source, name) {
 	if (!match) {
 		throw new Error(`${name} not found`);
 	}
+	// oxlint-disable-next-line typescript/no-implied-eval -- the string literal in the oracle's source text is evaluated to get the text it denotes
 	return new Function(`return '${match[1]}';`)();
 }
 

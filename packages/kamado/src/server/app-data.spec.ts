@@ -49,9 +49,11 @@ function data(...changes: boolean[]) {
  * @param pathname - The path
  */
 async function get(source: ReturnType<typeof data> | undefined, pathname: string) {
-	const { app } = createApp(DESCRIPTION, 'file:///runtime.js', {
-		...(source === undefined ? {} : { data: source }),
-	});
+	const { app } = createApp(
+		DESCRIPTION,
+		'file:///runtime.js',
+		source === undefined ? {} : { data: source },
+	);
 	return app.request(`http://localhost:3000${pathname}`, {
 		headers: { host: 'localhost:3000' },
 	});

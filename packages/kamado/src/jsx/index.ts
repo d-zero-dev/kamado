@@ -167,7 +167,7 @@ export interface LayoutProps extends PageProps {
 // `<html static>` keeps the template order (RFC §7). Projects that type JSX
 // with `@types/react` (a peer of this package) need this member.
 declare module 'react' {
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- matches @types/react
+	// The type parameter is unused on purpose: it matches @types/react.
 	interface HtmlHTMLAttributes<T> {
 		static?: boolean | undefined;
 	}

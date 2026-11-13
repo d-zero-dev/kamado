@@ -2,6 +2,7 @@ import type { Item, ItemKind } from './logic/list-items.js';
 
 import { useLayoutEffect, useRef, useState } from 'react';
 
+import { focusOnMountIfFirst } from './focus-on-mount.js';
 import { useI18n } from './i18n/context.js';
 import {
 	addItem,
@@ -184,6 +185,8 @@ export function ListEditor({ label, draft, commit, cancel, invalid }: ListEditor
 	);
 
 	return (
+		// The keys and the blur of the boxes come up to the group, which is the one widget they make.
+		// oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
 		<div
 			ref={commands.ref}
 			id={commands.id}
@@ -247,7 +250,7 @@ export function ListEditor({ label, draft, commit, cancel, invalid }: ListEditor
 									<input
 										data-control="input"
 										type="checkbox"
-										autoFocus={index === 0}
+										ref={focusOnMountIfFirst}
 										aria-label={t('list.item', { n: index + 1 })}
 										checked={item.text === 'true'}
 										onChange={(event) =>
@@ -261,7 +264,7 @@ export function ListEditor({ label, draft, commit, cancel, invalid }: ListEditor
 										step={item.kind === 'number' ? 'any' : undefined}
 										aria-label={t('list.item', { n: index + 1 })}
 										value={item.text}
-										autoFocus={index === 0}
+										ref={focusOnMountIfFirst}
 										onChange={(event) =>
 											setItems(changeItem(items, item.id, event.target.value))
 										}
@@ -273,7 +276,7 @@ export function ListEditor({ label, draft, commit, cancel, invalid }: ListEditor
 									aria-label={t('list.up', { n: index + 1 })}
 									disabled={index === 0}
 									{...commands.run('up')}>
-									<span aria-hidden="true">↑</span>
+									<span>↑</span>
 								</button>
 								<button
 									type="button"
@@ -281,14 +284,14 @@ export function ListEditor({ label, draft, commit, cancel, invalid }: ListEditor
 									aria-label={t('list.down', { n: index + 1 })}
 									disabled={index === items.length - 1}
 									{...commands.run('down')}>
-									<span aria-hidden="true">↓</span>
+									<span>↓</span>
 								</button>
 								<button
 									type="button"
 									data-control="remove"
 									aria-label={t('list.remove', { n: index + 1 })}
 									{...commands.run('remove')}>
-									<span aria-hidden="true">✕</span>
+									<span>✕</span>
 								</button>
 							</li>
 						))}

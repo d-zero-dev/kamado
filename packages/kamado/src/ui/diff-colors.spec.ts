@@ -31,7 +31,7 @@ function luminance(color: string): number {
 			: color;
 	const [r = 0, g = 0, b = 0] = [1, 3, 5].map((at) => {
 		const channel = Number.parseInt(hex.slice(at, at + 2), 16) / 255;
-		return channel <= 0.039_28 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+		return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
 	});
 	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }

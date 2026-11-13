@@ -133,6 +133,9 @@ import { RevertDialog } from './revert-dialog.js';
 import { SyncDialog, type SyncEnd } from './sync-dialog.js';
 import { useCommands } from './use-commands.js';
 
+/** The `id` of the title that names the dialog that adds a key. */
+const ADD_KEY_TITLE_ID = 'add-key-title';
+
 /**
  * Rows put in the page at a time: the first paint is not held up by the rest. 500 rows drew
  * in about 130 ms on a laptop (5,000 take about ten times that), which keeps the first
@@ -1500,7 +1503,7 @@ function Screen({
 		} else {
 			next = buttons[at + (event.key === 'ArrowRight' ? 1 : -1)];
 		}
-		if (at >= 0 && next !== undefined) {
+		if (at !== -1 && next !== undefined) {
 			event.preventDefault();
 			next.focus();
 		}
@@ -1978,6 +1981,8 @@ function Screen({
 							dragging !== id &&
 							columns.indexOf(dragging) < pinnedCount === isPinned;
 						return (
+							// The header is moved by drag; the way in with the keyboard is the button inside it.
+							// oxlint-disable-next-line jsx-a11y/interactive-supports-focus
 							<div
 								key={id}
 								role="columnheader"
@@ -2049,7 +2054,7 @@ function Screen({
 									aria-expanded={menu?.id === id}
 									aria-label={t('column.menu', { name })}
 									{...commands.run('columnMenu')}>
-									<span aria-hidden="true">⋮</span>
+									<span>⋮</span>
 								</button>
 								<span
 									aria-hidden="true"
@@ -2238,7 +2243,7 @@ function AddKeyDialog({ dialogRef, onAdd }: AddKeyProps) {
 		<dialog
 			ref={dialogRef}
 			id={ADD_KEY_DIALOG_ID}
-			aria-labelledby="add-key-title"
+			aria-labelledby={ADD_KEY_TITLE_ID}
 			className="dialog">
 			<form
 				method="dialog"
@@ -2252,7 +2257,7 @@ function AddKeyDialog({ dialogRef, onAdd }: AddKeyProps) {
 					setName('');
 					dialogRef.current?.close();
 				}}>
-				<h2 id="add-key-title">{t('app.addKey')}</h2>
+				<h2 id={ADD_KEY_TITLE_ID}>{t('app.addKey')}</h2>
 				<label>
 					{t('dialog.name')}
 					<input

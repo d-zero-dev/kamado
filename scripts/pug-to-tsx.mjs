@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unused-vars, unicorn/prefer-single-call, no-console, unicorn/no-lonely-if -- a migration helper to be read and changed per project, not a library */
+/* oxlint-disable typescript/no-unused-vars, unicorn/prefer-single-call, unicorn/no-lonely-if -- a migration helper to be read and changed per project, not a library */
 /**
  * A first pass of Pug to TSX for a migration to kamado v3 (docs/v3/MIGRATION.md).
  *
@@ -630,6 +630,8 @@ function declKind(isLet, names) {
 	return names.some((n) => isLet(n)) ? 'let' : 'const';
 }
 
+const keepText = (text) => text;
+
 /**
  * The pieces of an object pattern that can be declared apart: `{ a = 1, b: { c, d } }` is
  * `a = 1`, `b: { c }` and `b: { d }`, so that the body's assignment to one name does not
@@ -643,7 +645,7 @@ function declKind(isLet, names) {
  * @returns The pieces in the order of the pattern: `build(isLet, taken)` gives the keyword,
  * the code, and the declarations that follow it.
  */
-function patternUnits(pattern, source, wrap = (text) => text) {
+function patternUnits(pattern, source, wrap = keepText) {
 	const rest = pattern.properties.find((p) => p.type === 'RestElement');
 	if (rest) {
 		const first = pattern.properties[0];

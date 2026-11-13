@@ -44,8 +44,10 @@ describe('readNames', () => {
 				'(<Item {...props} text={"x"} id={"?id=" + id + "&x=1"} />);',
 			].join('\n'),
 		);
-		expect([...(names ?? [])].toSorted()).toEqual(
-			['Item', 'b', 'd', 'f', 'id', 'page', 'props', 'site'].toSorted(),
+		expect([...(names ?? [])].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0))).toEqual(
+			['Item', 'b', 'd', 'f', 'id', 'page', 'props', 'site'].toSorted((a, b) =>
+				a < b ? -1 : a > b ? 1 : 0,
+			),
 		);
 	});
 
@@ -842,10 +844,6 @@ describe('the table of React prop names', () => {
 		);
 		// If this fails after react-dom was upgraded: node scripts/generate-react-prop-names.mjs
 		expect(render(readPropNames(source), version)).toBe(committed);
-	});
-
-	test('the generated file is not read by cspell, which does not know the attribute names', () => {
-		expect(render([['a', 'b']], '1.0.0')).toContain('// cspell:disable');
 	});
 
 	test('running the generator writes the table to its file', () => {

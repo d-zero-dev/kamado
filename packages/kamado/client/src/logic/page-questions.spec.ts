@@ -60,7 +60,7 @@ describe('whether the site can hold a virtual page', () => {
 
 	test('it cannot when it has none, or when the list does not say', () => {
 		expect(holdsVirtualPages(null)).toBe(false);
-		// eslint-disable-next-line unicorn/no-useless-undefined -- the list of a server that does not say it
+		// oxlint-disable-next-line unicorn/no-useless-undefined -- the list of a server that does not say it
 		expect(holdsVirtualPages(undefined)).toBe(false);
 	});
 });

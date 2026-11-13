@@ -191,7 +191,7 @@ async function run(message: RunMessage): Promise<void> {
 			normalized =
 				selected === null
 					? null
-					: // eslint-disable-next-line unicorn/prefer-structured-clone
+					: // oxlint-disable-next-line unicorn/prefer-structured-clone
 						(JSON.parse(JSON.stringify(selected)) as unknown[]);
 			json = JSON.stringify({ direction, select: normalized, read: current });
 		} catch (error) {

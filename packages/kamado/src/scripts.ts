@@ -117,7 +117,7 @@ export async function buildScripts(request: ScriptRequest): Promise<ScriptOutput
 					kind: 'warning',
 					color: false,
 				});
-				// eslint-disable-next-line no-console
+				// oxlint-disable-next-line no-console -- the warnings of esbuild are for the terminal: the build goes on
 				console.warn(lines.join('\n').trimEnd());
 			}
 			// Further outputs (extracted CSS, source maps) are not part of the
@@ -129,7 +129,7 @@ export async function buildScripts(request: ScriptRequest): Promise<ScriptOutput
 			}
 			const dropped = result.outputFiles.filter((o) => o !== file);
 			if (dropped.length > 0) {
-				// eslint-disable-next-line no-console
+				// oxlint-disable-next-line no-console -- a script that esbuild splits is a warning for the terminal: the build goes on
 				console.warn(
 					`${entry.input}: not written (a script is one file): ${dropped
 						.map((o) => path.relative(root, o.path))

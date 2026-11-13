@@ -25,7 +25,6 @@ import { declarationCases } from './css-golden-cases.mjs';
 const require = createRequire(import.meta.url);
 // clean-css is what html-minifier-terser runs on `<style>`; it is a dependency
 // of that package, which is the point of comparing against it.
-// eslint-disable-next-line import-x/no-extraneous-dependencies
 const CleanCSS = require('clean-css');
 
 const root = path.resolve(import.meta.dirname, '..');

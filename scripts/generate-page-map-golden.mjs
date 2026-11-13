@@ -78,7 +78,6 @@ const FIXED = [
 	'/a/b',
 	'/a/index',
 	'/index',
-	// cspell:ignore ndex İndex
 	// The tree reads a run of `/` as one, and does not decode `%69`: `%69ndex` is not `index`.
 	// The case of a letter is the one `toLowerCase` gives, whatever it is: `İ` is not an `i`.
 	'/a//b.html',

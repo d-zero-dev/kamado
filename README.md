@@ -47,7 +47,7 @@ Run these commands from the root directory:
 
 - `yarn build`: Build the Node package.
 - `yarn test`: Run tests using Vitest.
-- `yarn lint`: Run linters (ESLint, Prettier, textlint, cspell).
+- `yarn lint`: Run linters and formatters (oxlint, stylelint, markuplint, oxfmt, textlint, rustfmt, clippy). Run `yarn build` first: the type-aware oxlint rules read the declarations that it writes.
 - `cargo fmt --all`, `cargo clippy --locked --offline --all-targets -- -D warnings`, `cargo test --locked --offline --workspace`: Format, lint and test the Rust workspace.
 
 See [`docs/v3/development.md`](./docs/v3/development.md) for the details (the native addon, the oracle scripts, the benchmarks).

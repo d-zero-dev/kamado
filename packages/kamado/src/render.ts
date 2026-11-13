@@ -343,6 +343,8 @@ export async function renderJobs(
 				for (const worker of workers) {
 					void worker.terminate();
 				}
+				// A value that is thrown may be anything: its text is only the message.
+				// oxlint-disable-next-line typescript/no-base-to-string
 				reject(error instanceof Error ? error : new Error(String(error)));
 			}
 		};

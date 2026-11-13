@@ -246,8 +246,8 @@ yarn build
 `node <clone>/scripts/pug-to-tsx.mjs <project> <out>`は、`__assets`の`.pug`をコンポーネント（`.tsx`）に直す。`include`はコンポーネントの呼び出し（include する側の props とスコープの変数を渡す）、`each`は`_eachOf(...).map`（配列は index、オブジェクトは key で回す Pug と同じ。補助関数`_eachOf`は`each`のあるファイルの中に出る。手で書くなら配列は`.map`、オブジェクトは`Object.entries`でよい）、`if`は`&&`/`?:`、`pkg.production.*`は`site.*`、`filters.date`は`formatDate`になる。`mixin`は大文字で始まるコンポーネント（要素や`block`、分岐、ほかの mixin の中で定義したものも、同じモジュールの export しないコンポーネントになり、呼ぶ側がその場の変数を渡す。どこからも呼ばないものは書かない。Pug の mixin は定義した場所の変数を読み書きするので、それと結果が変わるものは止まる: 宣言していない変数に代入するもの（`- n++`）、呼ぶ場所の`each`が同じ名前の変数を持つもの。名前がぶつかるもの（同じファイルで 2 度定義した名前、include したファイルの mixin の名前、ファイル自身のコンポーネントの名前）も止まる。止めずに変換するので、出力を読んで直すもの: 呼ぶ側の mixin の引数やローカル変数が、mixin が定義した場所で読む変数と同じ名前のとき（呼ぶ側の値が渡る）、トップレベルの mixin が外の変数に書き込むとき（コンポーネントのローカルになる）。同じ`each`の中で定義して呼ぶ mixin も、そのループの変数を読むと止まる（結果は変わらないが、見分けない））、`else if`は入れ子の`?:`になる。`include`した Pug でないファイルは`html()`で出す。データのディレクトリのファイルは`props.data`の値を読む。それ以外は、変換した時点の中身を文字列として書き、あとでファイルを直しても出力に入らないことを`warning:`で知らせる。`--include-comment=<root>`（プロジェクトからの相対パス）を付けると、`<root>`の下のファイルは`<!-- @include(/<root>からのパス>) -->`になり、同じ`root`の`html.includes`の`includeComment`がビルドのたびに読む。設定の`root`は設定ファイルのあるディレクトリが基準なので、設定ファイルがプロジェクトの直下にないときは、同じディレクトリをプロジェクトからのパスで書く。データのディレクトリのファイルは、`<root>`の下にあっても`props.data`を読む。`pre`/`textarea`の中で呼んだ`mixin`と`include`は、改行と字下げを文字列で残す別のコンポーネント（`Sample`に対する`SamplePre`）を同じファイルに足して使う。`foo`と`foo-pre`のように名前がぶつかるときは止まる。表現できないもの（唯一の子でない`!{}`など）は止まるので、手で直す。出力は必ず読む。変換で見つかった点:
 
 - **属性名は React の綴り**: `charset` → `charSet`、`itemprop` → `itemProp`、`itemtype` → `itemType`、`itemid` → `itemID`。小文字のままだと、`<meta charset>`は先頭に置かれず、`<meta itemprop>`（パンくずの`position`）が`<head>`に持ち上げられる。上のほかの属性（`datetime` → `dateTime`、`srcset` → `srcSet`など）も、`@types/react`の型が求める綴りで出す。対応表は react-dom の`possibleStandardNames`から`scripts/generate-react-prop-names.mjs`が作る。出力の HTML は、どちらの綴りでも同じになる。
-- **型検査と lint に通す**: 変換結果は、`@d-zero/tsconfig`（strictest）の型検査と、型付きの eslint に通る。project の`tsconfig.json`に次を足す。
-  - `"jsx": "preserve"`と`"allowImportingTsExtensions": true`。`include`に`**/*.tsx`を足す（`**/*.ts`が`.d.ts`も拾う）。型付きの eslint は、その`tsconfig.json`を`parserOptions.project`に使う。
+- **型検査と lint に通す**: 変換結果は、`@d-zero/tsconfig`（strictest）の型検査と、型付きの lint（`@d-zero/eslint-config` v5 の ESLint、または`@d-zero/oxlint-config` v6 の oxlint）に通る。project の`tsconfig.json`に次を足す。
+  - `"jsx": "preserve"`と`"allowImportingTsExtensions": true`。`include`に`**/*.tsx`を足す（`**/*.ts`が`.d.ts`も拾う）。型付きの ESLint は、その`tsconfig.json`を`parserOptions.project`に使い、oxlint は`--type-aware`でその`tsconfig.json`を読む。
   - `@types/react`は`kamado`の peerDependency（版はパッケージに合わせる）。プロジェクトの devDependency にも固定で足してよい。`react`自体は要らない（型だけを読む）。`html()`の戻り値の型`HtmlChild`と、`<html static>`の`static`は`kamado/jsx`が宣言する。ページ／レイアウトの props 型（`PageProps`等）と`basePathOf`も`kamado/jsx`から import する。
   - 変換スクリプトは`<out>/__assets/kamado-jsx.d.ts`も書く。中身は`command`/`commandfor`（Invoker Commands）の補強だけ（`static`は`kamado/jsx`側）。`__assets`に置きます。
   - 数字の文字列（`maxlength="255"`）は、`maxLength={255}`のように数値で出す。`on*`の文字列属性（`oncontextmenu="return false;"`）は、型が関数なので、型のつかない展開（`{...{ oncontextmenu: "..." }}`）で出す。
@@ -255,15 +255,17 @@ yarn build
   - Pug で宣言して、どこからも読まない変数と関数（`- const url = ...`だけで`url`を使わない、`- function helper() {}`を呼ばない）は書かない。属性の値の文字列（`property="og:url"`）の中の名前は、読んでいるとは数えない。初期値が何かをしうるもの（関数の呼び出し、`new`、代入、`x++`、タグ付きテンプレート、`await`など。`- const x = track()`）は、消すと動きが変わりうるので書き、`warning:`を出す。手で直す。
   - `style`の CSS の文字列と、`hidden="until-found"`（`@types/react`の型に無い値）は`as any`を付けて出す。条件式の枝の`false`と`null`（`cond ? "_blank" : false`、`cond ? "noopener" : null`）は`undefined`にする。Pug は、`false`や`null`の属性を出さず、`undefined`と同じに扱う。`disabled`のような真偽値の prop は、`false`に意味があるので残し、`null`だけを`undefined`にする。
   - 型を通すために`any`が入る。出力は必ず読み、必要なら型を付け直す。
-  - import は`@d-zero/eslint-config`の`import-x/order`の並び（組み込み、パッケージ、`../`、`./`、index の順で、グループの間は空行、中はパスの昇順。index は`.`/`./`/`./index`/`./index.js`だけで、`./index.tsx`は`./`に入る）で出し、`import type { PageProps } from 'kamado/jsx'`を同じ規則で混ぜる。分割代入は、再代入される名前だけを`let`にして`const`と分ける（オブジェクトパターンの引数も同じ。プロパティごとに分け、`...rest`を含む階層や、分けられない塊は、`let`にする名前を別名で受けて後から`let a = _a;`と宣言する）。
+  - import は`@d-zero/eslint-config`（v5）の`import-x/order`の並び（組み込み、パッケージ、`../`、`./`、index の順で、グループの間は空行、中はパスの昇順。index は`.`/`./`/`./index`/`./index.js`だけで、`./index.tsx`は`./`に入る）で出し、`import type { PageProps } from 'kamado/jsx'`を同じ規則で混ぜる（oxlint には import の並びの規則が無いので、oxlint だけで検査するプロジェクトでは並びは強制されない。並びは変わらない）。分割代入は、再代入される名前だけを`let`にして`const`と分ける（オブジェクトパターンの引数も同じ。プロパティごとに分け、`...rest`を含む階層や、分けられない塊は、`let`にする名前を別名で受けて後から`let a = _a;`と宣言する）。
   - oxlint を使うなら、`@kamado-io/oxlint`を devDependency に足して、規則を有効にする。hooks・`async`のコンポーネント・HTML の要素の関数の`on*`・モジュールの変数の書き換え・コンポーネントの中のファイルの読み込みと`fetch`を、エラーにする。設定の例は`packages/@kamado-io/oxlint/README.md`。
-  - eslint には、変換結果の TSX にだけ当てる設定を足す（flat config）。次の規則は、変換結果と合わない。
+  - lint には、変換結果の TSX にだけ当てる設定を足す（ESLint は flat config。oxlint は`oxlint.config.mts`の`overrides`）。次の規則は、変換結果と合わない。規則名は ESLint のもので、oxlint では`@typescript-eslint/`が`typescript/`になる。
     - `@typescript-eslint/no-explicit-any`: 外す。`--fix`（lint-staged の pre-commit も）が`any`を`unknown`に書き換えて、型が通らなくなる。
     - `@typescript-eslint/no-unused-vars`: `argsIgnorePattern: '^_'`にする。使わない`props`の引数は`_props`で出る。あとから`props`を使わなくなった部品も、`_props`に直す。
     - `unicorn/no-unreadable-iife`: 外す。条件式を含む出力が、即時実行関数になる。
     - `unicorn/filename-case`: ページ（`__assets/htdocs/`の下）だけ外す。ファイル名が出力の URL になるので、変えられない。
     - `no-irregular-whitespace`: `skipJSXText: true`にする。全角空白がテキストに入る。
     - Pug のコードの書き方に当たる規則（`unicorn/explicit-length-check`、`unicorn/no-array-for-each`、`regexp/no-unused-capturing-group`など）: 案件に合わせて外すか、コードを直す。変換前は lint の対象外だった。
+
+ESLint の例:
 
 ```js
 {
@@ -279,6 +281,21 @@ yarn build
 	files: ['__assets/htdocs/**/*.tsx'],
 	rules: { 'unicorn/filename-case': 'off' },
 },
+```
+
+oxlint の例（`typescript/no-explicit-any`と`unicorn/filename-case`が、変換結果に出ることを`@d-zero/oxlint-config` v6（執筆時は`6.0.0-alpha.3`）で確かめた。ほかの規則は、出たら同じ要領で外す）:
+
+```js
+overrides: [
+	{
+		files: ['__assets/**/*.tsx'],
+		rules: { 'typescript/no-explicit-any': 'off' },
+	},
+	{
+		files: ['__assets/htdocs/**/*.tsx'],
+		rules: { 'unicorn/filename-case': 'off' },
+	},
+],
 ```
 
 - **`&nbsp;`などの実体参照は、そのままテキストに書く**（`{"&nbsp;"}`と文字列にすると`&amp;nbsp;`になる）。

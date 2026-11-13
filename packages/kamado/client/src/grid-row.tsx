@@ -3,9 +3,10 @@ import type { EnumOption, KindsSettings } from './logic/kinds.js';
 import type { FieldKind } from './logic/value.js';
 import type { Origin, PageDiff, Row as PageRow } from './types.js';
 
-import { memo, useRef, useState } from 'react';
+import { memo, useCallback, useRef, useState } from 'react';
 
 import { EnumEditor } from './enum-editor.js';
+import { focusOnMount } from './focus-on-mount.js';
 import { useI18n } from './i18n/context.js';
 import { ListEditor } from './list-editor.js';
 import { editKindOf } from './logic/columns.js';
@@ -58,6 +59,12 @@ function Editor({ editing, onCommit, onCancel, onInvalid }: EditorProps) {
 	// A commit by Enter must not be repeated by the blur that follows when the input goes.
 	const settled = useRef(false);
 	const input = useRef<HTMLInputElement>(null);
+	// Takes the focus when the input is mounted, and keeps it in `input`. A stable function: a new one
+	// on every render would be called again, and take the focus again.
+	const setInput = useCallback((element: HTMLInputElement | null) => {
+		input.current = element;
+		focusOnMount(element);
+	}, []);
 
 	const cancel = () => {
 		if (settled.current) {
@@ -130,7 +137,7 @@ function Editor({ editing, onCommit, onCancel, onInvalid }: EditorProps) {
 	if (editing.kind === 'json') {
 		return (
 			<textarea
-				autoFocus
+				ref={focusOnMount}
 				aria-label={editing.label}
 				className="editor"
 				rows={4}
@@ -157,8 +164,7 @@ function Editor({ editing, onCommit, onCancel, onInvalid }: EditorProps) {
 		editing.kind === 'number' ? 'number' : editing.kind === 'date' ? 'date' : 'text';
 	return (
 		<input
-			ref={input}
-			autoFocus
+			ref={setInput}
 			aria-label={editing.label}
 			className="editor"
 			type={type}
@@ -344,7 +350,10 @@ export const GridRow = memo(function GridRow({
 				data-row={index}
 				data-col={col}
 				aria-colindex={col + 1}
+				// ARIA 1.2 lists `aria-readonly` for `gridcell`, and `aria-description` is global.
+				// oxlint-disable-next-line jsx-a11y/role-supports-aria-props
 				aria-readonly={readOnly || undefined}
+				// oxlint-disable-next-line jsx-a11y/role-supports-aria-props
 				aria-description={description.length === 0 ? undefined : description.join('. ')}
 				title={tip.length === 0 ? undefined : tip.join('\n')}
 				// A pinned cell sticks at the distance the grid sets in `--pin-<place>` (the widths

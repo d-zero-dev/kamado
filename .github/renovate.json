@@ -56,14 +56,36 @@
 		},
 		{
 			"groupName": "@d-zero configs",
+			"description": "The configs pin the version of the linter that they run (markuplint, stylelint, textlint), and the root lists the same version to have its binary: they move together",
 			"matchPackageNames": [
 				"@d-zero/commitlint-config",
-				"@d-zero/cspell-config",
-				"@d-zero/eslint-config",
 				"@d-zero/lint-staged-config",
-				"@d-zero/prettier-config",
-				"@d-zero/textlint-config"
+				"@d-zero/markuplint-config",
+				"@d-zero/oxlint-config",
+				"@d-zero/oxlint-plugin",
+				"@d-zero/stylelint-config",
+				"@d-zero/textlint-config",
+				"markuplint",
+				"/^@markuplint\\//",
+				"stylelint",
+				"textlint"
 			]
+		},
+		{
+			"description": "oxlint runs the type-aware rules through oxlint-tsgolint, which has to be the version that oxlint asks for",
+			"groupName": "oxlint",
+			"matchPackageNames": ["oxlint", "oxlint-tsgolint"]
+		},
+		{
+			"description": "The ESLint that scripts/pug-to-tsx-types.spec.ts runs the config of @d-zero/eslint-config on: it stays at the version that the config pins, or the rules of the config run on another major. The ESLint of packages/@kamado-io/oxlint (a different use) moves as usual",
+			"matchFileNames": ["package.json"],
+			"matchPackageNames": ["eslint"],
+			"enabled": false
+		},
+		{
+			"description": "@d-zero/eslint-config is the oracle of the order of the imports that scripts/pug-to-tsx-types.spec.ts reads (docs/v3/development.md): it stays at the version that the spec was written against, and `yarn lint` no longer runs ESLint",
+			"matchPackageNames": ["@d-zero/eslint-config"],
+			"enabled": false
 		},
 		{
 			"groupName": "@d-zero runtime",
@@ -95,7 +117,7 @@
 			"matchPackageNames": ["jsonc-parser"]
 		},
 		{
-			"description": "prettier-v2, esbuild-v2, character-entities and html-minifier-terser are the versions the published v2 page-compiler and jsx-compiler pin, the oracles of the HTML and JSX tables and differential checks; they do not move on their own (docs/v3/development.md). character-entities is also the table of named references that the --semantic mode of benchmarks/v3/compare-outputs.ts reads. The root prettier (yarn lint) and esbuild (the runtime) are not oracles and move as usual",
+			"description": "prettier-v2, esbuild-v2, character-entities and html-minifier-terser are the versions the published v2 page-compiler and jsx-compiler pin, the oracles of the HTML and JSX tables and differential checks; they do not move on their own (docs/v3/development.md). character-entities is also the table of named references that the --semantic mode of benchmarks/v3/compare-outputs.ts reads. The root esbuild (the runtime) is not an oracle and moves as usual",
 			"matchDepNames": [
 				"prettier-v2",
 				"esbuild-v2",

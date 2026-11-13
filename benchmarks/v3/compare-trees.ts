@@ -31,7 +31,13 @@ import { prefixDifference } from './css-declarations.ts';
 import { normalizeHtml, type NormalizedHtml } from './html-normalize.ts';
 
 export type Verdict =
-	'identical' | 'equivalent' | 'smaller' | 'larger' | 'different' | 'missing' | 'extra';
+	| 'identical'
+	| 'equivalent'
+	| 'smaller'
+	| 'larger'
+	| 'different'
+	| 'missing'
+	| 'extra';
 
 /**
  * What an `equivalent` page sets aside and still differs in.

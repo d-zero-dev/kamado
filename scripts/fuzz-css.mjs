@@ -1,7 +1,7 @@
 /**
  * Writes a CSS corpus for `kd_css`: `<n>.in` files holding
  * - random but valid style sheets (nested media queries, @font-face,
- *   @keyframes, vendor prefixes, custom properties, calc(), gradients,
+ *   `@keyframes`, vendor prefixes, custom properties, calc(), gradients,
  *   shorthands, colours in all notations, urls, attribute selectors, :is /
  *   :not / :where / :has, nesting, @layer, @container, unicode-range,
  *   escapes, `!important` with odd spacing, comments in odd places, @charset,

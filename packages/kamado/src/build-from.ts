@@ -131,7 +131,7 @@ export async function buildFrom(
 	const started = performance.now();
 	const lap = (what: string) => {
 		if (timing) {
-			// eslint-disable-next-line no-console
+			// oxlint-disable-next-line no-console -- the timing of `KAMADO_TIMING=1` is for the terminal, apart from the output of the build
 			console.error(
 				`  ${what}: ${Math.round(performance.now() - started)}ms (since start)`,
 			);

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await -- the stand-ins have the shape of async functions */
 import type { SyncSummary } from './types.js';
 
 import { describe, expect, test, vi } from 'vitest';

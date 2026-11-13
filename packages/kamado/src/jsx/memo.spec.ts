@@ -11,7 +11,7 @@ describe('memo', () => {
 		let calls = 0;
 		const sorted = memo((list: number[]) => {
 			calls++;
-			return list.toSorted();
+			return list.toSorted((a, b) => a - b);
 		});
 
 		const first = sorted(data.posts);

@@ -14,6 +14,9 @@ import {
 } from './logic/kinds.js';
 import { useCommands } from './use-commands.js';
 
+/** The `id` of the title that names the dialog. */
+const TITLE_ID = 'options-title';
+
 interface OptionsDialogProps {
 	/** The identifier of the column (`meta:<key>`). */
 	readonly column: string;
@@ -129,6 +132,7 @@ export function OptionsDialog({
 		}
 		return () => reading.current?.abort();
 		// Read once, when the dialog opens for a column that is not an enum yet.
+		// oxlint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	const addTyped = () => {
@@ -187,7 +191,7 @@ export function OptionsDialog({
 		<dialog
 			ref={commands.ref}
 			id={commands.id}
-			aria-labelledby="options-title"
+			aria-labelledby={TITLE_ID}
 			className="dialog options-dialog"
 			onClose={onClose}>
 			<form
@@ -196,7 +200,7 @@ export function OptionsDialog({
 					event.preventDefault();
 					save();
 				}}>
-				<h2 id="options-title">{t('options.title', { name })}</h2>
+				<h2 id={TITLE_ID}>{t('options.title', { name })}</h2>
 				{loading ? (
 					<p role="status">{t('options.loading')}</p>
 				) : (
@@ -222,7 +226,7 @@ export function OptionsDialog({
 											aria-label={t('options.remove', { option: String(option) })}
 											data-option={optionKey(option)}
 											{...commands.run('remove')}>
-											<span aria-hidden="true">✕</span>
+											<span>✕</span>
 										</button>
 									</li>
 								))}

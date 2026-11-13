@@ -550,6 +550,7 @@ describe.skipIf(!available && !process.env.CI)(
 			const source = /function _eachOf[\s\S]*?\n\}\n/.exec(page)?.[0] ?? '';
 			// The cut ends with the function, not before it.
 			expect(source).toContain('return entries;\n}\n');
+			// oxlint-disable-next-line typescript/no-implied-eval -- the transpiled helper that the generated page contains is evaluated to run it
 			const eachOf = new Function(
 				`${ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText}\nreturn _eachOf;`,
 			)() as (value: unknown) => unknown[];

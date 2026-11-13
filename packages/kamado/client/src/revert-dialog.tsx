@@ -3,6 +3,9 @@ import { useEffect, useRef } from 'react';
 import { useI18n } from './i18n/context.js';
 import { useCommands } from './use-commands.js';
 
+/** The `id` of the title that names the dialog. */
+const TITLE_ID = 'revert-title';
+
 /** What the dialog asks about: the cell that is to be put back as HEAD has it. */
 export interface RevertRequest {
 	/** The page, by its URL. */
@@ -69,7 +72,7 @@ export function RevertDialog({ request, onConfirm, onCancel }: RevertDialogProps
 		<dialog
 			ref={commands.ref}
 			id={commands.id}
-			aria-labelledby="revert-title"
+			aria-labelledby={TITLE_ID}
 			className="dialog"
 			onClose={() => {
 				if (!chosen.current) {
@@ -82,7 +85,7 @@ export function RevertDialog({ request, onConfirm, onCancel }: RevertDialogProps
 					onSubmit={(event) => {
 						event.preventDefault();
 					}}>
-					<h2 id="revert-title">{t('revert.title')}</h2>
+					<h2 id={TITLE_ID}>{t('revert.title')}</h2>
 					<p>{t('revert.what', { name: request.name, url: request.url })}</p>
 					<dl className="revert-values">
 						<dt>{t('revert.now')}</dt>

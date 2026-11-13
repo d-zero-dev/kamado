@@ -83,7 +83,12 @@ export type OptionTextProblem = 'empty' | 'number' | 'boolean';
  * ```
  */
 export type OptionsProblem =
-	'none' | 'invalid' | 'tooMany' | 'tooLong' | 'duplicate' | 'bytes';
+	| 'none'
+	| 'invalid'
+	| 'tooMany'
+	| 'tooLong'
+	| 'duplicate'
+	| 'bytes';
 
 /**
  * Whether a value can be an option.

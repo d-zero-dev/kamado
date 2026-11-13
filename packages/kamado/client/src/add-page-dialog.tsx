@@ -4,6 +4,12 @@ import { useI18n } from './i18n/context.js';
 import { builtinCommand } from './logic/commands.js';
 import { newPageOf } from './logic/page-edits.js';
 
+/** The `id` of the title that names the dialog. */
+const TITLE_ID = 'add-page-title';
+
+/** The `id` of the hint that describes the field of the path. */
+const HINT_ID = 'add-page-hint';
+
 /** The `id` of the dialog: the button of the bar that opens it names it in `commandfor`. */
 export const ADD_PAGE_DIALOG_ID = 'add-page-dialog';
 
@@ -40,7 +46,7 @@ export function AddPageDialog({ dialogRef, onAdd }: AddPageProps) {
 		<dialog
 			ref={dialogRef}
 			id={ADD_PAGE_DIALOG_ID}
-			aria-labelledby="add-page-title"
+			aria-labelledby={TITLE_ID}
 			className="dialog wordy"
 			onClose={() => setProblem('')}>
 			<form
@@ -59,7 +65,7 @@ export function AddPageDialog({ dialogRef, onAdd }: AddPageProps) {
 					dialogRef.current?.close();
 					onAdd(page.url, page.path);
 				}}>
-				<h2 id="add-page-title">{t('app.addPage')}</h2>
+				<h2 id={TITLE_ID}>{t('app.addPage')}</h2>
 				<label>
 					{t('addPage.url')}
 					<input
@@ -74,11 +80,11 @@ export function AddPageDialog({ dialogRef, onAdd }: AddPageProps) {
 					<input
 						value={path}
 						placeholder="about/index.html"
-						aria-describedby="add-page-hint"
+						aria-describedby={HINT_ID}
 						onChange={(event) => setPath(event.target.value)}
 					/>
 				</label>
-				<p id="add-page-hint" className="dialog-hint">
+				<p id={HINT_ID} className="dialog-hint">
 					{t('addPage.hint')}
 				</p>
 				<p role="alert" className="problem">

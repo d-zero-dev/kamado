@@ -1,4 +1,4 @@
-/* eslint-disable unicorn/no-await-expression-member -- an expectation reads better with the member of what it waits for */
+/* oxlint-disable unicorn/no-await-expression-member -- an expectation reads better with the member of what it waits for */
 import type { Snapshot } from './diff.js';
 import type { SyncEditor } from './session.js';
 
@@ -274,6 +274,7 @@ describe('the log (import)', () => {
 		const id = started(sync, 'talk');
 		const [first, second] = (await finished(sync, id)).log;
 		expect(first?.message).toBe(String.raw`<root>/file.json\x1B[2J`);
+		// oxlint-disable-next-line typescript/no-misused-spread -- the code points on purpose, not the units of a string
 		expect([...second!.message]).toHaveLength(2000);
 	});
 

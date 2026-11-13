@@ -93,7 +93,8 @@ export const noAsyncComponent: Rule.RuleModule = {
 				scope = scope.upper;
 			}
 			const definition = scope.set.get(name)?.defs[0]?.node as unknown as
-				Loose | undefined;
+				| Loose
+				| undefined;
 			const fn =
 				definition?.type === 'VariableDeclarator'
 					? (definition.init as Loose | null)

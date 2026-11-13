@@ -112,6 +112,7 @@ export function renderEntities({ entities, version }) {
 		// the characters, which in effect replaced one code point at a time, so a
 		// reference whose text is a base plus a combining mark (`&nang;`) never
 		// appeared in its output; emitting it would change the output.
+		// oxlint-disable-next-line typescript/no-misused-spread -- the code points on purpose, not the units of a string
 		if ([...char].length !== 1) {
 			continue;
 		}

@@ -243,7 +243,7 @@ describe('formatDate', () => {
 		];
 		for (const value of values) {
 			for (const format of FIXED_FORMATS) {
-				expect(formatDate(value, format), `${value} ${format}`).toBe(
+				expect(formatDate(value, format), `${String(value)} ${format}`).toBe(
 					dayjs(value).format(format),
 				);
 			}

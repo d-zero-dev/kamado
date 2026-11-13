@@ -39,7 +39,7 @@ const report: BuildReport = {
  * @param text - Terminal text
  */
 function plain(text: string): string {
-	// eslint-disable-next-line no-control-regex -- matching ANSI escapes is the point
+	// oxlint-disable-next-line no-control-regex -- matching ANSI escapes is the point
 	return text.replaceAll(/\u001B\[[\d;]*m/g, '');
 }
 
