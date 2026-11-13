@@ -1,0 +1,4 @@
+{
+	"extends": ["@d-zero/stylelint-config/base", "@d-zero/stylelint-config/order"],
+	"ignoreFiles": ["**/dist/**", "**/target/**"]
+}

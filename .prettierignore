@@ -1,4 +1,0 @@
-# Written by scripts/generate-jsonc-edit-golden.mjs; scripts/generate-jsonc-edit-golden.spec.ts
-# fails while a file is not what the script writes.
-crates/kd_jsonc/tests/edit_golden.json
-crates/kd_jsonc/tests/edit_array_golden.json
