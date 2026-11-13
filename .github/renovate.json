@@ -10,7 +10,6 @@
 		":semanticCommitTypeAll(chore)"
 	],
 	"timezone": "Asia/Tokyo",
-	"schedule": ["* 22-23,0-4 * * 1-5"],
 	"rangeStrategy": "pin",
 	"minimumReleaseAge": "7 days",
 	"internalChecksFilter": "strict",
@@ -45,15 +44,50 @@
 			"addLabels": ["Dependencies: Production"]
 		},
 		{
-			"description": "Automerge non-major updates, except for 0.x where minor is breaking",
+			"description": "Updates that keep the major version automerge after minimumReleaseAge, 0.x included: a 0.x minor may break, and CI (the tests and the differential checks against the v2 oracles) is what stops it",
 			"matchUpdateTypes": ["minor", "patch", "pin", "digest"],
-			"matchCurrentVersion": "!/^0/",
 			"automerge": true
+		},
+		{
+			"description": "A major update of a published dependency waits for review; once 5 Renovate PRs are open, no more of them are raised, so they cannot fill the prConcurrentLimit (10) and hold back the updates that automerge",
+			"matchUpdateTypes": ["major"],
+			"prConcurrentLimit": 5
+		},
+		{
+			"description": "devDependencies do not reach the users of the published packages: their major updates automerge once CI passes (the limit goes back to the default 10)",
+			"matchDepTypes": ["devDependencies"],
+			"matchUpdateTypes": ["major"],
+			"automerge": true,
+			"prConcurrentLimit": 10
+		},
+		{
+			"description": "GitHub Actions do not reach the users of the published packages: their major updates automerge once CI passes (the limit goes back to the default 10)",
+			"matchManagers": ["github-actions"],
+			"matchUpdateTypes": ["major"],
+			"automerge": true,
+			"prConcurrentLimit": 10
+		},
+		{
+			"description": "A digest update carries no release timestamp at the branch stage (renovatebot/renovate#45236), so under minimumReleaseAgeBehaviour=timestamp-required renovate/stability-days stays pending forever. The workflows comment the exact version of each pinned digest (# v7.0.0), so the same commit arrives as a version update, which carries a timestamp and keeps the cooldown",
+			"matchManagers": ["github-actions"],
+			"matchUpdateTypes": ["digest"],
+			"enabled": false
+		},
+		{
+			"description": "A pin update of an npm dependency carries no release timestamp (lookup pushes it without one), so minimumReleaseAge would keep it pending forever; it pins the version already resolved, so there is nothing new to wait for. GitHub Actions are not exempt: their pin resolves to the newest tag in the range, a new commit, so a workflow comments the exact version (# v7.0.0) instead of a range",
+			"matchManagers": ["npm"],
+			"matchUpdateTypes": ["pin"],
+			"minimumReleaseAge": null
 		},
 		{
 			"description": "Keep yarn resolutions on auto range strategy",
 			"matchDepTypes": ["resolutions"],
 			"rangeStrategy": "auto"
+		},
+		{
+			"description": "peerDependencies and engines are ranges that the users of the published packages resolve against: widen them instead of pinning them to one version",
+			"matchDepTypes": ["peerDependencies", "engines"],
+			"rangeStrategy": "widen"
 		},
 		{
 			"groupName": "typescript",
