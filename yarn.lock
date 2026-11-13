@@ -1585,7 +1585,7 @@ __metadata:
     oxlint: "npm:1.91.0"
     typescript: "npm:6.0.3"
   peerDependencies:
-    eslint: ">=9.0.0"
+    eslint: 10.14.0
     oxlint: ">=1.77.0"
   peerDependenciesMeta:
     eslint:

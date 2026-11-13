@@ -16,7 +16,7 @@
 		"@types/react": "19.3.0"
 	},
 	"engines": {
-		"node": ">=24.11.0"
+		"node": "v26.13.1"
 	},
 	"scripts": {
 		"build": "tsc --project tsconfig.build.json && tsc --project client/tsconfig.json && node ../../scripts/build-ui.mjs",
