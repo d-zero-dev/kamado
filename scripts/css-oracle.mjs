@@ -9,7 +9,7 @@
 import { pathToFileURL } from 'node:url';
 
 import cssnano from 'cssnano';
-import postcss from 'postcss';
+import postcss, { comment, parse } from 'postcss';
 
 const processor = postcss([
 	cssnano({
@@ -74,7 +74,7 @@ function nestedContainers(root) {
  * await minifyNestedDeclarations('a{@media x{color:RED}}'); // 'a{@media x{color:red}}'
  */
 export async function minifyNestedDeclarations(css) {
-	const root = postcss.parse(css);
+	const root = parse(css);
 	const jobs = nestedContainers(root).flatMap((container) => {
 		const declarations = container.nodes.filter((n) => n.type === 'decl');
 		return declarations.length === 0
@@ -87,7 +87,7 @@ export async function minifyNestedDeclarations(css) {
 		),
 	);
 	for (const [i, { container, declarations, first }] of jobs.entries()) {
-		const rule = postcss.parse(minified[i]).first;
+		const rule = parse(minified[i]).first;
 		// What cssnano gives back no rule for (it removed every declaration) stays as it is:
 		// replacing it by nothing would make any two such blocks compare equal.
 		if (rule?.type !== 'rule') {
@@ -96,6 +96,7 @@ export async function minifyNestedDeclarations(css) {
 		for (const d of declarations) {
 			d.remove();
 		}
+		// oxlint-disable-next-line unicorn/prefer-modern-dom-apis -- postcss `Container#insertBefore` takes an index, and a postcss node has no `before` for it
 		container.insertBefore(
 			first,
 			rule.nodes.map((d) => {
@@ -122,7 +123,7 @@ export async function minifyNestedDeclarations(css) {
  * withoutNestedDeclarations('a{b:c;&:hover{d:e;f:g}h:i}'); // 'a{/*d*\/&:hover{/*d*\/}/*d*\/}'
  */
 export function withoutNestedDeclarations(css) {
-	const root = postcss.parse(css);
+	const root = parse(css);
 	for (const container of nestedContainers(root)) {
 		// Collect the runs first and change the nodes after: replacing and
 		// removing while walking the children skips the ones after.
@@ -142,7 +143,7 @@ export function withoutNestedDeclarations(css) {
 			}
 		}
 		for (const { first, rest } of runs) {
-			first.replaceWith(postcss.comment({ text: 'd', raws: { left: '', right: '' } }));
+			first.replaceWith(comment({ text: 'd', raws: { left: '', right: '' } }));
 			for (const d of rest) {
 				d.remove();
 			}
@@ -200,7 +201,7 @@ export async function matchesWithDecisionsUndone(expected, undone, same) {
  */
 export function postcssError(css) {
 	try {
-		postcss.parse(css);
+		parse(css);
 		return null;
 	} catch (error) {
 		return error instanceof Error ? error.message : String(error);

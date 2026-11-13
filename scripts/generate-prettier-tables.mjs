@@ -7,7 +7,7 @@
  *
  * Source of truth: `node_modules/prettier-v2/plugins/html.mjs`, the prettier
  * that the published v2 pins (`prettier-v2` is an alias of it: `docs/v3/development.md`,
- * "v2 の oracle"; the root `prettier` is the one `yarn lint` formats with). The
+ * "v2 の oracle"; `yarn lint` formats with oxfmt). The
  * two tables are found by their first entries rather than by variable names,
  * which the bundle mangles. A prettier change that alters the structure makes
  * this script fail loudly instead of writing a wrong table.
@@ -64,6 +64,7 @@ function literalAt(source, open) {
 		} else if (c === ')') {
 			depth--;
 			if (depth === 0) {
+				// oxlint-disable-next-line typescript/no-implied-eval -- the table is a JavaScript literal in the oracle's source text, evaluated to read its value
 				return new Function(`return (${source.slice(open + 1, i)});`)();
 			}
 		}
@@ -112,7 +113,9 @@ export function renderElementTables(source, version) {
 		'',
 		'/// Known HTML element names (lower case), sorted.',
 		`pub static ELEMENT_NAMES: [&str; ${names.length}] = [`,
-		...[...names].toSorted().map((n) => `\t${JSON.stringify(n)},`),
+		...[...names]
+			.toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+			.map((n) => `\t${JSON.stringify(n)},`),
 		'];',
 		'',
 		'/// Known attribute names per element (`*` for every element), sorted by element.',
@@ -122,7 +125,7 @@ export function renderElementTables(source, version) {
 			.map(
 				([element, set]) =>
 					`\t(${JSON.stringify(element)}, &[${[...set]
-						.toSorted()
+						.toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 						.map((n) => JSON.stringify(n))
 						.join(', ')}]),`,
 			),
@@ -154,6 +157,7 @@ export function renderEntityNames(source, version) {
 	if (entityStart === -1 || entityEnd === -1) {
 		throw new Error('the entity table was not found');
 	}
+	// oxlint-disable-next-line typescript/no-implied-eval -- the entity table is JavaScript source text of the oracle (prettier), evaluated to read its value
 	const entities = new Function(
 		`return (${source.slice(entityStart, entityEnd + 'zwnj:"\\u200C"}'.length)});`,
 	)();

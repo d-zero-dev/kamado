@@ -281,6 +281,7 @@ for (const n of names) {
 }
 const second = runRust(again);
 
+/** @type {Record<string, string[]>} */
 const failures = { rust: [], parse: [], equivalence: [], size: [], idempotence: [] };
 /** @type {string[]} */
 const deliberate = [];

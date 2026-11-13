@@ -66,6 +66,7 @@ export function renderJsxEntities({ names, version }) {
 		if (!match) {
 			throw new Error(`unexpected esbuild output for ${name}: ${out}`);
 		}
+		// oxlint-disable-next-line typescript/no-implied-eval -- the string literal esbuild printed for the oracle is evaluated to get the text it denotes
 		const text = new Function(`return ${match[1]}`)();
 		if (text !== `&${name};`) {
 			decoded.push([name, text]);

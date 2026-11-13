@@ -10,7 +10,7 @@ import { realpathSync } from 'node:fs';
  * before it is compared. Without a path (`--eval`), or with a path of no file (a
  * runner's), it is not.
  * @param {string} filename - `import.meta.filename` of the script
- * @param {string | undefined} [argv1] - The path Node was started with
+ * @param {string} [argv1] - The path Node was started with
  * @returns {boolean} Whether the script is the one that runs
  * @example
  * if (isMain(import.meta.filename)) {

@@ -640,7 +640,10 @@ test('a config that names a column the screen does not have is refused when it i
 	}
 	const named = /expected a column: (.+) or meta:<key>/.exec(message)?.[1];
 	assert.ok(named !== undefined, message);
-	assert.deepEqual(named.split(', ').toSorted(), [...BUILTIN_COLUMNS].toSorted());
+	assert.deepEqual(
+		named.split(', ').toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+		[...BUILTIN_COLUMNS].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+	);
 });
 
 test('the editor tells the devServer of the config and the directories as absolute paths', () => {
@@ -1121,8 +1124,10 @@ test('a page is made, made virtual, given a file again and removed, and only its
 			pathToFileURL(path.join(dist, 'ui', 'settings.js')).href
 		);
 		assert.deepEqual(
-			[...BUILTIN_COLUMNS].toSorted(),
-			['url', 'virtual', 'inputPath', ...Object.keys(orders)].toSorted(),
+			[...BUILTIN_COLUMNS].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+			['url', 'virtual', 'inputPath', ...Object.keys(orders)].toSorted((a, b) =>
+				a < b ? -1 : a > b ? 1 : 0,
+			),
 		);
 		for (const key of BUILTIN_COLUMNS) {
 			assert.equal(sortedBy(key, false).length, 4, key);

@@ -67,6 +67,7 @@ export function readColorNames(source) {
 	if (!match) {
 		throw new Error('cannot find the colour table in @colordx/core/plugins/names');
 	}
+	// oxlint-disable-next-line typescript/no-implied-eval -- the colour table is an object literal in the oracle's source text, evaluated to read its value
 	return Object.entries(new Function(`return ${match[1]}`)());
 }
 

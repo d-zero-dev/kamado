@@ -21,6 +21,7 @@ for (let l = 0; l < 60; l++) {
 	for (let t = 0; t < 188; t++) {
 		const trail = t < 63 ? 0x40 + t : 0x41 + t;
 		const text = decoder.decode(new Uint8Array([lead, trail]));
+		// oxlint-disable-next-line typescript/no-misused-spread -- the code points on purpose, not the units of a string
 		const chars = [...text];
 		table.push(chars.length === 1 && chars[0] !== '�' ? chars[0].codePointAt(0) : 0);
 	}
