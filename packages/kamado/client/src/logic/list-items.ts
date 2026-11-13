@@ -167,7 +167,7 @@ export function removeItem(items: readonly Item[], id: number): Item[] {
 export function moveItem(items: readonly Item[], id: number, by: -1 | 1): Item[] {
 	const from = items.findIndex((item) => item.id === id);
 	const to = from + by;
-	if (from < 0 || to < 0 || to >= items.length) {
+	if (from === -1 || to < 0 || to >= items.length) {
 		return [...items];
 	}
 	const next = [...items];

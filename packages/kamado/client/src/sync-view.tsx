@@ -5,6 +5,15 @@ import type { SyncChange, SyncKind, SyncState } from './types.js';
 import { hiddenLines, tabsOf } from './logic/sync.js';
 import { useCommands, type Commands } from './use-commands.js';
 
+/** The `id` of the title that names the dialog of the sync: the dialog names it in `aria-labelledby`. */
+export const SYNC_TITLE_ID = 'sync-title';
+
+/** The `id` of the title that names the section of the log. */
+const LOG_TITLE_ID = 'sync-log-title';
+
+/** The `id` of the panel that the tabs control. */
+const PANEL_ID = 'sync-panel';
+
 /** The changes of one kind that the screen holds, and how many there are. */
 export interface HeldChanges {
 	readonly kind: SyncKind;
@@ -152,7 +161,7 @@ function Tabs({
 					role="tab"
 					id={`sync-tab-${entry.kind}`}
 					aria-selected={entry.kind === tab}
-					aria-controls="sync-panel"
+					aria-controls={PANEL_ID}
 					disabled={entry.disabled}
 					data-kind={entry.kind}
 					{...run('tab')}>
@@ -201,8 +210,8 @@ export function SyncView({
 	const exporting = state?.direction === 'export';
 	const hidden = hiddenLines(log);
 	const logBox = (
-		<section aria-labelledby="sync-log-title" className="sync-section">
-			<h3 id="sync-log-title">{t('sync.log')}</h3>
+		<section aria-labelledby={LOG_TITLE_ID} className="sync-section">
+			<h3 id={LOG_TITLE_ID}>{t('sync.log')}</h3>
 			{hidden > 0 && <p className="hint">{t('sync.logHidden', { count: hidden })}</p>}
 			{log.lines.length === 0 ? (
 				<p className="hint">{live ? t('sync.logEmpty') : ''}</p>
@@ -221,7 +230,7 @@ export function SyncView({
 	if (problem !== null) {
 		return (
 			<>
-				<h2 id="sync-title">{name}</h2>
+				<h2 id={SYNC_TITLE_ID}>{name}</h2>
 				<div className="sync-body">
 					<p role="alert" className="sync-failure">
 						{problem}
@@ -236,7 +245,7 @@ export function SyncView({
 		case 'writing': {
 			return (
 				<>
-					<h2 id="sync-title">{t('sync.writing', { name })}</h2>
+					<h2 id={SYNC_TITLE_ID}>{t('sync.writing', { name })}</h2>
 					<div className="sync-body">
 						<p role="status" className="sync-running">
 							<span className="spinner" aria-hidden="true" />
@@ -250,7 +259,7 @@ export function SyncView({
 		case 'cancelled': {
 			return (
 				<>
-					<h2 id="sync-title">{t('sync.running', { name })}</h2>
+					<h2 id={SYNC_TITLE_ID}>{t('sync.running', { name })}</h2>
 					<div className="sync-body">
 						<p role="status" className="sync-running">
 							<span className="spinner" aria-hidden="true" />
@@ -263,7 +272,7 @@ export function SyncView({
 		case 'failed': {
 			return (
 				<>
-					<h2 id="sync-title">{t('sync.failedTitle')}</h2>
+					<h2 id={SYNC_TITLE_ID}>{t('sync.failedTitle')}</h2>
 					<div className="sync-body">
 						<p className="sync-op">{name}</p>
 						<div role="alert" className="sync-failure">
@@ -288,7 +297,7 @@ export function SyncView({
 		case 'nochange': {
 			return (
 				<>
-					<h2 id="sync-title">{t('sync.nochangeTitle')}</h2>
+					<h2 id={SYNC_TITLE_ID}>{t('sync.nochangeTitle')}</h2>
 					<div className="sync-body">
 						<p className="sync-op">{name}</p>
 						<p className="sync-ok">
@@ -306,15 +315,17 @@ export function SyncView({
 			const problems = state?.problems;
 			return (
 				<>
-					<h2 id="sync-title">{t('sync.invalidTitle')}</h2>
+					<h2 id={SYNC_TITLE_ID}>{t('sync.invalidTitle')}</h2>
 					<div className="sync-body">
 						<p className="sync-op">{name}</p>
 						<p>{t(exporting ? 'sync.invalidBodyExport' : 'sync.invalidBody')}</p>
-						<ul className="sync-problems" role="alert">
-							{problems?.listed.map((text, i) => (
-								<li key={i}>{text}</li>
-							))}
-						</ul>
+						<div role="alert">
+							<ul className="sync-problems">
+								{problems?.listed.map((text, i) => (
+									<li key={i}>{text}</li>
+								))}
+							</ul>
+						</div>
 						{problems !== undefined && problems.total > problems.listed.length && (
 							<p className="hint">
 								{t('sync.problemsMore', {
@@ -330,7 +341,7 @@ export function SyncView({
 		case 'conflict': {
 			return (
 				<>
-					<h2 id="sync-title">{t('sync.conflictTitle')}</h2>
+					<h2 id={SYNC_TITLE_ID}>{t('sync.conflictTitle')}</h2>
 					<div className="sync-body">
 						<p className="sync-op">{name}</p>
 						<p role="alert">
@@ -344,7 +355,7 @@ export function SyncView({
 		case 'refused': {
 			return (
 				<>
-					<h2 id="sync-title">{t('sync.refusedTitle')}</h2>
+					<h2 id={SYNC_TITLE_ID}>{t('sync.refusedTitle')}</h2>
 					<div className="sync-body">
 						<p className="sync-op">{name}</p>
 						<p role="alert">{state?.refused?.message}</p>
@@ -355,18 +366,18 @@ export function SyncView({
 			);
 		}
 		case 'applied': {
-			return <h2 id="sync-title">{name}</h2>;
+			return <h2 id={SYNC_TITLE_ID}>{name}</h2>;
 		}
 		case 'review': {
 			const summary = state?.summary;
 			if (summary === undefined) {
-				return <h2 id="sync-title">{name}</h2>;
+				return <h2 id={SYNC_TITLE_ID}>{name}</h2>;
 			}
 			if (exporting && state?.diffed === false) {
 				// The script has no `read`: nothing was compared, so there is no list to show.
 				return (
 					<>
-						<h2 id="sync-title">{t('sync.reviewTitleNoDiff')}</h2>
+						<h2 id={SYNC_TITLE_ID}>{t('sync.reviewTitleNoDiff')}</h2>
 						<div className="sync-body">
 							<p className="sync-op">{name}</p>
 							<p>{t('sync.reviewBodyNoDiff', { count: state.targets ?? 0 })}</p>
@@ -378,7 +389,7 @@ export function SyncView({
 			const tabs = tabsOf(summary.counts);
 			return (
 				<>
-					<h2 id="sync-title">{t('sync.reviewTitle', { count: summary.total })}</h2>
+					<h2 id={SYNC_TITLE_ID}>{t('sync.reviewTitle', { count: summary.total })}</h2>
 					<div ref={commands.ref} id={commands.id} className="sync-body">
 						<p className="sync-op">{name}</p>
 						<p>{exporting ? t('sync.reviewBodyExport') : t('sync.reviewBody')}</p>
@@ -410,7 +421,7 @@ export function SyncView({
 						<Tabs tabs={tabs} tab={tab} t={t} run={commands.run} />
 						<div
 							role="tabpanel"
-							id="sync-panel"
+							id={PANEL_ID}
 							aria-label={t('sync.changes')}
 							aria-labelledby={tab === null ? undefined : `sync-tab-${tab}`}
 							className="sync-panel">

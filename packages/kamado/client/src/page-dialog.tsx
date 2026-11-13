@@ -6,6 +6,9 @@ import { useI18n } from './i18n/context.js';
 import { holdsVirtualPages } from './logic/page-questions.js';
 import { useCommands } from './use-commands.js';
 
+/** The `id` of the title that names the dialog. */
+const TITLE_ID = 'page-dialog-title';
+
 interface PageDialogProps {
 	/** What is asked; `null` while no dialog is open. */
 	readonly question: PageQuestion | null;
@@ -89,7 +92,7 @@ export function PageDialog({
 		<dialog
 			ref={commands.ref}
 			id={commands.id}
-			aria-labelledby="page-dialog-title"
+			aria-labelledby={TITLE_ID}
 			className="dialog wordy"
 			onClose={() => {
 				if (!chosen.current) {
@@ -102,7 +105,7 @@ export function PageDialog({
 					onSubmit={(event) => {
 						event.preventDefault();
 					}}>
-					<h2 id="page-dialog-title">
+					<h2 id={TITLE_ID}>
 						{t(`pageDialog.${question.kind}.title` as const, { url: question.url })}
 					</h2>
 					<p>

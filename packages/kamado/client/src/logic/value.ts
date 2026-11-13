@@ -102,6 +102,7 @@ export function toText(value: unknown): string {
 	if (typeof value === 'object') {
 		return JSON.stringify(value);
 	}
+	// oxlint-disable-next-line typescript/no-base-to-string -- what is left is a number, a boolean, a bigint, a symbol or a function: none has the default text of an object
 	return String(value);
 }
 

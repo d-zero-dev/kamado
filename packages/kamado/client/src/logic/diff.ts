@@ -185,6 +185,8 @@ export function valueText(value: unknown, none: string): string {
 	if (typeof value === 'string') {
 		return value === '' ? '""' : value;
 	}
+	// `JSON.stringify` has no text for a function or a symbol.
+	// oxlint-disable-next-line typescript/no-base-to-string -- only a function or a symbol gets here, and an object has the JSON of it
 	return JSON.stringify(value) ?? String(value);
 }
 
@@ -194,6 +196,7 @@ export function valueText(value: unknown, none: string): string {
  * @param value - The value
  */
 function quoted(value: unknown): string {
+	// oxlint-disable-next-line typescript/no-misused-spread -- the code points on purpose: a character of two units stays whole
 	const characters = [...valueText(value, '')];
 	return characters.length > MAX_QUOTED
 		? `${characters.slice(0, MAX_QUOTED).join('')}…`

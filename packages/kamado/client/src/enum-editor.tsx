@@ -1,7 +1,8 @@
 import type { EnumOption } from './logic/kinds.js';
 
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
+import { focusOnMount, focusOnMountIfFirstChoice } from './focus-on-mount.js';
 import { useI18n } from './i18n/context.js';
 import { optionKey, optionLabel, sameSelection, toggled } from './logic/kinds.js';
 
@@ -44,6 +45,16 @@ export function EnumEditor({
 	const { t } = useI18n();
 	const [chosen, setChosen] = useState<readonly EnumOption[]>(selected);
 	const root = useRef<HTMLDivElement>(null);
+	// The group takes the focus when it opens with no box to take it. Whether it did is fixed at
+	// the first render, and the function is stable: a new one would be called again, and take the
+	// focus again.
+	const startsEmpty = useRef(choices.length === 0);
+	const setRoot = useCallback((element: HTMLDivElement | null) => {
+		root.current = element;
+		if (startsEmpty.current) {
+			focusOnMount(element);
+		}
+	}, []);
 
 	if (!multiple) {
 		const first = selected[0];
@@ -53,7 +64,7 @@ export function EnumEditor({
 				: choices.findIndex((c) => optionKey(c) === optionKey(first));
 		return (
 			<select
-				autoFocus
+				ref={focusOnMount}
 				aria-label={label}
 				className="editor"
 				value={at < 0 ? '' : String(at)}
@@ -98,15 +109,16 @@ export function EnumEditor({
 		}
 	};
 	return (
+		// The keys and the blur of the boxes come up to the group, which is the one widget they make.
+		// oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
 		<div
-			ref={root}
+			ref={setRoot}
 			role="group"
 			aria-label={label}
 			// The group takes the focus when there is no box to (no choice), and when a click on a box
 			// gives it to none in Safari: the focus would then go to the body, and a click on a box
 			// would look like leaving the editor.
 			tabIndex={-1}
-			autoFocus={choices.length === 0}
 			className="editor enum-editor"
 			onBlur={() => {
 				// After the focus has settled: it goes from one box to the next through nothing.
@@ -132,11 +144,11 @@ export function EnumEditor({
 					}
 				}
 			}}>
-			{choices.map((choice, index) => (
+			{choices.map((choice) => (
 				<label key={optionKey(choice)}>
 					<input
 						type="checkbox"
-						autoFocus={index === 0}
+						ref={focusOnMountIfFirstChoice}
 						checked={chosen.some((c) => optionKey(c) === optionKey(choice))}
 						onChange={() => {
 							setChosen(toggled(choices, chosen, choice));

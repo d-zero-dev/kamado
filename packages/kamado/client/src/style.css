@@ -1,5 +1,4 @@
 :root {
-	color-scheme: light dark;
 	--bg: #fff;
 	--fg: #1b1f24;
 	--muted: #57606a;
@@ -9,11 +8,13 @@
 	--active-bg: #dbe8ff;
 	--readonly-bg: #f8f9fa;
 	--error: #b3261e;
+
 	/* How a value differs from the commit that is checked out (the colours of the gutter of
 	   VS Code: changed is blue, added is green, deleted is red). */
 	--diff-modified: #1f7fc4;
 	--diff-added: #2f855a;
 	--diff-deleted: #d1242f;
+	color-scheme: light dark;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -39,18 +40,19 @@
 
 body {
 	margin: 0;
-	background: var(--bg);
-	color: var(--fg);
 	font:
 		14px/1.4 system-ui,
 		sans-serif;
+	color: var(--fg);
+	background: var(--bg);
 }
 
 .app {
 	display: flex;
 	flex-direction: column;
-	height: 100dvh;
-	padding: 0.5rem 1rem;
+	block-size: 100dvh;
+	padding-block: 0.5rem;
+	padding-inline: 1rem;
 }
 
 .bar {
@@ -66,12 +68,12 @@ body {
 }
 
 .bar .git {
-	max-width: 24rem;
+	max-inline-size: 24rem;
 	overflow: hidden;
+	text-overflow: ellipsis;
 	font-family: ui-monospace, monospace;
 	font-size: 0.8rem;
 	color: var(--muted);
-	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
@@ -92,12 +94,13 @@ button,
 input,
 select,
 textarea {
+	padding-block: 0.25rem;
+	padding-inline: 0.5rem;
 	font: inherit;
 	color: inherit;
 	background: var(--bg);
 	border: 1px solid var(--line);
 	border-radius: 4px;
-	padding: 0.25rem 0.5rem;
 }
 
 button {
@@ -116,8 +119,9 @@ button:disabled {
 
 .status,
 .problem {
-	margin: 0.25rem 0;
-	min-height: 1.4em;
+	min-block-size: 1.4em;
+	margin-block: 0.25rem;
+	margin-inline: 0;
 }
 
 .status {
@@ -129,16 +133,17 @@ button:disabled {
 }
 
 .warnings {
-	margin-bottom: 0.25rem;
+	margin-block-end: 0.25rem;
 }
 
 .grid {
-	flex: 1;
-	/* A cell moved into view stops after the pinned columns, not under them. */
-	scroll-padding-left: var(--pin-total, 0px);
-	overflow: auto;
-	border: 1px solid var(--line);
 	position: relative;
+	flex: 1;
+	overflow: auto;
+
+	/* A cell moved into view stops after the pinned columns, not under them. */
+	scroll-padding-left: var(--pin-total, 0);
+	border: 1px solid var(--line);
 }
 
 .grid:focus-visible {
@@ -148,21 +153,22 @@ button:disabled {
 .row {
 	display: grid;
 	grid-template-columns: var(--cols);
-	width: max-content;
-	min-width: 100%;
-	border-bottom: 1px solid var(--line);
-	content-visibility: auto;
+	inline-size: max-content;
+	min-inline-size: 100%;
+
 	/* The height of a row of values: the value, and under it the line for where it is written. */
 	contain-intrinsic-block-size: auto 3rem;
+	content-visibility: auto;
+	border-block-end: 1px solid var(--line);
 }
 
 .row.head {
 	position: sticky;
-	top: 0;
+	inset-block-start: 0;
 	z-index: 1;
-	background: var(--head);
 	content-visibility: visible;
 	font-weight: 600;
+	background: var(--head);
 }
 
 /* The left padding is the width of the bar that a difference from HEAD is shown by (and that
@@ -170,22 +176,23 @@ button:disabled {
    same place. */
 .cell {
 	position: relative;
-	min-height: 3rem;
-	padding: 0.45rem 0.5rem 0.45rem 24px;
+	min-block-size: 3rem;
+	padding-block: 0.45rem 0.45rem;
+	padding-inline: 24px 0.5rem;
 	overflow: hidden;
-	white-space: nowrap;
 	text-overflow: ellipsis;
-	border-right: 1px solid var(--line);
+	white-space: nowrap;
 	scroll-margin-top: 2.5rem;
+	border-inline-end: 1px solid var(--line);
 }
 
 .cell .sort-mark {
-	margin-left: 0.35rem;
+	margin-inline-start: 0.35rem;
 }
 
 .cell.readonly {
-	background: var(--readonly-bg);
 	color: var(--muted);
+	background: var(--readonly-bg);
 }
 
 /* A pinned column sticks to the left edge while the rest scrolls under it (the place it sticks
@@ -206,15 +213,15 @@ button:disabled {
 }
 
 .cell.pin-end {
-	border-right: 2px solid var(--muted);
+	border-inline-end: 2px solid var(--muted);
 }
 
 /* The row of headers: a column's name, its menu, and the edge that is dragged to resize it. */
 .row.head .cell {
 	position: relative;
 	display: flex;
-	align-items: center;
 	gap: 0.25rem;
+	align-items: center;
 }
 
 .row.head .cell.pinned {
@@ -226,7 +233,7 @@ button:disabled {
 /* The name of a column: text, which is also what is held to drag the column. */
 .row.head .cell .name {
 	flex: 1;
-	min-width: 0;
+	min-inline-size: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	cursor: grab;
@@ -243,11 +250,12 @@ button:disabled {
 
 .menu-button {
 	flex: none;
+	padding-block: 0;
+	padding-inline: 0.3rem;
 	margin: 0;
-	padding: 0 0.3rem;
-	border: 0;
-	background: none;
 	line-height: 1.2;
+	background: none;
+	border: 0;
 	opacity: 0.75;
 }
 
@@ -258,12 +266,11 @@ button:disabled {
 
 .resize-handle {
 	position: absolute;
-	top: 0;
-	right: 0;
-	bottom: 0;
-	width: 6px;
-	cursor: col-resize;
+	inset-block: 0;
+	inset-inline-end: 0;
+	inline-size: 6px;
 	touch-action: none;
+	cursor: col-resize;
 }
 
 .resize-handle:hover {
@@ -275,11 +282,11 @@ button:disabled {
 	position: fixed;
 	z-index: 10;
 	display: grid;
-	min-width: 12rem;
+	min-inline-size: 12rem;
 	padding: 0.25rem;
+	background: var(--bg);
 	border: 1px solid var(--line);
 	border-radius: 6px;
-	background: var(--bg);
 	box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
 }
 
@@ -293,19 +300,21 @@ button:disabled {
    stay lines (`pre-line`), and a long word, such as a URL in a description, is broken instead
    of widening the menu past the window (`anywhere`). */
 .column-menu .note {
-	max-width: 24rem;
-	margin: 0 0 0.25rem;
-	padding: 0.25rem 0.5rem 0.5rem;
-	border-bottom: 1px solid var(--line);
+	max-inline-size: 24rem;
+	padding-block: 0.25rem 0.5rem;
+	padding-inline: 0.5rem;
+	margin-block: 0 0.25rem;
+	margin-inline: 0;
 	overflow-wrap: anywhere;
 	white-space: pre-line;
+	border-block-end: 1px solid var(--line);
 }
 
 .column-menu button {
+	text-align: start;
+	background: none;
 	border: 0;
 	border-radius: 4px;
-	text-align: left;
-	background: none;
 }
 
 .column-menu button:focus-visible,
@@ -321,11 +330,11 @@ button:disabled {
 	position: absolute;
 	inset: 0;
 	padding: 0;
-	border: 0;
-	border-radius: 0;
-	background: none;
 	cursor: inherit;
 	outline: none;
+	background: none;
+	border: 0;
+	border-radius: 0;
 }
 
 /* The text of a cell is what is cut with an ellipsis, so that the line under it (where the value
@@ -341,12 +350,12 @@ button:disabled {
    file), so that every row has the same height. */
 .origin-label {
 	display: block;
-	height: 0.8rem;
+	block-size: 0.8rem;
 	overflow: hidden;
+	text-overflow: ellipsis;
 	font-size: 0.7rem;
 	line-height: 0.8rem;
 	color: var(--muted);
-	text-overflow: ellipsis;
 }
 
 /* The bar at the left edge of a cell that differs from HEAD, 5px wide, in the colour of the kind
@@ -355,14 +364,13 @@ button:disabled {
 .diff-mark {
 	--diff: var(--diff-modified);
 	position: absolute;
-	top: 0;
-	bottom: 0;
-	left: 0;
-	width: 24px;
+	inset-block: 0;
+	inset-inline-start: 0;
+	inline-size: 24px;
 	padding: 0;
+	background: linear-gradient(to right, var(--diff) 5px, transparent 5px);
 	border: 0;
 	border-radius: 0;
-	background: linear-gradient(to right, var(--diff) 5px, transparent 5px);
 }
 
 .diff-mark[data-kind='added'] {
@@ -375,24 +383,24 @@ button:disabled {
 
 button.diff-mark:hover::after,
 button.diff-mark:focus-visible::after {
-	content: '\21ba';
 	position: absolute;
-	top: 50%;
-	left: 7px;
+	inset-block-start: 50%;
+	inset-inline-start: 7px;
 	font-size: 0.85rem;
 	line-height: 1;
 	color: var(--diff);
-	transform: translateY(-50%);
+	content: '\21ba';
+	translate: 0 -50%;
 }
 
 /* Under the table: what the labels and the bars mean. It keeps its height (the table takes the
    rest), so the rows do not move when a line of it comes or goes. */
 .foot {
-	flex: none;
 	display: flex;
+	flex: none;
+	gap: 0.5rem 1.25rem;
 	align-items: baseline;
 	justify-content: space-between;
-	gap: 0.5rem 1.25rem;
 }
 
 .foot-legend {
@@ -401,7 +409,7 @@ button.diff-mark:focus-visible::after {
 
 .reset-settings {
 	flex: none;
-	margin-top: 0.25rem;
+	margin-block-start: 0.25rem;
 	font-size: 0.8rem;
 }
 
@@ -409,7 +417,8 @@ button.diff-mark:focus-visible::after {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.1rem 1.25rem;
-	margin: 0.25rem 0 0;
+	margin-block: 0.25rem 0;
+	margin-inline: 0;
 	font-size: 0.8rem;
 	color: var(--muted);
 }
@@ -417,15 +426,15 @@ button.diff-mark:focus-visible::after {
 .legend-sample {
 	position: relative;
 	display: inline-block;
-	width: 8px;
-	height: 1em;
-	margin-right: 0.3rem;
+	inline-size: 8px;
+	block-size: 1em;
+	margin-inline-end: 0.3rem;
 	vertical-align: -0.15em;
 }
 
 /* The sample is drawn with the class of the bar of a cell, at the size of its first 5px. */
 .legend-sample .diff-mark {
-	width: 8px;
+	inline-size: 8px;
 }
 
 .legend-kinds {
@@ -435,23 +444,25 @@ button.diff-mark:focus-visible::after {
 }
 
 .cell.active {
-	background: var(--active-bg);
 	outline: 2px solid var(--accent);
 	outline-offset: -2px;
+	background: var(--active-bg);
 }
 
 .cell .editor {
-	width: 100%;
-	min-height: 1.6rem;
-	margin: -0.25rem 0;
-	padding: 0.1rem 0.25rem;
+	inline-size: 100%;
+	min-block-size: 1.6rem;
+	padding-block: 0.1rem;
+	padding-inline: 0.25rem;
+	margin-block: -0.25rem;
+	margin-inline: 0;
 }
 
 .cell textarea.editor {
-	font-family: ui-monospace, monospace;
-	white-space: pre;
 	position: relative;
 	z-index: 2;
+	font-family: ui-monospace, monospace;
+	white-space: pre;
 }
 
 .muted {
@@ -461,45 +472,46 @@ button.diff-mark:focus-visible::after {
 /* Said to a screen reader and not drawn. */
 .sr-only {
 	position: absolute;
-	width: 1px;
-	height: 1px;
+	inline-size: 1px;
+	block-size: 1px;
 	overflow: hidden;
-	clip-path: inset(50%);
 	white-space: nowrap;
+	clip-path: inset(50%);
 }
 
 /* The box of a cell of booleans. A click on it makes the edit (the cell shows `true` or `false`
    to a screen reader). */
 .check {
 	position: relative;
-	display: inline-block;
 	box-sizing: border-box;
-	width: 1rem;
-	height: 1rem;
+	display: inline-block;
+	inline-size: 1rem;
+	block-size: 1rem;
 	padding: 0;
+	vertical-align: -0.2rem;
+	cursor: pointer;
 	background: transparent;
 	border: 1.5px solid var(--muted);
 	border-radius: 3px;
-	vertical-align: -0.2rem;
-	cursor: pointer;
 }
 
 .check[data-checked='true'] {
-	border-color: var(--accent);
 	background: var(--accent);
+	border-color: var(--accent);
 }
 
 .check[data-checked='true']::after {
 	position: absolute;
-	top: 0;
-	left: 0.22rem;
+	inset-block-start: 0;
+	inset-inline-start: 0.22rem;
 	box-sizing: border-box;
-	width: 0.3rem;
-	height: 0.6rem;
-	border: solid var(--bg);
-	border-width: 0 2px 2px 0;
+	inline-size: 0.3rem;
+	block-size: 0.6rem;
 	content: '';
-	transform: rotate(45deg);
+	border: solid var(--bg);
+	border-block-width: 0 2px;
+	border-inline-width: 0 2px;
+	rotate: 45deg;
 }
 
 .cell.readonly .check {
@@ -525,8 +537,8 @@ button.diff-mark:focus-visible::after {
 .list-items {
 	display: grid;
 	gap: 0.2rem;
-	margin: 0;
 	padding: 0;
+	margin: 0;
 	list-style: none;
 }
 
@@ -538,7 +550,7 @@ button.diff-mark:focus-visible::after {
 
 .list-items li > input:not([type='checkbox']) {
 	flex: 1;
-	min-width: 0;
+	min-inline-size: 0;
 }
 
 .list-actions {
@@ -548,15 +560,15 @@ button.diff-mark:focus-visible::after {
 }
 
 .options-dialog form {
-	min-width: min(28rem, 85vw);
+	min-inline-size: min(28rem, 85vw);
 }
 
 .options {
 	display: grid;
 	gap: 0.2rem;
-	max-height: 16rem;
-	margin: 0;
+	max-block-size: 16rem;
 	padding: 0;
+	margin: 0;
 	overflow: auto;
 	list-style: none;
 }
@@ -569,16 +581,16 @@ button.diff-mark:focus-visible::after {
 
 .options .option-text {
 	flex: 1;
-	min-width: 0;
+	min-inline-size: 0;
 	overflow-wrap: anywhere;
 	white-space: pre-wrap;
 }
 
 .options .option-kind {
 	flex: none;
-	min-width: 3.5rem;
-	color: var(--muted);
+	min-inline-size: 3.5rem;
 	font-size: 0.8em;
+	color: var(--muted);
 }
 
 .new-option {
@@ -588,20 +600,20 @@ button.diff-mark:focus-visible::after {
 
 .new-option input {
 	flex: 1;
-	min-width: 0;
+	min-inline-size: 0;
 }
 
 .dialog {
+	color: var(--fg);
+	background: var(--bg);
 	border: 1px solid var(--line);
 	border-radius: 8px;
-	background: var(--bg);
-	color: var(--fg);
 }
 
 .dialog form {
 	display: grid;
 	gap: 0.75rem;
-	min-width: 18rem;
+	min-inline-size: 18rem;
 }
 
 .dialog h2 {
@@ -623,7 +635,7 @@ button.diff-mark:focus-visible::after {
 /* A dialog that explains what it is about to do: its sentences wrap at a width that is read
    easily, and are not spread over the width of the window. */
 .dialog.wordy {
-	max-width: min(36rem, calc(100vw - 2rem));
+	max-inline-size: min(36rem, calc(100vw - 2rem));
 }
 
 .dialog.wordy p {
@@ -643,7 +655,7 @@ button.diff-mark:focus-visible::after {
 
 /* Such a dialog says a problem only when there is one: no line is kept for it. */
 .dialog.wordy .problem {
-	min-height: 0;
+	min-block-size: 0;
 }
 
 .dialog.wordy .problem:empty {
@@ -658,22 +670,22 @@ button.diff-mark:focus-visible::after {
 /* The sync (RFC section 14.2). The button is green, as an added value is: it adds what a
    script says, and the colour is not the only sign (its name says what it is). */
 .bar .sync-button {
-	border-color: var(--diff-added);
-	color: var(--diff-added);
 	font-weight: 600;
+	color: var(--diff-added);
+	border-color: var(--diff-added);
 }
 
 .bar .sync-button:hover:not(:disabled),
 .bar .sync-button[aria-expanded='true'] {
-	background: var(--diff-added);
 	color: var(--bg);
+	background: var(--diff-added);
 }
 
 /* The dialog keeps its header and its buttons in view and scrolls only its body: a long log or
    a long list of differences must not push the buttons off the window. */
 .dialog.sync-dialog {
-	width: min(48rem, calc(100vw - 2rem));
-	max-height: calc(100vh - 2rem);
+	inline-size: min(48rem, calc(100vw - 2rem));
+	max-block-size: calc(100vh - 2rem);
 	padding: 0;
 	overflow: hidden;
 }
@@ -685,24 +697,26 @@ button.diff-mark:focus-visible::after {
 
 .sync-shell {
 	display: flex;
-	flex-direction: column;
-	min-height: 0;
-	max-height: calc(100vh - 2rem);
 	flex: 1;
+	flex-direction: column;
+	min-block-size: 0;
+	max-block-size: calc(100vh - 2rem);
 }
 
 .sync-shell > h2 {
 	flex: none;
-	padding: 1rem 1.25rem 0.5rem;
+	padding-block: 1rem 0.5rem;
+	padding-inline: 1.25rem;
 	margin: 0;
 	font-size: 1.1rem;
 }
 
 .sync-shell > .actions {
 	flex: none;
-	padding: 0.75rem 1.25rem;
-	border-top: 1px solid var(--line);
+	padding-block: 0.75rem;
+	padding-inline: 1.25rem;
 	background: var(--head);
+	border-block-start: 1px solid var(--line);
 }
 
 /* The body is the only part that scrolls. */
@@ -710,9 +724,10 @@ button.diff-mark:focus-visible::after {
 	display: grid;
 	gap: 0.75rem;
 	align-content: start;
-	min-height: 0;
+	min-block-size: 0;
+	padding-block: 0.5rem 1rem;
+	padding-inline: 1.25rem;
 	overflow-y: auto;
-	padding: 0.5rem 1.25rem 1rem;
 }
 
 .sync-body p {
@@ -721,34 +736,35 @@ button.diff-mark:focus-visible::after {
 }
 
 .sync-op {
-	color: var(--muted);
 	font-size: 0.9rem;
+	color: var(--muted);
 }
 
 .sync-section h3 {
-	margin: 0 0 0.35rem;
+	margin-block: 0 0.35rem;
+	margin-inline: 0;
 	font-size: 0.85rem;
 	color: var(--muted);
 }
 
 .sync-running {
 	display: flex;
-	align-items: center;
 	gap: 0.5rem;
+	align-items: center;
 }
 
 .spinner {
-	width: 1.1rem;
-	height: 1.1rem;
+	inline-size: 1.1rem;
+	block-size: 1.1rem;
 	border: 2px solid var(--line);
-	border-top-color: var(--accent);
+	border-block-start-color: var(--accent);
 	border-radius: 50%;
 	animation: sync-spin 0.9s linear infinite;
 }
 
 @keyframes sync-spin {
 	to {
-		transform: rotate(360deg);
+		rotate: 360deg;
 	}
 }
 
@@ -760,16 +776,16 @@ button.diff-mark:focus-visible::after {
 
 /* The log of a script: its lines as it wrote them, one to a line, and long ones wrap. */
 .sync-log {
-	margin: 0;
+	max-block-size: 16rem;
 	padding: 0.5rem;
-	max-height: 16rem;
+	margin: 0;
 	overflow-y: auto;
-	list-style: none;
-	border: 1px solid var(--line);
-	border-radius: 6px;
-	background: var(--readonly-bg);
 	font-family: ui-monospace, monospace;
 	font-size: 0.8rem;
+	list-style: none;
+	background: var(--readonly-bg);
+	border: 1px solid var(--line);
+	border-radius: 6px;
 }
 
 .sync-log li {
@@ -779,7 +795,7 @@ button.diff-mark:focus-visible::after {
 
 .sync-log .log-type {
 	display: inline-block;
-	min-width: 3.5em;
+	min-inline-size: 3.5em;
 	color: var(--muted);
 }
 
@@ -797,22 +813,24 @@ button.diff-mark:focus-visible::after {
 
 /* A failure: the border and the words say it, the colour only helps. */
 .sync-failure {
-	padding: 0.6rem 0.75rem;
-	border: 1px solid var(--error);
-	border-left-width: 4px;
-	border-radius: 6px;
+	padding-block: 0.6rem;
+	padding-inline: 0.75rem;
 	color: var(--error);
 	overflow-wrap: anywhere;
+	border: 1px solid var(--error);
+	border-inline-start-width: 4px;
+	border-radius: 6px;
 }
 
 .sync-failure pre {
-	margin: 0.5rem 0 0;
-	max-height: 12rem;
+	max-block-size: 12rem;
+	margin-block: 0.5rem 0;
+	margin-inline: 0;
 	overflow: auto;
 	font-size: 0.75rem;
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
 	color: var(--fg);
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
 }
 
 .sync-failure summary {
@@ -820,28 +838,30 @@ button.diff-mark:focus-visible::after {
 }
 
 .sync-ok .check {
-	margin-right: 0.4rem;
+	margin-inline-end: 0.4rem;
+	font-weight: bold;
 	color: var(--diff-added);
-	font-weight: 700;
 }
 
 .sync-warning {
-	padding: 0.6rem 0.75rem;
+	padding-block: 0.6rem;
+	padding-inline: 0.75rem;
 	border: 1px solid var(--diff-modified);
-	border-left-width: 4px;
+	border-inline-start-width: 4px;
 	border-radius: 6px;
 }
 
 .sync-warning ul {
-	margin: 0.35rem 0 0;
-	padding-left: 1.25rem;
-	max-height: 7rem;
+	max-block-size: 7rem;
+	padding-inline-start: 1.25rem;
+	margin-block: 0.35rem 0;
+	margin-inline: 0;
 	overflow-y: auto;
 }
 
 .sync-problems {
+	padding-inline-start: 1.25rem;
 	margin: 0;
-	padding-left: 1.25rem;
 	overflow-wrap: anywhere;
 }
 
@@ -856,14 +876,15 @@ button.diff-mark:focus-visible::after {
 	display: grid;
 	gap: 0.1rem;
 	justify-items: start;
-	min-width: 6.5rem;
-	padding: 0.4rem 0.7rem;
-	text-align: left;
+	min-inline-size: 6.5rem;
+	padding-block: 0.4rem;
+	padding-inline: 0.7rem;
+	text-align: start;
 }
 
 .sync-tabs button .count {
 	font-size: 1.15rem;
-	font-weight: 700;
+	font-weight: bold;
 }
 
 .sync-tabs button[aria-selected='true'] {
@@ -876,13 +897,13 @@ button.diff-mark:focus-visible::after {
 }
 
 .sync-panel {
-	min-height: 3rem;
+	min-block-size: 3rem;
 }
 
 .sync-changes {
-	margin: 0;
+	max-block-size: 18rem;
 	padding: 0;
-	max-height: 18rem;
+	margin: 0;
 	overflow-y: auto;
 	list-style: none;
 	border: 1px solid var(--line);
@@ -890,27 +911,29 @@ button.diff-mark:focus-visible::after {
 }
 
 .sync-changes li {
-	padding: 0.3rem 0.6rem;
-	border-bottom: 1px solid var(--line);
+	padding-block: 0.3rem;
+	padding-inline: 0.6rem;
 	overflow-wrap: anywhere;
+	border-block-end: 1px solid var(--line);
 }
 
 .sync-changes li:last-child {
-	border-bottom: 0;
+	border-block-end: 0;
 }
 
 .sync-changes .tag {
-	margin-left: 0.4rem;
-	padding: 0 0.35rem;
+	padding-block: 0;
+	padding-inline: 0.35rem;
+	margin-inline-start: 0.4rem;
+	font-size: 0.8rem;
+	color: var(--muted);
 	border: 1px solid var(--line);
 	border-radius: 4px;
-	color: var(--muted);
-	font-size: 0.8rem;
 }
 
 .sync-changes .values {
 	display: block;
-	margin-top: 0.15rem;
+	margin-block-start: 0.15rem;
 	font-family: ui-monospace, monospace;
 	font-size: 0.8rem;
 }
@@ -927,10 +950,10 @@ button.diff-mark:focus-visible::after {
 }
 
 .dialog .actions button.primary {
-	border-color: var(--diff-added);
-	background: var(--diff-added);
-	color: var(--bg);
 	font-weight: 600;
+	color: var(--bg);
+	background: var(--diff-added);
+	border-color: var(--diff-added);
 }
 
 .dialog .actions button.primary:disabled {
@@ -938,5 +961,5 @@ button.diff-mark:focus-visible::after {
 }
 
 .sync-panel .more {
-	margin-top: 0.5rem;
+	margin-block-start: 0.5rem;
 }

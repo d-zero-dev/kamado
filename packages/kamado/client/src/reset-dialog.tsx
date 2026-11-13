@@ -3,6 +3,9 @@ import { useEffect, useRef } from 'react';
 import { useI18n } from './i18n/context.js';
 import { useCommands } from './use-commands.js';
 
+/** The `id` of the title that names the dialog. */
+const TITLE_ID = 'reset-title';
+
 interface ResetDialogProps {
 	/** Whether the question is asked. */
 	readonly open: boolean;
@@ -58,7 +61,7 @@ export function ResetDialog({ open, onConfirm, onCancel }: ResetDialogProps) {
 		<dialog
 			ref={commands.ref}
 			id={commands.id}
-			aria-labelledby="reset-title"
+			aria-labelledby={TITLE_ID}
 			className="dialog"
 			onClose={() => {
 				if (!chosen.current) {
@@ -71,7 +74,7 @@ export function ResetDialog({ open, onConfirm, onCancel }: ResetDialogProps) {
 					onSubmit={(event) => {
 						event.preventDefault();
 					}}>
-					<h2 id="reset-title">{t('reset.title')}</h2>
+					<h2 id={TITLE_ID}>{t('reset.title')}</h2>
 					<p>{t('reset.what')}</p>
 					<ul>
 						<li>{t('reset.columns')}</li>

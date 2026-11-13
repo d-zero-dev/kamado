@@ -11,10 +11,11 @@ import {
 	fetchSyncState,
 	startSync,
 } from './api.js';
+import { focusOnMount } from './focus-on-mount.js';
 import { useI18n } from './i18n/context.js';
 import { followSync } from './logic/sync-run.js';
 import { firstTab, NO_LOG, operationLabel, tabsOf, type HeldLog } from './logic/sync.js';
-import { SyncView } from './sync-view.js';
+import { SYNC_TITLE_ID, SyncView } from './sync-view.js';
 import { useCommands } from './use-commands.js';
 
 /** How a sync ended when its dialog was closed. */
@@ -229,7 +230,7 @@ export function SyncDialog({ request, onEnd }: SyncDialogProps) {
 			mine.id = id;
 			await follow(mine, id);
 		},
-		[finish, follow, language, t],
+		[finish, follow, language],
 	);
 
 	// A new request runs the operation and opens the dialog.
@@ -250,6 +251,7 @@ export function SyncDialog({ request, onEnd }: SyncDialogProps) {
 		}
 		void begin(request.operation, request.nonce);
 		// `begin` is made for the language of the moment; a change of language does not run it again.
+		// oxlint-disable-next-line react-hooks/exhaustive-deps
 	}, [request]);
 
 	// The dialog goes with the screen.
@@ -455,7 +457,7 @@ export function SyncDialog({ request, onEnd }: SyncDialogProps) {
 		<dialog
 			ref={commands.ref}
 			id={commands.id}
-			aria-labelledby="sync-title"
+			aria-labelledby={SYNC_TITLE_ID}
 			className="dialog sync-dialog"
 			onCancel={(event) => {
 				// Escape while the script runs asks whether to cancel the sync (a second Escape answers
@@ -508,7 +510,7 @@ export function SyncDialog({ request, onEnd }: SyncDialogProps) {
 					)}
 					<div className="actions">
 						{running && !askingCancel && (
-							<button type="button" autoFocus {...commands.run('ask')}>
+							<button type="button" ref={focusOnMount} {...commands.run('ask')}>
 								{t('sync.cancel')}
 							</button>
 						)}
@@ -517,7 +519,7 @@ export function SyncDialog({ request, onEnd }: SyncDialogProps) {
 								{/* The focus starts on keeping the sync: a cancel is not one keystroke away. */}
 								<button
 									type="button"
-									autoFocus
+									ref={focusOnMount}
 									disabled={cancelling}
 									{...commands.run('keep')}>
 									{t('sync.cancelKeep')}
@@ -532,7 +534,7 @@ export function SyncDialog({ request, onEnd }: SyncDialogProps) {
 								{/* The focus starts here: what is applied removes and moves files. */}
 								<button
 									type="button"
-									autoFocus
+									ref={focusOnMount}
 									disabled={applying}
 									{...commands.run('close')}>
 									{t('dialog.cancel')}
@@ -548,7 +550,7 @@ export function SyncDialog({ request, onEnd }: SyncDialogProps) {
 						)}
 						{!running && !(status === 'review' && problem === null) && (
 							<>
-								<button type="button" autoFocus {...commands.run('close')}>
+								<button type="button" ref={focusOnMount} {...commands.run('close')}>
 									{t('sync.close')}
 								</button>
 								{(status === 'failed' ||
