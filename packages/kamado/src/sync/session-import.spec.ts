@@ -1,4 +1,4 @@
-/* eslint-disable unicorn/no-await-expression-member -- an expectation reads better with the member of what it waits for */
+/* oxlint-disable unicorn/no-await-expression-member -- an expectation reads better with the member of what it waits for */
 import type { Snapshot } from './diff.js';
 
 import { execFileSync } from 'node:child_process';

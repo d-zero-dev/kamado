@@ -1,4 +1,4 @@
-/* eslint-disable unicorn/no-await-expression-member -- an expectation reads better with the member of what it waits for */
+/* oxlint-disable unicorn/no-await-expression-member -- an expectation reads better with the member of what it waits for */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';

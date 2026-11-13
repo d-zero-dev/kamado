@@ -150,7 +150,7 @@ export function setProxyRoutes(
 				});
 			} catch (error) {
 				const message = error instanceof Error ? error.message : 'Unknown proxy error';
-				// eslint-disable-next-line no-console
+				// oxlint-disable-next-line no-console -- the error of a proxied request is for the terminal of the dev server, and the browser gets a 502
 				console.error(
 					styleText('red', `  Proxy error [${prefix} → ${rule.target}]: ${message}`),
 				);

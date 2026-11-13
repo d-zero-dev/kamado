@@ -23,6 +23,7 @@ describe('displayLog', () => {
 
 	test('cuts a line that is too long', () => {
 		const shown = displayLog({ type: 'info', message: 'x'.repeat(MAX_LOG_LINE + 50) });
+		// oxlint-disable-next-line typescript/no-misused-spread -- the code points on purpose, not the units of a string
 		expect([...shown.message]).toHaveLength(MAX_LOG_LINE);
 		expect(shown.message.endsWith('…')).toBe(true);
 	});
@@ -36,6 +37,7 @@ describe('previewValue', () => {
 	});
 
 	test('is cut, and has no control character', () => {
+		// oxlint-disable-next-line typescript/no-misused-spread -- the code points on purpose, not the units of a string
 		expect([...previewValue('y'.repeat(1000))]).toHaveLength(MAX_PREVIEW);
 		expect(previewValue(`a${RLO}b${ESC}`)).not.toContain(RLO);
 		expect(previewValue(`a${RLO}b${ESC}`)).not.toContain(ESC);

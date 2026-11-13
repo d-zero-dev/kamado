@@ -110,6 +110,7 @@ export function showControlsByLine(text: string): string {
  * ```
  */
 export function cutLine(text: string, max: number): string {
+	// oxlint-disable-next-line typescript/no-misused-spread -- the code points on purpose: a character of two units stays whole
 	const chars = [...text];
 	return chars.length <= max ? text : `${chars.slice(0, Math.max(0, max - 1)).join('')}…`;
 }

@@ -115,7 +115,7 @@ function candidates(given: string, cwd: string): string[] {
  */
 function printable(text: string): string {
 	return text.replaceAll(
-		// eslint-disable-next-line no-control-regex -- the control characters are what this finds
+		// oxlint-disable-next-line no-control-regex -- the control characters are what this finds
 		/[\u0000-\u001F\u007F]/g,
 		(char) => `\\x${(char.codePointAt(0) ?? 0).toString(16).padStart(2, '0')}`,
 	);

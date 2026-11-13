@@ -169,7 +169,8 @@ export type RunAnswer =
 
 /** The answer to a request to apply what was shown. */
 export type ApplyAnswer =
-	{ readonly ok: true } | { readonly ok: false; readonly error: 'unknown' | 'notReady' };
+	| { readonly ok: true }
+	| { readonly ok: false; readonly error: 'unknown' | 'notReady' };
 
 /** The sync of the screen. */
 export interface SyncController {

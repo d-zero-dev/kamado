@@ -8,7 +8,11 @@ import nodePath from 'node:path';
  * blob id of what it holds (with its text, once read) when that differs.
  */
 export type HeadState =
-	null | 'ignored' | 'skip' | 'same' | { readonly oid: string; text?: string };
+	| null
+	| 'ignored'
+	| 'skip'
+	| 'same'
+	| { readonly oid: string; text?: string };
 
 /** A file the core lists, with the git blob id of what it holds now (`null` if it is not there). */
 export interface ListedFile {

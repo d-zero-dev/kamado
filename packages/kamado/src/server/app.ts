@@ -166,7 +166,8 @@ export function createApp(
 	// The last failure to open the server again, so that the requests of one
 	// page (its assets) do not each plan the whole site again.
 	let reopenFailure:
-		{ readonly used: string; readonly at: number; readonly reason: string } | undefined;
+		| { readonly used: string; readonly at: number; readonly reason: string }
+		| undefined;
 
 	/**
 	 * Opens the server of the core again after `used` was left unusable, once

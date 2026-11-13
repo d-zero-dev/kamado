@@ -33,10 +33,8 @@ const WEEKDAYS = [
 
 const INVALID_DATE_STRING = 'Invalid Date';
 // dayjs's own pattern, kept verbatim so inputs split into the same groups.
-/* eslint-disable regexp/no-misleading-capturing-group */
 const REGEX_PARSE =
 	/^(\d{4})[-/]?(\d{1,2})?[-/]?(\d{0,2})[T\s]*(\d{1,2})?:?(\d{1,2})?:?(\d{1,2})?[.:]?(\d+)?$/i;
-/* eslint-enable regexp/no-misleading-capturing-group */
 const REGEX_FORMAT =
 	/\[([^\]]+)\]|YYYY|YY|M{1,4}|D{1,2}|d{1,4}|H{1,2}|h{1,2}|[aAXx]|m{1,2}|s{1,2}|Z{1,2}|SSS/g;
 

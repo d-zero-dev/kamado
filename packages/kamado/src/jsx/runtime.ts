@@ -69,7 +69,8 @@
  * `defaultProps`.
  * @module
  */
-/* eslint-disable unicorn/prefer-code-point -- hot paths compare single ASCII UTF-16 code units; `charCodeAt` is the cheapest and equivalent there */
+/* oxlint-disable typescript/no-base-to-string -- `'' + value` is the coercion of React (the abstract ToPrimitive with the default hint, where `valueOf` comes first), which this runtime equals byte for byte; `String(value)` differs for an object with a `valueOf` and is not what React does */
+/* oxlint-disable unicorn/prefer-code-point -- hot paths compare single ASCII UTF-16 code units; `charCodeAt` is the cheapest and equivalent there */
 import { randomUUID } from 'node:crypto';
 
 import {
@@ -415,7 +416,7 @@ const UNITLESS_SET = new Set<string>(UNITLESS);
 
 // Both patterns are copied from React: a `javascript:` URL may hide behind
 // control characters, and attribute names follow the XML Name production.
-/* eslint-disable no-control-regex, no-misleading-character-class, prefer-regex-literals -- see above */
+/* oxlint-disable no-control-regex, no-misleading-character-class, prefer-regex-literals -- see above */
 const JAVASCRIPT_URL =
 	/^[\u0000-\u001F ]*j[\n\r\t]*a[\n\r\t]*v[\n\r\t]*a[\n\r\t]*s[\n\r\t]*c[\n\r\t]*r[\n\r\t]*i[\n\r\t]*p[\n\r\t]*t[\n\r\t]*:/i;
 const VALID_ATTRIBUTE_NAME = new RegExp(
@@ -567,7 +568,7 @@ function styleAttr(style: unknown): string {
  * @returns Whether the value is not a number
  */
 function isNotANumber(value: unknown): boolean {
-	// eslint-disable-next-line unicorn/prefer-number-properties -- `Number.isNaN("abc")` is false
+	// oxlint-disable-next-line unicorn/prefer-number-properties -- `Number.isNaN("abc")` is false
 	return isNaN(value as number);
 }
 

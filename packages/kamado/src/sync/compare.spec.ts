@@ -52,7 +52,8 @@ const SNAPSHOT: Snapshot = {
  */
 function messagesOf(
 	result:
-		{ readonly ok: true } | { readonly ok: false; readonly problems: readonly Problem[] },
+		| { readonly ok: true }
+		| { readonly ok: false; readonly problems: readonly Problem[] },
 ): string[] {
 	if (result.ok) {
 		throw new Error('expected problems, but the result is ok');

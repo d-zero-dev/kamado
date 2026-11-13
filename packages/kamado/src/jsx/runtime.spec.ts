@@ -1157,7 +1157,7 @@ describe('m / Markup', () => {
 		const markup = m('<b>x</b>');
 		expect(markup).toBeInstanceOf(Markup);
 		expect(markup.html).toBe('<b>x</b>');
-		expect(`${markup}`).toBe('<b>x</b>');
+		expect(String(markup)).toBe('<b>x</b>');
 		expect(c(markup)).toBe('<b>x</b>');
 	});
 });
@@ -1194,7 +1194,7 @@ describe('c', () => {
 				})(),
 			),
 		).toBe('x2');
-		expect(c([, 'a'])).toBe('a'); // eslint-disable-line no-sparse-arrays
+		expect(c([, 'a'])).toBe('a'); // oxlint-disable-line no-sparse-arrays
 	});
 
 	test('plain objects throw like React', () => {
@@ -1515,7 +1515,7 @@ describe('k', () => {
 	test('calls function components and keeps Markup results as is', () => {
 		const result = m('<b/>');
 		expect(k(() => result, {})).toBe(result);
-		expect(k((p: Props) => m(`<i>${p.n}</i>`), { n: 1 }).html).toBe('<i>1</i>');
+		expect(k((p: Props) => m(`<i>${String(p.n)}</i>`), { n: 1 }).html).toBe('<i>1</i>');
 	});
 
 	test('coerces results like child content', () => {
