@@ -53,7 +53,7 @@
 		"@d-zero/markuplint-config": "6.0.0-alpha.3",
 		"@d-zero/oxlint-config": "6.0.0-alpha.3",
 		"@d-zero/oxlint-plugin": "6.0.0-alpha.3",
-		"@d-zero/shared": "0.23.0",
+		"@d-zero/shared": "0.23.1",
 		"@d-zero/stylelint-config": "6.0.0-alpha.3",
 		"@d-zero/textlint-config": "6.0.0-alpha.3",
 		"@d-zero/tsconfig": "2.0.0",
