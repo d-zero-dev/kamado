@@ -544,9 +544,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@d-zero/shared@npm:0.23.1":
-  version: 0.23.1
-  resolution: "@d-zero/shared@npm:0.23.1"
+"@d-zero/shared@npm:0.23.2":
+  version: 0.23.2
+  resolution: "@d-zero/shared@npm:0.23.2"
   dependencies:
     "@holiday-jp/holiday_jp": "npm:2.5.2"
     await-event-emitter: "npm:2.0.2"
@@ -555,7 +555,7 @@ __metadata:
     front-matter: "npm:4.0.2"
     micromatch: "npm:4.0.8"
     sanitize-filename: "npm:1.6.4"
-  checksum: 10c0/2bd2608556c07e56805b26f611ea0620fb349ca413afdb1da7dd6cf7eb7672521e5433b5d65c5ee97c5c0b2777c609a223e1c99a58f32eebb1e335d01a15a6d7
+  checksum: 10c0/b679bacb1cee61f893e6fa494bdf38a052fa5f6e1b0ac380d16adab6537e44cb1903d9f28841b6b454ba8673a1259dc8ac79ffd3fddf2b086675f9f28b6dd9e4
   languageName: node
   linkType: hard
 
@@ -8014,7 +8014,7 @@ __metadata:
     "@d-zero/markuplint-config": "npm:6.0.0-alpha.3"
     "@d-zero/oxlint-config": "npm:6.0.0-alpha.3"
     "@d-zero/oxlint-plugin": "npm:6.0.0-alpha.3"
-    "@d-zero/shared": "npm:0.23.1"
+    "@d-zero/shared": "npm:0.23.2"
     "@d-zero/stylelint-config": "npm:6.0.0-alpha.3"
     "@d-zero/textlint-config": "npm:6.0.0-alpha.3"
     "@d-zero/tsconfig": "npm:2.0.0"
