@@ -92,7 +92,7 @@
 		"stylelint": "17.16.0",
 		"textlint": "15.8.0",
 		"typescript": "6.0.3",
-		"vitest": "4.1.12"
+		"vitest": "5.1.0"
 	},
 	"resolutions": {
 		"nx/undici": "8.12.4"
