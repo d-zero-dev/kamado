@@ -194,16 +194,32 @@ describe('build when stdin is not a TTY', async () => {
 			verbose,
 		});
 
-	// With a dealer version that calls `setRawMode` unguarded, this test does not fail with a
-	// rejected promise: the TypeError is thrown inside dealer's finish callback, so `build()`
-	// never settles. The test then ends with a timeout and an unhandled rejection.
+	// kamado has no code of its own that prevents this crash: it relies on `@d-zero/dealer`.
+	// dealer before 1.6.1 (such as 1.5.3) calls `setRawMode` without checking for a TTY when
+	// its display closes, so keep dealer on 1.6.1 or later. In that case the TypeError is thrown
+	// inside dealer's finish callback and `build()` never settles instead of rejecting, so wait
+	// for it with a deadline to fail with a readable message rather than the test timeout.
+	const settlesWithin = <T>(promise: Promise<T>, ms: number) =>
+		Promise.race([
+			promise,
+			new Promise<never>((_, reject) => {
+				setTimeout(() => {
+					reject(
+						new Error(
+							`build() did not settle within ${ms}ms: the progress display may have thrown while closing`,
+						),
+					);
+				}, ms).unref();
+			}),
+		]);
+
 	test('finishes a non-verbose build without throwing', async () => {
 		const sigintListeners = process.listenerCount('SIGINT');
 
-		await expect(buildOnce(false)).resolves.toBeUndefined();
+		await expect(settlesWithin(buildOnce(false), 5000)).resolves.toBeUndefined();
 
 		expect(vol.toJSON()['/mock/output/dir/index.html']).toBe('page content');
-		// The progress display registers a SIGINT handler and must release it when it closes.
+		// dealer's progress display registers a SIGINT handler and releases it when it closes.
 		expect(process.listenerCount('SIGINT')).toBe(sigintListeners);
 	}, 10_000);
 
