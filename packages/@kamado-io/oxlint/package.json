@@ -40,7 +40,7 @@
 	},
 	"devDependencies": {
 		"eslint": "9.39.5",
-		"oxlint": "1.93.0",
+		"oxlint": "1.94.0",
 		"typescript": "6.0.3"
 	},
 	"engines": {
