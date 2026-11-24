@@ -60,6 +60,8 @@ Kamadoは並列ビルド処理を採用しています。ビルド中は何を�
 
 ### インストール
 
+Node.js 24.11.0以上が必要です。
+
 ```bash
 npm install kamado
 # または

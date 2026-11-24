@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - dev
+      - v1
 
 jobs:
   test:
@@ -12,7 +13,8 @@ jobs:
       matrix:
         os:
           - macOS-latest
-        node: [24]
+        # 24.11.0 is the lower bound of `engines.node`; 24 tracks the latest 24.x.
+        node: [24.11.0, 24]
 
     runs-on: ${{ matrix.os }}
 

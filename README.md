@@ -31,7 +31,7 @@ This repository is a monorepo managed by Lerna.
 
 ### Prerequisites
 
-- Node.js
+- Node.js 24.11.0 or later
 - Yarn
 
 ### Commands

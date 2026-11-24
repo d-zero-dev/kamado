@@ -62,9 +62,9 @@ export interface Context extends Config {
 
 ## ディレクトリ構造
 
-`packages/kamado/src` 配下の主要なディレクトリとその役割です。
+`packages/kamado/src`配下の主要なディレクトリとその役割です。
 
-- **`index.ts`**: CLI のエントリポイント。`@d-zero/roar` を使用してコマンドを処理します。
+- **`index.ts`**: CLI のエントリポイント。`@d-zero/roar`を使用してコマンドを処理します。
 - **`builder/`**: 静的ビルド（`kamado build`）の実行ロジック。
 - **`server/`**: 開発サーバー（`kamado server`）のロジック。Hono を使用。
 - **`compiler/`**: コンパイラ・プラグインのインターフェースと、機能マップの管理。
@@ -122,11 +122,11 @@ graph TD
 
 ### CompilableFileMap
 
-`compilableFileMap` は、出力ファイルパスを対応するソースファイルにマッピングする `Map<string, CompilableFile>` です。以下の手順で作成されます：
+`compilableFileMap`は、出力ファイルパスを対応するソースファイルにマッピングする`Map<string, CompilableFile>`です。以下の手順で作成されます：
 
 1. 設定内のすべてのコンパイラエントリを反復処理
-2. 各コンパイラについて、`getAssetGroup()` を使用してコンパイラの `files` パターンに一致するファイルを収集（`ignore` に一致するものを除外）
-3. 各ファイルの `outputPath`（出力先パス）を `CompilableFile` オブジェクトにマッピング
+2. 各コンパイラについて、`getAssetGroup()`を使用してコンパイラの`files`パターンに一致するファイルを収集（`ignore`に一致するものを除外）
+3. 各ファイルの`outputPath`（出力先パス）を`CompilableFile`オブジェクトにマッピング
 
 このマップにより、開発サーバーは以下を実現できます：
 
@@ -142,7 +142,7 @@ graph TD
 
 ### コンパイラ・プラグイン
 
-Kamado の機能拡張は、`CompilerPlugin` を追加することで行います。
+Kamado の機能拡張は、`CompilerPlugin`を追加することで行います。
 
 ```typescript
 // CompilerインターフェースはContextを受け取る
@@ -166,7 +166,7 @@ export interface CompileFunction {
 
 ### ライフサイクルフック
 
-ユーザーは `kamado.config.ts` を通じてビルドの前後に任意の処理を挿入できます。
+ユーザーは`kamado.config.ts`を通じてビルドの前後に任意の処理を挿入できます。
 
 - `onBeforeBuild(context: Context)`: ビルド開始前に実行（アセットの事前準備など）。`mode`フィールドを持つ`Context`を受け取ります。
 - `onAfterBuild(context: Context)`: ビルド完了後に実行（サイトマップ生成、通知など）。`mode`フィールドを持つ`Context`を受け取ります。
