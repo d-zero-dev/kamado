@@ -60,6 +60,8 @@ The page tree holds the source file paths and destination paths. Since mapping i
 
 ### Installation
 
+Requires Node.js 24.11.0 or later.
+
 ```bash
 npm install kamado
 # or

@@ -137,3 +137,80 @@ describe('getAssetGroup with virtual file system', async () => {
 		});
 	}, 10_000);
 });
+
+describe('build when stdin is not a TTY', async () => {
+	const config = await mergeConfig(
+		// @ts-ignore
+		{ pkg: { name: 'mock' } },
+	);
+	const stdinProps = ['isTTY', 'setRawMode'] as const;
+	let originalDescriptors: [string, PropertyDescriptor | undefined][] = [];
+
+	beforeAll(() => {
+		originalDescriptors = stdinProps.map((prop) => [
+			prop,
+			Object.getOwnPropertyDescriptor(process.stdin, prop),
+		]);
+	});
+
+	beforeEach(() => {
+		vol.fromJSON({
+			'/mock/input/dir/index.html': '<html><body>Index</body></html>',
+		});
+		// CI runners attach no TTY to stdin, so `setRawMode` does not exist on it.
+		Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+		Object.defineProperty(process.stdin, 'setRawMode', {
+			value: undefined,
+			configurable: true,
+		});
+	});
+
+	afterEach(() => {
+		for (const [prop, descriptor] of originalDescriptors) {
+			if (descriptor) {
+				Object.defineProperty(process.stdin, prop, descriptor);
+			} else {
+				Reflect.deleteProperty(process.stdin, prop);
+			}
+		}
+		vol.reset();
+	});
+
+	const buildOnce = (verbose: boolean) =>
+		build({
+			...config,
+			dir: {
+				...config.dir,
+				input: '/mock/input/dir',
+				output: '/mock/output/dir',
+			},
+			compilers: [
+				{
+					files: '**/*.html',
+					outputExtension: '.html',
+					compiler: () => () => 'page content',
+				},
+			],
+			verbose,
+		});
+
+	// With a dealer version that calls `setRawMode` unguarded, this test does not fail with a
+	// rejected promise: the TypeError is thrown inside dealer's finish callback, so `build()`
+	// never settles. The test then ends with a timeout and an unhandled rejection.
+	test('finishes a non-verbose build without throwing', async () => {
+		const sigintListeners = process.listenerCount('SIGINT');
+
+		await expect(buildOnce(false)).resolves.toBeUndefined();
+
+		expect(vol.toJSON()['/mock/output/dir/index.html']).toBe('page content');
+		// The progress display registers a SIGINT handler and must release it when it closes.
+		expect(process.listenerCount('SIGINT')).toBe(sigintListeners);
+	}, 10_000);
+
+	// Control case: the verbose display never touches raw mode, so this passes with any dealer version.
+	test('finishes a verbose build without throwing', async () => {
+		await expect(buildOnce(true)).resolves.toBeUndefined();
+
+		expect(vol.toJSON()['/mock/output/dir/index.html']).toBe('page content');
+	}, 10_000);
+});

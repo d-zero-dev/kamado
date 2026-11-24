@@ -4,6 +4,9 @@
 	"description": "Pug compiler for Kamado",
 	"author": "D-ZERO Co., Ltd.",
 	"license": "MIT",
+	"engines": {
+		"node": ">=24.11.0"
+	},
 	"publishConfig": {
 		"access": "public"
 	},
