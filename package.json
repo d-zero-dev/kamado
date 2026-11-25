@@ -15,7 +15,7 @@
 		"lint:eslint": "npx eslint --fix \"./{*,packages/**/src/{*,**/*}}.{ts,js,cjs,mjs}\"",
 		"lint:prettier": "npx prettier --write \"{*,./**/*}{.{md,mdc,mdx,js,jsx,ts,tsx,css,pug,html,json,yaml},*rc}\" \"!**/dist/**/*\"",
 		"lint:textlint": "npx textlint --fix \"{*,./**/*}.{md,mdc}\" && npx textlint \"{*,./**/*}.{md,mdc}\"",
-		"release": "lerna publish --dist-tag v1 --exact --conventional-commits --conventional-graduate",
+		"release": "lerna publish --dist-tag legacy-v1 --exact --conventional-commits --conventional-graduate",
 		"postinstall": "husky",
 		"commit": "npx cz",
 		"co": "npx cz",
