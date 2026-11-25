@@ -76,7 +76,7 @@
 		"kamado-v2": "npm:kamado@2.0.0-alpha.17",
 		"lerna": "10.1.2",
 		"markuplint": "5.6.1",
-		"mdn-data": "2.37.2",
+		"mdn-data": "2.38.0",
 		"npm-run-all2": "9.0.4",
 		"oxfmt": "0.79.0",
 		"oxlint": "1.94.0",

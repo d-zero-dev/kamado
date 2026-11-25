@@ -8237,7 +8237,7 @@ __metadata:
     kamado-v2: "npm:kamado@2.0.0-alpha.17"
     lerna: "npm:10.1.2"
     markuplint: "npm:5.6.1"
-    mdn-data: "npm:2.37.2"
+    mdn-data: "npm:2.38.0"
     npm-run-all2: "npm:9.0.4"
     oxfmt: "npm:0.79.0"
     oxlint: "npm:1.94.0"
@@ -9058,10 +9058,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"mdn-data@npm:2.37.2":
-  version: 2.37.2
-  resolution: "mdn-data@npm:2.37.2"
-  checksum: 10c0/d909477912e0db920d332421997c47b01fe3f6e563cace3919c555ff98c96ba90fb2a989c6992813728dd5cecad27ec8745de9b86960457d42792312834f7621
+"mdn-data@npm:2.38.0":
+  version: 2.38.0
+  resolution: "mdn-data@npm:2.38.0"
+  checksum: 10c0/a5cf5746f99deae052d1afddb5efef93cf7e21210f1b64ff9509b80d6180e1501972293e0c85f112198a96342aaac979e000a78002f99ab6c3eb5ab18def41d3
   languageName: node
   linkType: hard
 
