@@ -251,6 +251,215 @@ pub fn delete_key(src: &str, jsx: bool, ts: bool, key: &str) -> Result<String, E
 	}
 }
 
+// How many times the changes were made in one pass, for the tests: a test that compares the text
+// with what one by one makes passes as well when the one pass is never taken.
+#[cfg(test)]
+thread_local! {
+	static ONE_PASS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// One change to a key of `meta`, for [`edit_keys`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KeyOp<'a> {
+	/// `set_key` of the key to the value.
+	Set(&'a str, &'a Const),
+	/// `delete_key` of the key.
+	Delete(&'a str),
+}
+
+impl KeyOp<'_> {
+	fn key(&self) -> &str {
+		match self {
+			KeyOp::Set(key, _) | KeyOp::Delete(key) => key,
+		}
+	}
+}
+
+/// Makes the changes `ops` to the keys of `meta`, as [`set_key`] and [`delete_key`] make them one
+/// after the other, and reads the module once. One by one, each change reads the whole module
+/// again and writes it out again, so the keys of one page cost the square of how many there are.
+///
+/// The text is the same as one by one makes of it. A deletion is made by itself, between the
+/// runs of settings before it and after it. Where one pass cannot be sure of the text, the
+/// changes of a run are made one by one: a key that two of them name, a module whose `meta` is
+/// missing, empty, not a literal, or writes a key twice, and a key that is `__proto__` (each
+/// of them fails, or is laid out, by the rules of one change at a time).
+///
+/// # Errors
+///
+/// The position in `ops` of the change that failed, and why, as the one of [`set_key`] or
+/// [`delete_key`] would give for it.
+///
+/// # Example
+///
+/// ```
+/// use kd_js::{Const, meta_edit::{KeyOp, edit_keys}};
+/// let src = "export const meta = {\n\ttitle: 'Old',\n};\n";
+/// let (title, order) = (Const::Str("New".into()), Const::Num(2.0));
+/// let out = edit_keys(src, false, true, &[KeyOp::Set("title", &title), KeyOp::Set("order", &order)]).unwrap();
+/// assert_eq!(out, "export const meta = {\n\ttitle: 'New',\n\torder: 2,\n};\n");
+/// ```
+pub fn edit_keys(
+	src: &str,
+	jsx: bool,
+	ts: bool,
+	ops: &[KeyOp<'_>],
+) -> Result<String, (usize, EditError)> {
+	let one_by_one = || -> Result<String, (usize, EditError)> {
+		let mut out = src.to_string();
+		for (i, op) in ops.iter().enumerate() {
+			out = match op {
+				KeyOp::Set(key, value) => set_key(&out, jsx, ts, key, value),
+				KeyOp::Delete(key) => delete_key(&out, jsx, ts, key),
+			}
+			.map_err(|e| (i, e))?;
+		}
+		Ok(out)
+	};
+	if ops.len() < 2 {
+		return one_by_one();
+	}
+	// A deletion is made by itself, between the runs of settings before it and after it: the
+	// changes are made in their order, so the text is what one by one makes of it.
+	if ops.iter().any(|op| matches!(op, KeyOp::Delete(_))) {
+		let mut out = src.to_string();
+		let mut at = 0;
+		while at < ops.len() {
+			let end = match ops[at] {
+				KeyOp::Delete(_) => at + 1,
+				KeyOp::Set(..) => {
+					at + ops[at..]
+						.iter()
+						.take_while(|op| matches!(op, KeyOp::Set(..)))
+						.count()
+				}
+			};
+			out = edit_keys(&out, jsx, ts, &ops[at..end]).map_err(|(i, e)| (at + i, e))?;
+			at = end;
+		}
+		return Ok(out);
+	}
+	let mut named: std::collections::HashSet<&str> = std::collections::HashSet::new();
+	let sets_only = ops.iter().all(
+		|op| matches!(op, KeyOp::Set(key, value) if *key != "__proto__" && !has_proto_key(value)),
+	);
+	if !sets_only || !ops.iter().all(|op| named.insert(op.key())) {
+		return one_by_one();
+	}
+	let Ok(MetaPlace::Object(layout)) = locate_meta(src, jsx, ts) else {
+		return one_by_one();
+	};
+	let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+	for m in &layout.members {
+		*seen.entry(m.key.as_str()).or_default() += 1;
+	}
+	if layout.members.is_empty() || seen.values().any(|n| *n > 1) {
+		return one_by_one();
+	}
+	let quote = if layout.prefers_single_quotes {
+		'\''
+	} else {
+		'"'
+	};
+	let style = style_of(src, &layout);
+	let by_key: std::collections::HashMap<&str, &Member> =
+		layout.members.iter().map(|m| (m.key.as_str(), m)).collect();
+	// What replaces which bytes (the values are apart), and the members that are added.
+	let mut replaced: Vec<(usize, usize, String)> = Vec::new();
+	let mut added: Vec<(String, String)> = Vec::new();
+	for op in ops {
+		let KeyOp::Set(key, value) = op else {
+			return one_by_one();
+		};
+		if let Some(m) = by_key.get(key) {
+			// A string that replaces a string keeps the quote it was written with.
+			let quote = match src.as_bytes().get(m.value_start) {
+				Some(b'\'') => '\'',
+				Some(b'"') => '"',
+				_ => quote,
+			};
+			replaced.push((m.value_start, m.value_end, render(value, quote)));
+		} else {
+			added.push((
+				format!("{}{}", render_key(key, quote), style.key_sep),
+				render(value, quote),
+			));
+		}
+	}
+	// The quote a member that is added gets is the one most strings of the module use, which one
+	// change after the other can turn the other way (a string replaced by a number is one less):
+	// when a value that is replaced, or the one that replaces it, has a string in it, the
+	// quote is not known without making the changes in their order.
+	let has_quote = |text: &str| text.contains(['\'', '"', '`']);
+	if !added.is_empty()
+		&& replaced
+			.iter()
+			.any(|(start, end, text)| has_quote(&src[*start..*end]) || has_quote(text))
+	{
+		return one_by_one();
+	}
+	replaced.sort_by_key(|(start, _, _)| *start);
+	let last = layout.members.last().expect("members is not empty");
+	let after_last = last.comma.map_or(last.value_end, |c| c + 1);
+	// Where the members that are added go, and what is put there (see `insert_member`, which does
+	// the same for one: the ones after the first follow it).
+	let (at, block, comma_at) = if added.is_empty() {
+		(0, String::new(), None)
+	} else if style.multiline {
+		let eol = line_end(src, after_last);
+		let place_at_eol = eol <= layout.close && only_a_line_comment(&src[after_last..eol]);
+		let at = match (place_at_eol, eol.checked_sub(1)) {
+			(true, Some(before)) if before >= after_last && src.as_bytes()[before] == b'\r' => {
+				before
+			}
+			(true, _) => eol,
+			(false, _) => after_last,
+		};
+		let mut block = String::new();
+		for (n, (head, value)) in added.iter().enumerate() {
+			if n > 0 && !style.trailing_comma {
+				block.push(',');
+			}
+			block.push_str(&format!("{}{}{head}{value}", eol_of(src), style.indent));
+			if style.trailing_comma {
+				block.push(',');
+			}
+		}
+		(at, block, (!style.trailing_comma).then_some(last.value_end))
+	} else {
+		let mut block = String::new();
+		for (head, value) in &added {
+			if style.trailing_comma {
+				block.push_str(&format!("{}{head}{value},", style.gap));
+			} else {
+				block.push_str(&format!(",{}{head}{value}", style.gap));
+			}
+		}
+		(after_last, block, None)
+	};
+	let mut out = String::with_capacity(src.len() + block.len() + 1);
+	let mut copied = 0;
+	let mut pieces: Vec<(usize, usize, String)> = replaced;
+	if !added.is_empty() {
+		if let Some(c) = comma_at {
+			pieces.push((c, c, ",".to_string()));
+		}
+		pieces.push((at, at, block));
+	}
+	// The replaced values, the comma and the block are in this order in the text (the comma
+	// is after the last value and before where the block goes), and apart.
+	#[cfg(test)]
+	ONE_PASS.with(|c| c.set(c.get() + 1));
+	pieces.sort_by_key(|(start, end, _)| (*start, *end));
+	for (start, end, text) in &pieces {
+		out.push_str(&src[copied..*start]);
+		out.push_str(text);
+		copied = *end;
+	}
+	out.push_str(&src[copied..]);
+	Ok(out)
+}
+
 /// The line break the text uses: the first one it has (`\n` if it has none), so that what is
 /// added to a file with `\r\n` line breaks has them too.
 fn eol_of(text: &str) -> &'static str {
@@ -1089,5 +1298,153 @@ mod tests {
 		};
 		let keys: Vec<&str> = rest.iter().map(|(k, _)| k.as_str()).collect();
 		assert_eq!(keys, ["title", "og:image"]);
+	}
+}
+
+#[cfg(test)]
+mod edit_keys_tests {
+	use super::*;
+
+	/// What `edit_keys` has to give: the changes made one after the other.
+	fn one_by_one(src: &str, ops: &[KeyOp<'_>]) -> Result<String, (usize, EditError)> {
+		let mut out = src.to_string();
+		for (i, op) in ops.iter().enumerate() {
+			out = match op {
+				KeyOp::Set(key, value) => set_key(&out, true, true, key, value),
+				KeyOp::Delete(key) => delete_key(&out, true, true, key),
+			}
+			.map_err(|e| (i, e))?;
+		}
+		Ok(out)
+	}
+
+	const SOURCES: &[&str] = &[
+		"export const meta = {\n\ttitle: 'A',\n\tlayout: 'x',\n};\n\nexport default () => null;\n",
+		"export const meta = { title: 'A', layout: 'x' };\n",
+		"export const meta = {\n  title: \"A\",\n  layout: \"x\"\n} as const;\n",
+		"export const meta = {\n\ttitle: 'A', // the title\n\tlayout: 'x' // the layout\n};\n",
+		"export const meta = {\r\n\ttitle: 'A',\r\n\tlayout: 'x',\r\n};\r\n",
+		"import x from './x';\n\nexport const meta = {\n\ttitle: 'A',\n\tn: 1,\n\tlist: [1, 2],\n};\n\nexport default () => x;\n",
+		"export const meta = { 'quoted-key': 1, plain: [1, 2], nested: { a: 1 }, s: \"d\" };\n",
+		"export const meta = {\n\t// comment\n\ttitle: 'A',\n\n\t// another\n\tlayout: 'x',\n} satisfies Meta;\n",
+		"export const meta = {};\n",
+		"export const meta = {\n};\n",
+		"export default () => null;\n",
+		"export const meta = { a: 1, a: 2 };\n",
+		"export const meta = null;\n",
+		"export const meta = { title: 'A', n: 2 };\nexport const other = 1;\n",
+		"export const meta = {\n\ttitle: 'one', layout: 'two',\n\tz: 3,\n};\n",
+	];
+
+	/// A small generator that gives the same numbers every run.
+	struct Lcg(u64);
+	impl Lcg {
+		fn next(&mut self, n: usize) -> usize {
+			self.0 = self
+				.0
+				.wrapping_mul(6_364_136_223_846_793_005)
+				.wrapping_add(1_442_695_040_888_963_407);
+			((self.0 >> 33) as usize) % n
+		}
+	}
+
+	#[test]
+	fn the_changes_made_together_are_the_changes_made_one_by_one() {
+		let keys = [
+			"title",
+			"layout",
+			"n",
+			"list",
+			"z",
+			"plain",
+			"nested",
+			"s",
+			"quoted-key",
+			"a",
+			"new1",
+			"new2",
+			"new3",
+			"with space",
+			"__proto__",
+		];
+		let values = [
+			Const::Str("New".into()),
+			Const::Str("it's".into()),
+			Const::Str("say \"hi\"".into()),
+			Const::Num(7.0),
+			Const::Bool(true),
+			Const::Null,
+			Const::Array(vec![Const::Num(1.0), Const::Str("s".into())]),
+			Const::Object(vec![("k".into(), Const::Str("v".into()))]),
+		];
+		let mut rng = Lcg(0xC0FFEE);
+		ONE_PASS.with(|c| c.set(0));
+		let mut made_together = 0;
+		for round in 0..6000 {
+			let src = SOURCES[rng.next(SOURCES.len())];
+			let count = 1 + rng.next(6);
+			let mut chosen: Vec<&str> = Vec::new();
+			while chosen.len() < count {
+				let key = keys[rng.next(keys.len())];
+				if !chosen.contains(&key) || rng.next(12) == 0 {
+					chosen.push(key);
+				}
+			}
+			let ops: Vec<KeyOp<'_>> = chosen
+				.iter()
+				.map(|key| {
+					if rng.next(8) == 0 {
+						KeyOp::Delete(key)
+					} else {
+						KeyOp::Set(key, &values[rng.next(values.len())])
+					}
+				})
+				.collect();
+			let expected = one_by_one(src, &ops);
+			let got = edit_keys(src, true, true, &ops);
+			assert_eq!(got, expected, "round {round}: {src:?} with {ops:?}");
+			if expected.is_ok() && ops.len() > 1 {
+				made_together += 1;
+			}
+		}
+		assert!(made_together > 1000, "{made_together}");
+		let one_pass = ONE_PASS.with(std::cell::Cell::get);
+		assert!(one_pass > 500, "{one_pass}");
+	}
+
+	#[test]
+	fn the_keys_of_one_module_are_changed_together_whatever_their_number() {
+		let mut src = String::from("export const meta = {\n");
+		for i in 0..3000 {
+			src.push_str(&format!("\tk{i}: 0,\n"));
+		}
+		src.push_str("};\n\nexport default () => null;\n");
+		let values: Vec<Const> = (0..3000).map(|i| Const::Num(f64::from(i))).collect();
+		let names: Vec<String> = (0..3000).map(|i| format!("k{i}")).collect();
+		let ops: Vec<KeyOp<'_>> = names
+			.iter()
+			.zip(&values)
+			.map(|(k, v)| KeyOp::Set(k, v))
+			.collect();
+		ONE_PASS.with(|c| c.set(0));
+		let out = edit_keys(&src, true, true, &ops).unwrap();
+		// one pass, whatever the number of keys: not one by one
+		assert_eq!(ONE_PASS.with(std::cell::Cell::get), 1);
+		assert!(out.starts_with("export const meta = {\n\tk0: 0,\n\tk1: 1,\n\tk2: 2,\n"));
+		assert!(out.ends_with("\tk2999: 2999,\n};\n\nexport default () => null;\n"));
+	}
+
+	#[test]
+	fn the_key_that_is_not_there_is_the_change_that_fails() {
+		let src = "export const meta = { a: 1 };\n";
+		let one = Const::Num(1.0);
+		let err = edit_keys(
+			src,
+			false,
+			true,
+			&[KeyOp::Set("a", &one), KeyOp::Delete("zz")],
+		)
+		.unwrap_err();
+		assert_eq!(err, (1, EditError::NoSuchKey("zz".to_string())));
 	}
 }

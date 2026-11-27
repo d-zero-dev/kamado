@@ -253,6 +253,157 @@ pub fn delete_key(doc: &str, key: &str) -> Result<String, EditError> {
 	))
 }
 
+// How many times the changes were made in one pass, for the tests: a test that compares the text
+// with what one by one makes passes as well when the one pass is never taken.
+#[cfg(test)]
+thread_local! {
+	static ONE_PASS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// One change to a key of the front matter, for [`edit_keys`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KeyOp<'a> {
+	/// `set_key` of the key to the value.
+	Set(&'a str, &'a Value),
+	/// `delete_key` of the key.
+	Delete(&'a str),
+}
+
+impl KeyOp<'_> {
+	fn key(&self) -> &str {
+		match self {
+			KeyOp::Set(key, _) | KeyOp::Delete(key) => key,
+		}
+	}
+}
+
+/// Makes the changes `ops` to the keys of the front matter of `doc`, as [`set_key`] and
+/// [`delete_key`] make them one after the other, and reads and writes the front matter once.
+/// One by one, each change reads the whole front matter several times and writes it out again,
+/// so the keys of one page cost the square of how many there are.
+///
+/// The text is the same as one by one makes of it. Where one pass cannot be sure of that, the
+/// changes are made one by one: a key that two of the changes name, a document without front
+/// matter or with front matter that cannot be edited (the first change fails, as it would on
+/// its own), a block scalar that keeps the blank lines after it (`|+`), and the deletion of
+/// every key (the fences go, and a key set after that makes new ones).
+///
+/// # Errors
+///
+/// The position in `ops` of the change that failed, and why, as the one of [`set_key`] or
+/// [`delete_key`] would give for it: the changes before it are made, and the first that fails is
+/// the one told.
+///
+/// # Example
+///
+/// ```
+/// use kd_yaml::{Value, edit::{KeyOp, edit_keys}};
+/// let doc = "---\n# page\ntitle: Old\nlayout: x\n---\n<p>hi</p>\n";
+/// let new = Value::String("New".into());
+/// let order = Value::Number(2.0);
+/// let out = edit_keys(
+///     doc,
+///     &[KeyOp::Set("title", &new), KeyOp::Delete("layout"), KeyOp::Set("order", &order)],
+/// )
+/// .unwrap();
+/// assert_eq!(out, "---\n# page\ntitle: New\norder: 2\n---\n<p>hi</p>\n");
+/// ```
+pub fn edit_keys(doc: &str, ops: &[KeyOp<'_>]) -> Result<String, (usize, EditError)> {
+	use std::collections::{HashMap, HashSet};
+	let one_by_one = || -> Result<String, (usize, EditError)> {
+		let mut out = doc.to_string();
+		for (i, op) in ops.iter().enumerate() {
+			out = match op {
+				KeyOp::Set(key, value) => set_key(&out, key, value),
+				KeyOp::Delete(key) => delete_key(&out, key),
+			}
+			.map_err(|e| (i, e))?;
+		}
+		Ok(out)
+	};
+	let mut named: HashSet<&str> = HashSet::new();
+	if ops.len() < 2 || !ops.iter().all(|op| named.insert(op.key())) || named.contains("<<") {
+		return one_by_one();
+	}
+	let Ok(Some(fence)) = find_fence(doc) else {
+		return one_by_one();
+	};
+	if !matches!(not_editable_reason(doc), Ok(None)) {
+		return one_by_one();
+	}
+	let yaml = &doc[fence.yaml_start..fence.yaml_end];
+	let Ok(current) = parse_yaml(yaml) else {
+		return one_by_one();
+	};
+	let found = if matches!(current, Value::Null) {
+		None
+	} else {
+		match top_level_entries(yaml) {
+			Ok(found) => found,
+			Err(_) => return one_by_one(),
+		}
+	};
+	let entries = found.as_ref().map_or(&[][..], |f| &f.entries[..]);
+	let by_key: HashMap<&str, &crate::EntrySpan> =
+		entries.iter().map(|e| (e.key.as_str(), e)).collect();
+	// What replaces which bytes of the YAML (the entries are apart, so the places are too), and
+	// what is added at its end.
+	let mut changes: Vec<(usize, usize, String)> = Vec::new();
+	let mut appended = String::new();
+	let mut deleted = false;
+	for (i, op) in ops.iter().enumerate() {
+		match op {
+			KeyOp::Set(key, value) => {
+				if current.get(key) == Some(value) {
+					continue;
+				}
+				let rendered = render_value(value);
+				if let Some(e) = by_key.get(key) {
+					let (written, swallowed) = block_replacement(
+						&yaml[e.key_end..e.end],
+						&doc[fence.yaml_start + e.end..],
+						value,
+						fence.eol,
+					)
+					.unwrap_or_else(|| (format!(": {rendered}{}", fence.eol), 0));
+					if swallowed > 0 {
+						return one_by_one();
+					}
+					changes.push((e.key_end, e.end, written));
+				} else {
+					appended.push_str(&format!("{}: {rendered}{}", render_key(key), fence.eol));
+				}
+			}
+			KeyOp::Delete(key) => {
+				let Some(e) = by_key.get(key) else {
+					return Err((i, EditError::NoSuchKey((*key).to_string())));
+				};
+				changes.push((e.start, e.end, String::new()));
+				deleted = true;
+			}
+		}
+	}
+	changes.sort_by_key(|(start, _, _)| *start);
+	let mut written = String::with_capacity(yaml.len() + appended.len());
+	let mut copied = 0;
+	for (start, end, text) in &changes {
+		written.push_str(&yaml[copied..*start]);
+		written.push_str(text);
+		copied = *end;
+	}
+	written.push_str(&yaml[copied..]);
+	if deleted && written.trim().is_empty() {
+		return one_by_one();
+	}
+	#[cfg(test)]
+	ONE_PASS.with(|c| c.set(c.get() + 1));
+	Ok(format!(
+		"{}{written}{appended}{}",
+		&doc[..fence.yaml_start],
+		&doc[fence.yaml_end..]
+	))
+}
+
 fn render_key(key: &str) -> String {
 	let simple = key
 		.chars()
@@ -1756,5 +1907,170 @@ mod tests {
 			let found = top_level_entries(yaml).unwrap().unwrap();
 			assert!(found.uses_anchors, "{yaml:?}");
 		}
+	}
+}
+
+#[cfg(test)]
+mod edit_keys_tests {
+	use super::*;
+
+	/// What `edit_keys` has to give: the changes made one after the other.
+	fn one_by_one(doc: &str, ops: &[KeyOp<'_>]) -> Result<String, (usize, EditError)> {
+		let mut out = doc.to_string();
+		for (i, op) in ops.iter().enumerate() {
+			out = match op {
+				KeyOp::Set(key, value) => set_key(&out, key, value),
+				KeyOp::Delete(key) => delete_key(&out, key),
+			}
+			.map_err(|e| (i, e))?;
+		}
+		Ok(out)
+	}
+
+	const DOCS: &[&str] = &[
+		"---\ntitle: A\nlayout: x\n---\n<p>body</p>\n",
+		"---\n# the page\ntitle: A\n\n# the layout\nlayout: x # trailing\n\n\norder: 1\n---\n<p>body</p>\n",
+		"---\ntitle: A\nnote: |\n  one\n  two\nother: >\n  folded text\n  more\ntail: end\n---\n",
+		"---\nnote: |-\n  one\n  two\n---\nbody\n",
+		"---\nnote: |+\n  one\n\n\nnext: 1\n---\n",
+		"---\na: 1\nb: [1, 2]\nc: {x: 1}\nd:\n  - p\n  - q\ne:\n  nested: true\n---\n",
+		"---\n\"quoted key\": 1\n'single': 2\nplain: three words here\nmulti: first\n  second\n---\n",
+		"---\r\ntitle: A\r\nlayout: x\r\n---\r\nbody\r\n",
+		"\u{FEFF}---\ntitle: A\n---\nbody\n",
+		"---\n---\nbody\n",
+		"---\n# only a comment\n---\nbody\n",
+		"---\ntitle: A \n--- \nbody\n",
+		"body without front matter\n",
+		"---\ntitle: A\nbase: &b {x: 1}\nuse: *b\n---\n",
+		"---\nonly: 1\n---\n",
+		"---\ntitle: A\nlayout: x\n---",
+	];
+
+	/// A small generator that gives the same numbers every run.
+	struct Lcg(u64);
+	impl Lcg {
+		fn next(&mut self, n: usize) -> usize {
+			self.0 = self
+				.0
+				.wrapping_mul(6_364_136_223_846_793_005)
+				.wrapping_add(1_442_695_040_888_963_407);
+			((self.0 >> 33) as usize) % n
+		}
+	}
+
+	#[test]
+	fn the_changes_made_together_are_the_changes_made_one_by_one() {
+		let keys = [
+			"title",
+			"layout",
+			"order",
+			"note",
+			"other",
+			"tail",
+			"next",
+			"a",
+			"b",
+			"c",
+			"d",
+			"e",
+			"only",
+			"plain",
+			"multi",
+			"quoted key",
+			"single",
+			"new1",
+			"new2",
+			"new3",
+			"use",
+		];
+		let values = [
+			Value::String("New".into()),
+			Value::String("two\nlines\n".into()),
+			Value::String(
+				"a longer text that goes on, and on, and on, to be folded at a width somewhere in it"
+					.into(),
+			),
+			Value::String("2026-11-25".into()),
+			Value::String("x: y # z".into()),
+			Value::Number(7.0),
+			Value::Bool(true),
+			Value::Null,
+			Value::Array(vec![Value::Number(1.0), Value::String("s".into())]),
+			Value::Object(vec![("k".into(), Value::String("v".into()))]),
+		];
+		let mut rng = Lcg(0x5EED);
+		ONE_PASS.with(|c| c.set(0));
+		let mut made_together = 0;
+		for round in 0..6000 {
+			let doc = DOCS[rng.next(DOCS.len())];
+			let count = 1 + rng.next(6);
+			// distinct keys most of the time, a repeated one now and then
+			let mut chosen: Vec<&str> = Vec::new();
+			while chosen.len() < count {
+				let key = keys[rng.next(keys.len())];
+				if !chosen.contains(&key) || rng.next(12) == 0 {
+					chosen.push(key);
+				}
+			}
+			let ops: Vec<KeyOp<'_>> = chosen
+				.iter()
+				.map(|key| {
+					if rng.next(3) == 0 {
+						KeyOp::Delete(key)
+					} else {
+						KeyOp::Set(key, &values[rng.next(values.len())])
+					}
+				})
+				.collect();
+			let expected = one_by_one(doc, &ops);
+			let got = edit_keys(doc, &ops);
+			assert_eq!(got, expected, "round {round}: {doc:?} with {ops:?}");
+			if expected.is_ok() && ops.len() > 1 {
+				made_together += 1;
+			}
+		}
+		// the cases are not all ones that fail at the first change, and the one pass was taken
+		assert!(made_together > 1000, "{made_together}");
+		let one_pass = ONE_PASS.with(std::cell::Cell::get);
+		assert!(one_pass > 1000, "{one_pass}");
+	}
+
+	#[test]
+	fn the_keys_of_one_front_matter_are_changed_together_whatever_their_number() {
+		let mut doc = String::from("---\n");
+		for i in 0..3000 {
+			doc.push_str(&format!("k{i}: 0\n"));
+		}
+		doc.push_str("---\nbody\n");
+		let values: Vec<Value> = (0..3000).map(|i| Value::Number(f64::from(i))).collect();
+		let names: Vec<String> = (0..3000).map(|i| format!("k{i}")).collect();
+		let ops: Vec<KeyOp<'_>> = names
+			.iter()
+			.zip(&values)
+			.map(|(k, v)| KeyOp::Set(k, v))
+			.collect();
+		ONE_PASS.with(|c| c.set(0));
+		let out = edit_keys(&doc, &ops).unwrap();
+		// one pass, whatever the number of keys: not one by one
+		assert_eq!(ONE_PASS.with(std::cell::Cell::get), 1);
+		assert!(out.starts_with("---\nk0: 0\nk1: 1\nk2: 2\n"));
+		assert!(out.ends_with("k2999: 2999\n---\nbody\n"));
+		assert_eq!(out.matches("\nk").count(), 3000);
+	}
+
+	#[test]
+	fn the_change_that_fails_is_the_first_that_does() {
+		let doc = "---\na: 1\nb: 2\n---\n";
+		let one = Value::Number(1.0);
+		let err = edit_keys(
+			doc,
+			&[
+				KeyOp::Set("a", &one),
+				KeyOp::Delete("zz"),
+				KeyOp::Delete("yy"),
+			],
+		)
+		.unwrap_err();
+		assert_eq!(err, (1, EditError::NoSuchKey("zz".to_string())));
 	}
 }
