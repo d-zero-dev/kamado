@@ -221,6 +221,7 @@ export default ({ meta }: { meta: { title: string } }) => (
 - `nav`の`filter`/`comparator`、`breadcrumbs`の変換（`transformBreadcrumbItem`）は廃止。返ってきた配列を JSX 側で加工する。
 - `breadcrumbs`の起点は`site.baseURL`の**パス部分**（`https://example.com/sub/`なら`/sub/`）。v2 は値をそのまま数えたので、フル URL を書くと上位 2 階層が欠けていた（出力が変わる）。
 - YAML の日付（`date: 2026-01-02`）は**文字列のまま**渡る（v2 は front matter だけ`Date`）。`formatDate()`に渡せば同じ表示になる。
+- front matter の fence（`---`の行）は、v2（gray-matter）と読み方が 3 つ違う（RFC §4）。閉じる行は`---`のあとが空白かタブだけの行で、`----`や`---foo`の行では閉じない（v2 は最初の`\n---`で閉じる）。閉じる行が無いとエラーになる（v2 は残り全部を YAML として読み、本文が空になる）。開く行に言語名（`---yaml`）は書けず、fence として読まない。
 
 ### 3.4 変換スクリプトと、変換で見つかった注意点
 

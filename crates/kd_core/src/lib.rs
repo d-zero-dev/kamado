@@ -1217,6 +1217,35 @@ mod tests {
 	}
 
 	#[test]
+	fn plan_reads_front_matter_whose_fences_have_spaces_at_the_end_of_their_lines() {
+		// gray-matter reads `{ title: 'T' }` for each of these. What follows `---` on the closing
+		// line is the start of the body; one file with such a line must not stop the whole plan.
+		for (i, (text, body)) in [
+			("---\ntitle: T\n---\n<p>body</p>\n", "<p>body</p>\n"),
+			("--- \ntitle: T\n---\n<p>body</p>\n", "<p>body</p>\n"),
+			("--- \ntitle: T\n--- \n<p>body</p>\n", " \n<p>body</p>\n"),
+			("---\ntitle: T\n--- \n<p>body</p>\n", " \n<p>body</p>\n"),
+			("---\ntitle: T\n---\t\n<p>body</p>\n", "\t\n<p>body</p>\n"),
+		]
+		.into_iter()
+		.enumerate()
+		{
+			let site = Site::new(&format!("fence-blanks-{i}"));
+			site.write("src/a.html", text);
+			let loaded = site.config("");
+			let plan = plan(&loaded.config).unwrap();
+			assert_eq!(plan.pages.len(), 1, "{text:?}");
+			let page = &plan.pages[0];
+			assert_eq!(
+				Value::Object(page.meta.clone()).to_json(),
+				r#"{"title":"T"}"#,
+				"{text:?}"
+			);
+			assert_eq!(page.body.as_deref(), Some(body), "{text:?}");
+		}
+	}
+
+	#[test]
 	fn plan_errors_are_specific() {
 		let site = Site::new("errors");
 		site.write("src/a.html", "---\ntitle: [unclosed\n---\n");

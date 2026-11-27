@@ -671,6 +671,55 @@ fn a_value_is_written_to_the_file_it_comes_from_and_nothing_else_changes() {
 }
 
 #[test]
+fn a_value_is_written_in_the_front_matter_the_file_has_with_the_style_it_has() {
+	let site = Site::new("set-fence-and-block");
+	// spaces after both fences, and a long text in a folded block
+	site.write(
+		"src/a.html",
+		"--- \ntitle: A\ndescription: >-\n  long text one\n  continues here\nlayout: x\n--- \n<p>a</p>\n",
+	);
+	let mut ui = site.open("");
+	let rows = all(&mut ui);
+	let a = page(&rows, "/a.html");
+	assert_eq!(
+		cell(&a, "description").get("value"),
+		Some(&s("long text one continues here"))
+	);
+	let ex = expect(&rows, &a);
+
+	// the front matter of the file is changed, and no second one is put above it; the block
+	// stays a block and only the line that is new is new
+	let answer = edit(
+		&mut ui,
+		"/a.html",
+		&ex,
+		&set("description", r#""long text one continues here (edited)""#),
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(
+		site.read("src/a.html"),
+		"--- \ntitle: A\ndescription: >-\n  long text one\n  continues here\n  (edited)\nlayout: x\n--- \n<p>a</p>\n"
+	);
+
+	// a string that other readers of front matter take for a date is quoted
+	let rows = all(&mut ui);
+	let ex = expect(&rows, &page(&rows, "/a.html"));
+	let answer = edit(&mut ui, "/a.html", &ex, &set("date", r#""2026-11-25""#));
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(
+		site.read("src/a.html"),
+		"--- \ntitle: A\ndescription: >-\n  long text one\n  continues here\n  (edited)\nlayout: x\ndate: \"2026-11-25\"\n--- \n<p>a</p>\n"
+	);
+	let after = all(&mut ui);
+	let a = page(&after, "/a.html");
+	assert_eq!(cell(&a, "date").get("value"), Some(&s("2026-11-25")));
+	assert_eq!(
+		cell(&a, "description").get("value"),
+		Some(&s("long text one continues here (edited)"))
+	);
+}
+
+#[test]
 fn a_new_key_goes_into_the_page_file_and_a_virtual_page_has_no_other_place() {
 	let site = Site::new("new_key");
 	site.write("src/a.html", "<p>no front matter</p>\n");

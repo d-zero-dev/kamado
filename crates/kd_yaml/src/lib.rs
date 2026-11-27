@@ -156,13 +156,91 @@ struct RawEntry {
 	end: usize,
 }
 
+/// Where the front matter sits in a document, as byte offsets.
+///
+/// The one place that says what a fence is, for reading a document ([`split_front_matter`]) and
+/// for writing one (`edit`): the two cannot disagree about where the front matter ends.
+pub(crate) struct Fence {
+	/// First byte of the opening `---`.
+	pub(crate) open_start: usize,
+	/// First byte of the YAML: the line after the opening fence.
+	pub(crate) yaml_start: usize,
+	/// The first byte of the closing `---` line: the YAML is `yaml_start..yaml_end`.
+	pub(crate) yaml_end: usize,
+	/// First byte of the body: after the closing `---` line and its line break, or, when the
+	/// closing line has spaces or tabs after the `---`, right after the `---` (they are the
+	/// start of the body, as gray-matter reads it).
+	pub(crate) body_start: usize,
+	/// The line break of the opening fence.
+	pub(crate) eol: &'static str,
+}
+
+/// The length of the UTF-8 byte order mark a document starts with, or 0.
+pub(crate) fn bom_len(doc: &str) -> usize {
+	if doc.starts_with('\u{FEFF}') { 3 } else { 0 }
+}
+
+/// Finds the fences of the front matter of `doc`, or `None` if it has none.
+///
+/// The opening line is `---` at the very start (a UTF-8 BOM is allowed before it), then
+/// optional spaces and tabs, then the line break. The closing line is the first line that is
+/// `---` followed only by spaces and tabs. gray-matter reads the same fences, except where
+/// the RFC (section 4) says kamado does not on purpose: `----` and `---foo` do not close, a
+/// front matter that is not closed is an error, and `---yaml` does not open.
+pub(crate) fn find_fence(doc: &str) -> Result<Option<Fence>, Error> {
+	let open_start = bom_len(doc);
+	let Some(after) = doc[open_start..].strip_prefix("---") else {
+		return Ok(None);
+	};
+	let after = after.trim_start_matches([' ', '\t']);
+	let (eol, rest) = if let Some(r) = after.strip_prefix("\r\n") {
+		("\r\n", r)
+	} else if let Some(r) = after.strip_prefix('\n') {
+		("\n", r)
+	} else if after.is_empty() {
+		("\n", after)
+	} else {
+		// `---x` and `--- x` are not a fence.
+		return Ok(None);
+	};
+	let yaml_start = doc.len() - rest.len();
+	let mut offset = 0;
+	for line in rest.split_inclusive('\n') {
+		let t = line.strip_suffix('\n').unwrap_or(line);
+		let t = t.strip_suffix('\r').unwrap_or(t);
+		if let Some(tail) = t.strip_prefix("---")
+			&& tail.chars().all(|c| c == ' ' || c == '\t')
+		{
+			let close_start = yaml_start + offset;
+			return Ok(Some(Fence {
+				open_start,
+				yaml_start,
+				yaml_end: close_start,
+				body_start: if tail.is_empty() {
+					close_start + line.len()
+				} else {
+					close_start + 3
+				},
+				eol,
+			}));
+		}
+		offset += line.len();
+	}
+	Err(Error {
+		line: 1,
+		column: 1,
+		message: "front matter is not closed with a '---' line".to_string(),
+	})
+}
+
 /// Splits gray-matter style front matter from a document.
 ///
 /// The opening `---` must be the very first line (a UTF-8 BOM is allowed
-/// before it); the closing line is `---`. One line break after the closing
-/// fence is removed from the body. Empty front matter yields `{}`. A document
-/// that does not start with `---` has no front matter and is returned as the
-/// body unchanged.
+/// before it); the closing line is `---`. Spaces and tabs may follow either
+/// `---`; those after the closing one stay at the start of the body. One line
+/// break after the closing fence is removed from the body. Empty front matter
+/// yields `{}`. A document that does not start with `---` has no front matter
+/// and is returned as the body unchanged.
 ///
 /// # Example
 ///
@@ -170,41 +248,16 @@ struct RawEntry {
 /// let (meta, body) = kd_yaml::split_front_matter("---\ntitle: T\n---\n<p>x</p>\n").unwrap();
 /// assert_eq!(meta.unwrap().to_json(), r#"{"title":"T"}"#);
 /// assert_eq!(body, "<p>x</p>\n");
+///
+/// let (meta, body) = kd_yaml::split_front_matter("--- \ntitle: T\n--- \n<p>x</p>\n").unwrap();
+/// assert_eq!(meta.unwrap().to_json(), r#"{"title":"T"}"#);
+/// assert_eq!(body, " \n<p>x</p>\n");
 /// ```
 pub fn split_front_matter(input: &str) -> Result<(Option<Value>, &str), Error> {
-	let content = input.strip_prefix('\u{FEFF}').unwrap_or(input);
-	let Some(after_open) = content.strip_prefix("---") else {
+	let Some(fence) = find_fence(input)? else {
 		return Ok((None, input));
 	};
-	let after_open = match after_open
-		.strip_prefix("\r\n")
-		.or_else(|| after_open.strip_prefix('\n'))
-	{
-		Some(rest) => rest,
-		None if after_open.is_empty() => after_open,
-		// `---x` is not a fence.
-		None => return Ok((None, input)),
-	};
-	// Find the closing fence: a line that is exactly `---`.
-	let mut offset = 0;
-	let mut yaml_end: Option<(usize, usize)> = None;
-	for line in after_open.split_inclusive('\n') {
-		let trimmed = line.strip_suffix('\n').unwrap_or(line);
-		let trimmed = trimmed.strip_suffix('\r').unwrap_or(trimmed);
-		if trimmed == "---" {
-			yaml_end = Some((offset, offset + line.len()));
-			break;
-		}
-		offset += line.len();
-	}
-	let Some((yaml_end, body_start)) = yaml_end else {
-		return Err(Error {
-			line: 1,
-			column: 1,
-			message: "front matter is not closed with a '---' line".to_string(),
-		});
-	};
-	let yaml = &after_open[..yaml_end];
+	let yaml = &input[fence.yaml_start..fence.yaml_end];
 	let value = if yaml.trim().is_empty() {
 		Value::Object(vec![])
 	} else {
@@ -214,7 +267,7 @@ pub fn split_front_matter(input: &str) -> Result<(Option<Value>, &str), Error> {
 			..e
 		})?
 	};
-	Ok((Some(value), &after_open[body_start..]))
+	Ok((Some(value), &input[fence.body_start..]))
 }
 
 /// Maximum nesting of collections. Why: parsing recurses, front matter and
@@ -2116,6 +2169,56 @@ mod tests {
 		);
 		let e = split_front_matter("---\na: 1\na: 2\n---\n").unwrap_err();
 		assert_eq!((e.line, e.message.as_str()), (3, "duplicate key \"a\""));
+	}
+
+	#[test]
+	fn a_fence_may_have_spaces_or_tabs_at_the_end_of_its_line() {
+		// What gray-matter 4.0.3 reads for each of these: `{ title: 'T' }`, and the rest of the
+		// closing line (its spaces) stays at the start of the body.
+		for (doc, body) in [
+			("---\ntitle: T\n---\n<p>body</p>\n", "<p>body</p>\n"),
+			("--- \ntitle: T\n---\n<p>body</p>\n", "<p>body</p>\n"),
+			("---\t \ntitle: T\n---\n<p>body</p>\n", "<p>body</p>\n"),
+			("--- \ntitle: T\n--- \n<p>body</p>\n", " \n<p>body</p>\n"),
+			("---\ntitle: T\n--- \n<p>body</p>\n", " \n<p>body</p>\n"),
+			("---\ntitle: T\n---\t\n<p>body</p>\n", "\t\n<p>body</p>\n"),
+			(
+				"---\r\ntitle: T\r\n--- \r\n<p>body</p>\r\n",
+				" \r\n<p>body</p>\r\n",
+			),
+			("\u{FEFF}--- \ntitle: T\n---\nbody", "body"),
+			("---\ntitle: T\n--- ", " "),
+		] {
+			let (meta, rest) = split_front_matter(doc).unwrap();
+			assert_eq!(meta.unwrap().to_json(), r#"{"title":"T"}"#, "{doc:?}");
+			assert_eq!(rest, body, "{doc:?}");
+		}
+		let (meta, rest) = split_front_matter("--- \n--- \nbody").unwrap();
+		assert_eq!((meta.unwrap(), rest), (Value::Object(vec![]), " \nbody"));
+	}
+
+	#[test]
+	fn what_is_not_a_fence_is_not_read_as_one() {
+		// Where kamado does not read as gray-matter does, on purpose (RFC section 4).
+		for doc in ["---yaml\ntitle: T\n---\nbody", "--- x\ntitle: T\n---\nbody"] {
+			assert_eq!(split_front_matter(doc).unwrap(), (None, doc), "{doc:?}");
+		}
+		for doc in [
+			"---\ntitle: T\n----\nbody",
+			"---\ntitle: T\n---foo\nbody",
+			"---\ntitle: T\n--- x\nbody",
+			"---\ntitle: T\nbody",
+			// the opening line, and nothing after it
+			"--- ",
+			"---\t",
+			"---",
+		] {
+			assert_eq!(
+				split_front_matter(doc).unwrap_err().message,
+				"front matter is not closed with a '---' line",
+				"{doc:?}"
+			);
+		}
 	}
 
 	#[test]

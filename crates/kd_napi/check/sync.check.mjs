@@ -106,6 +106,17 @@ const HOSTILE_VALUES = [
 	'~',
 	'0x1f',
 	'1e3',
+	// what other readers of front matter take for a date or a number
+	'2026-11-25',
+	'2026-11-25 10:00:00',
+	'1_000',
+	'0b101',
+	'12:30:45',
+	'1:30',
+	// long text that a block scalar holds, with the line breaks at its end that decide how
+	'long text\nof two lines\n',
+	'long text\nof two lines\n\n\n',
+	'one long line of text that a folded block would fold at the width of the lines it had',
 	'- x',
 	'*alias',
 	'&anchor',
