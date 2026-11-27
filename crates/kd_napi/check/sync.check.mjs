@@ -1121,6 +1121,207 @@ test('law 5: the key __proto__ is written as a key in a front matter and in page
 	}
 });
 
+/**
+ * Whether a refusal says which character a name cannot have, as `has the character \n,`.
+ * The refusal is JSON, so what it says is compared as JSON text.
+ * @param {object} refused - What `apply()` returned
+ * @param {string} shown - The character, as the message shows it
+ */
+const namesTheCharacter = (refused, shown) =>
+	JSON.stringify(refused).includes(
+		JSON.stringify(`has the character ${shown},`).slice(1, -1),
+	);
+
+test('a page is not made at a url with a character that a name cannot have, and nothing is written', async () => {
+	const site = makeSite();
+	const opened = open(site);
+	try {
+		// each character, and how the message shows it (`\u{202e}`: right-to-left override)
+		const characters = [
+			['\\', '\\\\'],
+			['\n', '\\n'],
+			['\t', '\\t'],
+			['\u007F', '\\u{7f}'],
+			['\u0085', '\\u{85}'],
+			['\u202E', '\\u{202e}'],
+			['\u200B', '\\u{200b}'],
+			['\0', '\\u{0}'],
+		];
+		for (const [character, shown] of characters) {
+			// a row that says a url and no file: a page that is to get the file its url names
+			const rows = [
+				...given(opened.pages()),
+				{ url: `/x${character}y.html`, virtual: false, meta: { title: 'X' } },
+			];
+			const before = tree(site.root);
+			const prepared = await prepare(opened, site, scriptReturning(site, rows));
+			assert.equal(prepared.kind, 'review', shown);
+			const refused = prepared.apply();
+			assert.equal(refused.ok, false, shown);
+			assert.ok(
+				namesTheCharacter(refused, shown),
+				`${shown}: ${JSON.stringify(refused)}`,
+			);
+			assert.ok(!JSON.stringify(refused).includes('already exists'), shown);
+			assert.deepEqual(tree(site.root), before, shown);
+		}
+		// a name that has the ideographic space is made
+		const rows = [
+			...given(opened.pages()),
+			{ url: '/x\u3000y.html', virtual: false, meta: { title: 'X' } },
+		];
+		const prepared = await prepare(opened, site, scriptReturning(site, rows));
+		assert.equal(prepared.kind, 'review');
+		const applied = prepared.apply();
+		assert.equal(applied.ok, true, JSON.stringify(applied));
+		assert.ok(site.read('src/x\u3000y.html').includes('title: X'));
+	} finally {
+		opened.close();
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});
+
+test('a page is not moved, given a file or added virtual at a name with a character that a name cannot have, and nothing is written', async () => {
+	// (the characters are made from their code points, so that they are seen in the source)
+	const rtlOverride = String.fromCodePoint(0x20_2e);
+	const zeroWidthSpace = String.fromCodePoint(0x20_0b);
+	// the url of the page `/keyed/` is decided by a key, so a file that moves keeps its url, and
+	// a row that says another `inputPath` is a move of the file (for a page whose url the place
+	// decides, it is the url that moves the file)
+	const site = makeSite({ pages: { outputPathField: 'slug' } });
+	site.write('src/keyed.html', '---\ntitle: Keyed\nslug: /keyed/\n---\n<p>k</p>\n');
+	const opened = open(site);
+	try {
+		const change = (url, update) => (entry) =>
+			entry.url === url ? { ...entry, ...update } : entry;
+		const cases = [
+			{
+				// the url of a page is changed
+				name: 'moveUrl',
+				rows: (rows) => rows.map(change('/service/', { url: `/service${rtlOverride}/` })),
+				shown: '\\u{202e}',
+			},
+			{
+				// the file of a page is moved
+				name: 'movePath',
+				rows: (rows) =>
+					rows.map(
+						change('/keyed/', { inputPath: `keyed/x${zeroWidthSpace}index.html` }),
+					),
+				shown: '\\u{200b}',
+			},
+			{
+				// a page without a file is given one
+				name: 'materialize',
+				rows: (rows) =>
+					rows.map(
+						change('/ext/', {
+							virtual: false,
+							inputPath: `ext/e${zeroWidthSpace}x.html`,
+						}),
+					),
+				shown: '\\u{200b}',
+			},
+			{
+				// a page without a file is added
+				name: 'create',
+				rows: (rows) => [...rows, { url: `/v${rtlOverride}.html`, virtual: true }],
+				shown: '\\u{202e}',
+			},
+		];
+		for (const { name, rows, shown } of cases) {
+			const before = tree(site.root);
+			const prepared = await prepare(
+				opened,
+				site,
+				scriptReturning(site, rows(given(opened.pages()))),
+			);
+			assert.equal(prepared.kind, 'review', name);
+			const refused = prepared.apply();
+			assert.equal(refused.ok, false, name);
+			assert.ok(namesTheCharacter(refused, shown), `${name}: ${JSON.stringify(refused)}`);
+			assert.deepEqual(tree(site.root), before, name);
+		}
+	} finally {
+		opened.close();
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});
+
+test('a page that has such a character in its name already is read as it is, and edited like any page', async () => {
+	const site = makeSite();
+	site.write('src/odd\u200Bname.html', '---\ntitle: Odd\n---\n<p>odd</p>\n');
+	const opened = open(site);
+	try {
+		const unchanged = await prepare(
+			opened,
+			site,
+			scriptReturning(site, given(opened.pages())),
+		);
+		assert.equal(unchanged.kind, 'nochange');
+		const rows = given(opened.pages()).map((entry) =>
+			entry.url.includes('\u200B')
+				? { ...entry, meta: { ...entry.meta, title: 'Changed' } }
+				: entry,
+		);
+		const prepared = await prepare(opened, site, scriptReturning(site, rows));
+		assert.equal(prepared.kind, 'review');
+		const applied = prepared.apply();
+		assert.equal(applied.ok, true, JSON.stringify(applied));
+		assert.ok(site.read('src/odd\u200Bname.html').includes('title: Changed'));
+	} finally {
+		opened.close();
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});
+
+test('law 5: a value that has a __proto__ key inside is written to a front matter and refused by a module, with nothing written', async () => {
+	const site = makeSite();
+	const opened = open(site);
+	try {
+		const tsx = opened.pages().pages.find((p) => p.extension === '.tsx').url;
+		const inside = JSON.parse(
+			'{"a":{"__proto__":{"polluted":true}},"list":[{"__proto__":1}]}',
+		);
+		for (const target of ['/about/', tsx]) {
+			const fresh = opened.pages();
+			const rows = given(fresh).map((entry) =>
+				entry.url === target ? { ...entry, meta: { ...entry.meta, inside } } : entry,
+			);
+			const before = tree(site.root);
+			// the rows are parsed by the script: as the source of an object literal, a `__proto__`
+			// key would set a prototype and be gone before the sync sees it
+			const file = path.join(scriptsDir, `proto-inside-${scriptCount++}.mjs`);
+			writeFileSync(
+				file,
+				`export default { read: async () => JSON.parse(${JSON.stringify(JSON.stringify(rows))}) };`,
+			);
+			const prepared = await prepare(opened, site, file);
+			assert.equal(prepared.kind, 'review', target);
+			const applied = prepared.apply();
+			if (target === '/about/') {
+				assert.equal(applied.ok, true, JSON.stringify(applied));
+				const read = open(site);
+				try {
+					const back = read.pages().pages.find((p) => p.url === target).meta.inside;
+					assert.equal(Object.getPrototypeOf(back.a), Object.prototype);
+					assert.deepEqual(structuredClone(back.a.__proto__), { polluted: true });
+				} finally {
+					read.close();
+				}
+			} else {
+				assert.equal(applied.ok, false, target);
+				assert.match(JSON.stringify(applied), /__proto__/u);
+				assert.deepEqual(tree(site.root), before, target);
+			}
+		}
+		assert.equal({}.polluted, undefined);
+	} finally {
+		opened.close();
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});
+
 test('a page whose url a key decides moves its file and keeps its url, and returned again changes nothing', async () => {
 	const site = makeSite({ pages: { outputPathField: 'slug' } });
 	site.write('src/keyed.html', '---\ntitle: Keyed\nslug: /keyed/\n---\n<p>k</p>\n');

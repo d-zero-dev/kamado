@@ -1227,7 +1227,7 @@ impl Ui {
 				|| self.by_url.contains_key(name)
 				|| self
 					.url_as_page(name)
-					.is_ok_and(|file| super::taken(&file.input_path))
+					.is_ok_and(|file| super::in_the_way(&file.input_path))
 		};
 		let steps = moves::order(&pairs, |from| free_name(from, is_taken));
 		for step in steps {
@@ -1301,7 +1301,7 @@ impl Ui {
 					.index
 					.as_ref()
 					.is_some_and(|index| index.by_input.contains_key(&full))
-				|| super::taken(&full)
+				|| super::in_the_way(&full)
 		};
 		let steps = moves::order(&pairs, |from| free_name(from, is_taken));
 		for step in steps {
