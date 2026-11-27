@@ -3,6 +3,23 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [3.0.0-alpha.8](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.7...v3.0.0-alpha.8) (2026-11-27)
+
+### Bug Fixes
+
+* **repo:** edit many keys of one file, and add or remove many items of an array, in one pass ([4685175](https://github.com/d-zero-dev/kamado/commit/46851757b4c3ef69428cffa211d76f8b953cdd4c))
+* **repo:** keep front matter fences and block scalars when rewriting YAML front matter ([cce0240](https://github.com/d-zero-dev/kamado/commit/cce0240e94b8ce6786d0cc4a208319dafd8dcf54))
+* **repo:** read the fences of a front matter in pug-to-tsx as kamado does ([5cf3aa8](https://github.com/d-zero-dev/kamado/commit/5cf3aa8b9c4d1423f57ceaa26252ae878be4c797))
+* **repo:** refuse names that hide or change a page name when kamado ui and sync make or move it ([2ee1208](https://github.com/d-zero-dev/kamado/commit/2ee12089402bd19aceaf8b1979a147a25f630bfa))
+* **repo:** refuse the key __proto__ in the meta of a module, read or written ([8516958](https://github.com/d-zero-dev/kamado/commit/8516958d86abfe8e1c3c0de10d3a80e182bfa352))
+* **repo:** write a new key where newKeyOrigin says, and keep batch edits linear in their size ([63c53b6](https://github.com/d-zero-dev/kamado/commit/63c53b6cfa0cb2b68794e8101e6cacc1e6296087))
+
+### Features
+
+* **kamado:** count the kinds of change in the summary of kamado sync, and write them all with --out ([c9a2164](https://github.com/d-zero-dev/kamado/commit/c9a2164b70644cd54f0fde717c8c253772beef02))
+* **repo:** read ui.keys.<key>.newKeyOrigin, where a new key of a real page is written ([7c9ef41](https://github.com/d-zero-dev/kamado/commit/7c9ef412d8e497fee9f39ba0ecb7041ddbb0350e))
+
+
 # [3.0.0-alpha.7](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.6...v3.0.0-alpha.7) (2026-11-13)
 
 ### Bug Fixes

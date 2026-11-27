@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [3.0.0-alpha.8](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.7...v3.0.0-alpha.8) (2026-11-27)
+
+### Features
+
+* **kamado:** count the kinds of change in the summary of kamado sync, and write them all with --out ([c9a2164](https://github.com/d-zero-dev/kamado/commit/c9a2164b70644cd54f0fde717c8c253772beef02))
+* **repo:** read ui.keys.<key>.newKeyOrigin, where a new key of a real page is written ([7c9ef41](https://github.com/d-zero-dev/kamado/commit/7c9ef412d8e497fee9f39ba0ecb7041ddbb0350e))
+
+
 # [3.0.0-alpha.7](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.6...v3.0.0-alpha.7) (2026-11-13)
 
 ### Features

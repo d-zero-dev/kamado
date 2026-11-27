@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [3.0.0-alpha.8](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.7...v3.0.0-alpha.8) (2026-11-27)
+
+**Note:** Version bump only for package @kamado-io/oxlint
+
+
+
+
+
 # [3.0.0-alpha.7](https://github.com/d-zero-dev/kamado/compare/v3.0.0-alpha.6...v3.0.0-alpha.7) (2026-11-13)
 
 ### Features
