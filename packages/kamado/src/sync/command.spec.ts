@@ -1,6 +1,10 @@
 import type { SyncSummary } from './types.js';
 
-import { describe, expect, test, vi } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { summaryText, syncCommand, type SyncCommandContext } from './command.js';
 import { SyncError, type SyncReport, type SyncRun } from './sync.js';
@@ -122,7 +126,102 @@ describe('summaryText', () => {
 		const lines = summaryText({ counts: COUNTS, changes, unsaved: [] }).split('\n');
 		expect(lines[0]).toBe('205 changes:');
 		expect(lines).toHaveLength(1 + 200 + 1 + 1);
-		expect(lines[201]).toBe('... and 5 more');
+		// Behavior change: the line that says how many are not listed names their kinds and the way to see them all
+		expect(lines[201]).toBe('... and 5 more (5 deleted; all of them: --out <file>)');
+		// expect(lines[201]).toBe('... and 5 more'); // previous
+	});
+
+	test('counts the kinds of change on a line after the total, when there are several kinds', () => {
+		const text = summaryText({
+			counts: { ...COUNTS, deleted: 2, added: 1, meta: 247 },
+			unsaved: [],
+			changes: [
+				{ kind: 'deleted', url: '/a/', inputPath: null },
+				{ kind: 'deleted', url: '/b/', inputPath: null },
+				{ kind: 'added', url: '/n/', virtual: true, inputPath: null, keys: 0 },
+				{ kind: 'meta', url: '/p/', key: 'order', after: 1 },
+			],
+		});
+		const lines = text.split('\n');
+		expect(lines[0]).toBe('4 changes:');
+		// in the order the changes are listed in, and not the order of the table of counts
+		expect(lines[1]).toBe('by kind: 2 deleted, 1 added, 247 keys changed');
+		expect(lines[2]).toBe('- /a/');
+	});
+
+	test('does not count the kinds when all the changes are of one, which the total says', () => {
+		expect(summaryText(summary())).not.toContain('by kind');
+		expect(summaryText({ counts: COUNTS, changes: [], unsaved: [] })).not.toContain(
+			'by kind',
+		);
+	});
+
+	test('names the kinds of the changes that are not listed, from the end of the list', () => {
+		const changes = [
+			...Array.from({ length: 200 }, (_, i) => ({
+				kind: 'deleted' as const,
+				url: `/d${i}/`,
+				inputPath: null,
+			})),
+			...Array.from({ length: 3 }, (_, i) => ({
+				kind: 'added' as const,
+				url: `/n${i}/`,
+				virtual: true,
+				inputPath: null,
+				keys: 0,
+			})),
+			...Array.from({ length: 47 }, (_, i) => ({
+				kind: 'meta' as const,
+				url: `/p${i}/`,
+				key: 'order',
+				after: i,
+			})),
+		];
+		const text = summaryText({
+			counts: { ...COUNTS, deleted: 200, added: 3, meta: 47 },
+			changes,
+			unsaved: [],
+		});
+		expect(text).toContain('by kind: 200 deleted, 3 added, 47 keys changed');
+		expect(text).toContain(
+			'... and 50 more (3 added, 47 keys changed; all of them: --out <file>)',
+		);
+	});
+
+	test('says where the whole list is when it was written to a file', () => {
+		const changes = Array.from({ length: 205 }, (_, i) => ({
+			kind: 'deleted' as const,
+			url: `/p${i}/`,
+			inputPath: null,
+		}));
+		const text = summaryText(
+			{ counts: { ...COUNTS, deleted: 205 }, changes, unsaved: [] },
+			undefined,
+			{ out: 'maps/sync.txt' },
+		);
+		expect(text).toContain(
+			'... and 5 more (5 deleted; all of them are in maps/sync.txt)',
+		);
+		expect(text).not.toContain('--out');
+	});
+
+	test('with all, lists every change and names every file of the warning', () => {
+		const changes = Array.from({ length: 205 }, (_, i) => ({
+			kind: 'deleted' as const,
+			url: `/p${i}/`,
+			inputPath: null,
+		}));
+		const unsaved = Array.from({ length: 25 }, (_, i) => `f${i}.html`);
+		const text = summaryText(
+			{ counts: { ...COUNTS, deleted: 205 }, changes, unsaved },
+			undefined,
+			{ all: true },
+		);
+		const lines = text.split('\n');
+		expect(lines).toHaveLength(1 + 205 + 1 + 1);
+		expect(text).toContain('- /p204/');
+		expect(text).not.toContain('more');
+		expect(text).toContain('f24.html');
 	});
 
 	test('warns of the files git cannot bring back, or that git cannot tell', () => {
@@ -218,6 +317,179 @@ describe('syncCommand', () => {
 		await syncCommand(['import'], { yes: true }, { ...ctx, run });
 		expect(run.mock.calls[0]![2].yes).toBe(true);
 		expect(ctx.ask).not.toHaveBeenCalled();
+	});
+
+	describe('--out', () => {
+		const dirs: string[] = [];
+		afterEach(() => {
+			for (const dir of dirs.splice(0)) {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+
+		/**
+		 * A directory to be the cwd.
+		 */
+		function cwd(): string {
+			const dir = mkdtempSync(path.join(tmpdir(), 'kd-sync-out-'));
+			dirs.push(dir);
+			return dir;
+		}
+
+		const big = (): SyncSummary => ({
+			counts: { ...COUNTS, deleted: 205 },
+			changes: Array.from({ length: 205 }, (_, i) => ({
+				kind: 'deleted' as const,
+				url: `/p${i}/`,
+				inputPath: null,
+			})),
+			unsaved: Array.from({ length: 25 }, (_, i) => `f${i}.html`),
+		});
+
+		const confirming = (made: () => SyncSummary): Run =>
+			vi.fn<Run>(async (_c, _t, options) => {
+				const s = made();
+				// as the run does: when it is told yes it does not ask
+				if (options.yes === true || (await options.confirm?.(s))) {
+					return { kind: 'applied', direction: 'import', summary: s, count: 1 };
+				}
+				return { kind: 'declined', direction: 'import', summary: s };
+			});
+
+		test('writes every change to the file before it asks, relative to the cwd', async () => {
+			const dir = cwd();
+			let askedWhen: string | undefined;
+			const { ctx, out } = context({
+				cwd: dir,
+				run: confirming(big),
+				ask: vi.fn(async () => {
+					askedWhen = readFileSync(path.join(dir, 'maps', 'sync.txt'), 'utf8');
+					return 'n';
+				}),
+			});
+			expect(await syncCommand(['import'], { out: 'maps/sync.txt' }, ctx)).toBe(0);
+			const file = readFileSync(path.join(dir, 'maps', 'sync.txt'), 'utf8');
+			expect(askedWhen).toBe(file);
+			expect(file.split('\n')).toHaveLength(1 + 205 + 1 + 1);
+			expect(file).toContain('- /p204/');
+			expect(file).toContain('f24.html');
+			expect(out.join('')).toContain('Wrote maps/sync.txt (205 changes)');
+			// the list on the terminal says where the whole one is
+			expect(out.join('')).toContain(
+				'... and 5 more (5 deleted; all of them are in maps/sync.txt)',
+			);
+		});
+
+		test('writes the same list to the file when it is told yes, and asks nothing', async () => {
+			const dir = cwd();
+			const run = confirming(big);
+			const { ctx, out } = context({ cwd: dir, run, interactive: false });
+			expect(await syncCommand(['import'], { yes: true, out: 'all.txt' }, ctx)).toBe(0);
+			expect(readFileSync(path.join(dir, 'all.txt'), 'utf8')).toContain('- /p204/');
+			expect(ctx.ask).not.toHaveBeenCalled();
+			expect(out.join('')).toContain('Wrote all.txt (205 changes)');
+			expect(out.join('')).toContain('Applied 205 changes.');
+			expect(out.join('')).not.toContain('... and 5 more');
+			// the run is not told yes: the file is written when it asks, and the answer is yes
+			expect(vi.mocked(ctx.run!).mock.calls[0]![2].yes).toBe(false);
+		});
+
+		test('writes nothing when it is told yes and there is nothing to change', async () => {
+			const dir = cwd();
+			const report: SyncReport = {
+				kind: 'nochange',
+				direction: 'import',
+				summary: summary(),
+			};
+			const { ctx } = context({ cwd: dir, run: vi.fn<Run>(async () => report) });
+			expect(await syncCommand(['import'], { yes: true, out: 'none.txt' }, ctx)).toBe(0);
+			expect(existsSync(path.join(dir, 'none.txt'))).toBe(false);
+		});
+
+		test('writes what would be written outside, in the words of an export', async () => {
+			const dir = cwd();
+			const diffed: Run = vi.fn<Run>(async (_c, _t, options) => {
+				const s = summary();
+				const yes = await options.confirm?.(s, {
+					direction: 'export',
+					diffed: true,
+					targets: 1,
+				});
+				return yes
+					? { kind: 'applied', direction: 'export', summary: s, count: 1 }
+					: { kind: 'declined', direction: 'export', summary: s };
+			});
+			const { ctx, out } = context({
+				cwd: dir,
+				run: diffed,
+				ask: vi.fn(async () => 'n'),
+			});
+			await syncCommand(['export'], { out: 'outside.txt' }, ctx);
+			expect(readFileSync(path.join(dir, 'outside.txt'), 'utf8')).toContain(
+				'1 change to what is outside:',
+			);
+			expect(out.join('')).toContain('Wrote outside.txt (1 change)');
+		});
+
+		test('says only that the file was written when there is no difference to show', async () => {
+			const dir = cwd();
+			const blind: Run = vi.fn<Run>(async (_c, _t, options) => {
+				const s = summary();
+				const yes = await options.confirm?.(s, {
+					direction: 'export',
+					diffed: false,
+					targets: 3,
+				});
+				return yes
+					? { kind: 'applied', direction: 'export', summary: s, count: 3 }
+					: { kind: 'declined', direction: 'export', summary: s };
+			});
+			const { ctx, out } = context({ cwd: dir, run: blind, ask: vi.fn(async () => 'n') });
+			await syncCommand(['export'], { out: 'outside.txt' }, ctx);
+			expect(readFileSync(path.join(dir, 'outside.txt'), 'utf8')).toContain(
+				'The script would write 3 pages outside.',
+			);
+			expect(out.join('')).toContain('Wrote outside.txt\n');
+			expect(out.join('')).not.toContain('Wrote outside.txt (');
+		});
+
+		test('writes the file and then fails on what is not a terminal', async () => {
+			const dir = cwd();
+			const { ctx } = context({ cwd: dir, run: confirming(big), interactive: false });
+			await expect(syncCommand(['import'], { out: 'all.txt' }, ctx)).rejects.toThrow(
+				'this is not a terminal to confirm them on',
+			);
+			expect(readFileSync(path.join(dir, 'all.txt'), 'utf8')).toContain('- /p204/');
+		});
+
+		test('writes nothing when there is nothing to change', async () => {
+			const dir = cwd();
+			const report: SyncReport = {
+				kind: 'nochange',
+				direction: 'import',
+				summary: summary(),
+			};
+			const { ctx } = context({ cwd: dir, run: vi.fn<Run>(async () => report) });
+			expect(await syncCommand(['import'], { out: 'none.txt' }, ctx)).toBe(0);
+			expect(existsSync(path.join(dir, 'none.txt'))).toBe(false);
+		});
+
+		test('says that the file is empty before the script runs', async () => {
+			const { ctx } = context();
+			await expect(syncCommand(['import'], { out: '' }, ctx)).rejects.toThrow(
+				'--out needs a file name',
+			);
+			expect(ctx.run).not.toHaveBeenCalled();
+		});
+
+		test('says that the file cannot be written, and applies nothing', async () => {
+			const dir = cwd();
+			const { ctx } = context({ cwd: dir, run: confirming(big) });
+			await expect(syncCommand(['import'], { out: '.' }, ctx)).rejects.toThrow(
+				/^cannot write \.: /u,
+			);
+			expect(ctx.ask).not.toHaveBeenCalled();
+		});
 	});
 
 	test('says that nothing changed', async () => {

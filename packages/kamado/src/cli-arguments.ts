@@ -81,8 +81,8 @@ export const COMMAND_ALLOWLIST: Readonly<Record<string, CommandAllowlist>> = {
 	},
 	sync: {
 		positionals: true,
-		allowed: [...COMMON, 'yes'],
-		takes: '--yes, --cache-dir and --config',
+		allowed: [...COMMON, 'yes', 'out'],
+		takes: '--yes, --out, --cache-dir and --config',
 	},
 };
 
@@ -110,7 +110,7 @@ const FLAG_CLI: Record<CliFlag, string> = {
  * flags that used to have that wording.
  */
 const ONLY: Partial<Record<CliFlag, string>> = {
-	out: 'only pages writes a file',
+	out: 'only pages and sync write a file',
 	port: 'only ui does',
 	open: 'only ui does',
 	'no-open': 'only ui does',

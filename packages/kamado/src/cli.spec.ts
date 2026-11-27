@@ -6,7 +6,7 @@
  */
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -106,5 +106,49 @@ describe('--all', () => {
 		expect(result.stderr).toContain(
 			`${command} does not take --all (only ui-settings delete does)`,
 		);
+	});
+});
+
+describe('--out of sync', () => {
+	test('writes every change to the file the flag names, before it refuses what it cannot ask', async () => {
+		await mkdir(path.join(dir, 'src'));
+		await writeFile(config, JSON.stringify({ dir: { input: 'src', output: 'out' } }));
+		const rows = [];
+		for (const name of ['a', 'b', 'c']) {
+			await writeFile(
+				path.join(dir, 'src', `${name}.html`),
+				`---\ntitle: ${name}\n---\n<p>x</p>\n`,
+			);
+			rows.push({ url: `/${name}.html`, meta: { title: name, order: rows.length } });
+		}
+		const script = path.join(dir, 'script.mjs');
+		await writeFile(
+			script,
+			`export default { read: async () => JSON.parse(${JSON.stringify(JSON.stringify(rows))}) };`,
+		);
+		// not a terminal, and not told yes: nothing is applied, and the list is in the file
+		const result = await kamado('sync', script, '--out', 'maps/changes.txt');
+		expect(result.code).toBe(1);
+		expect(result.stderr).toContain('Wrote maps/changes.txt (3 changes)');
+		expect(result.stderr).toContain('this is not a terminal to confirm them on');
+		const written = await readFile(path.join(dir, 'maps', 'changes.txt'), 'utf8');
+		expect(written).toContain('3 changes:');
+		expect(written).toContain('* /c.html order: 2');
+		expect(await readFile(path.join(dir, 'src', 'a.html'), 'utf8')).not.toContain(
+			'order',
+		);
+	});
+
+	test('is refused by the commands that write no file, and needs a name', async () => {
+		for (const command of ['build', 'server', 'ui']) {
+			const result = await kamado(command, '--out', 'x.txt');
+			expect(result.code).toBe(1);
+			expect(result.stderr).toContain(
+				`${command} does not take --out (only pages and sync write a file)`,
+			);
+		}
+		const empty = await kamado('sync', 'import', '--out', '');
+		expect(empty.code).toBe(1);
+		expect(empty.stderr).toContain('--out needs a file name');
 	});
 });

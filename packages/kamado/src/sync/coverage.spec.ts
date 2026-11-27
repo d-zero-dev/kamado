@@ -106,4 +106,18 @@ describe('the answer of the core for a sync', () => {
 		expect(body).not.toContain('page_json(');
 		expect(text.slice(end, end + 3000)).toContain('"locked"');
 	});
+
+	test('tells what the warning about the files a sync writes needs of pages.overrides', () => {
+		const text = source('crates/kd_core/src/ui.rs');
+		const start = text.indexOf('pub fn sync_pages(');
+		const end = text.indexOf('pub fn sync_locked(', start);
+		const body = text.slice(start, end);
+		// the keys of the entry of a page with a file, and the keys the config sends there: without
+		// them the warning of `diff.ts` (`filesAtRisk`) would never name pages.overrides
+		expect(body).toContain('"overridesKeys"');
+		expect(body).toContain('"newKeysInOverrides"');
+		const diffText = source('packages/kamado/src/sync/diff.ts');
+		expect(diffText).toContain('overridesKeys');
+		expect(diffText).toContain('newKeysInOverrides');
+	});
 });

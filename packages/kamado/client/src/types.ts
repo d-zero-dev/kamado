@@ -47,8 +47,9 @@ export interface Rows {
 	readonly layouts?: readonly string[] | null;
 	/**
 	 * How the config presents the metadata keys (`ui.keys`): a label (the name of the column) and
-	 * a description, each a text or a text per language. The core always says it (`{}` when the
-	 * config names none). `columnHeading` reads a list without it (a value made by hand) as `{}`.
+	 * a description, each a text or a text per language, and where a new key of a real page is
+	 * written (`newKeyOrigin`, which the core uses and the screen does not read). The core always
+	 * says it (`{}` when the config names none). `columnHeading` reads a list without it (a value made by hand) as `{}`.
 	 */
 	readonly keys?: KeyPresentations;
 	/**

@@ -590,6 +590,101 @@ describe('pages.overrides in the files a sync takes from the place they are in',
 	});
 });
 
+describe('pages.overrides in the files a sync takes from the place they are in, for a page with a file', () => {
+	const OVERRIDES = '/site/pages.overrides.json';
+	const plain = file('/p/', 'p/index.html', { title: 'P' });
+	// the page has an entry in pages.overrides, in which `order` is
+	const entered = file(
+		'/e/',
+		'e/index.html',
+		{ title: 'E', order: 1 },
+		{ overridesKeys: ['order'] },
+	);
+	const sent = { overridesFile: OVERRIDES, newKeysInOverrides: ['order', 'nav'] };
+	const writesOverrides = (
+		pages: SnapshotPage[],
+		rows: unknown[],
+		extra: Partial<Snapshot> = sent,
+	): boolean => {
+		const result = diff(snapshot(pages, { overridesFile: OVERRIDES, ...extra }), rows);
+		// a result that is refused tells nothing of the files: the rows of these cases are right
+		expect(result.ok).toBe(true);
+		return result.ok && result.filesAtRisk.includes(OVERRIDES);
+	};
+
+	test('a new key that goes to pages.overrides writes it, and one that goes in the file does not', () => {
+		expect(
+			writesOverrides([plain], [{ url: '/p/', meta: { title: 'P', order: 2 } }]),
+		).toBe(true);
+		expect(
+			writesOverrides([plain], [{ url: '/p/', meta: { title: 'P', other: 2 } }]),
+		).toBe(false);
+		// the key is not new when the page has it
+		expect(
+			writesOverrides(
+				[file('/p/', 'p/index.html', { title: 'P', nav: 1 })],
+				[{ url: '/p/', meta: { title: 'P', nav: 2 } }],
+			),
+		).toBe(false);
+		// without what says where new keys go, a new key goes in the file
+		expect(
+			writesOverrides([plain], [{ url: '/p/', meta: { title: 'P', order: 2 } }], {}),
+		).toBe(false);
+	});
+
+	test('a key of the entry of the page is written in pages.overrides, set or removed', () => {
+		expect(
+			writesOverrides([entered], [{ url: '/e/', meta: { title: 'E', order: 2 } }], {}),
+		).toBe(true);
+		expect(writesOverrides([entered], [{ url: '/e/', meta: { title: 'E' } }], {})).toBe(
+			true,
+		);
+		// a key of the same page that is in its file is not
+		expect(
+			writesOverrides([entered], [{ url: '/e/', meta: { title: 'F', order: 1 } }], {}),
+		).toBe(false);
+		expect(
+			writesOverrides([entered], [{ url: '/e/', meta: { title: 'E', order: 1 } }]),
+		).toBe(false);
+	});
+
+	test('an entry that has no keys is the entry of the page still', () => {
+		// its keys were deleted: the page moves or goes with the entry that is left
+		const emptied = file('/m/', 'm/index.html', { title: 'M' }, { overridesKeys: [] });
+		expect(writesOverrides([emptied, plain], [{ url: '/p/' }], {})).toBe(true);
+		expect(
+			writesOverrides([emptied], [{ url: '/moved/', inputPath: 'm/index.html' }], {}),
+		).toBe(true);
+		// and no key of it is in pages.overrides
+		expect(writesOverrides([emptied], [{ url: '/m/', meta: { title: 'N' } }], {})).toBe(
+			false,
+		);
+	});
+
+	test('the keys of a page that is made go where the config sends a new key', () => {
+		const made = (meta: Record<string, unknown>, extra: Partial<Snapshot> = sent) =>
+			writesOverrides(
+				[plain],
+				[{ url: '/p/' }, { url: '/n/', virtual: false, inputPath: 'n/index.html', meta }],
+				extra,
+			);
+		expect(made({ order: 1 })).toBe(true);
+		expect(made({ title: 'N' })).toBe(false);
+		expect(made({ order: 1 }, {})).toBe(false);
+	});
+
+	test('the page that has an entry takes it when it goes or moves, and a page that has none does not', () => {
+		expect(writesOverrides([entered, plain], [{ url: '/p/' }], {})).toBe(true);
+		expect(writesOverrides([entered, plain], [{ url: '/e/' }], {})).toBe(false);
+		expect(
+			writesOverrides([entered], [{ url: '/moved/', inputPath: 'e/index.html' }], {}),
+		).toBe(true);
+		expect(
+			writesOverrides([plain], [{ url: '/moved/', inputPath: 'p/index.html' }], {}),
+		).toBe(false);
+	});
+});
+
 describe('the files a sync takes from the place they are in', () => {
 	test('the files of what is removed, made virtual or moved are listed', () => {
 		const withSidecar = file(
