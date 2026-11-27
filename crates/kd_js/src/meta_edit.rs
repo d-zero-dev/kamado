@@ -111,8 +111,10 @@ pub fn not_editable_reason(src: &str, jsx: bool, ts: bool) -> Result<Option<Stri
 /// # Errors
 ///
 /// [`EditError::Syntax`] if the module does not parse, and
-/// [`EditError::NotEditable`] if `meta` is not an object literal or the key is
-/// written twice.
+/// [`EditError::NotEditable`] if `meta` is not an object literal, the key is
+/// written twice, or the key, or a key of an object in `value` at any depth, is
+/// `__proto__` (it would set a prototype and make no property, and the reader of
+/// `meta` refuses it).
 ///
 /// # Example
 ///
@@ -131,9 +133,10 @@ pub fn set_key(
 	key: &str,
 	value: &Const,
 ) -> Result<String, EditError> {
-	if key == "__proto__" {
+	if key == "__proto__" || has_proto_key(value) {
 		// In an object literal `__proto__: v` sets the prototype, even in quotes, and makes
-		// no property: a key that reads back as a key and is none when the module runs.
+		// no property: a key that is none when the module runs, and that the reader of `meta`
+		// refuses. It is the key of `meta` or the key of an object inside the value.
 		return Err(EditError::NotEditable(
 			"`__proto__` cannot be a key of an object literal".to_string(),
 		));
@@ -457,6 +460,17 @@ fn collapse_if_empty(out: &str, lay: &ObjectLayout) -> String {
 	out.to_string()
 }
 
+/// Whether an object in `value`, at any depth, has the key `__proto__`.
+fn has_proto_key(value: &Const) -> bool {
+	match value {
+		Const::Array(items) => items.iter().any(has_proto_key),
+		Const::Object(members) => members
+			.iter()
+			.any(|(k, v)| k == "__proto__" || has_proto_key(v)),
+		_ => false,
+	}
+}
+
 fn render_key(key: &str, quote: char) -> String {
 	let ident = key
 		.chars()
@@ -770,6 +784,73 @@ mod tests {
 			set_key("export default 1;", false, true, "__proto__", &s("x")).unwrap_err(),
 			EditError::NotEditable(_)
 		));
+	}
+
+	#[test]
+	fn a_value_that_has_the_proto_key_inside_is_refused_as_the_key_is() {
+		let object = |members: Vec<(&str, Const)>| {
+			Const::Object(
+				members
+					.into_iter()
+					.map(|(k, v)| (k.to_string(), v))
+					.collect(),
+			)
+		};
+		let inside = object(vec![
+			("a", n(1.0)),
+			("__proto__", object(vec![("x", n(2.0))])),
+		]);
+		let deeper = Const::Array(vec![object(vec![("k", inside.clone())])]);
+		for src in [
+			"export const meta = { v: 'old' };",
+			"export const meta = {};",
+			"export default 1;",
+		] {
+			for value in [&inside, &deeper] {
+				let err = set_key(src, false, true, "v", value).unwrap_err();
+				assert!(
+					matches!(&err, EditError::NotEditable(why) if why.contains("__proto__")),
+					"{src}: {err}"
+				);
+			}
+		}
+		// the module is as it was: the refusal is before anything is written
+		let src = "export const meta = { v: 'old' };";
+		assert!(set_key(src, false, true, "v", &inside).is_err());
+		// text that only has the word in it, and names that only start with it, are written
+		assert_eq!(
+			set(src, "v", &s("__proto__")),
+			"export const meta = { v: '__proto__' };"
+		);
+		assert_eq!(
+			set(
+				src,
+				"v",
+				&object(vec![("__proto__x", n(1.0)), ("proto", n(2.0))])
+			),
+			"export const meta = { v: { __proto__x: 1, proto: 2 } };"
+		);
+	}
+
+	#[test]
+	fn a_module_that_has_the_proto_key_cannot_be_edited_as_it_cannot_be_read() {
+		// the editor reads the module with its own walk (the one that keeps where each key is),
+		// which has to refuse the key however it is written, as the reader of `meta` does
+		for src in [
+			"export const meta = { __proto__: { x: 1 }, a: 1 };",
+			"export const meta = { '__proto__': { x: 1 }, a: 1 };",
+			"export const meta = { \"__proto__\": 1, a: 1 };",
+			"export const meta = { \"\\u005f_proto__\": 1, a: 1 };",
+			"export const meta = { \\u005f_proto__: 1, a: 1 };",
+			"export const meta = { a: 1, b: { c: [{ __proto__: 1 }] } };",
+		] {
+			for err in [
+				set_key(src, false, true, "a", &n(2.0)).unwrap_err(),
+				delete_key(src, false, true, "a").unwrap_err(),
+			] {
+				assert!(err.to_string().contains("`__proto__`"), "{src}: {err}");
+			}
+		}
 	}
 
 	#[test]
