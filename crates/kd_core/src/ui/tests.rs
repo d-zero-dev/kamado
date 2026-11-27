@@ -788,6 +788,139 @@ fn a_new_key_goes_into_the_page_file_and_a_virtual_page_has_no_other_place() {
 	);
 }
 
+/// `order` and `nav` are written to `pages.overrides` when a page does not have them yet,
+/// `title` to the page file (as it is without being told).
+const NEW_KEYS_IN_OVERRIDES: &str = r#", "pages": { "overrides": "pages.overrides.json" }, "ui": { "keys": { "order": { "newKeyOrigin": "overrides" }, "nav": { "newKeyOrigin": "overrides" }, "title": { "newKeyOrigin": "inFile" } } }"#;
+
+#[test]
+fn a_new_key_that_the_config_sends_to_pages_overrides_adds_the_entry_of_the_page() {
+	let site = Site::new("new_key_overrides_added");
+	site.write("src/a.html", "---\ntitle: A\n---\n<p>a</p>\n");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(NEW_KEYS_IN_OVERRIDES);
+	let rows = all(&mut ui);
+	let ex = expect(&rows, &page(&rows, "/a.html"));
+	assert!(ok(&edit(&mut ui, "/a.html", &ex, &set("order", "3"))));
+	// the entry is added, with no `virtual`, and the page file is as it was
+	assert_eq!(
+		site.read("pages.overrides.json"),
+		r#"{"version":1,"pages":[{"url":"/a.html","meta":{"order":3}}]}"#
+	);
+	assert_eq!(site.read("src/a.html"), "---\ntitle: A\n---\n<p>a</p>\n");
+	let rows = all(&mut ui);
+	let c = cell(&page(&rows, "/a.html"), "order");
+	assert_eq!(c.get("value").map(Value::to_json), Some("3".to_string()));
+	assert_eq!(c.get("origin"), Some(&s("overrides")));
+	// the page has the entry now, so a second new key goes into it
+	let ex = expect(&rows, &page(&rows, "/a.html"));
+	assert!(ok(&edit(&mut ui, "/a.html", &ex, &set("nav", "true"))));
+	assert_eq!(
+		site.read("pages.overrides.json"),
+		r#"{"version":1,"pages":[{"url":"/a.html","meta":{"order":3,"nav":true}}]}"#
+	);
+	// a key that says it goes in the file, and one the config says nothing of, do
+	let rows = all(&mut ui);
+	let ex = expect(&rows, &page(&rows, "/a.html"));
+	assert!(ok(&edit(&mut ui, "/a.html", &ex, &set("other", "1"))));
+	assert!(site.read("src/a.html").contains("other: 1"));
+}
+
+#[test]
+fn a_new_key_that_the_config_sends_to_pages_overrides_goes_into_the_entry_the_page_has() {
+	let site = Site::new("new_key_overrides_entry");
+	site.write("src/a.html", "<p>a</p>\n");
+	site.write(
+		"pages.overrides.json",
+		r#"{"version":1,"pages":[{"url":"/a.html","meta":{"title":"Over"}}]}"#,
+	);
+	let mut ui = site.open(NEW_KEYS_IN_OVERRIDES);
+	let rows = all(&mut ui);
+	let ex = expect(&rows, &page(&rows, "/a.html"));
+	assert!(ok(&edit(&mut ui, "/a.html", &ex, &set("order", "2"))));
+	assert_eq!(
+		site.read("pages.overrides.json"),
+		r#"{"version":1,"pages":[{"url":"/a.html","meta":{"title":"Over","order":2}}]}"#
+	);
+	assert_eq!(site.read("src/a.html"), "<p>a</p>\n");
+}
+
+#[test]
+fn a_key_a_page_has_is_written_where_it_is_whatever_the_config_says_of_a_new_one() {
+	let site = Site::new("new_key_overrides_exists");
+	site.write("src/a.html", "---\nnav: false\n---\n<p>a</p>\n");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(NEW_KEYS_IN_OVERRIDES);
+	let rows = all(&mut ui);
+	let ex = expect(&rows, &page(&rows, "/a.html"));
+	assert!(ok(&edit(&mut ui, "/a.html", &ex, &set("nav", "true"))));
+	assert!(site.read("src/a.html").contains("nav: true"));
+	assert_eq!(
+		site.read("pages.overrides.json"),
+		r#"{"version":1,"pages":[]}"#
+	);
+}
+
+#[test]
+fn deleting_the_keys_of_an_entry_that_was_added_leaves_the_entry() {
+	let site = Site::new("new_key_overrides_deleted");
+	site.write("src/a.html", "<p>a</p>\n");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(NEW_KEYS_IN_OVERRIDES);
+	let rows = all(&mut ui);
+	let ex = expect(&rows, &page(&rows, "/a.html"));
+	assert!(ok(&edit(&mut ui, "/a.html", &ex, &set("order", "3"))));
+	let rows = all(&mut ui);
+	let ex = expect(&rows, &page(&rows, "/a.html"));
+	assert!(ok(&edit(&mut ui, "/a.html", &ex, &delete("order"))));
+	// the entry may have been written by a person: the key goes, the entry stays
+	assert_eq!(
+		site.read("pages.overrides.json"),
+		r#"{"version":1,"pages":[{"url":"/a.html","meta":{}}]}"#
+	);
+	let rows = all(&mut ui);
+	assert!(
+		page(&rows, "/a.html")
+			.get("meta")
+			.and_then(|m| m.get("order"))
+			.is_none()
+	);
+}
+
+#[test]
+fn a_new_key_for_pages_overrides_is_not_written_over_a_file_changed_since_it_was_read() {
+	let site = Site::new("new_key_overrides_conflict");
+	site.write("src/a.html", "<p>a</p>\n");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(NEW_KEYS_IN_OVERRIDES);
+	let rows = all(&mut ui);
+	let ex = expect(&rows, &page(&rows, "/a.html"));
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[ ]}"#);
+	let answer = edit(&mut ui, "/a.html", &ex, &set("order", "3"));
+	assert_eq!(code(&answer), "conflict", "{answer:?}");
+	assert_eq!(
+		site.read("pages.overrides.json"),
+		r#"{"version":1,"pages":[ ]}"#
+	);
+}
+
+#[test]
+fn the_config_tells_where_a_new_key_goes_as_it_was_written() {
+	let site = Site::new("new_key_origin_keys");
+	site.write("src/a.html", "<p>a</p>\n");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(NEW_KEYS_IN_OVERRIDES);
+	let answer = json(&ui.pages(r#"{"offset":0,"limit":10}"#).unwrap());
+	let keys = answer.get("keys").unwrap();
+	assert_eq!(
+		keys.get("order").unwrap().to_json(),
+		r#"{"newKeyOrigin":"overrides"}"#
+	);
+	assert_eq!(
+		keys.get("title").unwrap().to_json(),
+		r#"{"newKeyOrigin":"inFile"}"#
+	);
+}
+
 #[test]
 fn deleting_removes_the_value_from_its_file_and_the_one_below_shows() {
 	let site = Site::new("delete");

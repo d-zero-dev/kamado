@@ -107,6 +107,66 @@ fn every_page_is_listed_as_kamado_pages_lists_it() {
 }
 
 #[test]
+fn a_page_with_a_file_that_has_an_entry_in_pages_overrides_tells_its_keys_and_the_new_keys_that_go_there_are_listed()
+ {
+	let site = Site::new("entry_keys");
+	site.write("src/entered.html", "<p>e</p>\n");
+	site.write("src/plain.html", "<p>p</p>\n");
+	site.write(
+		"pages.overrides.json",
+		r#"{"version":1,"pages":[{"url":"/entered.html","meta":{"order":1,"nav":true}},{"url":"/virtual/","virtual":true,"meta":{"title":"V"}}]}"#,
+	);
+	let mut ui = site.open(
+		r#", "pages": { "overrides": "pages.overrides.json" }, "ui": { "keys": { "order": { "newKeyOrigin": "overrides" }, "title": { "newKeyOrigin": "inFile" } } }"#,
+	);
+	let answer = parse(&ui.sync_pages());
+	// the keys of the entry, for the page with a file that has one only
+	assert_eq!(
+		page(&answer, "/entered.html")
+			.get("overridesKeys")
+			.map(Value::to_json),
+		Some(r#"["order","nav"]"#.to_string())
+	);
+	assert!(page(&answer, "/plain.html").get("overridesKeys").is_none());
+	assert!(page(&answer, "/virtual/").get("overridesKeys").is_none());
+	// the keys the config sends to pages.overrides, and not the ones it keeps in the file
+	assert_eq!(
+		answer.get("newKeysInOverrides").map(Value::to_json),
+		Some(r#"["order"]"#.to_string())
+	);
+}
+
+#[test]
+fn an_entry_that_has_no_keys_is_told_as_one_with_none() {
+	// an entry is left with no keys when the last of them is deleted: it is still the entry of
+	// the page, which a move or a removal of the page changes
+	let site = Site::new("entry_without_keys");
+	site.write("src/entered.html", "<p>e</p>\n");
+	site.write(
+		"pages.overrides.json",
+		r#"{"version":1,"pages":[{"url":"/entered.html","meta":{}}]}"#,
+	);
+	let mut ui = site.open(OVERRIDES);
+	let answer = parse(&ui.sync_pages());
+	assert_eq!(
+		page(&answer, "/entered.html")
+			.get("overridesKeys")
+			.map(Value::to_json),
+		Some("[]".to_string())
+	);
+}
+
+#[test]
+fn a_site_that_sends_no_new_key_to_pages_overrides_lists_none() {
+	let site = Site::new("no_new_keys");
+	site.write("src/index.html", "<p>i</p>\n");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(OVERRIDES);
+	let answer = parse(&ui.sync_pages());
+	assert!(answer.get("newKeysInOverrides").is_none());
+}
+
+#[test]
 fn the_hashes_are_those_of_the_files_the_plan_read() {
 	let site = Site::new("hashes");
 	site.write("src/index.html", "---\ntitle: Home\n---\n");

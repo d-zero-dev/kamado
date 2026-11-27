@@ -693,6 +693,242 @@ fn a_key_that_a_batch_cannot_write_puts_back_the_keys_it_wrote() {
 	);
 }
 
+/// `order` is written to `pages.overrides` when a page does not have it yet.
+const NEW_KEYS_IN_OVERRIDES: &str = r#", "pages": { "overrides": "pages.overrides.json" }, "ui": { "keys": { "order": { "newKeyOrigin": "overrides" } } }"#;
+
+/// A `set` whose value is the JSON text given (`set` makes a string of it).
+fn set_json(key: &str, value: &str) -> String {
+	format!(r#"{{"op":"set","key":{},"value":{value}}}"#, s(key))
+}
+
+#[test]
+fn a_batch_adds_the_entries_the_new_keys_that_the_config_sends_to_pages_overrides_go_into() {
+	let (site, _) = three("new_keys_overrides");
+	site.write(
+		"pages.overrides.json",
+		r#"{"version":1,"pages":[{"url":"/b/","meta":{"nav":true}}]}"#,
+	);
+	let mut ui = site.open(NEW_KEYS_IN_OVERRIDES);
+	let r = rows(&mut ui);
+	let planned = ui.plans;
+	let answer = batch(
+		&mut ui,
+		&[
+			("/a/", expect(&r, "/a/"), set_json("order", "1")),
+			("/b/", expect(&r, "/b/"), set_json("order", "2")),
+			("/c/", expect(&r, "/c/"), set_json("order", "3")),
+			// a key the page has now, in the entry that was added in this batch
+			("/a/", expect(&r, "/a/"), set_json("order", "4")),
+			// a key the config says nothing of goes in the file
+			("/c/", expect(&r, "/c/"), set("title", "C2")),
+		],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(ui.plans - planned, 1);
+	// the entry of /b/ is changed, and those of /a/ and /c/ are added after it (with no
+	// `virtual`), each with the keys of its page
+	assert_eq!(
+		site.read("pages.overrides.json"),
+		r#"{"version":1,"pages":[{"url":"/b/","meta":{"nav":true,"order":2}},{"url":"/a/","meta":{"order":4}},{"url":"/c/","meta":{"order":3}}]}"#
+	);
+	assert_eq!(site.read("src/a/index.html"), html("A", "a"));
+	assert!(site.read("src/c/index.html").contains("title: C2"));
+	let r = rows(&mut ui);
+	for (url, order) in [("/a/", "4"), ("/b/", "2"), ("/c/", "3")] {
+		let cell = page(&r, url)
+			.get("meta")
+			.and_then(|m| m.get("order"))
+			.unwrap()
+			.clone();
+		assert_eq!(
+			cell.get("value").map(Value::to_json),
+			Some(order.to_string()),
+			"{url}"
+		);
+		assert_eq!(cell.get("origin"), Some(&Value::String("overrides".into())));
+	}
+}
+
+#[test]
+fn a_batch_that_adds_an_entry_for_a_new_key_and_then_fails_leaves_every_file_as_it_was() {
+	let (site, _) = three("new_keys_overrides_fails");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(NEW_KEYS_IN_OVERRIDES);
+	let r = rows(&mut ui);
+	let before = site.snapshot();
+	// the first edit adds the entry to the handle's copy; the second is refused while the batch is
+	// made (a key the page does not have), after the first was made
+	let answer = batch(
+		&mut ui,
+		&[
+			("/a/", expect(&r, "/a/"), set_json("order", "1")),
+			(
+				"/b/",
+				expect(&r, "/b/"),
+				r#"{"op":"delete","key":"nope"}"#.to_string(),
+			),
+		],
+	);
+	assert!(!ok(&answer), "{answer:?}");
+	assert_eq!(errors(&answer), vec![(1, "invalid".to_string())]);
+	assert_eq!(site.snapshot(), before);
+	// what the handle shows is what the files hold
+	let again = rows(&mut ui);
+	assert!(
+		page(&again, "/a/")
+			.get("meta")
+			.and_then(|m| m.get("order"))
+			.is_none()
+	);
+	// and the next batch is made from them
+	let answer = batch(
+		&mut ui,
+		&[("/a/", expect(&again, "/a/"), set_json("order", "1"))],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert!(site.read("pages.overrides.json").contains("\"/a/\""));
+}
+
+#[test]
+fn a_batch_that_adds_virtual_pages_in_place_and_then_fails_leaves_every_file_as_it_was() {
+	let (site, _) = three("virtual_in_place_fails");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(OVERRIDES);
+	let r = rows(&mut ui);
+	let ex = overrides_only(&r);
+	let before = site.snapshot();
+	let answer = batch(
+		&mut ui,
+		&[
+			(
+				"/n1/",
+				ex.clone(),
+				r#"{"op":"create","path":null}"#.to_string(),
+			),
+			(
+				"/n2/",
+				ex.clone(),
+				r#"{"op":"create","path":null}"#.to_string(),
+			),
+			(
+				"/b/",
+				expect(&r, "/b/"),
+				r#"{"op":"delete","key":"nope"}"#.to_string(),
+			),
+		],
+	);
+	assert!(!ok(&answer), "{answer:?}");
+	assert_eq!(site.snapshot(), before);
+	let again = rows(&mut ui);
+	assert!(!has_page(&again, "/n1/") && !has_page(&again, "/n2/"));
+	// the same pages are made by the next batch
+	let ex = overrides_only(&again);
+	let answer = batch(
+		&mut ui,
+		&[
+			(
+				"/n1/",
+				ex.clone(),
+				r#"{"op":"create","path":null}"#.to_string(),
+			),
+			("/n2/", ex, r#"{"op":"create","path":null}"#.to_string()),
+		],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert!(has_page(&rows(&mut ui), "/n2/"));
+}
+
+#[test]
+fn the_keys_of_an_entry_that_a_batch_adds_can_be_deleted_in_the_same_batch() {
+	let (site, _) = three("new_key_set_and_deleted");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(NEW_KEYS_IN_OVERRIDES);
+	let r = rows(&mut ui);
+	let ex = expect(&r, "/a/");
+	let answer = batch(
+		&mut ui,
+		&[
+			("/a/", ex.clone(), set_json("order", "1")),
+			("/a/", ex, r#"{"op":"delete","key":"order"}"#.to_string()),
+		],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	// the entry is there without keys (it reads back as the model says), and the page has none
+	let written = json(&site.read("pages.overrides.json"));
+	let Some(Value::Array(entries)) = written.get("pages") else {
+		panic!("no pages in {written:?}")
+	};
+	assert_eq!(entries.len(), 1);
+	assert_eq!(entries[0].get("url").and_then(Value::as_str), Some("/a/"));
+	assert!(
+		page(&rows(&mut ui), "/a/")
+			.get("meta")
+			.and_then(|m| m.get("order"))
+			.is_none()
+	);
+}
+
+#[test]
+fn a_page_made_in_a_batch_gets_its_new_keys_where_the_config_sends_them() {
+	let (site, _) = three("create_and_new_key");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(NEW_KEYS_IN_OVERRIDES);
+	let r = rows(&mut ui);
+	let answer = batch(
+		&mut ui,
+		&[
+			(
+				"/n/",
+				overrides_only(&r),
+				r#"{"op":"create","path":"n/index.html"}"#.to_string(),
+			),
+			("/n/", overrides_only(&r), set_json("order", "5")),
+			("/n/", overrides_only(&r), set("title", "N")),
+		],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	// `order` is in the entry of the new page, `title` is in its file
+	let overrides = site.read("pages.overrides.json");
+	assert!(
+		overrides.contains("\"/n/\"") && overrides.contains("\"order\":5"),
+		"{overrides}"
+	);
+	assert!(site.read("src/n/index.html").contains("title: N"));
+	assert!(!site.read("src/n/index.html").contains("order"));
+}
+
+#[test]
+fn a_new_key_for_pages_overrides_needs_the_hash_of_pages_overrides_and_the_one_it_was_read_at() {
+	let (site, _) = three("new_key_overrides_hash");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(NEW_KEYS_IN_OVERRIDES);
+	let r = rows(&mut ui);
+	let before = site.snapshot();
+	// the hashes of the page file and the sidecar, and none of pages.overrides
+	let input = page(&r, "/a/")
+		.get("hashes")
+		.and_then(|h| h.get("input"))
+		.map(Value::to_json)
+		.unwrap();
+	let answer = batch(
+		&mut ui,
+		&[(
+			"/a/",
+			format!(r#"{{"input":{input},"sidecar":null}}"#),
+			set_json("order", "1"),
+		)],
+	);
+	assert!(!ok(&answer));
+	assert_eq!(errors(&answer), vec![(0, "invalid".to_string())]);
+	assert_eq!(site.snapshot(), before);
+	// the one it was read at is out of date
+	let ex = expect(&r, "/a/");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[ ]}"#);
+	let answer = batch(&mut ui, &[("/a/", ex, set_json("order", "1"))]);
+	assert!(!ok(&answer));
+	assert_eq!(code(&answer), "conflict");
+}
+
 #[test]
 fn many_keys_of_a_big_pages_overrides_plan_the_site_once() {
 	let site = Site::new("many_keys");
@@ -1027,6 +1263,642 @@ fn hundreds_of_virtual_pages_plan_the_site_once() {
 	assert_eq!(ui.plans - planned, 1);
 	let text = site.read("pages.overrides.json");
 	assert!(text.contains("/new99/") && text.contains("/moved99/") && !text.contains("\"/p99/\""));
+}
+
+#[test]
+fn the_pages_a_batch_makes_cost_the_page_and_not_the_pages_there_are() {
+	// What is counted is how many times the work that grows with the site is done, and it is
+	// the same for a batch twice as big: a batch that makes a page reads `pages.overrides` once
+	// and asks no page of every other page.
+	for n in [400usize, 800] {
+		let site = Site::new(&format!("make_{n}"));
+		site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+		site.write("src/index.html", &html("A", "a"));
+		let mut ui = site.open(OVERRIDES);
+		let ex = overrides_only(&rows(&mut ui));
+		let edits: Vec<(String, String, String)> = (0..n)
+			.map(|i| {
+				(
+					format!("/new{i}/"),
+					ex.clone(),
+					r#"{"op":"create","path":null}"#.to_string(),
+				)
+			})
+			.collect();
+		let edits: Vec<(&str, String, String)> = edits
+			.iter()
+			.map(|(u, e, c)| (u.as_str(), e.clone(), c.clone()))
+			.collect();
+		counters::reset();
+		let answer = batch(&mut ui, &edits);
+		assert!(ok(&answer), "{:?}", answer.get("message"));
+		assert_eq!(counters::get("overrides-read"), 1, "{n} pages");
+		assert_eq!(counters::get("collision-scan"), 0, "{n} pages");
+		let written = json(&site.read("pages.overrides.json"));
+		let Some(Value::Array(entries)) = written.get("pages") else {
+			panic!("no pages in {written:?}")
+		};
+		assert_eq!(entries.len(), n);
+		assert_eq!(
+			entries[n - 1].get("url").and_then(Value::as_str),
+			Some(format!("/new{}/", n - 1).as_str())
+		);
+	}
+}
+
+#[test]
+fn virtual_pages_deleted_in_a_batch_leave_pages_overrides_as_they_do_one_by_one() {
+	let overrides = |n: usize| -> String {
+		let items: Vec<String> = (0..n)
+			.map(|i| format!("\t\t{{ \"url\": \"/v{i}/\", \"virtual\": true }}"))
+			.collect();
+		format!(
+			"{{\n\t\"version\": 1,\n\t\"pages\": [\n{}\n\t]\n}}\n",
+			items.join(",\n")
+		)
+	};
+	let n = 40;
+	// every third page, and the last
+	let gone: Vec<usize> = (0..n).filter(|i| i % 3 == 0 || *i == n - 1).collect();
+
+	let together = Site::new("virtual_gone_together");
+	together.write("pages.overrides.json", &overrides(n));
+	let mut ui = together.open(OVERRIDES);
+	let ex = overrides_only(&rows(&mut ui));
+	let edits: Vec<(String, String, String)> = gone
+		.iter()
+		.map(|i| {
+			(
+				format!("/v{i}/"),
+				ex.clone(),
+				r#"{"op":"deletePage"}"#.to_string(),
+			)
+		})
+		.collect();
+	let edits: Vec<(&str, String, String)> = edits
+		.iter()
+		.map(|(u, e, c)| (u.as_str(), e.clone(), c.clone()))
+		.collect();
+	counters::reset();
+	let planned = ui.plans;
+	let answer = batch(&mut ui, &edits);
+	assert!(ok(&answer), "{answer:?}");
+	// taken out of the file together, and the site planned once
+	assert_eq!(counters::get("entries-removed-together"), 1);
+	assert_eq!(counters::get("entry-removed"), 0);
+	assert_eq!(ui.plans - planned, 1);
+
+	let one_by_one = Site::new("virtual_gone_one_by_one");
+	one_by_one.write("pages.overrides.json", &overrides(n));
+	let mut ui_one = one_by_one.open(OVERRIDES);
+	for i in &gone {
+		let ex = overrides_only(&rows(&mut ui_one));
+		let answer = json(
+			&ui_one
+				.edit(&format!(
+					r#"{{"url":"/v{i}/","expect":{ex},"change":{{"op":"deletePage"}}}}"#
+				))
+				.unwrap(),
+		);
+		assert!(ok(&answer), "{answer:?}");
+	}
+	assert_eq!(
+		together.read("pages.overrides.json"),
+		one_by_one.read("pages.overrides.json")
+	);
+	let r = rows(&mut ui);
+	for i in 0..n {
+		assert_eq!(has_page(&r, &format!("/v{i}/")), !gone.contains(&i), "{i}");
+	}
+}
+
+#[test]
+fn every_virtual_page_going_in_a_batch_leaves_pages_overrides_as_it_does_one_by_one() {
+	let text = "{\n\t\"version\": 1,\n\t\"pages\": [\n\t\t{ \"url\": \"/a/\", \"virtual\": true },\n\t\t{ \"url\": \"/b/\", \"virtual\": true }\n\t]\n}\n";
+	let site = Site::new("virtual_gone_all");
+	site.write("pages.overrides.json", text);
+	let mut ui = site.open(OVERRIDES);
+	let ex = overrides_only(&rows(&mut ui));
+	counters::reset();
+	let answer = batch(
+		&mut ui,
+		&[
+			("/a/", ex.clone(), r#"{"op":"deletePage"}"#.to_string()),
+			("/b/", ex, r#"{"op":"deletePage"}"#.to_string()),
+		],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(counters::get("entries-removed-together"), 1);
+
+	let one_by_one = Site::new("virtual_gone_all_one_by_one");
+	one_by_one.write("pages.overrides.json", text);
+	let mut ui_one = one_by_one.open(OVERRIDES);
+	for url in ["/a/", "/b/"] {
+		let ex = overrides_only(&rows(&mut ui_one));
+		let answer = json(
+			&ui_one
+				.edit(&format!(
+					r#"{{"url":"{url}","expect":{ex},"change":{{"op":"deletePage"}}}}"#
+				))
+				.unwrap(),
+		);
+		assert!(ok(&answer), "{answer:?}");
+	}
+	assert_eq!(
+		site.read("pages.overrides.json"),
+		one_by_one.read("pages.overrides.json")
+	);
+}
+
+#[test]
+fn virtual_pages_that_cannot_be_taken_out_together_are_deleted_one_by_one() {
+	// items that share lines in an array that has more than one: what each removal leaves
+	// depends on the ones before it
+	let site = Site::new("virtual_gone_shared_lines");
+	site.write(
+		"pages.overrides.json",
+		"{\n\t\"version\": 1,\n\t\"pages\": [ { \"url\": \"/a/\", \"virtual\": true }, { \"url\": \"/b/\", \"virtual\": true },\n\t\t{ \"url\": \"/c/\", \"virtual\": true } ]\n}\n",
+	);
+	let mut ui = site.open(OVERRIDES);
+	let ex = overrides_only(&rows(&mut ui));
+	counters::reset();
+	let answer = batch(
+		&mut ui,
+		&[
+			("/a/", ex.clone(), r#"{"op":"deletePage"}"#.to_string()),
+			("/c/", ex, r#"{"op":"deletePage"}"#.to_string()),
+		],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(counters::get("entries-removed-together"), 0);
+	assert_eq!(counters::get("entry-removed"), 2);
+	let r = rows(&mut ui);
+	assert!(has_page(&r, "/b/") && !has_page(&r, "/a/") && !has_page(&r, "/c/"));
+}
+
+#[test]
+fn pages_given_a_file_in_a_batch_leave_the_files_as_they_do_one_by_one() {
+	let overrides = {
+		let items: Vec<String> = (0..30)
+			.map(|i| {
+				format!(
+					"\t\t{{ \"url\": \"/v{i}/\", \"virtual\": true, \"meta\": {{ \"title\": \"V{i}\" }} }}"
+				)
+			})
+			.collect();
+		format!(
+			"{{\n\t\"version\": 1,\n\t\"pages\": [\n{}\n\t]\n}}\n",
+			items.join(",\n")
+		)
+	};
+	// every other page, and the last
+	let given: Vec<usize> = (0..30).filter(|i| i % 2 == 0 || *i == 29).collect();
+
+	let together = Site::new("given_a_file_together");
+	together.write("pages.overrides.json", &overrides);
+	let mut ui = together.open(OVERRIDES);
+	let ex = overrides_only(&rows(&mut ui));
+	let edits: Vec<(String, String, String)> = given
+		.iter()
+		.map(|i| {
+			(
+				format!("/v{i}/"),
+				ex.clone(),
+				r#"{"op":"materialize","path":null}"#.to_string(),
+			)
+		})
+		.collect();
+	let edits: Vec<(&str, String, String)> = edits
+		.iter()
+		.map(|(u, e, c)| (u.as_str(), e.clone(), c.clone()))
+		.collect();
+	counters::reset();
+	let planned = ui.plans;
+	let answer = batch(&mut ui, &edits);
+	assert!(ok(&answer), "{answer:?}");
+	// the entries are taken out of the file together, and the site is planned once
+	assert_eq!(counters::get("entries-settled"), 1);
+	assert_eq!(counters::get("entry-removed"), 0);
+	assert_eq!(ui.plans - planned, 1);
+
+	let one_by_one = Site::new("given_a_file_one_by_one");
+	one_by_one.write("pages.overrides.json", &overrides);
+	let mut ui_one = one_by_one.open(OVERRIDES);
+	for i in &given {
+		let ex = overrides_only(&rows(&mut ui_one));
+		let answer = json(
+			&ui_one
+				.edit(&format!(
+					r#"{{"url":"/v{i}/","expect":{ex},"change":{{"op":"materialize","path":null}}}}"#
+				))
+				.unwrap(),
+		);
+		assert!(ok(&answer), "{answer:?}");
+	}
+	assert_eq!(
+		together.read("pages.overrides.json"),
+		one_by_one.read("pages.overrides.json")
+	);
+	for i in &given {
+		let file = format!("src/v{i}/index.html");
+		assert!(together.exists(&file), "{file}");
+		assert_eq!(together.read(&file), one_by_one.read(&file), "{file}");
+	}
+}
+
+#[test]
+fn pages_made_virtual_in_a_batch_leave_the_files_as_they_do_one_by_one() {
+	let setup = |name: &str| {
+		let site = Site::new(name);
+		for i in 0..20 {
+			site.write(
+				&format!("src/p/{i}/index.html"),
+				&html(&format!("P{i}"), "x"),
+			);
+		}
+		site.write(
+			"pages.overrides.json",
+			"{\n\t\"version\": 1,\n\t\"pages\": []\n}\n",
+		);
+		site
+	};
+	let together = setup("made_virtual_together");
+	let mut ui = together.open(OVERRIDES);
+	let r = rows(&mut ui);
+	let edits: Vec<(String, String, String)> = (0..20)
+		.map(|i| {
+			(
+				format!("/p/{i}/"),
+				expect(&r, &format!("/p/{i}/")),
+				r#"{"op":"virtualize"}"#.to_string(),
+			)
+		})
+		.collect();
+	let edits: Vec<(&str, String, String)> = edits
+		.iter()
+		.map(|(u, e, c)| (u.as_str(), e.clone(), c.clone()))
+		.collect();
+	counters::reset();
+	let answer = batch(&mut ui, &edits);
+	assert!(ok(&answer), "{answer:?}");
+	// the array of pages.overrides is read once, however many entries are added
+	assert_eq!(counters::get("overrides-read"), 1);
+
+	let one_by_one = setup("made_virtual_one_by_one");
+	let mut ui_one = one_by_one.open(OVERRIDES);
+	for i in 0..20 {
+		let r = rows(&mut ui_one);
+		let ex = expect(&r, &format!("/p/{i}/"));
+		let answer = json(
+			&ui_one
+				.edit(&format!(
+					r#"{{"url":"/p/{i}/","expect":{ex},"change":{{"op":"virtualize"}}}}"#
+				))
+				.unwrap(),
+		);
+		assert!(ok(&answer), "{answer:?}");
+	}
+	assert_eq!(
+		together.read("pages.overrides.json"),
+		one_by_one.read("pages.overrides.json")
+	);
+	assert!(!together.exists("src/p/19/index.html"));
+}
+
+/// Pages and entries for the batch that mixes every kind of edit of an entry of
+/// `pages.overrides`.
+fn mixed_site(name: &str) -> Site {
+	let site = Site::new(name);
+	for (dir, upper) in [("a", "A"), ("b", "B"), ("c", "C")] {
+		site.write(
+			&format!("src/{dir}/index.html"),
+			&html(upper, &upper.to_lowercase()),
+		);
+	}
+	site.write(
+		"pages.overrides.json",
+		concat!(
+			"{\n\t\"version\": 1,\n\t\"pages\": [\n",
+			"\t\t{ \"url\": \"/v1/\", \"virtual\": true, \"meta\": { \"title\": \"V1\" } },\n",
+			"\t\t{ \"url\": \"/b/\", \"meta\": { \"badge\": \"new\" } },\n",
+			"\t\t{ \"url\": \"/v2/\", \"virtual\": true, \"lastmod\": \"2024-02-02\", \"meta\": { \"title\": \"V2\" } },\n",
+			"\t\t{ \"url\": \"/v3/\", \"virtual\": true },\n",
+			"\t\t{ \"url\": \"/v4/\", \"virtual\": true, \"meta\": { \"title\": \"V4\" } }\n",
+			"\t]\n}\n"
+		),
+	);
+	site
+}
+
+#[test]
+fn a_batch_that_mixes_every_edit_of_an_entry_leaves_the_files_as_the_edits_one_by_one_do() {
+	// the order of the phases of a batch: what frees places, the pages that are made, the pages
+	// given a file, the keys
+	let edits: Vec<(&str, &str)> = vec![
+		("/v3/", r#"{"op":"deletePage"}"#),
+		("/v4/", r#"{"op":"deletePage"}"#),
+		("/a/", r#"{"op":"virtualize"}"#),
+		("/n/", r#"{"op":"create","path":null}"#),
+		("/v1/", r#"{"op":"materialize","path":null}"#),
+		("/v2/", r#"{"op":"materialize","path":null}"#),
+	];
+	let together = mixed_site("mixed_together");
+	let mut ui = together.open(OVERRIDES);
+	let r = rows(&mut ui);
+	let mut request: Vec<(&str, String, String)> = edits
+		.iter()
+		.map(|(url, change)| {
+			let ex = if *url == "/a/" {
+				expect(&r, url)
+			} else {
+				overrides_only(&r)
+			};
+			(*url, ex, change.to_string())
+		})
+		.collect();
+	request.push(("/c/", expect(&r, "/c/"), set("title", "C2")));
+	request.push(("/b/", expect(&r, "/b/"), set("badge", "old")));
+	let planned = ui.plans;
+	let answer = batch(&mut ui, &request);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(ui.plans - planned, 1);
+
+	let one_by_one = mixed_site("mixed_one_by_one");
+	let mut ui_one = one_by_one.open(OVERRIDES);
+	for (url, change) in edits.iter().chain(&[
+		("/c/", r#"{"op":"set","key":"title","value":"C2"}"#),
+		("/b/", r#"{"op":"set","key":"badge","value":"old"}"#),
+	]) {
+		let r = rows(&mut ui_one);
+		let ex = if *url == "/n/"
+			|| *url == "/v1/"
+			|| *url == "/v2/"
+			|| *url == "/v3/"
+			|| *url == "/v4/"
+		{
+			overrides_only(&r)
+		} else {
+			expect(&r, url)
+		};
+		let answer = json(
+			&ui_one
+				.edit(&format!(
+					r#"{{"url":"{url}","expect":{ex},"change":{change}}}"#
+				))
+				.unwrap(),
+		);
+		assert!(ok(&answer), "{url}: {answer:?}");
+	}
+	assert_eq!(
+		together.read("pages.overrides.json"),
+		one_by_one.read("pages.overrides.json")
+	);
+	assert_eq!(together.snapshot(), one_by_one.snapshot());
+}
+
+#[test]
+fn the_keys_of_one_page_are_edited_together_however_many_there_are() {
+	// The front matter and the module are read and written for the keys together, and not for
+	// each key: the number of times a page is read does not grow with the keys.
+	for (file, url, text) in [
+		("src/p/index.html", "/p/", "---\ntitle: T\n---\n<p>b</p>\n"),
+		(
+			"src/p.tsx",
+			"/p.html",
+			"export const meta = { title: 'T' };\n\nexport default () => null;\n",
+		),
+	] {
+		for k in [200usize, 400] {
+			let site = Site::new(&format!("keys_{}_{k}", file.replace(['/', '.'], "_")));
+			site.write(file, text);
+			let mut ui = site.open("");
+			let r = rows(&mut ui);
+			let ex = expect(&r, url);
+			let edits: Vec<(String, String, String)> = (0..k)
+				.map(|i| {
+					(
+						url.to_string(),
+						ex.clone(),
+						set_json(&format!("k{i}"), &i.to_string()),
+					)
+				})
+				.collect();
+			let edits: Vec<(&str, String, String)> = edits
+				.iter()
+				.map(|(u, e, c)| (u.as_str(), e.clone(), c.clone()))
+				.collect();
+			counters::reset();
+			let answer = batch(&mut ui, &edits);
+			assert!(ok(&answer), "{file} {k}: {answer:?}");
+			// one reading before the edit and one after it
+			assert_eq!(counters::get("page-edit"), 1, "{file} {k}");
+			assert_eq!(counters::get("page-parse"), 2, "{file} {k}");
+			let written = site.read(file);
+			assert!(written.contains(&format!("k{}", k - 1)), "{file} {k}");
+			let r = rows(&mut ui);
+			let cell = page(&r, url)
+				.get("meta")
+				.and_then(|m| m.get(&format!("k{}", k - 1)))
+				.unwrap()
+				.clone();
+			assert_eq!(
+				cell.get("value").map(Value::to_json),
+				Some((k - 1).to_string())
+			);
+		}
+	}
+}
+
+#[test]
+fn the_keys_of_one_sidecar_and_one_entry_are_edited_together_however_many_there_are() {
+	for k in [200usize, 400] {
+		let site = Site::new(&format!("keys_sidecar_{k}"));
+		site.write("src/p/index.html", "<p>b</p>\n");
+		let pairs = |value: i32| -> String {
+			(0..k)
+				.map(|i| format!("\"k{i}\": {value}"))
+				.collect::<Vec<_>>()
+				.join(", ")
+		};
+		site.write("src/p/index.json", &format!("{{ {} }}", pairs(0)));
+		site.write(
+			"pages.overrides.json",
+			&format!(
+				r#"{{"version":1,"pages":[{{"url":"/q/","virtual":true,"meta":{{ {} }}}}]}}"#,
+				pairs(0)
+			),
+		);
+		let mut ui = site.open(OVERRIDES);
+		let r = rows(&mut ui);
+		let sidecar: Vec<(String, String, String)> = (0..k)
+			.map(|i| {
+				(
+					"/p/".to_string(),
+					expect(&r, "/p/"),
+					set_json(&format!("k{i}"), "1"),
+				)
+			})
+			.collect();
+		let entry: Vec<(String, String, String)> = (0..k)
+			.map(|i| {
+				(
+					"/q/".to_string(),
+					expect(&r, "/q/"),
+					set_json(&format!("k{i}"), "1"),
+				)
+			})
+			.collect();
+		let edits: Vec<(&str, String, String)> = sidecar
+			.iter()
+			.chain(&entry)
+			.map(|(u, e, c)| (u.as_str(), e.clone(), c.clone()))
+			.collect();
+		counters::reset();
+		let answer = batch(&mut ui, &edits);
+		assert!(ok(&answer), "{k}: {answer:?}");
+		// the sidecar is read before the edit and after it, and the entry is changed in one edit
+		assert_eq!(counters::get("sidecar-edit"), 1, "{k}");
+		assert_eq!(counters::get("sidecar-parse"), 2, "{k}");
+		assert_eq!(counters::get("entry-together"), 1, "{k}");
+		assert_eq!(counters::get("entry-change"), 0, "{k}");
+		assert!(
+			site.read("src/p/index.json")
+				.contains(&format!("\"k{}\": 1", k - 1))
+		);
+		assert!(
+			site.read("pages.overrides.json")
+				.contains(&format!("\"k{}\": 1", k - 1))
+		);
+	}
+}
+
+/// A module, a page with a sidecar and a virtual page, each with the key `a`.
+fn site_of_three_kinds_of_keys(name: &str) -> Site {
+	let site = Site::new(name);
+	site.write(
+		"src/m.tsx",
+		"export const meta = { a: 1, b: 2 };\n\nexport default () => null;\n",
+	);
+	site.write(
+		"src/j.jsx",
+		"export const meta = { a: 1, b: 2 };\n\nexport default () => null;\n",
+	);
+	site.write("src/s/index.html", "<p>s</p>\n");
+	site.write("src/s/index.json", "{ \"a\": 1, \"b\": 2 }");
+	site.write(
+		"pages.overrides.json",
+		"{\"version\":1,\"pages\":[{\"url\":\"/q/\",\"virtual\":true,\"meta\":{\"a\":1,\"b\":2}}]}",
+	);
+	site
+}
+
+#[test]
+fn the_keys_of_modules_of_both_kinds_are_edited_together() {
+	let site = site_of_three_kinds_of_keys("keys_both_modules");
+	// `.jsx` is a page when `pages.files` takes it
+	let mut ui = site.open(
+		r#", "pages": { "overrides": "pages.overrides.json", "files": ["**/*.{html,tsx,jsx}"] }"#,
+	);
+	let r = rows(&mut ui);
+	let mut edits: Vec<(String, String, String)> = Vec::new();
+	for url in ["/m.html", "/j.html"] {
+		for (key, value) in [("a", "9"), ("x", "1"), ("y", "2")] {
+			edits.push((url.to_string(), expect(&r, url), set_json(key, value)));
+		}
+	}
+	let edits: Vec<(&str, String, String)> = edits
+		.iter()
+		.map(|(u, e, c)| (u.as_str(), e.clone(), c.clone()))
+		.collect();
+	counters::reset();
+	let answer = batch(&mut ui, &edits);
+	assert!(ok(&answer), "{answer:?}");
+	// each module is read before the edit and after it, whatever its kind
+	assert_eq!(counters::get("page-edit"), 2);
+	assert_eq!(counters::get("page-parse"), 4);
+	for file in ["src/m.tsx", "src/j.jsx"] {
+		let written = site.read(file);
+		assert!(written.contains("a: 9") && written.contains("x: 1") && written.contains("y: 2"));
+	}
+}
+
+#[test]
+fn the_change_that_fails_among_the_keys_of_a_module_a_sidecar_and_an_entry_is_told_by_its_place() {
+	// a key the page has not is deleted by the change at the place, after the ones that set
+	for (failing, place) in [("/m.html", 2), ("/s/", 5), ("/q/", 8)] {
+		let site = site_of_three_kinds_of_keys(&format!("keys_fail_{place}"));
+		let mut ui = site.open(OVERRIDES);
+		let r = rows(&mut ui);
+		let mut edits: Vec<(String, String, String)> = Vec::new();
+		for url in ["/m.html", "/s/", "/q/"] {
+			let ex = if url == "/q/" {
+				overrides_only(&r)
+			} else {
+				expect(&r, url)
+			};
+			edits.push((url.to_string(), ex.clone(), set_json("a", "9")));
+			edits.push((url.to_string(), ex.clone(), set_json("b", "8")));
+			let change = if url == failing {
+				r#"{"op":"delete","key":"nope"}"#.to_string()
+			} else {
+				set_json("c", "7")
+			};
+			edits.push((url.to_string(), ex, change));
+		}
+		// only the page that fails is told: the others are fine
+		let edits: Vec<(&str, String, String)> = edits
+			.iter()
+			.map(|(u, e, c)| (u.as_str(), e.clone(), c.clone()))
+			.collect();
+		let before = site.snapshot();
+		let answer = batch(&mut ui, &edits);
+		assert!(!ok(&answer), "{failing}: {answer:?}");
+		assert_eq!(
+			errors(&answer),
+			vec![(place, "invalid".to_string())],
+			"{failing}"
+		);
+		assert_eq!(site.snapshot(), before, "{failing}");
+	}
+}
+
+#[test]
+fn a_batch_that_sets_and_deletes_keys_of_a_page_edits_the_file_as_one_edit_after_another_would() {
+	let (site, mut ui) = three("keys_mixed");
+	let r = rows(&mut ui);
+	let ex = expect(&r, "/a/");
+	let answer = batch(
+		&mut ui,
+		&[
+			("/a/", ex.clone(), set_json("n", "1")),
+			("/a/", ex.clone(), set("title", "A2")),
+			("/a/", ex.clone(), set_json("list", "[1,2]")),
+		],
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(
+		site.read("src/a/index.html"),
+		"---\ntitle: A2\nn: 1\nlist: [1,2]\n---\n<p>a</p>"
+	);
+	// a change that cannot be made is the one that is told, with its place in the batch
+	let r = rows(&mut ui);
+	let ex = expect(&r, "/a/");
+	let before = site.snapshot();
+	let answer = batch(
+		&mut ui,
+		&[
+			("/a/", ex.clone(), set_json("n", "2")),
+			(
+				"/a/",
+				ex.clone(),
+				r#"{"op":"delete","key":"missing"}"#.to_string(),
+			),
+			("/a/", ex, set_json("m", "3")),
+		],
+	);
+	assert!(!ok(&answer), "{answer:?}");
+	assert_eq!(errors(&answer), vec![(1, "invalid".to_string())]);
+	assert_eq!(site.snapshot(), before);
 }
 
 #[test]
