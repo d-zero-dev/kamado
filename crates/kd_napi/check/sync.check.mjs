@@ -21,9 +21,10 @@
  * does not pick it up: it needs the native build.
  */
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -1558,6 +1559,46 @@ test('a page that has an entry in pages.overrides takes the entry when it goes, 
 		assert.ok(!plain.summary.unsaved.includes('../pages.overrides.json'));
 	} finally {
 		opened.close();
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});
+
+test('kamado sync --out writes every change to the file before it refuses what it cannot ask, and writes none when nothing differs', () => {
+	const site = makeSite();
+	try {
+		// every page as it is, and one with a key that it has not
+		const opened = open(site);
+		// (by url: a script gives the paths of files relative to dir.input, which a page need not)
+		const rows = opened.pages().pages.map((page) => ({
+			url: page.url,
+			...(page.virtual ? { virtual: true } : {}),
+			meta: page.url === '/service/' ? { ...page.meta, order: 3 } : page.meta,
+		}));
+		opened.close();
+		const file = scriptReturning(site, rows);
+		const cli = path.join(dist, 'cli.js');
+		const run = (...args) =>
+			spawnSync(process.execPath, [cli, 'sync', file, ...args], {
+				cwd: site.root,
+				encoding: 'utf8',
+			});
+		// not a terminal, and not told yes: nothing is applied, and the list is in the file
+		const refused = run('--out', 'maps/changes.txt');
+		assert.equal(refused.status, 1, refused.stderr);
+		assert.match(refused.stderr, /Wrote maps\/changes\.txt \(\d+ changes?\)/u);
+		assert.match(refused.stderr, /this is not a terminal to confirm them on/u);
+		const written = site.read('maps/changes.txt');
+		assert.match(written, /^\d+ changes?:/u);
+		assert.match(written, /^\* \/service\/ order: 3$/mu);
+		// told yes: it applies, and writes the same list
+		const applied = run('--yes', '--out', 'again.txt');
+		assert.equal(applied.status, 0, applied.stderr);
+		assert.equal(site.read('again.txt'), written);
+		// nothing differs now: nothing is written
+		const none = run('--yes', '--out', 'none.txt');
+		assert.equal(none.status, 0, none.stderr);
+		assert.equal(existsSync(path.join(site.root, 'none.txt')), false);
+	} finally {
 		rmSync(site.root, { recursive: true, force: true });
 	}
 });
