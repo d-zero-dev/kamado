@@ -171,7 +171,7 @@ v3 のページは **`.html`（front matter 付き）と`.tsx`の 2 種類**で�
 ### 3.1 ファイルの置き換え
 
 - `foo.pug` → `foo.tsx`。同じ場所に置く。出力パスは変わりません（拡張子だけ`.html`になる）。
-- `foo.pug`のメタ（Pug 内の変数や front matter）→ `export const meta = { ... }`（**リテラルのみ**。式や変数は書けない）。
+- `foo.pug`のメタ（Pug 内の変数や front matter）→ `export const meta = { ... }`（**リテラルのみ**。式や変数は書けない。キー`__proto__`も書けない。オブジェクトリテラルの`__proto__`はプロトタイプを設定するので、ビルドエラーになる。そのキーが要るデータは、sidecar の`.json`、`pages.overrides`、HTML の front matter に書く）。
 - 同名の`foo.json`（sidecar）はそのまま使える。優先順位は高い順に、`pages.overrides`、sidecar `.json`、ファイル内の`meta`。
 - ページは`export default`でコンポーネントを書く。props の型は同梱しない（必要なら使う側で宣言する）。
 

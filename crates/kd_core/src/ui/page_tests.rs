@@ -1583,3 +1583,488 @@ fn a_request_for_a_page_says_its_path_and_its_url_as_text() {
 			.contains("`url` (a string) is required")
 	);
 }
+
+// ---- the characters a name written by a person must not have
+
+/// What a name must not have in a URL, and how the message shows it.
+const UNFIT: [(&str, &str); 9] = [
+	("\\", "\\\\"),
+	("\n", "\\n"),
+	("\t", "\\t"),
+	("\u{7f}", "\\u{7f}"),
+	("\u{85}", "\\u{85}"),
+	("\u{202e}", "\\u{202e}"),
+	("\u{200b}", "\\u{200b}"),
+	("\u{feff}", "\\u{feff}"),
+	("\0", "\\u{0}"),
+];
+
+/// The ones of [`UNFIT`] that a typed path can have: `\` in a path is a `/` (folded), and a NUL
+/// is refused as the NUL of a path, as it is for every typed path.
+fn unfit_in_a_path() -> impl Iterator<Item = (&'static str, &'static str)> {
+	UNFIT.into_iter().filter(|(c, _)| *c != "\\" && *c != "\0")
+}
+
+fn message(answer: &Value) -> String {
+	answer
+		.get("message")
+		.and_then(Value::as_str)
+		.unwrap_or_else(|| panic!("no message in {answer:?}"))
+		.to_string()
+}
+
+/// Whether the refusal names the character as the RFC says, as `has the character \u{202e},`.
+/// (The name is in the message too, written with `{:?}`, so the character alone would be found
+/// there whether or not the refusal names it.)
+fn has_character(answer: &Value, shown: &str) -> bool {
+	message(answer).contains(&format!("has the character {shown},"))
+}
+
+/// The characters a name must not have, as ranges (the RFC lists them).
+const REFUSED: [(u32, u32); 19] = [
+	(0x00, 0x1f),
+	(0x5c, 0x5c),
+	(0x7f, 0x9f),
+	(0xad, 0xad),
+	(0x61c, 0x61c),
+	(0x115f, 0x1160),
+	(0x17b4, 0x17b5),
+	(0x180e, 0x180e),
+	(0x200b, 0x200b),
+	(0x200e, 0x200f),
+	(0x2028, 0x2029),
+	(0x202a, 0x202e),
+	(0x2060, 0x206f),
+	(0x3164, 0x3164),
+	(0xfeff, 0xfeff),
+	(0xffa0, 0xffa0),
+	(0xfff0, 0xfffb),
+	(0x1bca0, 0x1bca3),
+	(0x1d173, 0x1d17a),
+];
+
+#[test]
+fn the_characters_a_name_must_not_have_are_the_ones_of_the_rfc() {
+	let in_a_range = |u: u32| REFUSED.iter().any(|(a, b)| (*a..=*b).contains(&u));
+	for (first, last) in REFUSED {
+		for u in first..=last {
+			let c = char::from_u32(u).unwrap();
+			let why = check_name("the name", &format!("a{c}b")).unwrap_err();
+			assert_eq!(why.code, "invalid", "{u:x}");
+			assert!(
+				why.message
+					.contains(&format!("has the character {},", c.escape_default())),
+				"{u:x}: {}",
+				why.message
+			);
+		}
+		// the character next to each end of a range is a name, unless another range is there
+		for u in [first.checked_sub(1), Some(last + 1)].into_iter().flatten() {
+			let c = char::from_u32(u).unwrap();
+			assert_eq!(
+				check_name("the name", &format!("a{c}b")).is_err(),
+				in_a_range(u),
+				"{u:x}"
+			);
+		}
+	}
+	// what looks like a space and is shown, the joiners and marks that letters need, a variation
+	// selector, the tag characters, and the characters next to the ranges above
+	for u in (0x2000..=0x200a).chain([
+		0xa0, 0x1680, 0x202f, 0x205f, 0x2800, 0x3000, 0x200c, 0x200d, 0x34f, 0xfe0f, 0x180b,
+		0x180c, 0x180d, 0x180f, 0xe0100, 0xe0001, 0xe0020, 0xe007f, 0xfffc, 0x115e, 0x1161, 0x3163,
+		0x3165, 0xffa1, 0x2027, 0x2070, 0x1bc9f, 0x1bca4, 0x1d172, 0x1d17b, 0x17b3, 0x17b6, 0x2c,
+		0x2d, 0x2e, 0x61, 0x65e5,
+	]) {
+		let c = char::from_u32(u).unwrap();
+		assert!(check_name("the name", &format!("a{c}b")).is_ok(), "{u:x}");
+	}
+	for ok in [
+		"flag-\u{1f3f4}\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}",
+		"日本語 の ページ",
+		"emoji-\u{1f468}\u{200d}\u{1f469}",
+		"a b.html",
+	] {
+		assert!(check_name("the name", ok).is_ok(), "{ok:?}");
+	}
+}
+
+#[test]
+fn a_virtual_page_is_not_made_at_a_url_with_a_character_a_name_must_not_have() {
+	let site = Site::new("create_url_chars");
+	site.write("src/index.html", "");
+	let overrides = r#"{ "version": 1, "pages": [] }"#;
+	site.write("pages.overrides.json", overrides);
+	let mut ui = site.open(OVERRIDES);
+	for (c, shown) in UNFIT {
+		let url = format!("/x{c}y.html");
+		let ex = expect_overrides(&mut ui);
+		let answer = create(&mut ui, Some(&url), None, &ex);
+		assert_eq!(code(&answer), "invalid", "{shown}: {answer:?}");
+		assert!(has_character(&answer, shown), "{shown}: {answer:?}");
+		assert!(!message(&answer).contains("already exists"), "{answer:?}");
+	}
+	assert_eq!(site.read("pages.overrides.json"), overrides);
+}
+
+#[test]
+fn a_page_file_is_not_made_at_a_path_with_a_character_a_name_must_not_have() {
+	let site = Site::new("create_path_chars");
+	site.write("src/index.html", "");
+	let mut ui = site.open("");
+	for (c, shown) in unfit_in_a_path() {
+		let answer = create(&mut ui, None, Some(&format!("dir/x{c}y.html")), "{}");
+		assert_eq!(code(&answer), "invalid", "{shown}: {answer:?}");
+		assert!(has_character(&answer, shown), "{shown}: {answer:?}");
+	}
+	// a NUL is the NUL of a path, as it is for every typed path
+	let answer = create(&mut ui, None, Some("dir/x\0y.html"), "{}");
+	assert_eq!(code(&answer), "invalid", "{answer:?}");
+	assert!(message(&answer).contains("NUL"), "{answer:?}");
+	assert!(!site.exists("src/dir"));
+	// a backslash in a path is a slash: the file is made in the directory
+	let answer = create(&mut ui, None, Some("dir\\x.html"), "{}");
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(site.read("src/dir/x.html"), "");
+	// a segment that `..` folds away is no name of the file
+	let answer = create(&mut ui, None, Some("gone\u{200b}/../kept.html"), "{}");
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(site.read("src/kept.html"), "");
+}
+
+#[test]
+fn the_url_said_for_a_page_file_is_a_name_too_with_or_without_the_key_that_makes_urls() {
+	// With the key, a URL that is not the one of the place would be written in it, so the
+	// refusal must come from the URL, not from the URL and the place being two.
+	for (n, config) in ["", r#", "pages": { "outputPathField": "slug" }"#]
+		.into_iter()
+		.enumerate()
+	{
+		let site = Site::new(&format!("create_url_and_path_chars_{n}"));
+		site.write("src/index.html", "");
+		let mut ui = site.open(config);
+		for (c, shown) in UNFIT {
+			let answer = create(
+				&mut ui,
+				Some(&format!("/x{c}y.html")),
+				Some("ok.html"),
+				"{}",
+			);
+			assert_eq!(code(&answer), "invalid", "{n} {shown}: {answer:?}");
+			assert!(has_character(&answer, shown), "{n} {shown}: {answer:?}");
+		}
+		assert!(!site.exists("src/ok.html"), "{n}");
+	}
+}
+
+#[test]
+fn a_name_with_the_ideographic_space_or_a_joiner_is_made_moved_to_and_given() {
+	let site = Site::new("allowed_chars");
+	site.write("src/index.html", "");
+	site.write("src/m.html", "m");
+	site.write("src/n.html", "n");
+	site.write(
+		"pages.overrides.json",
+		"{ \"version\": 1, \"pages\": [ { \"url\": \"/h\u{3000}i.html\", \"virtual\": true } ] }",
+	);
+	let mut ui = site.open(OVERRIDES);
+	// made
+	let answer = create(&mut ui, None, Some("全角\u{3000}名前.html"), "{}");
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(site.read("src/全角\u{3000}名前.html"), "");
+	let answer = create(&mut ui, None, Some("a\u{200d}b.html"), "{}");
+	assert!(ok(&answer), "{answer:?}");
+	let ex = expect_overrides(&mut ui);
+	let answer = create(&mut ui, Some("/v\u{3000}w.html"), None, &ex);
+	assert!(ok(&answer), "{answer:?}");
+	assert!(
+		site.read("pages.overrides.json")
+			.contains("/v\u{3000}w.html")
+	);
+	// moved to
+	let ex = expect_of(&mut ui, "/m.html");
+	let answer = change(
+		&mut ui,
+		"/m.html",
+		&ex,
+		&format!(
+			r#"{{"op":"moveUrl","url":{}}}"#,
+			s("/m\u{3000}2.html").to_json()
+		),
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(site.read("src/m\u{3000}2.html"), "m");
+	let ex = expect_of(&mut ui, "/n.html");
+	let answer = change(
+		&mut ui,
+		"/n.html",
+		&ex,
+		&format!(
+			r#"{{"op":"movePath","path":{}}}"#,
+			s("n\u{200d}2.html").to_json()
+		),
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(site.read("src/n\u{200d}2.html"), "n");
+	// given: the place the URL of a virtual page names
+	let url = "/h\u{3000}i.html";
+	let ex = expect_of(&mut ui, url);
+	let answer = change(&mut ui, url, &ex, &materialize(None));
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(site.read("src/h\u{3000}i.html"), "");
+}
+
+#[test]
+fn a_page_is_not_moved_to_a_url_or_a_path_with_a_character_a_name_must_not_have() {
+	let site = Site::new("move_chars");
+	site.write("src/index.html", "");
+	site.write("src/a.html", "a");
+	let mut ui = site.open("");
+	for (c, shown) in UNFIT {
+		let ex = expect_of(&mut ui, "/a.html");
+		let answer = change(
+			&mut ui,
+			"/a.html",
+			&ex,
+			&format!(
+				r#"{{"op":"moveUrl","url":{}}}"#,
+				s(&format!("/m{c}n.html")).to_json()
+			),
+		);
+		assert_eq!(code(&answer), "invalid", "moveUrl {shown}: {answer:?}");
+		assert!(has_character(&answer, shown), "moveUrl {shown}: {answer:?}");
+	}
+	for (c, shown) in unfit_in_a_path() {
+		let ex = expect_of(&mut ui, "/a.html");
+		let answer = change(
+			&mut ui,
+			"/a.html",
+			&ex,
+			&format!(
+				r#"{{"op":"movePath","path":{}}}"#,
+				s(&format!("m{c}n.html")).to_json()
+			),
+		);
+		assert_eq!(code(&answer), "invalid", "movePath {shown}: {answer:?}");
+		assert!(
+			has_character(&answer, shown),
+			"movePath {shown}: {answer:?}"
+		);
+	}
+	assert_eq!(site.read("src/a.html"), "a");
+	assert_eq!(
+		fs::read_dir(format!("{}/src", site.root)).unwrap().count(),
+		2
+	);
+}
+
+#[test]
+fn a_virtual_page_is_not_given_a_file_with_a_character_a_name_must_not_have() {
+	let site = Site::new("materialize_chars");
+	site.write("src/index.html", "");
+	// the entry is read as it is (a name is only refused when a file is made of it)
+	let overrides =
+		"{ \"version\": 1, \"pages\": [ { \"url\": \"/b\u{202e}c.html\", \"virtual\": true } ] }";
+	site.write("pages.overrides.json", overrides);
+	let mut ui = site.open(OVERRIDES);
+	let url = "/b\u{202e}c.html";
+	assert!(has_page(&all(&mut ui), url));
+	// the place the URL names
+	let ex = expect_of(&mut ui, url);
+	let answer = change(&mut ui, url, &ex, &materialize(None));
+	assert_eq!(code(&answer), "invalid", "{answer:?}");
+	assert!(has_character(&answer, "\\u{202e}"), "{answer:?}");
+	// the refusal says what to do: a typed path would not make the URL of the page either
+	assert!(
+		message(&answer).contains("change the URL of the page first"),
+		"{answer:?}"
+	);
+	// a place that is typed
+	let answer = change(&mut ui, url, &ex, &materialize(Some("b\u{202e}c.html")));
+	assert_eq!(code(&answer), "invalid", "{answer:?}");
+	assert!(has_character(&answer, "\\u{202e}"), "{answer:?}");
+	assert!(!site.exists("src/b\u{202e}c.html"));
+	assert_eq!(site.read("pages.overrides.json"), overrides);
+}
+
+#[test]
+fn a_page_with_such_a_character_in_its_name_is_read_edited_and_moved_to_a_name_without_it() {
+	// A name is refused when a person writes it for a file; the one a page already has is read
+	// as it is, and the page is edited and moved like any other.
+	let site = Site::new("read_chars");
+	site.write("src/index.html", "");
+	site.write("src/b\u{200b}c.html", "---\ntitle: B\n---\nb");
+	let mut ui = site.open("");
+	let url = "/b\u{200b}c.html";
+	assert!(has_page(&all(&mut ui), url));
+	let ex = expect_of(&mut ui, url);
+	let answer = change(
+		&mut ui,
+		url,
+		&ex,
+		r#"{"op":"set","key":"title","value":"New"}"#,
+	);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(site.read("src/b\u{200b}c.html"), "---\ntitle: New\n---\nb");
+	let ex = expect_of(&mut ui, url);
+	let answer = change(&mut ui, url, &ex, r#"{"op":"movePath","path":"bc.html"}"#);
+	assert!(ok(&answer), "{answer:?}");
+	assert_eq!(site.read("src/bc.html"), "---\ntitle: New\n---\nb");
+	assert!(!site.exists("src/b\u{200b}c.html"));
+}
+
+#[test]
+fn a_page_whose_url_has_such_a_character_is_told_that_the_url_is_the_same() {
+	let site = Site::new("same_url_chars");
+	site.write("src/index.html", "");
+	site.write("src/b\u{200b}c.html", "b");
+	let mut ui = site.open("");
+	let url = "/b\u{200b}c.html";
+	let ex = expect_of(&mut ui, url);
+	let answer = change(
+		&mut ui,
+		url,
+		&ex,
+		&format!(r#"{{"op":"moveUrl","url":{}}}"#, s(url).to_json()),
+	);
+	assert_eq!(code(&answer), "invalid", "{answer:?}");
+	assert!(message(&answer).contains("the same"), "{answer:?}");
+	assert!(
+		!message(&answer).contains("has the character"),
+		"{answer:?}"
+	);
+}
+
+#[test]
+fn the_url_of_a_virtual_page_is_written_as_it_is_in_the_key_that_makes_urls() {
+	// The page has the URL already, so it is not a name that a person writes; it goes into the
+	// file as the value of the key, and the file is at the place that was typed.
+	let site = Site::new("materialize_key_chars");
+	site.write("src/index.html", "");
+	site.write(
+		"pages.overrides.json",
+		"{ \"version\": 1, \"pages\": [ { \"url\": \"/b\u{202e}c.html\", \"virtual\": true } ] }",
+	);
+	let mut ui = site
+		.open(r#", "pages": { "overrides": "pages.overrides.json", "outputPathField": "slug" }"#);
+	let url = "/b\u{202e}c.html";
+	let ex = expect_of(&mut ui, url);
+	let answer = change(&mut ui, url, &ex, &materialize(Some("clean.html")));
+	assert!(ok(&answer), "{answer:?}");
+	// (how the front matter writes the value is the business of its writer, not of this rule)
+	let text = site.read("src/clean.html");
+	assert!(text.starts_with("---\nslug: "), "{text:?}");
+	assert!(text.contains(url), "{text:?}");
+	assert!(!site.exists("src/b\u{202e}c.html"));
+}
+
+#[test]
+fn a_page_is_not_moved_to_a_place_that_cannot_be_looked_at_and_the_refusal_says_so() {
+	let site = Site::new("move_unlookable");
+	site.write("src/index.html", "");
+	site.write("src/a.html", "a");
+	// a file where the directory of the new place would be
+	site.write("src/file.txt", "x");
+	// a directory is something that is there, and no page
+	site.write("src/dir.html/keep.txt", "t");
+	let mut ui = site.open("");
+	let ex = expect_of(&mut ui, "/a.html");
+	for (change_json, what) in [
+		(r#"{"op":"movePath","path":"file.txt/x.html"}"#, "movePath"),
+		(r#"{"op":"moveUrl","url":"/file.txt/x.html"}"#, "moveUrl"),
+	] {
+		let answer = change(&mut ui, "/a.html", &ex, change_json);
+		assert_eq!(code(&answer), "invalid", "{what}: {answer:?}");
+		assert!(
+			message(&answer).contains("cannot be looked at"),
+			"{what}: {answer:?}"
+		);
+		assert!(
+			!message(&answer).contains("already exists"),
+			"{what}: {answer:?}"
+		);
+	}
+	// a file that is there is still a collision
+	let answer = change(
+		&mut ui,
+		"/a.html",
+		&ex,
+		r#"{"op":"movePath","path":"dir.html"}"#,
+	);
+	assert_eq!(code(&answer), "collision", "{answer:?}");
+	assert!(message(&answer).contains("already exists"), "{answer:?}");
+	assert_eq!(site.read("src/a.html"), "a");
+	assert_eq!(site.read("src/dir.html/keep.txt"), "t");
+}
+
+#[test]
+fn a_virtual_page_whose_directory_is_a_file_is_refused_for_that_and_not_for_a_file_that_is_there() {
+	let site = Site::new("materialize_unlookable");
+	site.write("src/index.html", "");
+	// a file where the directory of every place of `/about/` would be: nothing can be below it
+	site.write("src/about", "x");
+	site.write(
+		"pages.overrides.json",
+		r#"{ "version": 1, "pages": [ { "url": "/about/", "virtual": true } ] }"#,
+	);
+	let mut ui = site.open(OVERRIDES);
+	let ex = expect_of(&mut ui, "/about/");
+	let answer = change(&mut ui, "/about/", &ex, &materialize(None));
+	assert_eq!(code(&answer), "invalid", "{answer:?}");
+	assert!(
+		message(&answer).contains("cannot be looked at"),
+		"{answer:?}"
+	);
+	assert!(!message(&answer).contains("already exists"), "{answer:?}");
+	assert_eq!(site.read("src/about"), "x");
+	assert!(!site.exists("src/about.html"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_place_the_disk_does_not_answer_for_is_an_io_error_and_not_an_invalid_name() {
+	use std::os::unix::fs::PermissionsExt;
+	let site = Site::new("taken_io");
+	site.write("src/index.html", "");
+	let locked = format!("{}/src/locked", site.root);
+	fs::create_dir_all(&locked).unwrap();
+	fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+	let place = format!("{locked}/x.html");
+	// a process that may look anyway (root) has nothing to show here
+	let answered =
+		fs::symlink_metadata(&place).is_err_and(|e| e.kind() != std::io::ErrorKind::NotFound);
+	let why = taken(&place);
+	let waiting = in_the_way(&place);
+	fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+	if answered {
+		assert_eq!(why.unwrap_err().code, "io");
+		assert!(waiting);
+	}
+}
+
+#[test]
+fn a_place_that_cannot_be_looked_at_is_not_a_place_that_is_taken() {
+	assert!(!taken("/this/does/not/exist/x.html").unwrap());
+	let site = Site::new("taken");
+	site.write("src/index.html", "");
+	site.write("src/file.txt", "x");
+	assert!(taken(&format!("{}/src/file.txt", site.root)).unwrap());
+	assert!(taken(&format!("{}/src", site.root)).unwrap());
+	// a file is not a directory: nothing can be below it, and that is not the same as something
+	// being there
+	let why = taken(&format!("{}/src/file.txt/x.html", site.root)).unwrap_err();
+	assert_eq!(why.code, "invalid");
+	assert!(why.message.contains("file.txt/x.html"), "{}", why.message);
+	assert!(taken("a\0b").is_err());
+	// the callers that only choose a name to set a file aside take what cannot be looked at as in
+	// the way, and what is not there as free
+	assert!(in_the_way(&format!("{}/src/file.txt/x.html", site.root)));
+	assert!(in_the_way("a\0b"));
+	assert!(in_the_way(&format!("{}/src/file.txt", site.root)));
+	assert!(!in_the_way(&format!("{}/src/free.html", site.root)));
+	// so a page is refused for what is the matter, and not for "already exists"
+	let mut ui = site.open("");
+	let answer = create(&mut ui, None, Some("file.txt/x.html"), "{}");
+	assert_eq!(code(&answer), "invalid", "{answer:?}");
+	assert!(!message(&answer).contains("already exists"), "{answer:?}");
+}

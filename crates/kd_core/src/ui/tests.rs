@@ -720,6 +720,37 @@ fn a_value_is_written_in_the_front_matter_the_file_has_with_the_style_it_has() {
 }
 
 #[test]
+fn a_value_with_the_proto_key_inside_is_written_to_a_front_matter_and_refused_by_a_module() {
+	// In an object literal the key sets a prototype and makes no property, so a module cannot
+	// have it, where a front matter (YAML), a sidecar and pages.overrides (JSON) can.
+	let site = Site::new("proto_value");
+	site.write("src/a.html", "---\ntitle: A\n---\n<p>a</p>\n");
+	site.write(
+		"src/b.tsx",
+		"export const meta = { title: 'B' };\nexport default () => null;\n",
+	);
+	let mut ui = site.open("");
+	let value = r#"{"a":{"__proto__":{"x":1}},"list":[{"__proto__":2}]}"#;
+
+	let rows = all(&mut ui);
+	let ex = expect(&rows, &page(&rows, "/b.html"));
+	let before = site.read("src/b.tsx");
+	let answer = edit(&mut ui, "/b.html", &ex, &set("v", value));
+	assert_eq!(code(&answer), "notEditable", "{answer:?}");
+	assert_eq!(site.read("src/b.tsx"), before);
+
+	let ex = expect(&rows, &page(&rows, "/a.html"));
+	let answer = edit(&mut ui, "/a.html", &ex, &set("v", value));
+	assert!(ok(&answer), "{answer:?}");
+	let rows = all(&mut ui);
+	let written = cell(&page(&rows, "/a.html"), "v")
+		.get("value")
+		.unwrap()
+		.clone();
+	assert_eq!(written.to_json(), value);
+}
+
+#[test]
 fn a_new_key_goes_into_the_page_file_and_a_virtual_page_has_no_other_place() {
 	let site = Site::new("new_key");
 	site.write("src/a.html", "<p>no front matter</p>\n");

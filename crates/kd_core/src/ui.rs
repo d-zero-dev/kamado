@@ -423,6 +423,10 @@ fn typed_parts(typed: &str) -> F<(Vec<String>, bool)> {
 			name => parts.push(name.to_string()),
 		}
 	}
+	// The names that are left, as they were typed: a segment that `..` folds away makes no name.
+	for name in &parts {
+		check_name("the name", name)?;
+	}
 	Ok((parts, directory))
 }
 
@@ -463,10 +467,89 @@ fn new_page_text(path: &str) -> &'static str {
 }
 
 /// Whether there is anything at `path`: a file, a directory, or a link (also one that leads
-/// nowhere: writing through it would make a file somewhere else). What cannot be looked at
-/// is in the way as much as what can.
-fn taken(path: &str) -> bool {
-	!matches!(fs::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+/// nowhere: writing through it would make a file somewhere else).
+///
+/// A place that cannot be looked at is an error that says so, and not a place that is taken:
+/// what is the matter is the place, not a file that is there. It is `invalid` when the place
+/// cannot be one on this disk (a file is on the way, the name has a NUL or is too long), and `io`
+/// when the disk does not answer (no permission, a failing disk). The callers that only choose a
+/// name to set a file aside use [`in_the_way`], which takes such a place as taken.
+fn taken(path: &str) -> F<bool> {
+	use std::io::ErrorKind;
+	match fs::symlink_metadata(path) {
+		Ok(_) => Ok(true),
+		Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
+		Err(e)
+			if matches!(
+				e.kind(),
+				ErrorKind::NotADirectory | ErrorKind::InvalidInput | ErrorKind::InvalidFilename
+			) =>
+		{
+			fail("invalid", format!("{path} cannot be looked at: {e}"))
+		}
+		Err(e) => Err(io_fail(path, &e)),
+	}
+}
+
+/// Whether a file that is set aside for a while (a move that needs a free name to pass through)
+/// cannot be put at `path`: something is there, or the place cannot be looked at. Why the second:
+/// a name is only being chosen, there is nowhere to report an error to, and another name is the
+/// safe answer (a place that cannot be looked at must not be written to).
+fn in_the_way(path: &str) -> bool {
+	taken(path).unwrap_or(true)
+}
+
+/// Whether a person may not write `c` in the name of a page file or in the URL of a page
+/// (RFC §14.2, "名前の文字"): a control character (C0, DEL, C1: a NUL, a line break and a tab
+/// too), a separator of lines and paragraphs, a backslash, and a character that is not seen. The
+/// last are the Unicode Default_Ignorable_Code_Point characters (the soft hyphen, the zero width
+/// and joining marks that are no letters' business, the bidirectional controls, the deprecated
+/// format controls U+206A to U+206F, the Hangul and Khmer fillers, the interlinear annotation
+/// marks, the musical formatting ones), less the ones that letters, combining marks and emoji
+/// need: U+200C, U+200D, U+034F, the variation selectors and the tag characters. They would make
+/// a name that looks like another, or one that is shown as another.
+///
+/// What looks like a space and is shown (the no-break space, the spaces of U+2000 to U+200A,
+/// U+202F, U+205F, the ideographic space U+3000, the braille blank U+2800) is a name like any
+/// other: Japanese names use U+3000, and refusing the others would not make a name safer.
+/// The list is of what Unicode 16 gives; a character that a later version adds is a name until it
+/// is added here.
+fn unfit_char(c: char) -> bool {
+	c.is_control()
+		|| c == '\\'
+		|| matches!(
+			c,
+			'\u{ad}'
+				| '\u{61c}'
+				| '\u{115f}' | '\u{1160}'
+				| '\u{17b4}' | '\u{17b5}'
+				| '\u{180e}' | '\u{200b}'
+				| '\u{200e}' | '\u{200f}'
+				| '\u{2028}' | '\u{2029}'
+				| '\u{202a}'..='\u{202e}'
+				| '\u{2060}'..='\u{206f}'
+				| '\u{3164}' | '\u{feff}'
+				| '\u{ffa0}' | '\u{fff0}'..='\u{fffb}'
+				| '\u{1bca0}'..='\u{1bca3}'
+				| '\u{1d173}'..='\u{1d17a}'
+		)
+}
+
+/// Refuses a name (`what` says what it is: "the URL", "the path") that has a character a person
+/// may not write in it, and says which, as Rust writes a character in a string (`\n`, `\t`, `\\`,
+/// and `\u{202e}` for the rest). A name that is read, not made, is not checked: a site that has a
+/// page with such a name must still build.
+fn check_name(what: &str, name: &str) -> F<()> {
+	match name.chars().find(|c| unfit_char(*c)) {
+		Some(c) => fail(
+			"invalid",
+			format!(
+				"{what} {name:?} has the character {}, which a name cannot have here (a control character, one that changes how the name is shown or that is not shown, or a backslash)",
+				c.escape_default()
+			),
+		),
+		None => Ok(()),
+	}
 }
 
 /// Whether a relative path leaves the directory it is relative to (a segment that only starts
@@ -1002,17 +1085,16 @@ fn change_overrides_entry(
 
 /// Whether `target` is a file other than `source`. A file system that does not tell cases
 /// apart answers for the new spelling of the name of the file that is being moved, and that
-/// is not another file. A file that cannot be looked at is in the way as much as one that can.
-fn occupied(target: &str, source: &str) -> bool {
-	match fs::symlink_metadata(target) {
-		Ok(_) => {}
-		Err(e) if e.kind() == std::io::ErrorKind::NotFound => return false,
-		Err(_) => return true,
+/// is not another file. A place that cannot be looked at is an error, as for [`taken`] (a file on
+/// the way is not a file that is there).
+fn occupied(target: &str, source: &str) -> F<bool> {
+	if !taken(target)? {
+		return Ok(false);
 	}
-	match (fs::canonicalize(target), fs::canonicalize(source)) {
+	Ok(match (fs::canonicalize(target), fs::canonicalize(source)) {
 		(Ok(a), Ok(b)) => a != b,
 		_ => true,
-	}
+	})
 }
 
 /// Whether there is a file at `path`. A file that cannot be looked at is an error and not a
@@ -3007,7 +3089,8 @@ impl Ui {
 		Ok(file)
 	}
 
-	/// Checks that a URL a person wrote can be the URL of a page (RFC §6).
+	/// Checks that a URL a person wrote can be the URL of a page (RFC §6), and that it is written
+	/// with characters a name can have (RFC §14.2).
 	fn check_url(url: &str) -> F<()> {
 		if !url.starts_with('/') {
 			return fail("invalid", format!("the URL must start with '/': {url:?}"));
@@ -3015,7 +3098,7 @@ impl Ui {
 		if let Some(why) = kd_site::meta::not_a_page_path(url) {
 			return fail("invalid", format!("the URL {url:?} {why}"));
 		}
-		Ok(())
+		check_name("the URL", url)
 	}
 
 	/// Checks that `to` is a place for a page file: inside the input directory, not inside the
@@ -3066,14 +3149,18 @@ impl Ui {
 		url: Option<&str>,
 		meta: &Meta,
 	) -> F<(String, String, PageFile)> {
+		// Every way a file is made comes here: a typed path (checked as it was typed, in
+		// `typed_parts`) and the place a URL names (`path_for_url` checks the URL); this is the
+		// last check, of the file that is made.
+		check_name("the file path", rel)?;
 		let to = format!("{}/{rel}", self.input_dir());
 		let placed = kd_site::page_file(&to, &self.dirs());
 		self.check_place(&to, &placed)?;
-		if taken(&to) {
+		if taken(&to)? {
 			return fail("collision", format!("{to} already exists"));
 		}
 		let sidecar = crate::sidecar_path(&to);
-		if taken(&sidecar) {
+		if taken(&sidecar)? {
 			return fail("collision", format!("{sidecar} already exists"));
 		}
 		let kind = crate::page_kind(&kd_site::path::extname(&to).to_ascii_lowercase()).map_err(
@@ -3414,6 +3501,15 @@ impl Ui {
 	/// extensions of a page that makes it a page by `pages.files` and `pages.ignore` and whose
 	/// place is free (no file there, and no `.json` of the same name).
 	fn path_for_url(&self, url: &str) -> F<String> {
+		// The URL of a page that is read may have any character; a file is not made of such a name,
+		// and a path that is typed gives the file a place that is not the URL of the page.
+		check_name("the URL", url).map_err(|mut why| {
+			if self.by_url.contains_key(url) {
+				why.message
+					.push_str(": no file is made of it, change the URL of the page first");
+			}
+			why
+		})?;
 		let config = &self.loaded.config;
 		let rel = kd_site::url_to_local_path(url, &config.pages.output_extension);
 		let stem = rel
@@ -3427,11 +3523,23 @@ impl Ui {
 			let candidate = format!("{stem}{ext}");
 			let to = format!("{input_dir}/{candidate}");
 			let sidecar = crate::sidecar_path(&to);
-			match self.check_place(&to, &kd_site::page_file(&to, &self.dirs())) {
+			if let Err(why) = self.check_place(&to, &kd_site::page_file(&to, &self.dirs())) {
+				passed.push(why.message);
+				continue;
+			}
+			// A place that cannot be looked at (a file is where a directory has to be) is not a
+			// place that is free: the next kind of page is tried, and the refusal, if none is
+			// free, says what is the matter with it. The kinds share the directory, so they
+			// mostly fail together (the reasons are then all the same one); one that fails alone
+			// is passed over like a file that is there.
+			match taken(&to) {
 				Err(why) => passed.push(why.message),
-				Ok(()) if taken(&to) => passed.push(format!("{to} already exists")),
-				Ok(()) if taken(&sidecar) => passed.push(format!("{sidecar} already exists")),
-				Ok(()) => return Ok(candidate),
+				Ok(true) => passed.push(format!("{to} already exists")),
+				Ok(false) => match taken(&sidecar) {
+					Err(why) => passed.push(why.message),
+					Ok(true) => passed.push(format!("{sidecar} already exists")),
+					Ok(false) => return Ok(candidate),
+				},
 			}
 		}
 		fail(
@@ -3510,18 +3618,12 @@ impl Ui {
 	/// Moves the page `i` to `new_url`, in the way its URL is made (RFC §14.2).
 	fn move_url(&mut self, i: usize, expect: &Value, new_url: &str) -> F<String> {
 		let old_url = self.plan.pages[i].file.url.clone();
-		if !new_url.starts_with('/') {
-			return fail(
-				"invalid",
-				format!("the URL must start with '/': {new_url:?}"),
-			);
-		}
-		if let Some(why) = kd_site::meta::not_a_page_path(new_url) {
-			return fail("invalid", format!("the URL {new_url:?} {why}"));
-		}
+		// first: a URL that the page has already is not written by anybody, so it is not judged
+		// by the characters it has
 		if new_url == old_url {
 			return fail("invalid", "the URL is the same as it was");
 		}
+		Self::check_url(new_url)?;
 		let (input_dir, extension) = {
 			let c = &self.loaded.config;
 			(
@@ -3623,12 +3725,12 @@ impl Ui {
 		let sidecar_from = crate::sidecar_path(&from);
 		let sidecar_to = crate::sidecar_path(to);
 		let has_sidecar = exists(&sidecar_from)?;
-		if occupied(to, &from) {
+		if occupied(to, &from)? {
 			return fail("collision", format!("{to} already exists"));
 		}
 		// A sidecar at the destination is taken even if the page has none: the moved
 		// page would read it as its own.
-		if occupied(&sidecar_to, &sidecar_from) {
+		if occupied(&sidecar_to, &sidecar_from)? {
 			return fail("collision", format!("{sidecar_to} already exists"));
 		}
 		if url_changes && let Some(why) = self.output_collision(i, moved) {

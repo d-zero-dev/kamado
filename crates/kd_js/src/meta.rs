@@ -3,7 +3,10 @@
 //! booleans, `null`, arrays, objects, template literals without
 //! substitutions, a leading `-` or `+` on a number); anything else is an
 //! error with the position, because a value that needs evaluation would
-//! need the page's JavaScript to run before the build can plan.
+//! need the page's JavaScript to run before the build can plan. So is the
+//! key `__proto__`, at any depth: in an object literal it sets the prototype
+//! and makes no property, so the value read here would not be the one the
+//! module has when it runs.
 
 use crate::lexer::{Kind, Lexer, SyntaxError, Token};
 use crate::parser::Parser;
@@ -25,7 +28,8 @@ pub enum Const {
 /// # Errors
 ///
 /// A [`SyntaxError`] if the source does not parse, or if `meta` is not a
-/// literal (naming the first part that is not).
+/// literal (naming the first part that is not): a key `__proto__` of an object at any depth is
+/// one such part, however the key is written.
 ///
 /// # Example
 ///
@@ -315,6 +319,34 @@ impl<'s> Eval<'s> {
 		))
 	}
 
+	/// [`Eval::check_key`] for the key that is a bare identifier, whose text is as it is written.
+	/// An identifier may spell a character as an escape (a backslash, `u` and the code of the
+	/// character), as a string does, and the key is the character: written that way, `__proto__`
+	/// sets the prototype too.
+	///
+	/// Only the check reads the escapes. The key that is kept is still the text as written (a
+	/// key spelled with an escape is read under that spelling, which the module does not do):
+	/// that is an older gap, and it is not what this check is for.
+	fn check_ident_key(&self, raw: &str) -> R<()> {
+		if raw.contains('\\') {
+			return self.check_key(&strings::decode(&format!("\"{raw}\"")));
+		}
+		self.check_key(raw)
+	}
+
+	/// Refuses the key `__proto__` (at the key, which is the current token; `key` is the key as
+	/// it reads, with the escapes of a string decoded). In an object literal `__proto__: v` sets
+	/// the prototype, quoted or not, and makes no property: what is read here would not be what
+	/// the module has when it runs.
+	fn check_key(&self, key: &str) -> R<()> {
+		if key == "__proto__" {
+			return self.fail(
+				"the key `__proto__` is not allowed (in an object literal it sets the prototype and makes no property)",
+			);
+		}
+		Ok(())
+	}
+
 	fn advance(&mut self) -> R<()> {
 		self.prev_end = self.tok.end;
 		self.tok = self.lex.next()?;
@@ -454,11 +486,13 @@ impl<'s> Eval<'s> {
 			let key = match self.tok.kind {
 				Kind::Ident => {
 					let k = self.text().to_owned();
+					self.check_ident_key(&k)?;
 					self.advance()?;
 					k
 				}
 				Kind::Str => {
 					let k = strings::decode(self.text());
+					self.check_key(&k)?;
 					self.advance()?;
 					k
 				}
@@ -507,12 +541,14 @@ impl<'s> Eval<'s> {
 			let key = match self.tok.kind {
 				Kind::Ident => {
 					let k = self.text().to_owned();
+					self.check_ident_key(&k)?;
 					self.advance()?;
 					k
 				}
 				Kind::Str => {
 					self.count_quote();
 					let k = strings::decode(self.text());
+					self.check_key(&k)?;
 					self.advance()?;
 					k
 				}
@@ -647,6 +683,60 @@ mod tests {
 		assert!(error("export const meta = { a: `x${y}` };").contains("cannot contain"));
 		assert!(error("export const meta = [1, , 2];").contains("empty slots"));
 		assert!(error("export const meta = 1n;").contains("BigInt"));
+	}
+
+	#[test]
+	fn a_key_called_proto_is_an_error_at_the_key_however_it_is_written() {
+		// In an object literal `__proto__: v` sets the prototype and makes no property, so the
+		// module would not have the key that this reads, whichever way the key is written.
+		for (src, at) in [
+			("export const meta = { __proto__: 1 };", "1:23:"),
+			("export const meta = { '__proto__': 1 };", "1:23:"),
+			("export const meta = { \"__proto__\": 1 };", "1:23:"),
+			("export const meta = { \"\\u005f_proto__\": 1 };", "1:23:"),
+			// an identifier may spell a character as an escape too, and it is the same key
+			("export const meta = { \\u005f_proto__: 1 };", "1:23:"),
+			("export const meta = { _\\u{5f}proto__: 1 };", "1:23:"),
+			(
+				"export const meta = { a: { \\u005F\\u005Fproto\\u005F\\u005F: 1 } };",
+				"1:28:",
+			),
+			("export const meta = { a: { __proto__: null } };", "1:28:"),
+			(
+				"export const meta = { a: [{ b: { __proto__: 1 } }] };",
+				"1:34:",
+			),
+			(
+				"export const meta = {\n\ttitle: 'x',\n\t__proto__: {},\n};",
+				"3:2:",
+			),
+			// other escapes of a string, and a line continuation inside it
+			("export const meta = { '__pro\\x74o__': 1 };", "1:23:"),
+			("export const meta = { '__pro\\\nto__': 1 };", "1:23:"),
+			(
+				"export const meta = { '\\x5f\\x5fproto\\x5f\\x5f': 1 };",
+				"1:23:",
+			),
+		] {
+			let why = error(src);
+			assert!(why.starts_with(at), "{src}: {why}");
+			assert!(why.contains("`__proto__`"), "{src}: {why}");
+		}
+	}
+
+	#[test]
+	fn a_name_that_only_holds_proto_is_a_key_like_any_other() {
+		assert_eq!(
+			meta(
+				"export const meta = { a: '__proto__', __proto__x: 1, _proto: 2, '__proto__ ': 3 };"
+			),
+			Const::Object(vec![
+				("a".to_owned(), Const::Str("__proto__".to_owned())),
+				("__proto__x".to_owned(), Const::Num(1.0)),
+				("_proto".to_owned(), Const::Num(2.0)),
+				("__proto__ ".to_owned(), Const::Num(3.0)),
+			])
+		);
 	}
 
 	#[test]
