@@ -16,11 +16,23 @@
 //! string, a double-quoted one when it does not, and one line of flow
 //! (`{"a":1}`, `["x","y"]`) for an array or an object. The way the replaced
 //! entry was written is not kept, and neither is a comment at the end of its
-//! line.
+//! line, with one exception: a string that replaces a block scalar (`|`, `>`)
+//! is written as one too, with the same indent, so that a long text that
+//! changes by a word changes by a line in the file, not by the whole value. A
+//! value that a block cannot hold (a control character, a space at the end of
+//! a line, nothing at all) is written as above.
+//!
+//! A plain scalar is also quoted when it is a date or a number to the readers
+//! of YAML 1.1 that front matter meets (gray-matter reads it with js-yaml): the
+//! parser here reads `2026-11-25` and `1_000` as strings, and they must stay
+//! strings for the next reader of the file.
+//!
+//! The fences are found by the function the reader uses, so a document is
+//! edited where it is read.
 
 use std::fmt;
 
-use crate::{Error, Value, parse, resolve_plain, top_level_entries};
+use crate::{Error, Fence, Value, bom_len, parse, resolve_plain, top_level_entries};
 
 /// Why an edit was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,19 +57,6 @@ impl fmt::Display for EditError {
 
 impl std::error::Error for EditError {}
 
-/// Where the front matter sits in a document, as byte offsets.
-struct Fence {
-	/// First byte of the opening `---`.
-	open_start: usize,
-	/// The YAML between the fences: `yaml_start..yaml_end`.
-	yaml_start: usize,
-	yaml_end: usize,
-	/// First byte after the closing `---` line (and its line break).
-	body_start: usize,
-	/// The line break of the opening fence.
-	eol: &'static str,
-}
-
 /// The line break the document uses: the first one it has (`\n` if it has none).
 fn eol_of(doc: &str) -> &'static str {
 	match doc.find('\n') {
@@ -66,46 +65,9 @@ fn eol_of(doc: &str) -> &'static str {
 	}
 }
 
-fn bom_len(doc: &str) -> usize {
-	if doc.starts_with('\u{FEFF}') { 3 } else { 0 }
-}
-
+/// The fences of the front matter, as the reader finds them ([`crate::split_front_matter`]).
 fn find_fence(doc: &str) -> Result<Option<Fence>, EditError> {
-	let open_start = bom_len(doc);
-	let Some(after) = doc[open_start..].strip_prefix("---") else {
-		return Ok(None);
-	};
-	let (eol, rest) = if let Some(r) = after.strip_prefix("\r\n") {
-		("\r\n", r)
-	} else if let Some(r) = after.strip_prefix('\n') {
-		("\n", r)
-	} else if after.is_empty() {
-		("\n", after)
-	} else {
-		// `---x` is not a fence.
-		return Ok(None);
-	};
-	let yaml_start = open_start + 3 + eol.len();
-	let mut offset = 0;
-	for line in rest.split_inclusive('\n') {
-		let t = line.strip_suffix('\n').unwrap_or(line);
-		let t = t.strip_suffix('\r').unwrap_or(t);
-		if t == "---" {
-			return Ok(Some(Fence {
-				open_start,
-				yaml_start,
-				yaml_end: yaml_start + offset,
-				body_start: yaml_start + offset + line.len(),
-				eol,
-			}));
-		}
-		offset += line.len();
-	}
-	Err(EditError::Parse(Error {
-		line: 1,
-		column: 1,
-		message: "front matter is not closed with a '---' line".to_string(),
-	}))
+	crate::find_fence(doc).map_err(EditError::Parse)
 }
 
 fn parse_yaml(yaml: &str) -> Result<Value, EditError> {
@@ -159,6 +121,12 @@ pub fn not_editable_reason(doc: &str) -> Result<Option<String>, EditError> {
 /// document without front matter gets one. Setting a key to the value it
 /// already has returns `doc` as it was.
 ///
+/// A string is written plain when it reads back as the same string, and double-quoted when it
+/// does not, or when other readers of YAML would take it for a date or a number (`2026-11-25`,
+/// `1_000`). A string that replaces a block scalar (`|`, `>`) is written as a block scalar with
+/// the same indent, and only the lines that changed change; one that a block cannot hold is
+/// written as above.
+///
 /// # Errors
 ///
 /// [`EditError::Parse`] if the front matter is not valid, and
@@ -171,6 +139,10 @@ pub fn not_editable_reason(doc: &str) -> Result<Option<String>, EditError> {
 /// let doc = "---\n# page\ntitle: Old\nlayout: x\n---\n<p>hi</p>\n";
 /// let out = set_key(doc, "title", &Value::String("New".into())).unwrap();
 /// assert_eq!(out, "---\n# page\ntitle: New\nlayout: x\n---\n<p>hi</p>\n");
+///
+/// let doc = "---\nnote: |\n  one\n  two\n---\n";
+/// let out = set_key(doc, "note", &Value::String("one\ntwo\nthree\n".into())).unwrap();
+/// assert_eq!(out, "---\nnote: |\n  one\n  two\n  three\n---\n");
 /// ```
 pub fn set_key(doc: &str, key: &str, value: &Value) -> Result<String, EditError> {
 	if key == "<<" {
@@ -208,12 +180,19 @@ pub fn set_key(doc: &str, key: &str, value: &Value) -> Result<String, EditError>
 		.and_then(|f| f.entries.iter().find(|e| e.key == key));
 	if let Some(e) = existing {
 		let at = fence.yaml_start;
+		// a block scalar stays one when the new value can be written as one
+		let (written, swallowed) = block_replacement(
+			&yaml[e.key_end..e.end],
+			&doc[at + e.end..],
+			value,
+			fence.eol,
+		)
+		.unwrap_or_else(|| (format!(": {rendered}{}", fence.eol), 0));
 		return Ok(format!(
-			"{}{}: {rendered}{}{}",
+			"{}{}{written}{}",
 			&doc[..at + e.start],
 			&yaml[e.start..e.key_end],
-			fence.eol,
-			&doc[at + e.end..]
+			&doc[at + e.end + swallowed..]
 		));
 	}
 	Ok(format!(
@@ -227,7 +206,8 @@ pub fn set_key(doc: &str, key: &str, value: &Value) -> Result<String, EditError>
 
 /// Removes the entry `key` from the front matter of `doc`, with every line
 /// of its value. If nothing but blanks is left, the fences go too (and the
-/// line break after the closing one); comments that remain keep them.
+/// line break after the closing one); comments that remain keep them. What follows the
+/// `---` of a closing line (spaces or tabs) is the start of the body, and stays with it.
 ///
 /// # Errors
 ///
@@ -296,6 +276,155 @@ fn render_value(value: &Value) -> String {
 	}
 }
 
+/// A cursor over the bytes of a plain scalar, for the shapes [`reads_as_yaml_1_1_scalar`] tests.
+struct Cursor<'a> {
+	b: &'a [u8],
+	i: usize,
+}
+
+impl Cursor<'_> {
+	/// Takes between `min` and `max` ASCII digits (as many as there are, up to `max`).
+	fn digits(&mut self, min: usize, max: usize) -> bool {
+		let start = self.i;
+		while self.i - start < max && self.b.get(self.i).is_some_and(u8::is_ascii_digit) {
+			self.i += 1;
+		}
+		self.i - start >= min
+	}
+
+	/// Takes the bytes that `ok` accepts, and says how many there were.
+	fn run(&mut self, ok: fn(u8) -> bool) -> usize {
+		let start = self.i;
+		while self.b.get(self.i).is_some_and(|b| ok(*b)) {
+			self.i += 1;
+		}
+		self.i - start
+	}
+
+	/// Takes `c`, if it is next.
+	fn eat(&mut self, c: u8) -> bool {
+		let found = self.b.get(self.i) == Some(&c);
+		self.i += usize::from(found);
+		found
+	}
+
+	/// Takes any spaces and tabs, and says how many there were.
+	fn blanks(&mut self) -> usize {
+		let start = self.i;
+		while matches!(self.b.get(self.i), Some(b' ' | b'\t')) {
+			self.i += 1;
+		}
+		self.i - start
+	}
+
+	fn done(&self) -> bool {
+		self.i == self.b.len()
+	}
+}
+
+/// Whether `s` is a timestamp as YAML 1.1 writes it (js-yaml `!!timestamp`): a date
+/// (`2026-11-25`), or a date and a time (`2026-11-25T10:00:00Z`, `2026-11-25 10:00:00.5 +9`).
+///
+/// This copies, by hand, the two patterns of `lib/js-yaml/type/timestamp.js` of js-yaml 3.14, the
+/// version gray-matter 4.0.3 depends on (https://yaml.org/type/timestamp.html is the spec). If
+/// gray-matter moves to another reader, compare with its pattern again.
+fn is_yaml_1_1_timestamp(s: &str) -> bool {
+	let mut c = Cursor {
+		b: s.as_bytes(),
+		i: 0,
+	};
+	if !(c.digits(4, 4) && c.eat(b'-')) {
+		return false;
+	}
+	let at_month = c.i;
+	if c.digits(2, 2) && c.eat(b'-') && c.digits(2, 2) && c.done() {
+		return true;
+	}
+	c.i = at_month;
+	if !(c.digits(1, 2) && c.eat(b'-') && c.digits(1, 2)) {
+		return false;
+	}
+	if !(c.eat(b'T') || c.eat(b't') || c.blanks() > 0) {
+		return false;
+	}
+	if !(c.digits(1, 2) && c.eat(b':') && c.digits(2, 2) && c.eat(b':') && c.digits(2, 2)) {
+		return false;
+	}
+	if c.eat(b'.') {
+		c.digits(0, usize::MAX);
+	}
+	let before_zone = c.i;
+	c.blanks();
+	let zone = c.eat(b'Z')
+		|| ((c.eat(b'-') || c.eat(b'+')) && c.digits(1, 2) && (!c.eat(b':') || c.digits(2, 2)));
+	if !zone {
+		c.i = before_zone;
+	}
+	c.done()
+}
+
+/// Whether `s` is a number as YAML 1.1 writes it and the core schema does not (js-yaml `!!int`,
+/// `!!float`): digits with `_` in them (`1_000`, `1_0.5`, `0x1_F`), a binary number (`0b101`),
+/// or a base 60 number with `:` (`1:30`, `12:30:45`, `1:30.5`). A sign may come first.
+///
+/// The shapes follow `lib/js-yaml/type/int.js` and `float.js` of js-yaml 3.14, the version
+/// gray-matter 4.0.3 depends on (https://yaml.org/type/int.html and float.html are the spec).
+///
+/// The shapes are a little wider than what js-yaml 3 reads as a number (it wants `[0-5]?[0-9]` after
+/// a `:`, so `1:99` stays a string there): readers differ at the edges, and a string that is quoted
+/// when it did not have to be reads the same everywhere.
+fn is_yaml_1_1_number(s: &str) -> bool {
+	let r = s.strip_prefix(['-', '+']).unwrap_or(s);
+	let underscore = r.contains('_');
+	let only = |digits: &str, ok: fn(u8) -> bool| !digits.is_empty() && digits.bytes().all(ok);
+	if let Some(digits) = r.strip_prefix("0b").or_else(|| r.strip_prefix("0B")) {
+		return only(digits, |c| matches!(c, b'0' | b'1' | b'_'));
+	}
+	// without a `_` the core schema reads `0x1F` as a number already
+	if let Some(digits) = r.strip_prefix("0x").or_else(|| r.strip_prefix("0X")) {
+		return underscore && only(digits, |c| c.is_ascii_hexdigit() || c == b'_');
+	}
+	let mut c = Cursor {
+		b: r.as_bytes(),
+		i: 0,
+	};
+	let whole = c.run(|d| d.is_ascii_digit() || d == b'_');
+	let digit_first = r.as_bytes().first().is_some_and(u8::is_ascii_digit);
+	if whole > 0 && !digit_first {
+		return false;
+	}
+	// `:` and one or two digits, any number of times: base 60
+	let mut base_60 = false;
+	while digit_first && c.eat(b':') {
+		if !c.digits(1, 2) {
+			return false;
+		}
+		base_60 = true;
+	}
+	// the fraction (a number may start with it), and the exponent
+	if c.eat(b'.') {
+		c.run(|d| d.is_ascii_digit() || d == b'_');
+	} else if !digit_first {
+		return false;
+	}
+	if c.eat(b'e') || c.eat(b'E') {
+		let _ = c.eat(b'-') || c.eat(b'+');
+		if !c.digits(1, usize::MAX) {
+			return false;
+		}
+	}
+	c.done() && (underscore || base_60)
+}
+
+/// Whether other readers of YAML read the plain scalar `s` as a date or a number, although the
+/// core schema (which `resolve_plain` follows) reads it as a string. gray-matter, whose rules
+/// RFC section 4 names, reads front matter with js-yaml 3, which resolves the YAML 1.1 types:
+/// `2026-11-25` is a `Date` and `1_000` or `1:30` is a number. It is a string in kamado, so a
+/// string written plain would change type for the next reader of the same front matter.
+fn reads_as_yaml_1_1_scalar(s: &str) -> bool {
+	is_yaml_1_1_timestamp(s) || is_yaml_1_1_number(s)
+}
+
 fn render_string(s: &str) -> String {
 	let indicator = s
 		.chars()
@@ -303,6 +432,7 @@ fn render_string(s: &str) -> String {
 		.is_some_and(|c| "-?:,[]{}#&*!|>'\"%@`".contains(c));
 	let plain_ok = !s.is_empty()
 		&& matches!(resolve_plain(s), Value::String(_))
+		&& !reads_as_yaml_1_1_scalar(s)
 		&& !indicator
 		&& s == s.trim()
 		&& !s.contains(": ")
@@ -314,6 +444,316 @@ fn render_string(s: &str) -> String {
 	} else {
 		Value::String(s.to_string()).to_json()
 	}
+}
+
+/// How the value of an entry was written, when it is a block scalar (`|` or `>`).
+struct BlockStyle {
+	/// `>` (folded), not `|` (literal).
+	folded: bool,
+	/// The columns every line of the value is indented by.
+	indent: usize,
+	/// The digit of the header that gives the indent (`|2`), 1 to 9.
+	explicit: Option<u8>,
+	/// The lines as written, without the indent. The blank lines at the end are not here.
+	lines: Vec<String>,
+}
+
+/// Reads how a block scalar was written. `entry` is the text of the entry after its key: the
+/// `:`, the header line and the lines of the value. `None` if the value is not a block scalar,
+/// or one that is not written as the parser reads it.
+fn read_block_style(entry: &str) -> Option<BlockStyle> {
+	let rest = entry
+		.trim_start_matches([' ', '\t'])
+		.strip_prefix(':')?
+		.trim_start_matches([' ', '\t']);
+	let folded = match rest.chars().next()? {
+		'|' => false,
+		'>' => true,
+		_ => return None,
+	};
+	let after = &rest[1..];
+	let header_end = after.find('\n').unwrap_or(after.len());
+	let header = after[..header_end].trim_end_matches('\r');
+	let indicators = header
+		.bytes()
+		.take(2)
+		.take_while(|b| matches!(b, b'-' | b'+' | b'1'..=b'9'))
+		.count();
+	let explicit = header[..indicators]
+		.bytes()
+		.find(u8::is_ascii_digit)
+		.map(|d| d - b'0');
+	// only blanks, or a comment after the blanks, may follow the indicators
+	let tail = &header[indicators..];
+	if !(tail.is_empty()
+		|| tail.starts_with([' ', '\t']) && {
+			let t = tail.trim_start_matches([' ', '\t']);
+			t.is_empty() || t.starts_with('#')
+		}) {
+		return None;
+	}
+	let body = after[header_end..].strip_prefix('\n').unwrap_or("");
+	let raw: Vec<&str> = body
+		.split_terminator('\n')
+		.map(|l| l.strip_suffix('\r').unwrap_or(l))
+		.collect();
+	let spaces = |l: &str| l.len() - l.trim_start_matches(' ').len();
+	let indent = match explicit {
+		// the parent is the top-level mapping, at column 0
+		Some(n) => usize::from(n),
+		None => spaces(raw.iter().find(|l| spaces(l) < l.len())?),
+	};
+	let mut lines = Vec::with_capacity(raw.len());
+	for l in raw {
+		if spaces(l) == l.len() {
+			lines.push(String::new());
+		} else if spaces(l) >= indent {
+			lines.push(l[indent..].to_string());
+		} else {
+			return None;
+		}
+	}
+	while lines.last().is_some_and(String::is_empty) {
+		lines.pop();
+	}
+	// a block with no line has no indent to keep
+	if lines.is_empty() {
+		return None;
+	}
+	Some(BlockStyle {
+		folded,
+		indent,
+		explicit,
+		lines,
+	})
+}
+
+/// The text of an entry after its key, with `value` written as the block scalar the entry had,
+/// and how many bytes of `after` (the text that follows the entry) it replaces; or `None` if the
+/// entry was not a block scalar, `value` is not a string, `value` cannot be written as one, or
+/// what is written would not read back as `value`.
+///
+/// The blank lines that follow an entry are not part of it, but when the block keeps the line
+/// breaks at its end (`|+`) they are the value's own: they are replaced with it, or they would be
+/// counted twice.
+fn block_replacement(
+	entry: &str,
+	after: &str,
+	value: &Value,
+	eol: &str,
+) -> Option<(String, usize)> {
+	let Value::String(s) = value else {
+		return None;
+	};
+	let style = read_block_style(entry)?;
+	let text = render_block(s, &style, eol)?;
+	// the lines after the entry that the parser reads as blank (spaces only), and those of them
+	// that are empty (a line with spaces is not replaced: they stay, and the check below sees them)
+	let len_of = |blank: fn(&str) -> bool| {
+		after
+			.split_inclusive('\n')
+			.take_while(|l| blank(l.trim_end_matches(['\r', '\n'])))
+			.map(str::len)
+			.sum::<usize>()
+	};
+	let blank = len_of(|l| l.trim_start_matches(' ').is_empty());
+	let empty = len_of(str::is_empty);
+	let keep = text.lines().next().is_some_and(|h| h.ends_with('+'));
+	let (swallowed, left) = if keep {
+		(empty, &after[empty..blank])
+	} else {
+		(0, &after[..blank])
+	};
+	// A line of spaces that is longer than the indent is part of the value to readers that do not
+	// take it for blank (js-yaml), and the line breaks that `+` keeps at the end of the last entry
+	// are not counted by readers that end the front matter at the first line break before the
+	// closing `---` (gray-matter). Neither shows when this parser reads it back, so they are
+	// not written as a block.
+	if left
+		.lines()
+		.any(|l| l.trim_end_matches('\r').len() > style.indent)
+		|| (keep && after[blank..].starts_with("---"))
+	{
+		return None;
+	}
+	// read it back with what follows it, as it will be in the document
+	match parse(&format!("k{text}{left}n: 1\n")) {
+		Ok(Value::Object(pairs)) if matches!(pairs.as_slice(), [(_, Value::String(r)), (_, Value::Number(_))] if r == s) => {
+			Some((text, swallowed))
+		}
+		_ => None,
+	}
+}
+
+/// `s` as a block scalar of the style `style`: the header and the lines, each with its line
+/// break `eol`. `None` for what a block cannot hold as it is: nothing but newlines, a control
+/// character other than `\n` (a tab included), a space at the end of a line, and a first line
+/// that starts with a space where the header does not give the indent.
+fn render_block(s: &str, style: &BlockStyle, eol: &str) -> Option<String> {
+	let body = s.trim_end_matches('\n');
+	let newlines = s.len() - body.len();
+	if body.is_empty()
+		|| body
+			.chars()
+			.any(|c| (c.is_control() && c != '\n') || matches!(c, '\u{2028}' | '\u{2029}'))
+		|| body.split('\n').any(|l| l.ends_with(' '))
+	{
+		return None;
+	}
+	let lines = if style.folded {
+		fold_lines(body, style)?
+	} else {
+		body.split('\n').map(str::to_string).collect()
+	};
+	if style.explicit.is_none() && lines.iter().find(|l| !l.is_empty())?.starts_with(' ') {
+		return None;
+	}
+	let mut out = String::from(if style.folded { ": >" } else { ": |" });
+	if let Some(digit) = style.explicit {
+		out.push(char::from(b'0' + digit));
+	}
+	out.push_str(match newlines {
+		0 => "-",
+		1 => "",
+		_ => "+",
+	});
+	out.push_str(eol);
+	let pad = " ".repeat(style.indent);
+	for l in &lines {
+		if !l.is_empty() {
+			out.push_str(&pad);
+			out.push_str(l);
+		}
+		out.push_str(eol);
+	}
+	// every newline after the first at the end is a blank line the value keeps
+	for _ in 1..newlines {
+		out.push_str(eol);
+	}
+	Some(out)
+}
+
+/// The lines of a folded block that reads as `body` (which has no newline at its end). A
+/// newline of the value is a blank line, and the text between newlines is folded at the
+/// single spaces. Each paragraph (the text between newlines, and the lines that the old block
+/// had between blank lines) keeps the lines of the old block that did not change, from its start
+/// and from its end, and what changed is folded again at the width of the longest old line
+/// (80 if the old block was one line). `None` if a line starts with a space: it would not fold.
+fn fold_lines(body: &str, style: &BlockStyle) -> Option<Vec<String>> {
+	let mut paragraphs: Vec<(usize, &str)> = Vec::new();
+	let mut gap = 0;
+	for (i, text) in body.split('\n').enumerate() {
+		gap += usize::from(i > 0);
+		if text.is_empty() {
+			continue;
+		}
+		if text.starts_with(' ') {
+			return None;
+		}
+		paragraphs.push((gap, text));
+		gap = 0;
+	}
+	let mut old: Vec<(usize, Vec<&str>)> = Vec::new();
+	let (mut gap, mut inside) = (0, false);
+	for l in &style.lines {
+		if l.is_empty() {
+			gap += 1;
+			inside = false;
+		} else if inside && let Some((_, lines)) = old.last_mut() {
+			lines.push(l);
+		} else {
+			old.push((gap, vec![l]));
+			(gap, inside) = (0, true);
+		}
+	}
+	let text_lines = style.lines.iter().filter(|l| !l.is_empty()).count();
+	let width = if text_lines < 2 {
+		80
+	} else {
+		style.lines.iter().map(|l| l.chars().count()).max()?
+	};
+	let mut out = Vec::new();
+	for (i, (gap, text)) in paragraphs.iter().enumerate() {
+		out.extend(std::iter::repeat_n(String::new(), *gap));
+		match old.get(i) {
+			Some((before, lines)) if before == gap => out.extend(refold(lines, text, width)),
+			_ => out.extend(fold_at(text, width)),
+		}
+	}
+	Some(out)
+}
+
+/// The lines for `text`, where a paragraph had the lines `old`: the lines at the start and at
+/// the end that `text` still has stay as they were, and what is between them is folded again.
+fn refold(old: &[&str], text: &str, width: usize) -> Vec<String> {
+	let (mut head, mut at) = (0, 0);
+	while let Some(line) = old.get(head) {
+		let Some(after) = text[at..].strip_prefix(line) else {
+			break;
+		};
+		if after.is_empty() {
+			(head, at) = (head + 1, text.len());
+		} else if after.starts_with(' ') && !after[1..].starts_with(' ') {
+			(head, at) = (head + 1, at + line.len() + 1);
+		} else {
+			break;
+		}
+	}
+	let rest = &text[at..];
+	let (mut tail, mut end) = (0, rest.len());
+	while tail < old.len() - head {
+		let line = old[old.len() - 1 - tail];
+		let Some(before) = rest[..end].strip_suffix(line) else {
+			break;
+		};
+		if before.is_empty() {
+			(tail, end) = (tail + 1, 0);
+			break;
+		}
+		if before.ends_with(' ') && !before[..before.len() - 1].ends_with(' ') {
+			(tail, end) = (tail + 1, before.len() - 1);
+		} else {
+			break;
+		}
+	}
+	let mut lines: Vec<String> = old[..head].iter().map(|l| (*l).to_string()).collect();
+	if end > 0 {
+		lines.extend(fold_at(&rest[..end], width));
+	}
+	lines.extend(old[old.len() - tail..].iter().map(|l| (*l).to_string()));
+	lines
+}
+
+/// `text` in lines of at most `width` characters, broken at single spaces (a line is longer
+/// when a word is, and a run of spaces is not broken).
+fn fold_at(text: &str, width: usize) -> Vec<String> {
+	let b = text.as_bytes();
+	let mut lines: Vec<String> = Vec::new();
+	let mut start = 0;
+	let mut line = String::new();
+	for i in 0..=b.len() {
+		let breaks = i == b.len()
+			|| (b[i] == b' '
+				&& i > 0 && b[i - 1] != b' '
+				&& b.get(i + 1).is_some_and(|n| *n != b' '));
+		if !breaks {
+			continue;
+		}
+		let word = &text[start..i];
+		if line.is_empty() {
+			line.push_str(word);
+		} else if line.chars().count() + 1 + word.chars().count() <= width {
+			line.push(' ');
+			line.push_str(word);
+		} else {
+			lines.push(std::mem::replace(&mut line, word.to_string()));
+		}
+		start = i + 1;
+	}
+	if !line.is_empty() {
+		lines.push(line);
+	}
+	lines
 }
 
 #[cfg(test)]
@@ -338,7 +778,9 @@ mod tests {
 		let doc = "---\nbody: |\n  one\n  two\nlist:\n  - 1\n  - 2\nlast: z\n---\n";
 		assert_eq!(
 			set_key(doc, "body", &s("x")).unwrap(),
-			"---\nbody: x\nlist:\n  - 1\n  - 2\nlast: z\n---\n"
+			// Behavior change: a literal block stays a literal block when its value is replaced by a string
+			// "---\nbody: x\nlist:\n  - 1\n  - 2\nlast: z\n---\n" // previous
+			"---\nbody: |-\n  x\nlist:\n  - 1\n  - 2\nlast: z\n---\n"
 		);
 		assert_eq!(
 			set_key(doc, "list", &Value::Array(vec![Value::Number(3.0)])).unwrap(),
@@ -468,7 +910,9 @@ mod tests {
 		assert_eq!(delete_key(doc, "body").unwrap(), "---\nnext: 1\n---\n");
 		assert_eq!(
 			set_key(doc, "body", &s("x")).unwrap(),
-			"---\nbody: x\nnext: 1\n---\n"
+			// Behavior change: a literal block stays a literal block when its value is replaced by a string
+			// "---\nbody: x\nnext: 1\n---\n" // previous
+			"---\nbody: |-\n  x\nnext: 1\n---\n"
 		);
 	}
 
@@ -594,6 +1038,622 @@ mod tests {
 			let out = set_key(&doc, "title", &v).unwrap();
 			let (meta, _) = crate::split_front_matter(&out).unwrap();
 			assert_eq!(meta.unwrap().get("title"), Some(&v), "{out:?}");
+		}
+	}
+
+	#[test]
+	fn a_fence_with_spaces_at_the_end_of_its_line_is_edited_as_a_fence() {
+		// An entry is replaced in the front matter the file has; no second front matter is added
+		// above it, and the fence lines keep their bytes.
+		let doc = "--- \ntitle: old\n---\n<p>body</p>\n";
+		assert_eq!(
+			set_key(doc, "title", &s("new")).unwrap(),
+			"--- \ntitle: new\n---\n<p>body</p>\n"
+		);
+		let doc = "---\ntitle: old\n--- \n<p>body</p>\n";
+		assert_eq!(
+			set_key(doc, "title", &s("new")).unwrap(),
+			"---\ntitle: new\n--- \n<p>body</p>\n"
+		);
+		assert_eq!(
+			set_key(doc, "layout", &s("x")).unwrap(),
+			"---\ntitle: old\nlayout: x\n--- \n<p>body</p>\n"
+		);
+		let doc = "---\t\ntitle: old\n---\t\n<p>body</p>\n";
+		assert_eq!(
+			set_key(doc, "title", &s("new")).unwrap(),
+			"---\t\ntitle: new\n---\t\n<p>body</p>\n"
+		);
+		assert_eq!(
+			set_key("---\r\ntitle: A\r\n--- \r\nbody", "layout", &s("x")).unwrap(),
+			"---\r\ntitle: A\r\nlayout: x\r\n--- \r\nbody"
+		);
+		// the value the file has: nothing changes, whichever fence it has
+		for doc in [
+			"--- \ntitle: T\n---\n<p>body</p>\n",
+			"--- \ntitle: T\n--- \n<p>body</p>\n",
+			"---\ntitle: T\n--- \n<p>body</p>\n",
+			"---\ntitle: T\n---\t\n<p>body</p>\n",
+		] {
+			assert_eq!(set_key(doc, "title", &s("T")).unwrap(), doc);
+		}
+	}
+
+	#[test]
+	fn what_follows_the_closing_fence_stays_when_the_fences_go() {
+		// What the closing line holds after `---` is the start of the body (as it is read).
+		assert_eq!(
+			delete_key("---\na: 1\n--- \nbody\n", "a").unwrap(),
+			" \nbody\n"
+		);
+		assert_eq!(
+			delete_key("--- \na: 1\n---\nbody\n", "a").unwrap(),
+			"body\n"
+		);
+		assert_eq!(
+			delete_key("---\na: 1\n---\t\r\nbody", "a").unwrap(),
+			"\t\r\nbody"
+		);
+		assert_eq!(
+			delete_key("--- \n# keep\na: 1\n--- \nbody", "a").unwrap(),
+			"--- \n# keep\n--- \nbody"
+		);
+	}
+
+	#[test]
+	fn what_is_not_a_fence_is_not_edited_as_one() {
+		// `---yaml` and `--- x` are not an opening fence: the document has no front matter, so
+		// one is added (the text is body, as it is read).
+		assert_eq!(
+			set_key("---yaml\ntitle: T\n---\nbody", "a", &s("x")).unwrap(),
+			"---\na: x\n---\n---yaml\ntitle: T\n---\nbody"
+		);
+		// no closing line: the file is refused, as it is when it is read
+		for doc in [
+			"---\ntitle: T\n----\nbody",
+			"---\ntitle: T\n---foo\nbody",
+			"---\ntitle: T\nbody",
+			"--- ",
+			"---\t",
+		] {
+			let not_closed = "front matter is not closed with a '---' line";
+			assert!(
+				matches!(set_key(doc, "a", &s("x")).unwrap_err(), EditError::Parse(e) if e.message == not_closed),
+				"{doc:?}"
+			);
+			assert!(
+				matches!(delete_key(doc, "title").unwrap_err(), EditError::Parse(e) if e.message == not_closed),
+				"{doc:?}"
+			);
+		}
+	}
+
+	#[test]
+	fn a_fence_with_spaces_is_found_after_a_byte_order_mark_and_at_the_end_of_the_file() {
+		assert_eq!(
+			set_key("\u{FEFF}--- \ntitle: A\n---\nb", "title", &s("B")).unwrap(),
+			"\u{FEFF}--- \ntitle: B\n---\nb"
+		);
+		assert_eq!(
+			delete_key("\u{FEFF}--- \na: 1\n---\nb", "a").unwrap(),
+			"\u{FEFF}b"
+		);
+		// the closing line is the last line, and has no line break
+		assert_eq!(
+			set_key("---\na: 1\n--- ", "a", &Value::Number(2.0)).unwrap(),
+			"---\na: 2\n--- "
+		);
+		assert_eq!(
+			set_key("---\na: 1\n---\t", "b", &s("x")).unwrap(),
+			"---\na: 1\nb: x\n---\t"
+		);
+	}
+
+	#[test]
+	fn a_string_that_other_yaml_readers_take_for_a_date_or_a_number_is_quoted() {
+		// gray-matter (js-yaml 3) reads each of these, written plain, as a Date or a number; js-yaml
+		// 4 does for some. kamado reads them as strings, and the file has to hold what they read.
+		for (v, written) in [
+			("2026-11-25", "\"2026-11-25\""),
+			("2026-11-25T10:00:00Z", "\"2026-11-25T10:00:00Z\""),
+			(
+				"2026-11-25t10:00:00.5+09:00",
+				"\"2026-11-25t10:00:00.5+09:00\"",
+			),
+			("2026-11-25 10:00:00", "\"2026-11-25 10:00:00\""),
+			("2026-1-5 1:02:03 -5", "\"2026-1-5 1:02:03 -5\""),
+			("1_000", "\"1_000\""),
+			("07_55", "\"07_55\""),
+			("-1_0", "\"-1_0\""),
+			("+1_000_000", "\"+1_000_000\""),
+			("0b101", "\"0b101\""),
+			("-0b1_0", "\"-0b1_0\""),
+			("0x1_F", "\"0x1_F\""),
+			("1_0.5", "\"1_0.5\""),
+			(".5_0", "\".5_0\""),
+			("1:30", "\"1:30\""),
+			("12:30:45", "\"12:30:45\""),
+			("190:20:30", "\"190:20:30\""),
+			("-1:30", "\"-1:30\""),
+			("1:30.5", "\"1:30.5\""),
+			// wider than what js-yaml 3 reads as a number (`[0-5]?[0-9]` after a `:`); quoting
+			// more than needed reads the same everywhere
+			("1:99", "\"1:99\""),
+			("0:30", "\"0:30\""),
+		] {
+			let out = set_key("---\nt: x\n---\n", "t", &s(v)).unwrap();
+			assert_eq!(out, format!("---\nt: {written}\n---\n"), "{v}");
+			let (meta, _) = crate::split_front_matter(&out).unwrap();
+			assert_eq!(meta.unwrap().get("t"), Some(&s(v)), "{out:?}");
+		}
+	}
+
+	#[test]
+	fn a_string_that_no_reader_takes_for_a_date_or_a_number_gets_no_extra_quotes() {
+		for (v, written) in [
+			("yes", "yes"),
+			("no", "no"),
+			("on", "on"),
+			("2026-11", "2026-11"),
+			("2026-11-25-1", "2026-11-25-1"),
+			("10:30 AM", "10:30 AM"),
+			("12:30:45pm", "12:30:45pm"),
+			("v1_000", "v1_000"),
+			("a_b", "a_b"),
+			("1-2-3", "1-2-3"),
+			("0b", "0b"),
+			("0b2", "0b2"),
+			("1:a", "1:a"),
+			("Mar 3", "Mar 3"),
+			// the core schema reads these as numbers, so they are quoted anyway
+			("0777", "\"0777\""),
+			("0755", "\"0755\""),
+			("0o17", "\"0o17\""),
+			("0x1F", "\"0x1F\""),
+			("1e3", "\"1e3\""),
+			("2026", "\"2026\""),
+			("1.5", "\"1.5\""),
+		] {
+			let out = set_key("---\nt: x\n---\n", "t", &s(v)).unwrap();
+			assert_eq!(out, format!("---\nt: {written}\n---\n"), "{v}");
+		}
+	}
+
+	#[test]
+	fn a_literal_block_stays_a_literal_block() {
+		let doc = "---\ntitle: T\nnote: |\n  line one\n  line two\nlayout: sub\n---\n";
+		assert_eq!(
+			set_key(doc, "note", &s("line one\nline two\nline three\n")).unwrap(),
+			"---\ntitle: T\nnote: |\n  line one\n  line two\n  line three\nlayout: sub\n---\n"
+		);
+		assert_eq!(
+			set_key(doc, "note", &s("line one\nline 2\n")).unwrap(),
+			"---\ntitle: T\nnote: |\n  line one\n  line 2\nlayout: sub\n---\n"
+		);
+		// a blank line and an indented line are lines of the value
+		assert_eq!(
+			set_key(doc, "note", &s("one\n\n  indented\ntwo\n")).unwrap(),
+			"---\ntitle: T\nnote: |\n  one\n\n    indented\n  two\nlayout: sub\n---\n"
+		);
+	}
+
+	#[test]
+	fn the_chomping_indicator_follows_the_newlines_at_the_end_of_the_new_value() {
+		let doc = "---\nnote: |\n  a\nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "note", &s("a\nb")).unwrap(),
+			"---\nnote: |-\n  a\n  b\nnext: 1\n---\n"
+		);
+		assert_eq!(
+			set_key(doc, "note", &s("a\nb\n")).unwrap(),
+			"---\nnote: |\n  a\n  b\nnext: 1\n---\n"
+		);
+		assert_eq!(
+			set_key(doc, "note", &s("a\nb\n\n\n")).unwrap(),
+			"---\nnote: |+\n  a\n  b\n\n\nnext: 1\n---\n"
+		);
+		// whichever the old one was
+		for old in ["|-", "|+", "|"] {
+			let doc = format!("---\nnote: {old}\n  a\nnext: 1\n---\n");
+			for (new, written) in [
+				("a\nb", "---\nnote: |-\n  a\n  b\nnext: 1\n---\n"),
+				("a\nb\n", "---\nnote: |\n  a\n  b\nnext: 1\n---\n"),
+				("a\nb\n\n", "---\nnote: |+\n  a\n  b\n\nnext: 1\n---\n"),
+			] {
+				assert_eq!(
+					set_key(&doc, "note", &s(new)).unwrap(),
+					written,
+					"{old} {new:?}"
+				);
+			}
+		}
+		// the same for a folded block
+		for old in [">-", ">+", ">"] {
+			let doc = format!("---\nd: {old}\n  a b\nnext: 1\n---\n");
+			for (new, written) in [
+				("p q", "---\nd: >-\n  p q\nnext: 1\n---\n"),
+				("p q\n", "---\nd: >\n  p q\nnext: 1\n---\n"),
+				("p q\n\n\n", "---\nd: >+\n  p q\n\n\nnext: 1\n---\n"),
+			] {
+				assert_eq!(
+					set_key(&doc, "d", &s(new)).unwrap(),
+					written,
+					"{old} {new:?}"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn the_indent_of_a_block_is_kept() {
+		let doc = "---\nnote: |\n    four\n    spaces\nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "note", &s("four\nspaces\nmore\n")).unwrap(),
+			"---\nnote: |\n    four\n    spaces\n    more\nnext: 1\n---\n"
+		);
+		// an indicator the old one had stays
+		let doc = "---\nnote: |2\n    two more\nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "note", &s("  two more\nx\n")).unwrap(),
+			"---\nnote: |2\n    two more\n  x\nnext: 1\n---\n"
+		);
+		// it is what lets the first line start with a space; without it the value is not a block
+		let doc = "---\nnote: |\n  two\nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "note", &s("  two more\n")).unwrap(),
+			"---\nnote: \"  two more\\n\"\nnext: 1\n---\n"
+		);
+		// a folded block: the indicator stays, and so does a one-column indent
+		let doc = "---\nd: >2\n    a b\nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "d", &s("c d\n")).unwrap(),
+			"---\nd: >2\n  c d\nnext: 1\n---\n"
+		);
+		let doc = "---\nd: >1\n a b\nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "d", &s("c d\n")).unwrap(),
+			"---\nd: >1\n c d\nnext: 1\n---\n"
+		);
+		assert_eq!(
+			set_key(doc, "d", &s("  c\n")).unwrap(),
+			"---\nd: \"  c\\n\"\nnext: 1\n---\n"
+		);
+	}
+
+	#[test]
+	fn a_folded_block_changes_only_the_lines_that_changed() {
+		let doc =
+			"---\ntitle: T\ndescription: >-\n  long text one\n  continues here\nlayout: sub\n---\n";
+		// words added at the end: the first line stays, the rest is folded again at the width of
+		// the longest line the block had (14)
+		assert_eq!(
+			set_key(
+				doc,
+				"description",
+				&s("long text one continues here (edited)")
+			)
+			.unwrap(),
+			"---\ntitle: T\ndescription: >-\n  long text one\n  continues here\n  (edited)\nlayout: sub\n---\n"
+		);
+		// a word of the first line changed: the last line stays
+		assert_eq!(
+			set_key(doc, "description", &s("long text ONE continues here")).unwrap(),
+			"---\ntitle: T\ndescription: >-\n  long text ONE\n  continues here\nlayout: sub\n---\n"
+		);
+		// words taken from the end
+		assert_eq!(
+			set_key(doc, "description", &s("long text one continues")).unwrap(),
+			"---\ntitle: T\ndescription: >-\n  long text one\n  continues\nlayout: sub\n---\n"
+		);
+		assert_eq!(
+			set_key(doc, "description", &s("long text one")).unwrap(),
+			"---\ntitle: T\ndescription: >-\n  long text one\nlayout: sub\n---\n"
+		);
+		// the first and the last line stay, the middle is new
+		let doc = "---\nd: >-\n  first line\n  old middle\n  last line\n---\n";
+		assert_eq!(
+			set_key(doc, "d", &s("first line new middle words last line")).unwrap(),
+			"---\nd: >-\n  first line\n  new middle\n  words\n  last line\n---\n"
+		);
+	}
+
+	#[test]
+	fn a_folded_block_keeps_its_paragraphs() {
+		let doc = "---\nd: >\n  one two\n  three\n\n  four five\nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "d", &s("one two three\nfour five six\n")).unwrap(),
+			"---\nd: >\n  one two\n  three\n\n  four five\n  six\nnext: 1\n---\n"
+		);
+		// a paragraph more: the ones that are as they were stay
+		let out = set_key(doc, "d", &s("one two three\nfour five\nnew\n")).unwrap();
+		assert_eq!(
+			out,
+			"---\nd: >\n  one two\n  three\n\n  four five\n\n  new\nnext: 1\n---\n"
+		);
+		// two newlines are two blank lines
+		let out = set_key(doc, "d", &s("one two three\n\nfour five\n")).unwrap();
+		let (meta, _) = crate::split_front_matter(&out).unwrap();
+		assert_eq!(
+			meta.unwrap().get("d"),
+			Some(&s("one two three\n\nfour five\n"))
+		);
+		assert!(
+			out.starts_with("---\nd: >\n  one two\n  three\n\n\n  four five\n"),
+			"{out:?}"
+		);
+	}
+
+	#[test]
+	fn a_folded_block_that_had_one_line_is_folded_at_eighty() {
+		// ten words of ten characters: seven fit in 80 (76), eight do not (87)
+		let doc = "---\nd: >-\n  short\nnext: 1\n---\n";
+		let words = "abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij";
+		assert_eq!(
+			set_key(doc, "d", &s(words)).unwrap(),
+			"---\nd: >-\n  abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij\n  abcdefghij abcdefghij abcdefghij\nnext: 1\n---\n"
+		);
+	}
+
+	#[test]
+	fn a_folded_block_is_folded_at_a_width_counted_in_characters() {
+		// the longest old line is 7 characters (19 bytes); four of the new words fit in 7
+		// characters ("あ い う え"), and would not in 7 bytes
+		let doc = "---\nd: >-\n  日本語 日本語\n  日本語 日本語\nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "d", &s("あ い う え お か き")).unwrap(),
+			"---\nd: >-\n  あ い う え\n  お か き\nnext: 1\n---\n"
+		);
+	}
+
+	#[test]
+	fn a_folded_block_is_not_broken_inside_a_word_or_a_run_of_spaces() {
+		// a word longer than the width has a line to itself
+		let doc = "---\nd: >-\n  ab cd\n  ef gh\nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "d", &s("xxxxxxxxxxxxxxxxxxxx yz")).unwrap(),
+			"---\nd: >-\n  xxxxxxxxxxxxxxxxxxxx\n  yz\nnext: 1\n---\n"
+		);
+		// two spaces are not a place to break: they stay inside the line
+		let doc = "---\nd: >-\n  alpha beta\n  gamma  delta\nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "d", &s("alpha beta gamma  delta epsilon")).unwrap(),
+			"---\nd: >-\n  alpha beta\n  gamma  delta\n  epsilon\nnext: 1\n---\n"
+		);
+		assert_eq!(
+			set_key(doc, "d", &s("alpha beta gamma  delta  epsilon zeta")).unwrap(),
+			"---\nd: >-\n  alpha beta\n  gamma  delta  epsilon\n  zeta\nnext: 1\n---\n"
+		);
+	}
+
+	#[test]
+	fn a_paragraph_added_in_the_middle_of_a_folded_block_folds_the_ones_after_it_again() {
+		let doc = "---\nd: >\n  one\n\n  two\nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "d", &s("one\nnew\ntwo\n")).unwrap(),
+			"---\nd: >\n  one\n\n  new\n\n  two\nnext: 1\n---\n"
+		);
+	}
+
+	#[test]
+	fn fold_at_breaks_at_single_spaces_up_to_the_width() {
+		assert_eq!(fold_at("aaa  bbb ccc", 5), ["aaa  bbb", "ccc"]);
+		assert_eq!(fold_at("a b c d", 3), ["a b", "c d"]);
+		assert_eq!(fold_at("a b c d", 1), ["a", "b", "c", "d"]);
+		assert_eq!(fold_at("word", 2), ["word"]);
+	}
+
+	#[test]
+	fn a_value_that_a_block_cannot_hold_is_written_plain_or_quoted() {
+		let literal = "---\nnote: |\n  a\n  b\nnext: 1\n---\n";
+		let folded = "---\nnote: >-\n  a\n  b\nnext: 1\n---\n";
+		for doc in [literal, folded] {
+			for (v, written) in [
+				("", "\"\""),
+				("\n", "\"\\n\""),
+				("a\tb\n", "\"a\\tb\\n\""),
+				("a\u{7}b", "\"a\\u0007b\""),
+				("trailing \nspace", "\"trailing \\nspace\""),
+				("  leading", "\"  leading\""),
+			] {
+				let out = set_key(doc, "note", &s(v)).unwrap();
+				assert_eq!(
+					out,
+					format!("---\nnote: {written}\nnext: 1\n---\n"),
+					"{doc:?} {v:?}"
+				);
+			}
+		}
+		// a folded block has no line that starts with a space (it would not fold)
+		assert_eq!(
+			set_key(folded, "note", &s("a\n  b")).unwrap(),
+			"---\nnote: \"a\\n  b\"\nnext: 1\n---\n"
+		);
+		// a value that is not a string replaces the block
+		assert_eq!(
+			set_key(literal, "note", &Value::Number(5.0)).unwrap(),
+			"---\nnote: 5\nnext: 1\n---\n"
+		);
+		assert_eq!(
+			set_key(literal, "note", &Value::Null).unwrap(),
+			"---\nnote: null\nnext: 1\n---\n"
+		);
+		// and a value that was not a block is not made one
+		assert_eq!(
+			set_key("---\nt: old\n---\n", "t", &s("a\nb\n")).unwrap(),
+			"---\nt: \"a\\nb\\n\"\n---\n"
+		);
+	}
+
+	#[test]
+	fn the_blank_lines_a_keep_block_holds_go_with_its_value() {
+		let value = |doc: &str, key: &str| {
+			crate::split_front_matter(doc)
+				.unwrap()
+				.0
+				.unwrap()
+				.get(key)
+				.cloned()
+		};
+		// the blank lines after `|+` are its value's, so they are replaced, not counted again
+		let doc = "---\nnote: |+\n  a\n\n\nnext: 1\n---\n";
+		assert_eq!(value(doc, "note"), Some(s("a\n\n\n")));
+		assert_eq!(
+			set_key(doc, "note", &s("b\n\n\n")).unwrap(),
+			"---\nnote: |+\n  b\n\n\nnext: 1\n---\n"
+		);
+		assert_eq!(
+			set_key(doc, "note", &s("b\n\n")).unwrap(),
+			"---\nnote: |+\n  b\n\nnext: 1\n---\n"
+		);
+		assert_eq!(
+			set_key(doc, "note", &s("b\n\n\n\n\n")).unwrap(),
+			"---\nnote: |+\n  b\n\n\n\n\nnext: 1\n---\n"
+		);
+		// written without `+`, the lines after it are not its value, and stay
+		assert_eq!(
+			set_key(doc, "note", &s("b\n")).unwrap(),
+			"---\nnote: |\n  b\n\n\nnext: 1\n---\n"
+		);
+		// a folded block that keeps its line breaks is the same
+		let doc = "---\nd: >+\n  a b\n\n\nnext: 1\n---\n";
+		assert_eq!(value(doc, "d"), Some(s("a b\n\n\n")));
+		assert_eq!(
+			set_key(doc, "d", &s("c d\n\n\n")).unwrap(),
+			"---\nd: >+\n  c d\n\n\nnext: 1\n---\n"
+		);
+		assert_eq!(
+			set_key(doc, "d", &s("c d\n\n")).unwrap(),
+			"---\nd: >+\n  c d\n\nnext: 1\n---\n"
+		);
+		// the blank lines between entries are not the value of a block that has no `+`; they stay
+		// unless the new value is written with one, which makes its own
+		let doc = "---\nnote: |\n  a\n\n# about next\nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "note", &s("b\n")).unwrap(),
+			"---\nnote: |\n  b\n\n# about next\nnext: 1\n---\n"
+		);
+		let out = set_key(doc, "note", &s("b\n\n\n")).unwrap();
+		assert_eq!(out, "---\nnote: |+\n  b\n\n\n# about next\nnext: 1\n---\n");
+		assert_eq!(value(&out, "note"), Some(s("b\n\n\n")));
+		// a line of spaces after the entry is not replaced, and what is written has to read back
+		// as the value with it: here it would add a newline, so the value is not a block
+		let doc = "---\nnote: |\n  a\n  \nnext: 1\n---\n";
+		let out = set_key(doc, "note", &s("b\n\n")).unwrap();
+		let meta = crate::split_front_matter(&out).unwrap().0.unwrap();
+		assert_eq!(meta.get("note"), Some(&s("b\n\n")), "{out:?}");
+		assert_eq!(meta.get("next"), Some(&Value::Number(1.0)), "{out:?}");
+		assert!(!out.contains("|+"), "{out:?}");
+		// the last entry: the line breaks `+` keeps would be right before the closing fence, where
+		// gray-matter does not count one of them, so the value is quoted instead
+		let doc = "---\nnext: 1\nnote: |+\n  a\n\n---\nbody\n";
+		assert_eq!(
+			set_key(doc, "note", &s("b\n\n\n")).unwrap(),
+			"---\nnext: 1\nnote: \"b\\n\\n\\n\"\n\n---\nbody\n"
+		);
+		let doc = "---\nnext: 1\nnote: |\n  a\n---\nbody\n";
+		assert_eq!(
+			set_key(doc, "note", &s("b\n\n")).unwrap(),
+			"---\nnext: 1\nnote: \"b\\n\\n\"\n---\nbody\n"
+		);
+		// without `+` the last entry is a block as any other
+		assert_eq!(
+			set_key(doc, "note", &s("b\n")).unwrap(),
+			"---\nnext: 1\nnote: |\n  b\n---\nbody\n"
+		);
+	}
+
+	#[test]
+	fn a_block_with_no_line_has_no_indent_to_keep() {
+		// the value is the empty string, and nothing says how far a line is indented
+		for doc in [
+			"---\nnote: |\nnext: 1\n---\n",
+			"---\nnote: >-\nnext: 1\n---\n",
+			"---\nnote: |+\n\n\nnext: 1\n---\n",
+		] {
+			let out = set_key(doc, "note", &s("x\n")).unwrap();
+			let meta = crate::split_front_matter(&out).unwrap().0.unwrap();
+			assert_eq!(meta.get("note"), Some(&s("x\n")), "{out:?}");
+			assert_eq!(meta.get("next"), Some(&Value::Number(1.0)), "{out:?}");
+			assert!(out.contains("note: \"x\\n\"\n"), "{out:?}");
+		}
+	}
+
+	#[test]
+	fn the_comment_on_the_header_of_a_block_goes_with_the_value_it_replaces() {
+		assert_eq!(
+			set_key("---\nnote: |  # about it\n  a\n---\n", "note", &s("b\n")).unwrap(),
+			"---\nnote: |\n  b\n---\n"
+		);
+		assert_eq!(
+			set_key("---\nnote: >-  # about it\n  a\n---\n", "note", &s("b")).unwrap(),
+			"---\nnote: >-\n  b\n---\n"
+		);
+	}
+
+	#[test]
+	fn what_is_not_a_line_end_for_this_parser_is_not_written_in_a_block() {
+		// U+2028 and U+2029 end a line to some readers (YAML 1.1); U+0085 and `\r` are control
+		// characters. Each of these values is written as a scalar, which reads back as it is.
+		let doc = "---\nnote: |\n  a\nnext: 1\n---\n";
+		for v in ["a\u{2028}b", "a\u{2029}b\n", "a\u{85}b\n", "a\rb\n"] {
+			let out = set_key(doc, "note", &s(v)).unwrap();
+			let meta = crate::split_front_matter(&out).unwrap().0.unwrap();
+			assert_eq!(meta.get("note"), Some(&s(v)), "{out:?}");
+			assert!(!out.contains("note: |"), "{out:?}");
+		}
+	}
+
+	#[test]
+	fn a_line_of_spaces_after_a_block_is_blank_only_up_to_the_indent() {
+		// as long as the indent (or shorter), it is a blank line to every reader
+		assert_eq!(
+			set_key("---\nk: |\n  a\n  \nnext: 1\n---\n", "k", &s("new\n")).unwrap(),
+			"---\nk: |\n  new\n  \nnext: 1\n---\n"
+		);
+		// longer, js-yaml reads it as a line of the value (spaces and a newline), which this
+		// parser does not: the value is not written as a block
+		let doc = "---\nk: |\n  a\n   \nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "k", &s("new\n")).unwrap(),
+			"---\nk: \"new\\n\"\n   \nnext: 1\n---\n"
+		);
+		let doc = "---\nk: |+\n  a\n   \nnext: 1\n---\n";
+		assert_eq!(
+			set_key(doc, "k", &s("new\n\n")).unwrap(),
+			"---\nk: \"new\\n\\n\"\n   \nnext: 1\n---\n"
+		);
+	}
+
+	#[test]
+	fn a_block_keeps_the_line_breaks_of_the_file() {
+		let doc = "---\r\nnote: |\r\n  a\r\n  b\r\nnext: 1\r\n---\r\nbody";
+		assert_eq!(
+			set_key(doc, "note", &s("a\nb\nc\n")).unwrap(),
+			"---\r\nnote: |\r\n  a\r\n  b\r\n  c\r\nnext: 1\r\n---\r\nbody"
+		);
+		let doc = "---\r\nnote: >-\r\n  a b\r\nnext: 1\r\n---\r\nbody";
+		assert_eq!(
+			set_key(doc, "note", &s("a b\nc")).unwrap(),
+			"---\r\nnote: >-\r\n  a b\r\n\r\n  c\r\nnext: 1\r\n---\r\nbody"
+		);
+	}
+
+	#[test]
+	fn setting_the_value_a_block_has_changes_nothing() {
+		for doc in [
+			"---\nnote: |\n  a\n  b\n---\n",
+			"---\nnote: >-\n  a\n  b\n---\n",
+			"---\nnote: |+\n  a\n\n\nnext: 1\n---\n",
+			"---\nnote: |  # about it\n  a\n---\n",
+		] {
+			let value = crate::split_front_matter(doc)
+				.unwrap()
+				.0
+				.unwrap()
+				.get("note")
+				.cloned()
+				.unwrap();
+			assert_eq!(set_key(doc, "note", &value).unwrap(), doc);
 		}
 	}
 
