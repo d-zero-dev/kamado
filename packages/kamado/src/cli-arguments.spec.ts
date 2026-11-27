@@ -55,7 +55,9 @@ describe('checkCommandArguments', () => {
 			/takes no arguments/,
 		);
 		expect(() => checkCommandArguments('ui', [], { out: 'a.json' })).toThrow(
-			'ui does not take --out (only pages writes a file)',
+			// Behavior change: sync writes a file too
+			'ui does not take --out (only pages and sync write a file)',
+			// 'ui does not take --out (only pages writes a file)', // previous
 		);
 		expect(() => checkCommandArguments('ui', [], { force: true })).toThrow('--force');
 		expect(() => checkCommandArguments('ui', [], { incremental: true })).toThrow(
@@ -65,10 +67,14 @@ describe('checkCommandArguments', () => {
 
 	test('build and server refuse --out with the ownership clause', () => {
 		expect(() => checkCommandArguments('build', [], { out: 'x.json' })).toThrow(
-			'build does not take --out (only pages writes a file)',
+			// Behavior change: sync writes a file too
+			'build does not take --out (only pages and sync write a file)',
+			// 'build does not take --out (only pages writes a file)', // previous
 		);
 		expect(() => checkCommandArguments('server', [], { out: 'x.json' })).toThrow(
-			'server does not take --out (only pages writes a file)',
+			// Behavior change: sync writes a file too
+			'server does not take --out (only pages and sync write a file)',
+			// 'server does not take --out (only pages writes a file)', // previous
 		);
 	});
 

@@ -377,6 +377,23 @@ export async function runSync(
 }
 
 /**
+ * What each kind of change is called when it is counted.
+ * @example
+ * ```ts
+ * `${3} ${COUNT_NAMES.movedFile}`; // '3 files moved'
+ * ```
+ */
+export const COUNT_NAMES: Readonly<Record<keyof SyncSummary['counts'], string>> = {
+	added: 'added',
+	deleted: 'deleted',
+	movedUrl: 'URLs moved',
+	movedFile: 'files moved',
+	virtualized: 'made virtual',
+	materialized: 'given a file',
+	meta: 'keys changed',
+};
+
+/**
  * The counts of a summary in a line, for a message.
  * @param summary - The summary
  * @example
@@ -386,19 +403,10 @@ export async function runSync(
  * ```
  */
 export function describeCounts(summary: SyncSummary): string {
-	const names: Record<keyof SyncSummary['counts'], string> = {
-		added: 'added',
-		deleted: 'deleted',
-		movedUrl: 'URLs moved',
-		movedFile: 'files moved',
-		virtualized: 'made virtual',
-		materialized: 'given a file',
-		meta: 'keys changed',
-	};
 	return (
 		Object.entries(summary.counts)
 			.filter(([, count]) => count > 0)
-			.map(([kind, count]) => `${count} ${names[kind as keyof typeof names]}`)
+			.map(([kind, count]) => `${count} ${COUNT_NAMES[kind as keyof typeof COUNT_NAMES]}`)
 			.join(', ') || 'no changes'
 	);
 }

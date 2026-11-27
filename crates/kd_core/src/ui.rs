@@ -293,8 +293,9 @@ fn label_json(label: &kd_config::Label) -> Value {
 }
 
 /// How the config presents the metadata keys (`ui.keys`, RFC §14.2), as the screen reads it:
-/// an object from key to `{ "label"?, "description"? }` in the order written, each a text or an
-/// object from language to text. A key the config gives neither is an empty object.
+/// an object from key to `{ "label"?, "description"?, "newKeyOrigin"? }` in the order written,
+/// each of the first two a text or an object from language to text. A key the config gives
+/// none of them is an empty object.
 ///
 /// The texts go as written, not chosen for a language: the language is the screen's (the
 /// person can change it without the core being asked again), so the rule that picks a text
@@ -311,6 +312,18 @@ fn keys_json(ui: &kd_config::UiConfig) -> Value {
 				}
 				if let Some(d) = &key.description {
 					fields.push(("description".to_owned(), label_json(d)));
+				}
+				if let Some((_, origin)) = ui.new_key_origins.iter().find(|(k, _)| k == name) {
+					fields.push((
+						"newKeyOrigin".to_owned(),
+						Value::String(
+							match origin {
+								kd_config::NewKeyOrigin::InFile => "inFile",
+								kd_config::NewKeyOrigin::Overrides => "overrides",
+							}
+							.to_owned(),
+						),
+					));
 				}
 				(name.clone(), Value::Object(fields))
 			})
@@ -609,6 +622,7 @@ fn hash_expected(expect: &Value, field: &str, path: &str, current: Option<&str>)
 /// Edits the text of a page (front matter or `export const meta`) and checks that the page
 /// reads back as the change says: its metadata, and for an HTML page its body too.
 fn edit_page_text(input_path: &str, kind: PageKind, text: &str, change: &KeyChange) -> F<String> {
+	counters::bump("page-parse");
 	let (before, body_before) = crate::parse_page_text(input_path, kind, text.to_string())
 		.map_err(|message| Fail {
 			code: "invalid",
@@ -650,6 +664,7 @@ fn edit_page_text(input_path: &str, kind: PageKind, text: &str, change: &KeyChan
 			})?
 		}
 	};
+	counters::bump("page-parse");
 	let (after, body_after) =
 		crate::parse_page_text(input_path, kind, edited.clone()).map_err(|e| Fail {
 			code: "invalid",
@@ -665,6 +680,210 @@ fn edit_page_text(input_path: &str, kind: PageKind, text: &str, change: &KeyChan
 		);
 	}
 	Ok(edited)
+}
+
+/// The page file `text` once all of `changes` (each with the position of its edit in the batch)
+/// are made to its keys: the front matter or the `meta` is read, edited and read back once, where
+/// `edit_page_text` of each change reads the whole page twice and makes the edit by itself, so
+/// that the keys of one page cost the square of how many there are. The result is checked as
+/// the result of one change is: the page reads back as the changes make it.
+///
+/// Where the changes cannot be made together (the editor makes some of them one after the
+/// other, or one of them fails), they are made one by one, and the one that fails is the
+/// one that is told, with its position.
+fn edit_page_text_many(
+	input_path: &str,
+	kind: PageKind,
+	text: &str,
+	changes: &[(usize, &KeyChange)],
+) -> Result<String, (usize, Fail)> {
+	counters::bump("page-edit");
+	let one_by_one = || -> Result<String, (usize, Fail)> {
+		let mut current = text.to_string();
+		for (index, change) in changes {
+			current =
+				edit_page_text(input_path, kind, &current, change).map_err(|f| (*index, f))?;
+		}
+		Ok(current)
+	};
+	if changes.len() < 2 {
+		return one_by_one();
+	}
+	edit_page_text_together(input_path, kind, text, changes).or_else(|_| one_by_one())
+}
+
+fn edit_page_text_together(
+	input_path: &str,
+	kind: PageKind,
+	text: &str,
+	changes: &[(usize, &KeyChange)],
+) -> F<String> {
+	counters::bump("page-parse");
+	let (before, body_before) = crate::parse_page_text(input_path, kind, text.to_string())
+		.map_err(|message| Fail {
+			code: "invalid",
+			message,
+		})?;
+	let mut meta = WorkingMeta::new(before);
+	for (_, change) in changes {
+		meta.apply(change);
+	}
+	let expected = meta.into_meta();
+	let edited = match kind {
+		PageKind::Html => {
+			let ops: Vec<kd_yaml::edit::KeyOp<'_>> = changes
+				.iter()
+				.map(|(_, change)| match change {
+					KeyChange::Set(k, v) => kd_yaml::edit::KeyOp::Set(k, v),
+					KeyChange::Delete(k) => kd_yaml::edit::KeyOp::Delete(k),
+				})
+				.collect();
+			kd_yaml::edit::edit_keys(text, &ops).map_err(|(_, e)| match e {
+				kd_yaml::edit::EditError::NotEditable(message) => Fail {
+					code: "notEditable",
+					message,
+				},
+				other => Fail {
+					code: "invalid",
+					message: other.to_string(),
+				},
+			})?
+		}
+		PageKind::Tsx => {
+			let ts = !input_path.ends_with(".jsx");
+			let values: Vec<Option<kd_js::Const>> = changes
+				.iter()
+				.map(|(_, change)| match change {
+					KeyChange::Set(_, v) => Some(value_to_const(v)),
+					KeyChange::Delete(_) => None,
+				})
+				.collect();
+			let ops: Vec<kd_js::meta_edit::KeyOp<'_>> = changes
+				.iter()
+				.zip(&values)
+				.map(|((_, change), value)| match (change, value) {
+					(KeyChange::Set(k, _), Some(v)) => kd_js::meta_edit::KeyOp::Set(k, v),
+					_ => kd_js::meta_edit::KeyOp::Delete(change.key()),
+				})
+				.collect();
+			kd_js::meta_edit::edit_keys(text, true, ts, &ops).map_err(|(_, e)| match e {
+				kd_js::meta_edit::EditError::NotEditable(message) => Fail {
+					code: "notEditable",
+					message,
+				},
+				other => Fail {
+					code: "invalid",
+					message: other.to_string(),
+				},
+			})?
+		}
+	};
+	counters::bump("page-parse");
+	let (after, body_after) =
+		crate::parse_page_text(input_path, kind, edited.clone()).map_err(|e| Fail {
+			code: "invalid",
+			message: format!("the edit would leave {input_path} unreadable: {e}"),
+		})?;
+	let body_changed = kind == PageKind::Html && body_before != body_after;
+	if after != expected || body_changed {
+		return fail(
+			"invalid",
+			format!("the edit would not read back as written in {input_path}; nothing was written"),
+		);
+	}
+	Ok(edited)
+}
+
+/// The metadata of a page as a batch changes it key by key: the pairs in their order, and where
+/// each key is, so that asking for a key and changing it do not read all the keys of the page.
+struct WorkingMeta {
+	/// The pairs in their order; the place of a key that was deleted is left empty, so that
+	/// deleting a key does not move the others (it would make deleting every key of a page
+	/// cost the square of their number).
+	slots: Vec<Option<(String, Value)>>,
+	at: HashMap<String, usize>,
+}
+
+impl WorkingMeta {
+	fn new(pairs: Meta) -> WorkingMeta {
+		let at = pairs
+			.iter()
+			.enumerate()
+			.map(|(i, (k, _))| (k.clone(), i))
+			.collect();
+		WorkingMeta {
+			slots: pairs.into_iter().map(Some).collect(),
+			at,
+		}
+	}
+
+	fn has(&self, key: &str) -> bool {
+		self.at.contains_key(key)
+	}
+
+	/// Makes the change as `KeyChange::apply` does.
+	fn apply(&mut self, change: &KeyChange) {
+		match change {
+			KeyChange::Set(key, value) => match self.at.get(key) {
+				Some(&i) => {
+					if let Some(slot) = &mut self.slots[i] {
+						slot.1 = value.clone();
+					}
+				}
+				None => {
+					self.at.insert(key.clone(), self.slots.len());
+					self.slots.push(Some((key.clone(), value.clone())));
+				}
+			},
+			KeyChange::Delete(key) => {
+				if let Some(i) = self.at.remove(key) {
+					self.slots[i] = None;
+				}
+			}
+		}
+	}
+
+	/// The metadata as it is now, in the order of the keys.
+	fn to_meta(&self) -> Meta {
+		self.slots.iter().flatten().cloned().collect()
+	}
+
+	/// The metadata as it is now, in the order of the keys.
+	fn into_meta(self) -> Meta {
+		self.slots.into_iter().flatten().collect()
+	}
+}
+
+/// Counts of the work edits do, for the tests that hold the cost of a batch to the number of its
+/// edits: a test of the time is as long as the machine is slow and says nothing when it is
+/// fast, and the number of times a file is read does not. In a build that is not a test the
+/// functions do nothing.
+#[cfg(test)]
+pub(crate) mod counters {
+	use std::cell::RefCell;
+	use std::collections::BTreeMap;
+
+	thread_local! {
+		static COUNTS: RefCell<BTreeMap<&'static str, u64>> = const { RefCell::new(BTreeMap::new()) };
+	}
+
+	pub(crate) fn bump(name: &'static str) {
+		COUNTS.with(|c| *c.borrow_mut().entry(name).or_default() += 1);
+	}
+
+	pub(crate) fn get(name: &'static str) -> u64 {
+		COUNTS.with(|c| c.borrow().get(name).copied().unwrap_or(0))
+	}
+
+	pub(crate) fn reset() {
+		COUNTS.with(|c| c.borrow_mut().clear());
+	}
+}
+
+#[cfg(not(test))]
+mod counters {
+	#[inline]
+	pub(crate) fn bump(_name: &'static str) {}
 }
 
 /// Edits the text of a sidecar `.json` and checks that it reads back as the change says.
@@ -703,6 +922,113 @@ fn edit_sidecar_text(path: &str, text: &str, change: &KeyChange) -> F<String> {
 	Ok(edited)
 }
 
+/// The sidecar `text` once all of `changes` (each with the position of its edit in the batch) are
+/// made to its keys, read and edited once as `edit_page_text_many` does for a page file. Where
+/// they cannot be made together they are made one by one, and the one that fails is told.
+fn edit_sidecar_text_many(
+	path: &str,
+	text: &str,
+	changes: &[(usize, &KeyChange)],
+) -> Result<String, (usize, Fail)> {
+	counters::bump("sidecar-edit");
+	let one_by_one = || -> Result<String, (usize, Fail)> {
+		let mut current = text.to_string();
+		for (index, change) in changes {
+			current = edit_sidecar_text(path, &current, change).map_err(|f| (*index, f))?;
+		}
+		Ok(current)
+	};
+	if changes.len() < 2 {
+		return one_by_one();
+	}
+	edit_sidecar_text_together(path, text, changes).or_else(|_| one_by_one())
+}
+
+fn edit_sidecar_text_together(
+	path: &str,
+	text: &str,
+	changes: &[(usize, &KeyChange)],
+) -> F<String> {
+	let parse_meta = |text: &str| -> Result<Meta, String> {
+		counters::bump("sidecar-parse");
+		let value = kd_jsonc::parse(text)
+			.map_err(|e| format!("{path}:{}:{}: {}", e.line, e.column, e.message))?;
+		kd_site::meta::as_meta(&value, path)
+	};
+	let before = parse_meta(text).map_err(|message| Fail {
+		code: "invalid",
+		message,
+	})?;
+	let mut meta = WorkingMeta::new(before);
+	for (_, change) in changes {
+		meta.apply(change);
+	}
+	let expected = meta.into_meta();
+	let ops: Vec<kd_jsonc::edit::MemberOp<'_>> = changes
+		.iter()
+		.map(|(_, change)| match change {
+			KeyChange::Set(k, v) => kd_jsonc::edit::MemberOp::Set(k, v),
+			KeyChange::Delete(k) => kd_jsonc::edit::MemberOp::Delete(k),
+		})
+		.collect();
+	let edited = kd_jsonc::edit::edit_members(text, &[], &ops).map_err(|(_, e)| Fail {
+		code: match e {
+			kd_jsonc::edit::EditError::NotAContainer(_) => "notEditable",
+			_ => "invalid",
+		},
+		message: format!("{path}: {e}"),
+	})?;
+	let after = parse_meta(&edited).map_err(|e| Fail {
+		code: "invalid",
+		message: format!("the edit would leave {path} unreadable: {e}"),
+	})?;
+	if after != expected {
+		return fail(
+			"invalid",
+			format!("the edit would not read back as written in {path}; nothing was written"),
+		);
+	}
+	Ok(edited)
+}
+
+/// The text of one entry of `pages.overrides` once all of `changes` are made to the keys of its
+/// `meta`, edited once where `change_entry` of each would read the entry again; `expected` is
+/// what the entry reads as, and is changed the same way. `None` when that cannot be said
+/// without making the changes one by one (the entry has no `meta` that is an object, or one of
+/// the changes fails): the caller makes them one by one, and `expected` is as it was.
+fn change_entry_together(
+	entry: &str,
+	changes: &[&KeyChange],
+	expected: &mut Value,
+) -> Option<String> {
+	if changes.len() < 2 {
+		return None;
+	}
+	let Value::Object(members) = expected else {
+		return None;
+	};
+	let Some((_, Value::Object(meta))) = members.iter_mut().find(|(k, _)| k == "meta") else {
+		return None;
+	};
+	let ops: Vec<kd_jsonc::edit::MemberOp<'_>> = changes
+		.iter()
+		.map(|change| match change {
+			KeyChange::Set(k, v) => kd_jsonc::edit::MemberOp::Set(k, v),
+			KeyChange::Delete(k) => kd_jsonc::edit::MemberOp::Delete(k),
+		})
+		.collect();
+	let edited = kd_jsonc::edit::trusted(entry)
+		.edit_members(&[Seg::Key("meta")], &ops)
+		.ok()?;
+	let mut work = WorkingMeta::new(std::mem::take(meta));
+	for change in changes {
+		work.apply(change);
+	}
+	*meta = work.into_meta();
+	counters::bump("entry-together");
+	Some(edited)
+}
+
 /// The text of one entry of `pages.overrides` (`entry`: the entry on its own, as the file has
 /// it) once `change` is made to a key of its `meta`; `expected` is what the entry reads as,
 /// and is changed the same way. The one place that says how a key is set or deleted in an entry,
@@ -715,6 +1041,7 @@ fn change_entry(
 	expected: &mut Value,
 ) -> F<String> {
 	use kd_jsonc::edit::{EditError as E, trusted};
+	counters::bump("entry-change");
 	let overrides_fail = |e: E| Fail {
 		code: "invalid",
 		message: format!("{path}: {e}"),
@@ -993,6 +1320,7 @@ fn remove_overrides_entry(
 	url: &str,
 	verify: bool,
 ) -> F<String> {
+	counters::bump("entry-removed");
 	let Some(idx) = before.order.iter().position(|u| u == url) else {
 		return fail("invalid", format!("{path} has no entry for {url}"));
 	};
@@ -1222,6 +1550,18 @@ struct Journal {
 	/// edits read meanwhile (see `Ui::overrides_expected`); the file is written by
 	/// `Ui::flush_overrides`, and what was not written is not there to put back.
 	deferred: Option<String>,
+	/// Items were added to the handle's copy of `pages.overrides` in place (see
+	/// `Ui::append_entry`), so the copy is the text to write and `deferred` is not (it is
+	/// cleared when an item is added, and set by the next commit that writes the file).
+	appended: bool,
+	/// Where the next item of `pages.overrides` goes when items are added in place: the array is
+	/// read once and not for each item.
+	appender: Option<kd_jsonc::edit::Appender>,
+	/// Entries of `pages.overrides` that the model does not have any more and the text still has,
+	/// each with its place in the text (see `Ui::defer_entry_removal`).
+	removed: Vec<(String, usize)>,
+	/// Where each entry is in the text, while `removed` is not empty.
+	entry_index: Option<HashMap<String, usize>>,
 }
 
 impl Journal {
@@ -1397,6 +1737,8 @@ impl Txn {
 		for (path, text) in &self.writes {
 			if shared && journal.defer.as_deref() == Some(path.as_str()) {
 				journal.deferred = Some(text.clone());
+				journal.appended = false;
+				journal.appender = None;
 				continue;
 			}
 			// A file that is new can be in a directory that is new.
@@ -2308,9 +2650,40 @@ impl Ui {
 					("sidecar".to_owned(), sidecar),
 				]),
 			));
+			// A page with a file that has an entry in `pages.overrides`: the keys of the entry,
+			// for the warning about the files a sync writes (a page with none has no member,
+			// so a site with a hundred thousand pages does not carry one for each).
+			if !page.is_virtual
+				&& let Some(entry) = self
+					.overrides
+					.as_ref()
+					.and_then(|o| o.parsed.by_url.get(&page.file.url))
+			{
+				fields.push((
+					"overridesKeys".to_owned(),
+					Value::Array(
+						entry
+							.meta
+							.iter()
+							.map(|(k, _)| Value::String(k.clone()))
+							.collect(),
+					),
+				));
+			}
 			pages.push(Value::Object(fields));
 		}
-		Value::Object(vec![
+		// The keys that `ui.keys.<key>.newKeyOrigin` sends to `pages.overrides`: where a sync
+		// tells which files it writes (the member is left out when there are none).
+		let new_in_overrides: Vec<Value> = self
+			.loaded
+			.config
+			.ui
+			.new_key_origins
+			.iter()
+			.filter(|(_, origin)| *origin == kd_config::NewKeyOrigin::Overrides)
+			.map(|(key, _)| Value::String(key.clone()))
+			.collect();
+		let mut snapshot = vec![
 			("version".to_owned(), Value::Number(self.version as f64)),
 			("overridesHash".to_owned(), self.overrides_hash_json()),
 			(
@@ -2342,8 +2715,14 @@ impl Ui {
 						.collect(),
 				),
 			),
-		])
-		.to_json()
+		];
+		if !new_in_overrides.is_empty() {
+			snapshot.push((
+				"newKeysInOverrides".to_owned(),
+				Value::Array(new_in_overrides),
+			));
+		}
+		Value::Object(snapshot).to_json()
 	}
 
 	/// The keys that cannot be edited, for the pages at `urls` (`{ "urls": [...] }`), for a sync
@@ -2792,8 +3171,29 @@ impl Ui {
 		match change {
 			KeyChange::Delete(_) => fail("invalid", format!("the page has no key {key:?}")),
 			KeyChange::Set(..) if self.plan.pages[i].is_virtual => Ok(Origin::Overrides),
+			// A real page that does not have the key: where the config says a new key goes
+			// (RFC §14.2, "書く場所（出所）"). The config has `pages.overrides` when it says
+			// `overrides`, so the handle has the file.
+			KeyChange::Set(..)
+				if self.new_key_origin(key) == kd_config::NewKeyOrigin::Overrides =>
+			{
+				Ok(Origin::Overrides)
+			}
 			KeyChange::Set(..) => Ok(Origin::InFile),
 		}
+	}
+
+	/// Where the config (`ui.keys.<key>.newKeyOrigin`) says a key that a real page does not have
+	/// yet is written.
+	fn new_key_origin(&self, key: &str) -> kd_config::NewKeyOrigin {
+		self.loaded
+			.config
+			.ui
+			.new_key_origins
+			.iter()
+			.find(|(k, _)| k == key)
+			.map(|(_, origin)| *origin)
+			.unwrap_or_default()
 	}
 
 	/// Sets or deletes one key of the metadata of the page `i`, in the file it comes from.
@@ -2868,17 +3268,38 @@ impl Ui {
 				};
 				let text = read_expected(expect, "overrides", &o.path)?;
 				let before = Self::overrides_before(o, &text)?;
-				let edited = edit_overrides_text(
-					&o.path,
-					&text,
-					&before,
-					&page.file.url,
-					Some(change),
-					None,
-				)?;
-				if edited != text {
+				if before.by_url.contains_key(&page.file.url) {
+					let edited = edit_overrides_text(
+						&o.path,
+						&text,
+						&before,
+						&page.file.url,
+						Some(change),
+						None,
+					)?;
+					if edited != text {
+						txn.writes.push((o.path.clone(), edited.clone()));
+						txn.overrides_after = Some((edited, o.text != text));
+					}
+				} else {
+					// A real page with no entry, and a new key that goes to `pages.overrides`: the
+					// entry is added with the key. An entry added is a change of the entries
+					// themselves, which is followed by a new plan of the site (RFC §14.2).
+					let KeyChange::Set(..) = change else {
+						return fail(
+							"invalid",
+							format!("{} has no entry for {}", o.path, page.file.url),
+						);
+					};
+					let entry = kd_site::meta::Override {
+						url: page.file.url.clone(),
+						is_virtual: false,
+						meta: change.apply(&Meta::new()),
+						lastmod: None,
+					};
+					let edited = add_overrides_entry(&o.path, &text, &before, entry, true)?;
 					txn.writes.push((o.path.clone(), edited.clone()));
-					txn.overrides_after = Some((edited, o.text != text));
+					txn.overrides_after = Some((edited, true));
 				}
 			}
 		}
@@ -3048,6 +3469,33 @@ impl Ui {
 
 	/// Whether the output path of `file` is taken by another page, or is a source file.
 	fn output_collision(&self, skip: usize, file: &PageFile) -> Option<String> {
+		// A batch keeps where the pages are by the paths they have (see `batch::PlanIndex`): the
+		// question is asked of it, and every page is looked at only when it cannot answer (it
+		// holds one page for a path, and more than one page had the path: the plan keeps such
+		// pages under a policy that allows them, and the index forgets a path when one of them goes).
+		if let Some(index) = &self.index {
+			let by_output = index.output(&file.output_path);
+			let by_input = index.input(&file.output_path);
+			if !index.shares_output(&file.output_path) {
+				if let Some(p) = by_output
+					.filter(|&j| j != skip)
+					.and_then(|j| self.plan.pages.get(j))
+				{
+					return Some(format!(
+						"the page {} is written to {} as well",
+						p.file.url, file.output_path
+					));
+				}
+				if let Some(p) = by_input.and_then(|j| self.plan.pages.get(j)) {
+					return Some(format!(
+						"{} is the source file of {}",
+						file.output_path, p.file.url
+					));
+				}
+				return None;
+			}
+		}
+		counters::bump("collision-scan");
 		for (j, p) in self.plan.pages.iter().enumerate() {
 			if j != skip && p.file.output_path == file.output_path {
 				return Some(format!(
@@ -3236,6 +3684,173 @@ impl Ui {
 		Ok((o, text))
 	}
 
+	/// Takes the entries of the virtual pages `urls` out of `pages.overrides` together, in the
+	/// handle's copy, while a batch is made: one by one, the removal of each reads the file and
+	/// builds it again (see [`Journal::appended`], where the copy is the text to write).
+	/// Says whether it did. It does not when the entries cannot be taken out together (the file
+	/// is laid out another way, every entry goes, an entry is not there, or a URL is named
+	/// twice): the pages are then deleted one by one, and the one that cannot be is told.
+	fn delete_virtual_pages(&mut self, urls: &[&str]) -> F<bool> {
+		self.settle_removed_entries()?;
+		let (Some(o), Some(journal)) = (&mut self.overrides, &mut self.batch) else {
+			return Ok(false);
+		};
+		let position: HashMap<&str, usize> = o
+			.parsed
+			.order
+			.iter()
+			.enumerate()
+			.map(|(i, url)| (url.as_str(), i))
+			.collect();
+		let gone: std::collections::HashSet<&str> = urls.iter().copied().collect();
+		if gone.len() != urls.len() {
+			return Ok(false);
+		}
+		let mut indices = Vec::with_capacity(urls.len());
+		for url in urls {
+			let Some(&i) = position.get(url) else {
+				return Ok(false);
+			};
+			indices.push(i);
+		}
+		let edited = kd_jsonc::edit::trusted(&o.text)
+			.delete_elements(&[Seg::Key("pages")], &indices)
+			.map_err(|e| overrides_edit_fail(&o.path, &e))?;
+		let Some(edited) = edited else {
+			return Ok(false);
+		};
+		counters::bump("entries-removed-together");
+		o.parsed.order.retain(|url| !gone.contains(url.as_str()));
+		for url in urls {
+			o.parsed.by_url.remove(*url);
+		}
+		o.text = edited;
+		journal.deferred = None;
+		journal.appended = true;
+		journal.appender = None;
+		for url in urls {
+			self.touched.insert((*url).to_string());
+		}
+		self.plan_after_files_changed()?;
+		Ok(true)
+	}
+
+	/// Takes the entry of the page with the URL `url` out of the model of `pages.overrides` and
+	/// leaves it in the text until `settle_removed_entries` takes it out together with the others,
+	/// while a batch is made: pages are given a file one after the other, and the removal of each
+	/// entry from the text reads the file and builds it again. The places of the entries in the
+	/// text are those of `order` of the model, which keeps the URL of an entry that is taken out
+	/// until the text is: whatever reads the text by the place of an entry settles first.
+	fn defer_entry_removal(&mut self, url: &str) -> F<()> {
+		let (Some(o), Some(journal)) = (&mut self.overrides, &mut self.batch) else {
+			return fail(
+				"invalid",
+				"entries are taken out in place only while a batch is made",
+			);
+		};
+		let index = journal.entry_index.get_or_insert_with(|| {
+			o.parsed
+				.order
+				.iter()
+				.enumerate()
+				.map(|(i, url)| (url.clone(), i))
+				.collect()
+		});
+		let Some(&place) = index.get(url) else {
+			return fail("invalid", format!("{} has no entry for {url}", o.path));
+		};
+		journal.removed.push((url.to_string(), place));
+		o.parsed.by_url.remove(url);
+		self.touched.insert(url.to_string());
+		Ok(())
+	}
+
+	/// Takes the entries that `defer_entry_removal` left in the text out of it, together, and out
+	/// of `order` of the model. The same text as the removals one after the other leave, which
+	/// `kd_jsonc::edit::Trusted::delete_elements` answers for; for a layout it does not
+	/// answer for, they are removed one by one from the last.
+	fn settle_removed_entries(&mut self) -> F<()> {
+		let (Some(o), Some(journal)) = (&mut self.overrides, &mut self.batch) else {
+			return Ok(());
+		};
+		if journal.removed.is_empty() {
+			return Ok(());
+		}
+		counters::bump("entries-settled");
+		let removed = std::mem::take(&mut journal.removed);
+		journal.entry_index = None;
+		let mut places: Vec<usize> = removed.iter().map(|(_, place)| *place).collect();
+		let pages = [Seg::Key("pages")];
+		let together = kd_jsonc::edit::trusted(&o.text)
+			.delete_elements(&pages, &places)
+			.map_err(|e| overrides_edit_fail(&o.path, &e))?;
+		let edited = match together {
+			Some(text) => text,
+			None => {
+				places.sort_unstable_by(|a, b| b.cmp(a));
+				let mut text = o.text.clone();
+				for place in places {
+					text = kd_jsonc::edit::trusted(&text)
+						.delete_element(&pages, place)
+						.map_err(|e| overrides_edit_fail(&o.path, &e))?;
+				}
+				text
+			}
+		};
+		let gone: std::collections::HashSet<&str> =
+			removed.iter().map(|(url, _)| url.as_str()).collect();
+		o.parsed.order.retain(|url| !gone.contains(url.as_str()));
+		o.text = edited;
+		journal.deferred = None;
+		journal.appended = true;
+		journal.appender = None;
+		Ok(())
+	}
+
+	/// Adds `entry` after the last entry of `pages.overrides` in the handle's copy, in place,
+	/// while a batch is made (see [`Journal::appended`]): the cost is the entry and not the file.
+	/// The model of the file is not changed here (`follow_entries` does it), and the text is
+	/// not read back: the batch reads the file that is written when it is made.
+	///
+	/// `why` says what needs the file, for a site that has none.
+	fn append_entry(&mut self, entry: &kd_site::meta::Override, why: &str) -> F<()> {
+		self.settle_removed_entries()?;
+		let Some(o) = &mut self.overrides else {
+			return fail(
+				"invalid",
+				format!("the site has no pages.overrides file, and {why}"),
+			);
+		};
+		let Some(journal) = &mut self.batch else {
+			return fail(
+				"invalid",
+				"entries are added in place only while a batch is made",
+			);
+		};
+		if o.parsed.by_url.contains_key(&entry.url) {
+			return fail(
+				"collision",
+				format!("{} has an entry for {} already", o.path, entry.url),
+			);
+		}
+		let appender = match &mut journal.appender {
+			Some(appender) => appender,
+			slot => {
+				counters::bump("overrides-read");
+				slot.insert(
+					kd_jsonc::edit::Appender::new(&o.text, &[Seg::Key("pages")])
+						.map_err(|e| overrides_edit_fail(&o.path, &e))?,
+				)
+			}
+		};
+		appender
+			.push(&mut o.text, &overrides_entry_value(entry))
+			.map_err(|e| overrides_edit_fail(&o.path, &e))?;
+		journal.deferred = None;
+		journal.appended = true;
+		Ok(())
+	}
+
 	/// Whether the edits of a batch are being made, with `pages.overrides` held in the handle
 	/// (see [`Journal::deferred`]): they read its text and its model, not the file, and change the
 	/// model by hand.
@@ -3294,27 +3909,31 @@ impl Ui {
 				if let Some(why) = self.output_collision(usize::MAX, &file) {
 					return fail("collision", why);
 				}
-				let (o, text) = self.overrides_expected(
-					expect,
-					"a page without a file is an entry of it: write the path of a file for the page",
-				)?;
-				let before = Self::overrides_before(o, &text)?;
 				let entry = kd_site::meta::Override {
 					url: url.to_string(),
 					is_virtual: true,
 					meta: Vec::new(),
 					lastmod: None,
 				};
-				let path = o.path.clone();
-				let edited = add_overrides_entry(
-					&path,
-					&text,
-					&before,
-					entry.clone(),
-					!self.in_overrides_session(),
-				)?;
-				self.follow_entries(&[EntryChange::Add(entry)]);
-				txn.writes.push((path, edited));
+				if self.in_overrides_session() {
+					// In a batch the entry is added to the handle's copy in place: the text is not
+					// read, compared and built again for each of the pages the batch makes.
+					self.append_entry(
+						&entry,
+						"a page without a file is an entry of it: write the path of a file for the page",
+					)?;
+					self.follow_entries(&[EntryChange::Add(entry)]);
+				} else {
+					let (o, text) = self.overrides_expected(
+						expect,
+						"a page without a file is an entry of it: write the path of a file for the page",
+					)?;
+					let before = Self::overrides_before(o, &text)?;
+					let path = o.path.clone();
+					let edited = add_overrides_entry(&path, &text, &before, entry.clone(), true)?;
+					self.follow_entries(&[EntryChange::Add(entry)]);
+					txn.writes.push((path, edited));
+				}
 				url.to_string()
 			}
 			(None, None) => {
@@ -3354,11 +3973,27 @@ impl Ui {
 			return fail("invalid", "the page is virtual already");
 		}
 		let url = page.file.url.clone();
-		let (o, text) = self.overrides_expected(
-			expect,
-			"a virtual page is an entry of it: the page cannot be made virtual",
-		)?;
-		let before = Self::overrides_before(o, &text)?;
+		let why = "a virtual page is an entry of it: the page cannot be made virtual";
+		// In a batch the entry of a page that has none is added to the handle's copy in place,
+		// and the text is not read and copied for each page.
+		let in_place = self.in_overrides_session()
+			&& self.overrides.is_some()
+			&& !self
+				.overrides
+				.as_ref()
+				.is_some_and(|o| o.parsed.by_url.contains_key(&url));
+		if self.in_overrides_session() && !in_place {
+			self.settle_removed_entries()?;
+		}
+		let held = if in_place {
+			None
+		} else {
+			Some(self.overrides_expected(expect, why)?)
+		};
+		let before = match &held {
+			Some((o, text)) => Some(Self::overrides_before(o, text)?),
+			None => None,
+		};
 		// A virtual page is where its URL says, read as the plan reads the entry, and it is
 		// written to the same output path as the page was (the output of a page whose URL a key
 		// makes can differ from the one its URL gives; the plan would then refuse the site after
@@ -3393,40 +4028,58 @@ impl Ui {
 		let mut from_files = kd_site::meta::merge(&[&read.in_file, &read.side]);
 		from_files.retain(|(k, _)| Some(k.as_str()) != field);
 		let verify = !self.in_overrides_session();
-		let path = o.path.clone();
-		let (edited, added) = match before.by_url.get(&url) {
-			Some(entry) => {
-				// What the entry says wins over the files already (§4), so its keys stay.
-				let add: Meta = from_files
-					.into_iter()
-					.filter(|(k, _)| !entry.meta.iter().any(|(ek, _)| ek == k))
-					.collect();
-				let edit = EntryEdit {
-					url: &url,
-					is_virtual: true,
-					add: &add,
-					take: &[],
-				};
-				let edited = change_overrides_entry(&path, &text, &before, &edit, verify)?;
-				self.follow_entries(&[EntryChange::Change(edit)]);
-				(edited, None)
+		let (edited, added) = match (&held, &before) {
+			(Some((o, text)), Some(before)) => {
+				let path = o.path.clone();
+				match before.by_url.get(&url) {
+					Some(entry) => {
+						// What the entry says wins over the files already (§4), so its keys stay.
+						let add: Meta = from_files
+							.into_iter()
+							.filter(|(k, _)| !entry.meta.iter().any(|(ek, _)| ek == k))
+							.collect();
+						let edit = EntryEdit {
+							url: &url,
+							is_virtual: true,
+							add: &add,
+							take: &[],
+						};
+						let edited = change_overrides_entry(&path, text, before, &edit, verify)?;
+						self.follow_entries(&[EntryChange::Change(edit)]);
+						(Some((path, edited)), None)
+					}
+					None => {
+						let entry = kd_site::meta::Override {
+							url: url.clone(),
+							is_virtual: true,
+							meta: from_files,
+							lastmod: None,
+						};
+						let edited =
+							add_overrides_entry(&path, text, before, entry.clone(), verify)?;
+						(Some((path, edited)), Some(entry))
+					}
+				}
 			}
-			None => {
+			_ => {
+				// added to the handle's copy in place: there is no text to write with the page
 				let entry = kd_site::meta::Override {
 					url: url.clone(),
 					is_virtual: true,
 					meta: from_files,
 					lastmod: None,
 				};
-				let edited = add_overrides_entry(&path, &text, &before, entry.clone(), verify)?;
-				(edited, Some(entry))
+				self.append_entry(&entry, why)?;
+				(None, Some(entry))
 			}
 		};
 		if let Some(entry) = added {
 			self.follow_entries(&[EntryChange::Add(entry)]);
 		}
 		let mut txn = Txn::default();
-		txn.writes.push((path, edited));
+		if let Some(write) = edited {
+			txn.writes.push(write);
+		}
 		txn.removes.push(from);
 		if read.sidecar_dep.hash != kd_build::MISSING_FILE_HASH {
 			txn.removes.push(read.sidecar);
@@ -3449,6 +4102,42 @@ impl Ui {
 			return fail("invalid", "the page has a file already");
 		}
 		let url = page.file.url.clone();
+		if self.in_overrides_session() {
+			// In a batch an entry that goes with the page (all its keys go into the file) is taken out
+			// of the text with the others once the batch has made them, and the text is not read
+			// and copied for each page.
+			let Some(o) = &self.overrides else {
+				return fail(
+					"invalid",
+					"the site has no pages.overrides file, and a virtual page is an entry of it",
+				);
+			};
+			let Some(entry) = o.parsed.by_url.get(&url) else {
+				return fail("invalid", format!("{} has no entry for {url}", o.path));
+			};
+			let field = self.output_path_field();
+			let goes = entry.lastmod.is_none()
+				&& entry.meta.iter().all(|(k, _)| Some(k.as_str()) != field);
+			if goes {
+				let moved: Meta = entry.meta.clone();
+				let rel = match path {
+					Some(typed) => typed_new_path(typed)?,
+					None => self.path_for_url(&url)?,
+				};
+				let (to, page_text, file) = self.new_page_file(&rel, Some(&url), &moved)?;
+				if let Some(why) = self.output_collision(i, &file) {
+					return fail("collision", why);
+				}
+				self.defer_entry_removal(&url)?;
+				let mut txn = Txn::default();
+				txn.writes.push((to, page_text));
+				txn.commit_with(self.batch.as_mut())?;
+				self.plan_after_files_changed()?;
+				return Ok(url);
+			}
+			// the entry stays, changed: it is found in the text
+			self.settle_removed_entries()?;
+		}
 		let (o, text) = self.overrides_expected(expect, "a virtual page is an entry of it")?;
 		let before = Self::overrides_before(o, &text)?;
 		let Some(entry) = before.by_url.get(&url) else {

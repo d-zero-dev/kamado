@@ -21,8 +21,10 @@
  * does not pick it up: it needs the native build.
  */
 import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -148,6 +150,7 @@ function makeSite(config = {}) {
 			dir: { input: 'src', output: 'out' },
 			build: { cacheDir: '.cache' },
 			pages: { overrides: 'pages.overrides.json', ...config.pages },
+			...(config.ui === undefined ? {} : { ui: config.ui }),
 		}),
 	);
 	write('src/index.html', '---\ntitle: Home\nlayout: top\n---\n<p>home</p>\n');
@@ -1445,6 +1448,157 @@ test('order is deleted like any key: rows without it take it away, and the pages
 		);
 	} finally {
 		opened.close();
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});
+
+test('a new key that the config sends to pages.overrides is written in the entry of the page, and the same rows returned again change nothing', async () => {
+	const site = makeSite({ ui: { keys: { rank: { newKeyOrigin: 'overrides' } } } });
+	const opened = open(site);
+	try {
+		const snapshot = opened.pages();
+		// what a sync needs to know to tell the files it writes
+		assert.deepEqual(snapshot.newKeysInOverrides, ['rank']);
+		assert.deepEqual(
+			snapshot.pages.find((page) => page.url === '/about/').overridesKeys,
+			['navHidden'],
+		);
+		assert.equal(
+			snapshot.pages.find((page) => page.url === '/service/').overridesKeys,
+			undefined,
+		);
+		const before = site.read('src/service/index.html');
+		const rows = given(snapshot).map((entry) =>
+			entry.url === '/service/' || entry.url === '/about/'
+				? { ...entry, meta: { ...entry.meta, rank: 3 } }
+				: entry,
+		);
+		const file = scriptReturning(site, rows);
+		const prepared = await prepare(opened, site, file);
+		assert.equal(prepared.kind, 'review');
+		assert.equal(prepared.apply().ok, true);
+		// the page file is as it was, and the key is in the entry of the page (added for /service/)
+		assert.equal(site.read('src/service/index.html'), before);
+		const overrides = JSON.parse(site.read('pages.overrides.json'));
+		const entry = (url) => overrides.pages.find((e) => e.url === url);
+		assert.equal(entry('/service/').meta.rank, 3);
+		assert.equal(entry('/service/').virtual, undefined);
+		assert.deepEqual(entry('/about/').meta, { navHidden: false, rank: 3 });
+		const again = await prepare(opened, site, file);
+		assert.equal(again.kind, 'nochange');
+	} finally {
+		opened.close();
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});
+
+/**
+ * Makes the site a git repository with everything committed, and then changes pages.overrides
+ * without committing, so that git cannot bring back what a sync writes in it.
+ * @param site - The site
+ */
+function commitAndLeavePagesOverridesDirty(site) {
+	const git = (...args) =>
+		execFileSync(
+			'git',
+			['-c', 'user.name=check', '-c', 'user.email=check@example.test', ...args],
+			{ cwd: site.root, stdio: 'ignore' },
+		);
+	git('init', '-q');
+	writeFileSync(path.join(site.root, '.gitignore'), '.cache\nout\n');
+	git('add', '-A');
+	git('commit', '-q', '-m', 'site');
+	site.write('pages.overrides.json', `${site.read('pages.overrides.json')}\n`);
+}
+
+test('the files a sync writes through a key that goes to pages.overrides are the ones git is asked about', async () => {
+	const site = makeSite({ ui: { keys: { rank: { newKeyOrigin: 'overrides' } } } });
+	commitAndLeavePagesOverridesDirty(site);
+	const opened = open(site);
+	try {
+		const rows = (key) =>
+			given(opened.pages()).map((entry) =>
+				entry.url === '/service/'
+					? { ...entry, meta: { ...entry.meta, [key]: 3 } }
+					: entry,
+			);
+		// a key that goes to pages.overrides: it is written, and it has changes git does not hold
+		const sent = await prepare(opened, site, scriptReturning(site, rows('rank')));
+		assert.equal(sent.kind, 'review');
+		assert.deepEqual(sent.summary.unsaved, ['../pages.overrides.json']);
+		// a key that goes in the file of the page: pages.overrides is not written, so it is not asked
+		const kept = await prepare(opened, site, scriptReturning(site, rows('other')));
+		assert.equal(kept.kind, 'review');
+		assert.deepEqual(kept.summary.unsaved, []);
+	} finally {
+		opened.close();
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});
+
+test('a page that has an entry in pages.overrides takes the entry when it goes, and git is asked about the file', async () => {
+	const site = makeSite();
+	commitAndLeavePagesOverridesDirty(site);
+	const opened = open(site);
+	try {
+		// /about/ has an entry (its key navHidden), /service/ has none
+		const without = (url) => given(opened.pages()).filter((entry) => entry.url !== url);
+		const entered = await prepare(
+			opened,
+			site,
+			scriptReturning(site, without('/about/')),
+		);
+		assert.equal(entered.kind, 'review');
+		assert.ok(entered.summary.unsaved.includes('../pages.overrides.json'));
+		const plain = await prepare(
+			opened,
+			site,
+			scriptReturning(site, without('/service/')),
+		);
+		assert.equal(plain.kind, 'review');
+		assert.ok(!plain.summary.unsaved.includes('../pages.overrides.json'));
+	} finally {
+		opened.close();
+		rmSync(site.root, { recursive: true, force: true });
+	}
+});
+
+test('kamado sync --out writes every change to the file before it refuses what it cannot ask, and writes none when nothing differs', () => {
+	const site = makeSite();
+	try {
+		// every page as it is, and one with a key that it has not
+		const opened = open(site);
+		// (by url: a script gives the paths of files relative to dir.input, which a page need not)
+		const rows = opened.pages().pages.map((page) => ({
+			url: page.url,
+			...(page.virtual ? { virtual: true } : {}),
+			meta: page.url === '/service/' ? { ...page.meta, order: 3 } : page.meta,
+		}));
+		opened.close();
+		const file = scriptReturning(site, rows);
+		const cli = path.join(dist, 'cli.js');
+		const run = (...args) =>
+			spawnSync(process.execPath, [cli, 'sync', file, ...args], {
+				cwd: site.root,
+				encoding: 'utf8',
+			});
+		// not a terminal, and not told yes: nothing is applied, and the list is in the file
+		const refused = run('--out', 'maps/changes.txt');
+		assert.equal(refused.status, 1, refused.stderr);
+		assert.match(refused.stderr, /Wrote maps\/changes\.txt \(\d+ changes?\)/u);
+		assert.match(refused.stderr, /this is not a terminal to confirm them on/u);
+		const written = site.read('maps/changes.txt');
+		assert.match(written, /^\d+ changes?:/u);
+		assert.match(written, /^\* \/service\/ order: 3$/mu);
+		// told yes: it applies, and writes the same list
+		const applied = run('--yes', '--out', 'again.txt');
+		assert.equal(applied.status, 0, applied.stderr);
+		assert.equal(site.read('again.txt'), written);
+		// nothing differs now: nothing is written
+		const none = run('--yes', '--out', 'none.txt');
+		assert.equal(none.status, 0, none.stderr);
+		assert.equal(existsSync(path.join(site.root, 'none.txt')), false);
+	} finally {
 		rmSync(site.root, { recursive: true, force: true });
 	}
 });

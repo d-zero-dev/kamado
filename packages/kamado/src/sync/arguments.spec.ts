@@ -15,19 +15,30 @@ describe('the arguments of sync (RFC §13)', () => {
 	});
 
 	test.each([
-		[{ out: 'x.json' }, 'sync does not take --out (only pages writes a file)'],
+		// Behavior change: sync takes --out, the file the whole list of changes is written to
+		// [{ out: 'x.json' }, 'sync does not take --out (only pages writes a file)'], // previous
 		[{ port: '3000' }, 'sync does not take --port (only ui does)'],
 		[{ open: true }, 'sync does not take --open (only ui does)'],
 		[
 			{ force: true },
-			'sync does not take --force (it takes --yes, --cache-dir and --config)',
+			// Behavior change: the flags sync takes include --out
+			'sync does not take --force (it takes --yes, --out, --cache-dir and --config)',
+			// 'sync does not take --force (it takes --yes, --cache-dir and --config)', // previous
 		],
 		[
 			{ verbose: true, incremental: true },
-			'sync does not take --incremental, --verbose (it takes --yes, --cache-dir and --config)',
+			// Behavior change: the flags sync takes include --out
+			'sync does not take --incremental, --verbose (it takes --yes, --out, --cache-dir and --config)',
+			// 'sync does not take --incremental, --verbose (it takes --yes, --cache-dir and --config)', // previous
 		],
 	])('refuses a flag it does not read: %j', (flags, message) => {
 		expect(() => checkCommandArguments('sync', ['import'], flags)).toThrow(message);
+	});
+
+	test('takes --out, the file the whole list of changes is written to', () => {
+		expect(() =>
+			checkCommandArguments('sync', ['import'], { out: 'changes.txt' }),
+		).not.toThrow();
 	});
 
 	test('--yes is the flag of sync only', () => {

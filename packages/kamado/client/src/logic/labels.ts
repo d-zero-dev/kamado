@@ -13,6 +13,11 @@ export type Label = string | Readonly<Record<string, string>> | null;
 export interface KeyPresentation {
 	readonly label?: Label;
 	readonly description?: Label;
+	/**
+	 * Where a real page that does not have the key yet gets it when it is set (the file of the
+	 * page, or its entry in `pages.overrides`). The core decides it; the screen does not read it.
+	 */
+	readonly newKeyOrigin?: 'inFile' | 'overrides';
 }
 
 /** What `ui.keys` of the config holds: the key, and how it is presented. */

@@ -116,15 +116,37 @@ pub(super) struct PlanIndex {
 	/// The pages that have a file, by the path of the file.
 	by_input: std::collections::HashMap<String, usize>,
 	by_output: std::collections::HashMap<String, usize>,
+	/// The output paths that more than one page has when the index is made (the plan keeps them,
+	/// with a warning, under a policy that allows it). `by_output` holds one page for each, so
+	/// the question whether another page has the path of a page cannot be answered by it for them.
+	shared_outputs: std::collections::HashSet<String>,
 }
 
 impl PlanIndex {
 	pub(super) fn of(plan: &crate::Plan) -> PlanIndex {
 		let mut index = PlanIndex::default();
 		for (i, page) in plan.pages.iter().enumerate() {
+			if index.by_output.contains_key(&page.file.output_path) {
+				index.shared_outputs.insert(page.file.output_path.clone());
+			}
 			index.put(page, i);
 		}
 		index
+	}
+
+	/// Whether more than one page had the output `path` when the index was made.
+	pub(super) fn shares_output(&self, path: &str) -> bool {
+		self.shared_outputs.contains(path)
+	}
+
+	/// The page that is written to `path`.
+	pub(super) fn output(&self, path: &str) -> Option<usize> {
+		self.by_output.get(path).copied()
+	}
+
+	/// The page that has a file at `path`.
+	pub(super) fn input(&self, path: &str) -> Option<usize> {
+		self.by_input.get(path).copied()
 	}
 
 	fn put(&mut self, page: &crate::Page, i: usize) {
@@ -361,10 +383,20 @@ impl Ui {
 	/// Writes `pages.overrides` as the batch has it, if its commits held it back (see
 	/// [`Journal::deferred`]): once, with what it held recorded to be put back like any write.
 	pub(super) fn flush_overrides(&mut self) -> Result<(), Fail> {
+		self.settle_removed_entries()?;
 		let Some(journal) = &mut self.batch else {
 			return Ok(());
 		};
-		let (Some(text), Some(path)) = (journal.deferred.take(), journal.defer.clone()) else {
+		// What was written to the copy in place is the text; otherwise what the commits held back.
+		let held = journal.deferred.take();
+		let text = if journal.appended {
+			self.overrides.as_ref().map(|o| o.text.clone())
+		} else {
+			held
+		};
+		journal.appended = false;
+		journal.appender = None;
+		let (Some(text), Some(path)) = (text, journal.defer.clone()) else {
 			return Ok(());
 		};
 		let old = match fs::read(&path) {
@@ -499,6 +531,13 @@ impl Ui {
 		let mut remade: Vec<(usize, kd_site::meta::Meta, Option<String>)> = Vec::new();
 		for url in &self.touched {
 			if built.iter().any(|a| a.page.file.url == *url) {
+				// A page file made at the URL of a virtual page is the page now: the virtual
+				// page that was there goes (a page that had a file is in `gone`).
+				if let Some(i) = self.by_url.get(url).copied()
+					&& self.plan.pages[i].is_virtual
+				{
+					dropped.insert(i);
+				}
 				continue;
 			}
 			let entry = model.and_then(|m| m.by_url.get(url));
@@ -895,11 +934,31 @@ impl Ui {
 					.map(|p| p.file.url.clone()),
 			)
 			.collect();
-		// What frees places.
-		for item in items
+		// What frees places. The pages without a file that go are taken out of
+		// `pages.overrides` together, where one by one each would read and build the file again.
+		let virtual_gone: Vec<&Item> = items
 			.iter()
-			.filter(|i| phase(&i.edit.change) == Some(Phase::Frees))
-		{
+			.filter(|i| {
+				matches!(i.edit.change, Change::DeletePage)
+					&& self
+						.by_url
+						.get(&i.edit.url)
+						.is_some_and(|&p| self.plan.pages[p].is_virtual)
+			})
+			.collect();
+		let mut gone_together: std::collections::HashSet<usize> = std::collections::HashSet::new();
+		if virtual_gone.len() > 1 {
+			let urls: Vec<&str> = virtual_gone.iter().map(|i| i.edit.url.as_str()).collect();
+			if self
+				.delete_virtual_pages(&urls)
+				.map_err(|f| (virtual_gone[0].index, f))?
+			{
+				gone_together.extend(virtual_gone.iter().map(|i| i.index));
+			}
+		}
+		for item in items.iter().filter(|i| {
+			phase(&i.edit.change) == Some(Phase::Frees) && !gone_together.contains(&i.index)
+		}) {
 			let url = current(&now, &item.edit.url);
 			self.make_one(&url, &item.edit.change, &item.edit.expect)
 				.map_err(|f| (item.index, f))?;
@@ -935,6 +994,8 @@ impl Ui {
 				self.make_one(&url, &item.edit.change, &item.edit.expect)
 					.map_err(|f| (item.index, f))?;
 			}
+			// The entries the pages that were given a file leave are taken out of the text.
+			self.settle_removed_entries().map_err(|f| (NO_EDIT, f))?;
 		}
 		let keys: Vec<(&Item, String)> = items
 			.iter()
@@ -965,11 +1026,13 @@ impl Ui {
 		if keys.is_empty() {
 			return Ok(());
 		}
+		// The text of `pages.overrides` is what the entries are found in by their places.
+		self.settle_removed_entries().map_err(|f| (NO_EDIT, f))?;
 		// The page files and the sidecars: what each holds before the keys and as the keys have
 		// changed it so far, by path, in the order they were first touched.
 		let mut texts: Vec<(String, String, bool)> = Vec::new();
 		let mut at: HashMap<String, usize> = HashMap::new();
-		let mut meta_of: HashMap<usize, Meta> = HashMap::new();
+		let mut meta_of: HashMap<usize, super::WorkingMeta> = HashMap::new();
 		let mut touched: Vec<usize> = Vec::new();
 		let mut is_touched: std::collections::HashSet<usize> = std::collections::HashSet::new();
 		// `pages.overrides` as the keys change it: what it reads as, and the changes to make to
@@ -993,95 +1056,159 @@ impl Ui {
 			})
 			.unwrap_or_default();
 		let mut entry_changes: Vec<(usize, usize, &str, &KeyChange)> = Vec::new();
-		for (item, url) in keys {
-			let Change::Key(change) = &item.edit.change else {
-				continue;
-			};
-			let fail_at = |f: Fail| (item.index, f);
-			let Some(&i) = self.by_url.get(url) else {
-				return Err(fail_at(Fail {
-					code: "notFound",
-					message: format!("there is no page with the URL {url}"),
-				}));
-			};
-			let key = change.key();
-			let page = &self.plan.pages[i];
-			let meta = meta_of.entry(i).or_insert_with(|| page.meta.clone());
-			let exists = meta.iter().any(|(k, _)| k == key);
-			let in_overrides = overrides_now
-				.as_ref()
-				.and_then(|p| p.by_url.get(&page.file.url))
-				.is_some_and(|o| o.meta.iter().any(|(k, _)| k == key));
-			let origin = self
-				.key_origin(i, change, exists, in_overrides)
-				.map_err(fail_at)?;
-			let made_here = no_file_at_start.contains(item.edit.url.as_str());
-			let (field, path) = match origin {
-				super::Origin::InFile => ("input", page.file.input_path.clone()),
-				super::Origin::Sidecar => ("sidecar", crate::sidecar_path(&page.file.input_path)),
-				super::Origin::Overrides => match &overrides_before {
-					Some((path, _, _)) => ("overrides", path.clone()),
-					None => {
-						return Err(fail_at(Fail {
-							code: "invalid",
-							message: "the site has no pages.overrides file".to_string(),
-						}));
-					}
-				},
-			};
-			let has_hash =
-				matches!(&item.edit.expect, Value::Object(m) if m.iter().any(|(f, _)| f == field));
-			if !has_hash && !(made_here && field != "overrides") {
-				return Err(fail_at(Fail {
-					code: "invalid",
-					message: format!(
-						"`expect.{field}` (the hash of {path}) is required for this change"
-					),
-				}));
-			}
-			if origin == super::Origin::Overrides {
-				let Some(&entry) = entry_of.get(&page.file.url) else {
+		// The entries of real pages that have none yet and get a new key that goes to
+		// `pages.overrides` (`ui.keys.<key>.newKeyOrigin`), added after the entries that are
+		// changed, and where each is among them.
+		let mut new_entries: Vec<kd_site::meta::Override> = Vec::new();
+		let mut new_at: HashMap<String, usize> = HashMap::new();
+		// The keys of the entries of `pages.overrides` as the keys change them, by URL: what the
+		// model of the file has of each is written back when every key is known.
+		let mut entry_work: HashMap<String, super::WorkingMeta> = HashMap::new();
+		// The keys of the page files, which are changed together once every key is known (the
+		// edit of a key reads the whole file, so a page with many keys edited one by one costs
+		// the square of their number): by the place of the file in `texts`.
+		let mut pending: Vec<PendingFile<'_>> = Vec::new();
+		let mut pending_at: HashMap<usize, usize> = HashMap::new();
+		let mut each_key = || -> Result<(), (usize, Fail)> {
+			for (item, url) in keys {
+				let Change::Key(change) = &item.edit.change else {
+					continue;
+				};
+				let fail_at = |f: Fail| (item.index, f);
+				let Some(&i) = self.by_url.get(url) else {
 					return Err(fail_at(Fail {
-						code: "invalid",
-						message: format!("{path} has no entry for {}", page.file.url),
+						code: "notFound",
+						message: format!("there is no page with the URL {url}"),
 					}));
 				};
-				entry_changes.push((item.index, entry, page.file.url.as_str(), change));
-				if let Some(parsed) = &mut overrides_now
-					&& let Some(e) = parsed.by_url.get_mut(&page.file.url)
-				{
-					e.meta = change.apply(&e.meta);
-				}
-			} else {
-				let slot = match at.get(&path) {
-					Some(&slot) => slot,
-					None => {
-						let bytes =
-							std::fs::read(&path).map_err(|e| fail_at(super::io_fail(&path, &e)))?;
-						let text = String::from_utf8(bytes).map_err(|_| {
-							fail_at(Fail {
-								code: "invalid",
-								message: format!("{path}: file is not valid UTF-8"),
-							})
-						})?;
-						texts.push((path.clone(), text, false));
-						at.insert(path.clone(), texts.len() - 1);
-						texts.len() - 1
+				let key = change.key();
+				let page = &self.plan.pages[i];
+				let meta = meta_of
+					.entry(i)
+					.or_insert_with(|| super::WorkingMeta::new(page.meta.clone()));
+				let exists = meta.has(key);
+				let in_overrides = match entry_work.get(&page.file.url) {
+					Some(work) => work.has(key),
+					None => overrides_now
+						.as_ref()
+						.and_then(|p| p.by_url.get(&page.file.url))
+						.is_some_and(|o| o.meta.iter().any(|(k, _)| k == key)),
+				};
+				let origin = self
+					.key_origin(i, change, exists, in_overrides)
+					.map_err(fail_at)?;
+				let made_here = no_file_at_start.contains(item.edit.url.as_str());
+				let (field, path) = match origin {
+					super::Origin::InFile => ("input", page.file.input_path.clone()),
+					super::Origin::Sidecar => {
+						("sidecar", crate::sidecar_path(&page.file.input_path))
 					}
+					super::Origin::Overrides => match &overrides_before {
+						Some((path, _, _)) => ("overrides", path.clone()),
+						None => {
+							return Err(fail_at(Fail {
+								code: "invalid",
+								message: "the site has no pages.overrides file".to_string(),
+							}));
+						}
+					},
 				};
-				let edited = if origin == super::Origin::InFile {
-					super::edit_page_text(&path, page.kind, &texts[slot].1, change)
+				let has_hash = matches!(&item.edit.expect, Value::Object(m) if m.iter().any(|(f, _)| f == field));
+				if !has_hash && !(made_here && field != "overrides") {
+					return Err(fail_at(Fail {
+						code: "invalid",
+						message: format!(
+							"`expect.{field}` (the hash of {path}) is required for this change"
+						),
+					}));
+				}
+				if origin == super::Origin::Overrides {
+					if let Some(&entry) = entry_of.get(&page.file.url) {
+						entry_changes.push((item.index, entry, page.file.url.as_str(), change));
+					} else if new_at.contains_key(&page.file.url) {
+						// the entry this batch adds: it is written with the keys it has at the end
+					} else if matches!(change, KeyChange::Set(..)) {
+						let entry = kd_site::meta::Override {
+							url: page.file.url.clone(),
+							is_virtual: false,
+							meta: change.apply(&Meta::new()),
+							lastmod: None,
+						};
+						if let Some(parsed) = &mut overrides_now {
+							super::model_after(parsed, &super::EntryChange::Add(entry.clone()));
+						}
+						new_at.insert(page.file.url.clone(), new_entries.len());
+						new_entries.push(entry);
+					} else {
+						return Err(fail_at(Fail {
+							code: "invalid",
+							message: format!("{path} has no entry for {}", page.file.url),
+						}));
+					}
+					let work = entry_work.entry(page.file.url.clone()).or_insert_with(|| {
+						super::WorkingMeta::new(
+							overrides_now
+								.as_ref()
+								.and_then(|p| p.by_url.get(&page.file.url))
+								.map(|e| e.meta.clone())
+								.unwrap_or_default(),
+						)
+					});
+					work.apply(change);
 				} else {
-					super::edit_sidecar_text(&path, &texts[slot].1, change)
-				};
-				let edited = edited.map_err(fail_at)?;
-				if edited != texts[slot].1 {
-					texts[slot] = (path.clone(), edited, true);
+					let slot = match at.get(&path) {
+						Some(&slot) => slot,
+						None => {
+							let bytes = std::fs::read(&path)
+								.map_err(|e| fail_at(super::io_fail(&path, &e)))?;
+							let text = String::from_utf8(bytes).map_err(|_| {
+								fail_at(Fail {
+									code: "invalid",
+									message: format!("{path}: file is not valid UTF-8"),
+								})
+							})?;
+							texts.push((path.clone(), text, false));
+							at.insert(path.clone(), texts.len() - 1);
+							texts.len() - 1
+						}
+					};
+					let place = *pending_at.entry(slot).or_insert_with(|| {
+						pending.push(PendingFile {
+							slot,
+							path: path.clone(),
+							// a sidecar is no page file
+							kind: (origin == super::Origin::InFile).then_some(page.kind),
+							changes: Vec::new(),
+						});
+						pending.len() - 1
+					});
+					pending[place].changes.push((item.index, change));
+				}
+				meta.apply(change);
+				if is_touched.insert(i) {
+					touched.push(i);
 				}
 			}
-			*meta = change.apply(meta);
-			if is_touched.insert(i) {
-				touched.push(i);
+			Ok(())
+		};
+		// The page files are edited with the keys known so far even when a key is refused, so
+		// that the edit of the batch that fails first, in the order of the batch, is the one told.
+		let looped = each_key();
+		let edited = edit_page_files(&mut texts, &pending);
+		match (looped, edited) {
+			(Err(a), Err(b)) => return Err(if b.0 < a.0 { b } else { a }),
+			(Err(e), Ok(())) | (Ok(()), Err(e)) => return Err(e),
+			(Ok(()), Ok(())) => {}
+		}
+		// The keys of the entries, as the model of the file and as the entries that are added.
+		for (url, work) in entry_work {
+			if let Some(&n) = new_at.get(&url) {
+				new_entries[n].meta = work.to_meta();
+			}
+			if let Some(parsed) = &mut overrides_now
+				&& let Some(e) = parsed.by_url.get_mut(&url)
+			{
+				e.meta = work.into_meta();
 			}
 		}
 		let mut writes: Vec<(String, String)> = texts
@@ -1090,8 +1217,25 @@ impl Ui {
 			.map(|(path, text, _)| (path, text))
 			.collect();
 		let mut overrides_after = None;
-		if let (Some((path, text, _)), false) = (&overrides_before, entry_changes.is_empty()) {
-			let edited = edit_overrides_entries(path, text, &entry_changes)?;
+		if let (Some((path, text, _)), false) = (
+			&overrides_before,
+			entry_changes.is_empty() && new_entries.is_empty(),
+		) {
+			let mut edited = if entry_changes.is_empty() {
+				text.clone()
+			} else {
+				edit_overrides_entries(path, text, &entry_changes)?
+			};
+			if !new_entries.is_empty() {
+				let mut appender =
+					kd_jsonc::edit::Appender::new(&edited, &[super::Seg::Key("pages")])
+						.map_err(|e| (NO_EDIT, super::overrides_edit_fail(path, &e)))?;
+				for entry in &new_entries {
+					appender
+						.push(&mut edited, &super::overrides_entry_value(entry))
+						.map_err(|e| (NO_EDIT, super::overrides_edit_fail(path, &e)))?;
+				}
+			}
 			if &edited != text {
 				writes.push((path.clone(), edited.clone()));
 				overrides_after = Some(edited);
@@ -1117,6 +1261,47 @@ impl Ui {
 		self.reindex_columns();
 		Ok(())
 	}
+}
+
+/// The keys of one page file that the keys of a batch change: the place of the file among the
+/// texts the batch holds, and the changes with the position of each edit in the batch.
+struct PendingFile<'a> {
+	slot: usize,
+	path: String,
+	/// The kind of the page file, or `None` for a sidecar.
+	kind: Option<crate::PageKind>,
+	changes: Vec<(usize, &'a KeyChange)>,
+}
+
+/// Edits each page file of `pending` once, with all its changes (see
+/// `super::edit_page_text_many`). When some fail, the one told is the one of the edit that
+/// comes first in the batch.
+fn edit_page_files(
+	texts: &mut [(String, String, bool)],
+	pending: &[PendingFile<'_>],
+) -> Result<(), (usize, Fail)> {
+	let mut first: Option<(usize, Fail)> = None;
+	for file in pending {
+		let edited = match file.kind {
+			Some(kind) => {
+				super::edit_page_text_many(&file.path, kind, &texts[file.slot].1, &file.changes)
+			}
+			None => super::edit_sidecar_text_many(&file.path, &texts[file.slot].1, &file.changes),
+		};
+		match edited {
+			Ok(edited) => {
+				if edited != texts[file.slot].1 {
+					texts[file.slot] = (file.path.clone(), edited, true);
+				}
+			}
+			Err(e) => {
+				if first.as_ref().is_none_or(|f| e.0 < f.0) {
+					first = Some(e);
+				}
+			}
+		}
+	}
+	first.map_or(Ok(()), Err)
 }
 
 /// The text of `pages.overrides` once the key changes are made to its entries: `changes` are
@@ -1165,9 +1350,17 @@ fn edit_overrides_entries(
 				},
 			)
 		})?;
-		for (index, url, change) in &list {
-			edited = super::change_entry(path, url, &edited, change, &mut expected)
-				.map_err(|f| (*index, f))?;
+		// The keys of the entry are changed together when they can be; else one after the other,
+		// and the one that fails is the one told.
+		let changes: Vec<&KeyChange> = list.iter().map(|(_, _, change)| *change).collect();
+		match super::change_entry_together(&edited, &changes, &mut expected) {
+			Some(text) => edited = text,
+			None => {
+				for (index, url, change) in &list {
+					edited = super::change_entry(path, url, &edited, change, &mut expected)
+						.map_err(|f| (*index, f))?;
+				}
+			}
 		}
 		let read_back = kd_jsonc::parse(&edited).map_err(|e| {
 			(

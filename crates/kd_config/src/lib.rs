@@ -41,6 +41,10 @@ impl std::error::Error for Error {}
 
 type R<T> = Result<T, Error>;
 
+/// What `ui.keys` gives: how the screen presents each key, and where each key that says so
+/// writes a new value of a real page.
+type ParsedUiKeys = (Vec<(String, UiKey)>, Vec<(String, NewKeyOrigin)>);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dir {
 	pub input: String,
@@ -263,6 +267,17 @@ pub struct UiKey {
 	pub description: Option<Label>,
 }
 
+/// Where a key that a real page does not have yet is written when `kamado ui` or `kamado sync`
+/// sets it (RFC section 14.2, "書く場所（出所）").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum NewKeyOrigin {
+	/// The page file: the front matter of an HTML page, the `meta` of a module.
+	#[default]
+	InFile,
+	/// The entry of the page in `pages.overrides`, which is added when the page has none.
+	Overrides,
+}
+
 /// One operation of the sync button of `kamado ui` (and of `kamado sync <name>`): a script of
 /// the project that exports `{ select?, read?, write? }`. With `write` it writes the site out to
 /// the outside data (an export); without it, it brings the outside data into the site (an
@@ -279,12 +294,16 @@ pub struct SyncFunction {
 	pub script: String,
 }
 
-/// The `ui` section: what `kamado ui` shows, shared with the team through the repository. The
-/// build and the dev server do not read it.
+/// The `ui` section: what `kamado ui` shows, and where `kamado ui` and `kamado sync` write a new
+/// key, shared with the team through the repository. The build and the dev server do not read it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UiConfig {
 	/// Metadata key → how the screen presents it, in the order written.
 	pub keys: Vec<(String, UiKey)>,
+	/// Metadata key → where `ui.keys.<key>.newKeyOrigin` says a new key of a real page is
+	/// written, for the keys that say one, in the order written. It is not part of how the
+	/// screen presents a key, so it is not in [`UiKey`].
+	pub new_key_origins: Vec<(String, NewKeyOrigin)>,
 	/// The operations of the sync button, in the order written.
 	pub sync_functions: Vec<SyncFunction>,
 	/// `ui.defaultKeyOrder`: the identifiers of the columns in the order the grid shows them
@@ -649,8 +668,20 @@ pub fn parse(config_text: &str, root_dir: &str, package_json: Option<&str>) -> R
 			"defaultKeyOrder",
 			"defaultFixedKeys",
 		])?;
+		let (keys, new_key_origins) = parse_ui_keys(&o)?;
+		if let Some((name, _)) = new_key_origins
+			.iter()
+			.find(|(_, origin)| *origin == NewKeyOrigin::Overrides)
+			&& pages.overrides.is_none()
+		{
+			return Err(Error {
+				path: format!("ui.keys.{name}.newKeyOrigin"),
+				message: "\"overrides\" needs pages.overrides, which is not set".to_string(),
+			});
+		}
 		UiConfig {
-			keys: parse_ui_keys(&o)?,
+			keys,
+			new_key_origins,
 			sync_functions: parse_sync_functions(&o, &resolve)?,
 			default_key_order: parse_column_list(&o, "defaultKeyOrder")?,
 			default_fixed_keys: parse_column_list(&o, "defaultFixedKeys")?,
@@ -673,26 +704,40 @@ pub fn parse(config_text: &str, root_dir: &str, package_json: Option<&str>) -> R
 	})
 }
 
-/// `ui.keys`: an object from metadata key to `{ label?, description? }`.
+/// `ui.keys`: an object from metadata key to `{ label?, description?, newKeyOrigin? }`; what is
+/// read of it is the presentation of the keys and, for the keys that write one, where a new key
+/// of a real page goes.
 ///
 /// A key written twice is an error of the JSONC layer (`duplicate key`), so it is not checked
 /// here. An empty name is refused because no metadata key has one: an entry for it could never
 /// be shown. The names are not looked up among the keys of the pages: a key that no page has
 /// gets no column (the columns are the keys the pages hold), so a team can name a key before
 /// the first page has it.
-fn parse_ui_keys(ui: &Obj<'_>) -> R<Vec<(String, UiKey)>> {
+fn parse_ui_keys(ui: &Obj<'_>) -> R<ParsedUiKeys> {
 	let pairs = match ui.get("keys") {
-		None => return Ok(Vec::new()),
+		None => return Ok((Vec::new(), Vec::new())),
 		Some(Value::Object(pairs)) => pairs,
 		Some(_) => return Err(ui.err("keys", "expected an object")),
 	};
 	let mut keys = Vec::with_capacity(pairs.len());
+	let mut origins = Vec::new();
 	for (name, value) in pairs {
 		if name.is_empty() {
 			return Err(ui.err("keys", "a key name must not be empty"));
 		}
 		let o = Obj::new(value, &format!("{}keys.{name}.", ui.prefix()))?;
-		o.allow(&["label", "description"])?;
+		o.allow(&["label", "description", "newKeyOrigin"])?;
+		match o.opt_str("newKeyOrigin")?.as_deref() {
+			None => {}
+			Some("inFile") => origins.push((name.clone(), NewKeyOrigin::InFile)),
+			Some("overrides") => origins.push((name.clone(), NewKeyOrigin::Overrides)),
+			Some(other) => {
+				return Err(o.err(
+					"newKeyOrigin",
+					format!("expected \"inFile\" or \"overrides\", got {other:?}"),
+				));
+			}
+		}
 		keys.push((
 			name.clone(),
 			UiKey {
@@ -701,7 +746,7 @@ fn parse_ui_keys(ui: &Obj<'_>) -> R<Vec<(String, UiKey)>> {
 			},
 		));
 	}
-	Ok(keys)
+	Ok((keys, origins))
 }
 
 /// The columns every row of the grid of `kamado ui` has, by their identifiers (RFC section 14.2).
@@ -1817,6 +1862,76 @@ mod tests {
 				),
 				("layout".to_string(), UiKey::default()),
 			]
+		);
+	}
+
+	#[test]
+	fn a_new_key_origin_is_read_for_the_keys_that_write_one() {
+		let cfg = ok(r#"{
+			"pages": { "overrides": "pages.overrides.json" },
+			"ui": { "keys": {
+				"order": { "newKeyOrigin": "overrides" },
+				"title": { "label": "T", "newKeyOrigin": "inFile" },
+				"nav": { "newKeyOrigin": null },
+				"layout": {}
+			} }
+		}"#);
+		assert_eq!(
+			cfg.ui.new_key_origins,
+			vec![
+				("order".to_string(), NewKeyOrigin::Overrides),
+				("title".to_string(), NewKeyOrigin::InFile),
+			]
+		);
+		// the presentation of a key is not changed by where its new values go
+		assert_eq!(cfg.ui.keys.len(), 4);
+		assert_eq!(cfg.ui.keys[1].1.label, Some(Label::Text("T".to_string())));
+		assert_eq!(cfg.ui.keys[0].1, UiKey::default());
+		assert!(ok("{}").ui.new_key_origins.is_empty());
+	}
+
+	#[test]
+	fn a_new_key_origin_is_in_file_or_overrides() {
+		let e = fail(
+			r#"{ "pages": { "overrides": "o.json" }, "ui": { "keys": { "order": { "newKeyOrigin": "sidecar" } } } }"#,
+		);
+		assert_eq!(e.path, "ui.keys.order.newKeyOrigin");
+		assert_eq!(
+			e.message,
+			r#"expected "inFile" or "overrides", got "sidecar""#
+		);
+		let e = fail(r#"{ "ui": { "keys": { "order": { "newKeyOrigin": 1 } } } }"#);
+		assert_eq!(e.path, "ui.keys.order.newKeyOrigin");
+		assert_eq!(e.message, "expected a string");
+	}
+
+	#[test]
+	fn an_empty_new_key_origin_is_not_one() {
+		let e = fail(
+			r#"{ "pages": { "overrides": "o.json" }, "ui": { "keys": { "order": { "newKeyOrigin": "" } } } }"#,
+		);
+		assert_eq!(e.path, "ui.keys.order.newKeyOrigin");
+		assert_eq!(e.message, r#"expected "inFile" or "overrides", got """#);
+		// `pages.overrides` that is null is not set
+		let e = fail(
+			r#"{ "pages": { "overrides": null }, "ui": { "keys": { "order": { "newKeyOrigin": "overrides" } } } }"#,
+		);
+		assert_eq!(e.path, "ui.keys.order.newKeyOrigin");
+	}
+
+	#[test]
+	fn overrides_as_the_place_of_a_new_key_needs_pages_overrides() {
+		let e = fail(r#"{ "ui": { "keys": { "order": { "newKeyOrigin": "overrides" } } } }"#);
+		assert_eq!(e.path, "ui.keys.order.newKeyOrigin");
+		assert_eq!(
+			e.message,
+			r#""overrides" needs pages.overrides, which is not set"#
+		);
+		// writing the page file needs no other file
+		let cfg = ok(r#"{ "ui": { "keys": { "order": { "newKeyOrigin": "inFile" } } } }"#);
+		assert_eq!(
+			cfg.ui.new_key_origins,
+			vec![("order".to_string(), NewKeyOrigin::InFile)]
 		);
 	}
 

@@ -257,3 +257,54 @@ fn schema_column_lists_match_the_parser() {
 	assert!(at(501).is_err());
 	assert_eq!(list.get("uniqueItems"), Some(&Value::Bool(true)));
 }
+
+/// The values of `ui.keys.<key>.newKeyOrigin` that the schema lists are the ones the parser takes
+/// (`null` is not writing it), and the parser says no others.
+#[test]
+fn schema_new_key_origin_values_match_the_parser() {
+	let root = schema();
+	let key = root
+		.get("properties")
+		.unwrap()
+		.get("ui")
+		.unwrap()
+		.get("properties")
+		.unwrap()
+		.get("keys")
+		.unwrap()
+		.get("additionalProperties")
+		.unwrap();
+	let listed = match key
+		.get("properties")
+		.unwrap()
+		.get("newKeyOrigin")
+		.unwrap()
+		.get("enum")
+	{
+		Some(Value::Array(values)) => values.clone(),
+		other => panic!("no enum in {other:?}"),
+	};
+	let config = |value: &str| {
+		format!(
+			r#"{{ "dir": {{ "input": "src", "output": "out" }}, "pages": {{ "overrides": "o.json" }}, "ui": {{ "keys": {{ "k": {{ "newKeyOrigin": {value} }} }} }} }}"#
+		)
+	};
+	let mut names: Vec<String> = Vec::new();
+	for value in &listed {
+		kd_config::parse(&config(&value.to_json()), "/p", None)
+			.unwrap_or_else(|e| panic!("{} is listed but refused: {e}", value.to_json()));
+		if let Value::String(name) = value {
+			names.push(name.clone());
+		}
+	}
+	let error = kd_config::parse(&config(r#""nope""#), "/p", None).expect_err("nope is refused");
+	let said: Vec<String> = error
+		.message
+		.split('"')
+		.skip(1)
+		.step_by(2)
+		.take(2)
+		.map(str::to_string)
+		.collect();
+	assert_eq!(sorted(said), sorted(names));
+}

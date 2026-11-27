@@ -22,7 +22,7 @@ const USAGE = `Usage:
   kamado server           [--config <file>] [--cache-dir <dir>] [--verbose]
   kamado pages            [--out <file>] [--incremental] [--cache-dir <dir>] [--config <file>]
   kamado ui               [--port <n>] [--open | --no-open] [--cache-dir <dir>] [--config <file>]
-  kamado sync <name|path> [-y, --yes] [--cache-dir <dir>] [--config <file>]
+  kamado sync <name|path> [-y, --yes] [--out <file>] [--cache-dir <dir>] [--config <file>]
   kamado ui-settings list
   kamado ui-settings reset [--config <file>]
   kamado ui-settings delete <config-file> | --all
@@ -38,7 +38,8 @@ unless --port says otherwise.
 path), which exports { select?, read?, write? }. With a write it exports: it shows what differs
 from the data outside, asks, and then the write puts the pages there. Without one it imports: it
 shows what the returned pages change, asks, and applies it to the files of the local repository
-(--yes does not ask). It changes nothing when anything is wrong.
+(--yes does not ask). --out writes every change to a file before it asks (the screen lists
+the first 200). It changes nothing when anything is wrong.
 \`ui-settings\` looks at what \`ui\` saved in ~/.config/kamado/ui-settings.json, for each project:
 \`list\` shows the projects, \`reset\` removes those of the project of the config file, and
 \`delete\` removes those of the project of the given config file (or, with --all, those of every
@@ -97,11 +98,12 @@ function resolveConfig(configFlag: string | undefined): string {
  * @param values - The flags
  * @param values.config - The `--config` flag
  * @param values.yes - The `--yes` flag
+ * @param values.out - The `--out` flag
  * @returns The process exit code
  */
 async function runSyncCommand(
 	rest: readonly string[],
-	values: { config?: string; 'cache-dir'?: string; yes?: boolean },
+	values: { config?: string; 'cache-dir'?: string; yes?: boolean; out?: string },
 ): Promise<number> {
 	const interactive = process.stdin.isTTY && process.stderr.isTTY;
 	return await syncCommand(
@@ -113,6 +115,7 @@ async function runSyncCommand(
 					? undefined
 					: path.resolve(process.cwd(), values['cache-dir']),
 			yes: values.yes,
+			out: values.out,
 		},
 		{
 			cwd: process.cwd(),

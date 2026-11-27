@@ -5,9 +5,7 @@
  */
 import type { PageMap, PagesOptions } from './pages.js';
 
-import { mkdirSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
-
+import { checkOutName, writeOutFile } from './out-file.js';
 import { pagesJson } from './pages.js';
 
 /** What the command needs from the process. */
@@ -60,11 +58,8 @@ export function pagesCommand(
 	options: PagesCommandOptions,
 	io: PagesCommandIO = processIO(),
 ): void {
-	// An empty name resolves to the directory the command runs in: say what is wrong now,
-	// not after a plan that can take a while.
-	if (options.out === '') {
-		throw new Error('--out needs a file name');
-	}
+	// Say what is wrong now, not after a plan that can take a while.
+	checkOutName(options.out);
 	io.stderr('Reading pages...\n');
 	const started = io.now();
 	const text = pagesJson(configPath, {
@@ -76,15 +71,7 @@ export function pagesCommand(
 	if (options.out === undefined) {
 		io.stdout(`${text}\n`);
 	} else {
-		const file = path.resolve(io.cwd, options.out);
-		try {
-			mkdirSync(path.dirname(file), { recursive: true });
-			writeFileSync(file, `${text}\n`);
-		} catch (error) {
-			// The message of the system names the resolved path, not what was typed.
-			const reason = error instanceof Error ? error.message : String(error);
-			throw new Error(`cannot write ${options.out}: ${reason}`, { cause: error });
-		}
+		writeOutFile(io.cwd, options.out, `${text}\n`);
 	}
 	// The warnings are in the map for the program that reads it; on the terminal they are
 	// what `build` shows them as, so that a conflict is not missed when the map goes to a file.

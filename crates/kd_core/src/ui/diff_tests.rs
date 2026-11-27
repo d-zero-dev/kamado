@@ -450,6 +450,78 @@ fn pages_overrides_that_head_does_not_have_makes_what_it_holds_added() {
 }
 
 #[test]
+fn a_key_that_a_new_key_origin_put_in_an_entry_is_reverted_by_taking_it_out_of_the_entry() {
+	// the entry is added when the key is set; HEAD has no entry, and putting the value of HEAD
+	// back is taking the key out of the entry: an entry is not added by putting a value back
+	let site = Site::new("revert_new_key_origin");
+	site.write("src/a/index.html", "---\ntitle: A\n---\n<p>a</p>");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(
+		r#", "pages": { "overrides": "pages.overrides.json" }, "ui": { "keys": { "order": { "newKeyOrigin": "overrides" } } }"#,
+	);
+	let expect = expect_of(&mut ui, "/a/");
+	let set = json(
+		&ui.edit(&format!(
+			r#"{{"url":"/a/","expect":{expect},"change":{{"op":"set","key":"order","value":3}}}}"#
+		))
+		.unwrap(),
+	);
+	assert!(ok(&set), "{set:?}");
+	let head = head_of(
+		&mut ui,
+		&["/a/"],
+		&[("pages.overrides.json", H::Absent)],
+		true,
+	);
+	let answer = diff(&mut ui, &["/a/"], &head);
+	let order = meta_diff(&of(&answer, "/a/").unwrap(), "order");
+	assert_eq!(kind(&order), "added");
+	assert!(revertible(&order));
+	let reverted = revert(&mut ui, "/a/", Some("order"), &head);
+	assert!(ok(&reverted), "{reverted:?}");
+	assert_eq!(
+		site.read("pages.overrides.json"),
+		r#"{"version":1,"pages":[{"url":"/a/","meta":{}}]}"#
+	);
+	assert_eq!(
+		site.read("src/a/index.html"),
+		"---\ntitle: A\n---\n<p>a</p>"
+	);
+}
+
+#[test]
+fn a_value_put_back_into_an_entry_the_page_does_not_have_is_refused_and_no_entry_is_added() {
+	// HEAD has the key in an entry of pages.overrides; the page has no entry now (it was taken
+	// out): putting the value back would be adding an entry, which a revert does not do
+	let site = Site::new("revert_needs_an_entry");
+	site.write("src/a/index.html", "---\ntitle: A\n---\n<p>a</p>");
+	site.write("pages.overrides.json", r#"{"version":1,"pages":[]}"#);
+	let mut ui = site.open(
+		r#", "pages": { "overrides": "pages.overrides.json" }, "ui": { "keys": { "nav": { "newKeyOrigin": "overrides" } } }"#,
+	);
+	let head = head_of(
+		&mut ui,
+		&["/a/"],
+		&[(
+			"pages.overrides.json",
+			H::Text(r#"{"version":1,"pages":[{"url":"/a/","meta":{"nav":true}}]}"#),
+		)],
+		true,
+	);
+	let answer = diff(&mut ui, &["/a/"], &head);
+	let nav = meta_diff(&of(&answer, "/a/").unwrap(), "nav");
+	assert!(!revertible(&nav), "{nav:?}");
+	let before = site.read("pages.overrides.json");
+	let reverted = revert(&mut ui, "/a/", Some("nav"), &head);
+	assert!(!ok(&reverted), "{reverted:?}");
+	assert_eq!(site.read("pages.overrides.json"), before);
+	assert_eq!(
+		site.read("src/a/index.html"),
+		"---\ntitle: A\n---\n<p>a</p>"
+	);
+}
+
+#[test]
 fn a_virtual_page_has_the_value_of_its_entry_in_head_to_be_compared_with() {
 	let (_site, mut ui) = overrides_site("virtual_modified");
 	let head = head_of(

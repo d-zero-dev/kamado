@@ -108,3 +108,18 @@ describe('--all', () => {
 		);
 	});
 });
+
+describe('--out of sync', () => {
+	test('is refused by the commands that write no file, and needs a name', async () => {
+		for (const command of ['build', 'server', 'ui']) {
+			const result = await kamado(command, '--out', 'x.txt');
+			expect(result.code).toBe(1);
+			expect(result.stderr).toContain(
+				`${command} does not take --out (only pages and sync write a file)`,
+			);
+		}
+		const empty = await kamado('sync', 'import', '--out', '');
+		expect(empty.code).toBe(1);
+		expect(empty.stderr).toContain('--out needs a file name');
+	});
+});

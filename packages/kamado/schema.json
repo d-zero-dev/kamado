@@ -280,7 +280,7 @@
 			}
 		},
 		"ui": {
-			"description": "What kamado ui shows, shared with the team through the repository. Only kamado ui reads it: the build and the dev server do not.",
+			"description": "What kamado ui shows, and where kamado ui and kamado sync write a new key, shared with the team through the repository. The build and the dev server do not read it.",
 			"type": "object",
 			"additionalProperties": false,
 			"properties": {
@@ -293,7 +293,11 @@
 						"additionalProperties": false,
 						"properties": {
 							"label": { "$ref": "#/definitions/label" },
-							"description": { "$ref": "#/definitions/label" }
+							"description": { "$ref": "#/definitions/label" },
+							"newKeyOrigin": {
+								"description": "Where kamado ui and kamado sync write this key on a real page that does not have it yet: inFile (the default) is the page file, overrides is the entry of the page in pages.overrides (added when the page has none; it needs pages.overrides). A key the page already has is written where it is, and a virtual page is written in pages.overrides whatever this says. null is the same as not writing it.",
+								"enum": ["inFile", "overrides", null]
+							}
 						}
 					}
 				},

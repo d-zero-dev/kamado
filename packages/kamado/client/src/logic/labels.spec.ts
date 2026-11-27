@@ -147,3 +147,13 @@ describe('columnHeading', () => {
 		},
 	);
 });
+
+describe('columnHeading of a key that only says where its new values go', () => {
+	test('is shown by its name, with nothing to add: the screen does not read newKeyOrigin', () => {
+		const keys = { order: { newKeyOrigin: 'overrides' as const } };
+		expect(columnHeading('meta:order', keys, 'en', english)).toEqual({
+			name: 'order',
+			detail: undefined,
+		});
+	});
+});

@@ -9,10 +9,12 @@
  * changes and nobody could confirm them), and 130 when it was cancelled with Ctrl-C.
  */
 import type { Run } from './runner.js';
-import type { SyncSummary } from './types.js';
+import type { SyncChange, SyncChangeKind, SyncSummary } from './types.js';
 
 import { styleText } from 'node:util';
 
+import { checkOutName, writeOutFile } from '../out-file.js';
+import { CHANGE_ORDER } from './diff.js';
 import {
 	displayChange,
 	displayFailure,
@@ -20,6 +22,7 @@ import {
 	type DisplayChange,
 } from './display.js';
 import {
+	COUNT_NAMES,
 	runSync,
 	SyncError,
 	type SyncReport,
@@ -33,6 +36,8 @@ export interface SyncFlags {
 	readonly config?: string;
 	readonly 'cache-dir'?: string;
 	readonly yes?: boolean;
+	/** The file the whole list of changes is written to. */
+	readonly out?: string;
 }
 
 /** What the command needs of its surroundings. */
@@ -60,6 +65,61 @@ const MAX_LISTED = 200;
 
 /** The most files of unsaved changes the warning names. */
 const MAX_NAMED = 20;
+
+/**
+ * Counts by kind, in the words of {@link COUNT_NAMES} and in the order of the list.
+ * @param counts - How many changes there are of each kind
+ * @returns For example `2 deleted, 3 added`, empty when there are none
+ */
+function kindsText(counts: Readonly<Record<SyncChangeKind, number>>): string {
+	return CHANGE_ORDER.filter((kind) => counts[kind] > 0)
+		.map((kind) => `${counts[kind]} ${COUNT_NAMES[kind]}`)
+		.join(', ');
+}
+
+/**
+ * How many changes there are of each kind in a list of them.
+ * @param changes - The changes
+ */
+function tally(changes: readonly SyncChange[]): Record<SyncChangeKind, number> {
+	const counts: Record<SyncChangeKind, number> = {
+		added: 0,
+		deleted: 0,
+		movedUrl: 0,
+		movedFile: 0,
+		virtualized: 0,
+		materialized: 0,
+		meta: 0,
+	};
+	for (const change of changes) {
+		counts[change.kind] += 1;
+	}
+	return counts;
+}
+
+/**
+ * How {@link summaryText} shows the summary.
+ * @example
+ * ```ts
+ * // every change, for the file `--out` names
+ * const options: SummaryTextOptions = { all: true };
+ * // the cut list, which says where the whole one is
+ * const cut: SummaryTextOptions = { out: 'maps/sync.txt' };
+ * ```
+ */
+export interface SummaryTextOptions {
+	/**
+	 * Lists every change and names every file of the warning, with no line about what is left
+	 * out (what is written to the file `--out` names). By default the list is cut at 200
+	 * changes, and the warning names 20 files.
+	 */
+	readonly all?: boolean;
+	/**
+	 * The file the whole list is written to, as it was typed: the line about what is left out
+	 * says the list is there. Without it the line tells how to get the list (`--out <file>`).
+	 */
+	readonly out?: string;
+}
 
 /**
  * One change as a line of the confirmation.
@@ -121,14 +181,22 @@ function nothingDone(direction: 'import' | 'export' | undefined): string {
  * The summary as the text the confirmation shows.
  * @param summary - What the sync would change
  * @param review - Which way the sync goes (default: an import, which changes the site)
+ * @param options - How much of it to show
  * @returns The lines, each ending with a newline
  * @example
  * ```ts
  * summaryText({ counts: { added: 1, deleted: 0, movedUrl: 0, movedFile: 0, virtualized: 0, materialized: 0, meta: 0 }, changes: [{ kind: 'added', url: '/n/', virtual: true, inputPath: null, keys: 0 }], unsaved: [] });
  * // '1 change:\n+ /n/ (virtual)\n'
+ * // every change, and every file of the warning, for the file `--out` names
+ * summaryText(summary, undefined, { all: true });
  * ```
  */
-export function summaryText(summary: SyncSummary, review?: SyncReview): string {
+export function summaryText(
+	summary: SyncSummary,
+	review?: SyncReview,
+	options: SummaryTextOptions = {},
+): string {
+	const all = options.all === true;
 	const total = summary.changes.length;
 	if (review?.direction === 'export' && !review.diffed) {
 		return `The script would write ${review.targets} ${review.targets === 1 ? 'page' : 'pages'} outside. No difference can be shown: the script has no read.\n`;
@@ -138,20 +206,30 @@ export function summaryText(summary: SyncSummary, review?: SyncReview): string {
 			? `${total} ${total === 1 ? 'change' : 'changes'} to what is outside:`
 			: `${total} ${total === 1 ? 'change' : 'changes'}:`,
 	];
-	for (const change of summary.changes.slice(0, MAX_LISTED)) {
+	// With one kind the total says it all: the line is for what the total does not tell.
+	if (CHANGE_ORDER.filter((kind) => summary.counts[kind] > 0).length > 1) {
+		lines.push(`by kind: ${kindsText(summary.counts)}`);
+	}
+	const listed = all ? summary.changes : summary.changes.slice(0, MAX_LISTED);
+	for (const change of listed) {
 		lines.push(lineOf(displayChange(change)));
 	}
-	if (total > MAX_LISTED) {
-		lines.push(`... and ${total - MAX_LISTED} more`);
+	if (total > listed.length) {
+		// Whoever confirms agrees to what is not listed too: say what kinds it is made of.
+		lines.push(
+			`... and ${total - listed.length} more (${kindsText(tally(summary.changes.slice(listed.length)))}; ${options.out === undefined ? 'all of them: --out <file>' : `all of them are in ${showControls(options.out)}`})`,
+		);
 	}
 	if (summary.gitUnavailable === true) {
 		lines.push(
 			'warning: git cannot bring these changes back (this is not a repository, or nothing is committed yet)',
 		);
 	} else if (summary.unsaved.length > 0) {
-		const named = summary.unsaved.slice(0, MAX_NAMED).map((file) => showControls(file));
+		const named = (all ? summary.unsaved : summary.unsaved.slice(0, MAX_NAMED)).map(
+			(file) => showControls(file),
+		);
 		const more =
-			summary.unsaved.length > MAX_NAMED
+			!all && summary.unsaved.length > MAX_NAMED
 				? `, and ${summary.unsaved.length - MAX_NAMED} more`
 				: '';
 		lines.push(
@@ -180,7 +258,11 @@ export async function syncCommand(
 			'sync takes one argument: the name of an operation of ui.syncFunctions, or the path of a script',
 		);
 	}
+	// Before the script runs, which can take a while.
+	checkOutName(flags.out);
 	const target = positionals[0]!;
+	const out = flags.out;
+	const yes = flags.yes === true;
 	const configPath = context.resolveConfig();
 	const run = context.run ?? runSync;
 	let running: Run | undefined;
@@ -195,7 +277,9 @@ export async function syncCommand(
 	process.on('SIGINT', onSigint);
 	try {
 		const report = await run(configPath, target, {
-			yes: flags.yes === true,
+			// With `--out` the run is not told yes: the file is written when it asks, which is the
+			// moment the changes are known, and the answer is yes (see `confirm`).
+			yes: yes && out === undefined,
 			cacheDir: flags['cache-dir'],
 			cwd: context.cwd,
 			write: context.write,
@@ -204,11 +288,31 @@ export async function syncCommand(
 			},
 			confirm: async (summary, review) => {
 				direction = review?.direction === 'export' ? 'export' : 'import';
-				context.write(summaryText(summary, review));
-				const out = review?.direction === 'export';
+				const wrote = (): void => {
+					if (out === undefined) {
+						return;
+					}
+					const total = summary.changes.length;
+					context.write(
+						review?.direction === 'export' && !review.diffed
+							? `Wrote ${showControls(out)}\n`
+							: `Wrote ${showControls(out)} (${total} ${total === 1 ? 'change' : 'changes'})\n`,
+					);
+				};
+				if (out !== undefined) {
+					// Every change, before any of them is applied or asked about.
+					writeOutFile(context.cwd, out, summaryText(summary, review, { all: true }));
+				}
+				if (yes) {
+					wrote();
+					return true;
+				}
+				context.write(summaryText(summary, review, out === undefined ? {} : { out }));
+				wrote();
+				const writes = review?.direction === 'export';
 				if (!context.interactive) {
 					throw new Error(
-						out
+						writes
 							? 'there is something to write, and nothing was written: this is not a terminal to confirm it on (pass --yes to write it)'
 							: 'there are changes to apply, and nothing was applied: this is not a terminal to confirm them on (pass --yes to apply them)',
 					);

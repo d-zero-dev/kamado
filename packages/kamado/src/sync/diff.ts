@@ -94,6 +94,12 @@ export interface SnapshotPage extends PageMapEntry {
 	 * that needs it says which pages (`needsLocked` of the result), and is made again with it.
 	 */
 	readonly locked?: Readonly<Record<string, string>>;
+	/**
+	 * The keys of the entry the page has in `pages.overrides`: there for a page with a file that
+	 * has an entry (the list is empty for an entry with no keys), left out for one that has none.
+	 * A virtual page is its entry, so it does not carry the list.
+	 */
+	readonly overridesKeys?: readonly string[];
 }
 
 /** What the core gives for a sync (`uiSyncPages`). */
@@ -108,6 +114,11 @@ export interface Snapshot {
 	readonly overridesFile?: string | null;
 	/** The key that decides the URL (`pages.outputPathField`), or `null`. */
 	readonly outputPathField: string | null;
+	/**
+	 * The keys that `ui.keys.<key>.newKeyOrigin` sends to `pages.overrides` when a page with a
+	 * file does not have them yet. Left out when there are none.
+	 */
+	readonly newKeysInOverrides?: readonly string[];
 	readonly pages: readonly SnapshotPage[];
 	readonly warnings: readonly string[];
 }
@@ -437,6 +448,25 @@ export function pairByPlace<
 }
 
 /**
+ * The kinds of change in the order of `SyncSummary.changes`: what goes first, so that the
+ * places it frees are free for what comes after it, and the changes of keys last. The summary
+ * the terminal shows counts the kinds in this order too.
+ * @example
+ * ```ts
+ * CHANGE_ORDER.indexOf('deleted') < CHANGE_ORDER.indexOf('added'); // true
+ * ```
+ */
+export const CHANGE_ORDER: readonly SyncChangeKind[] = [
+	'deleted',
+	'movedUrl',
+	'movedFile',
+	'virtualized',
+	'materialized',
+	'added',
+	'meta',
+];
+
+/**
  * Finds what the result changes in the site.
  * @param snapshot - The pages the site has (`uiSyncPages`), as of the moment the script was given them
  * @param rows - The pages the outside data has, as rows: those `importRows` made in the range of
@@ -500,6 +530,25 @@ export function diff(snapshot: Snapshot, rows: readonly unknown[]): DiffResult {
 			filesAtRisk.add(snapshot.overridesFile);
 		}
 	};
+	// A page with a file whose entry in `pages.overrides` is changed or goes (a move, a removal)
+	// writes the file; a page that has none does not.
+	const writesEntryOf = (page: SnapshotPage): void => {
+		if (page.overridesKeys !== undefined) {
+			writesOverrides();
+		}
+	};
+	// A key is written in `pages.overrides` when the page is virtual, when the page's entry has
+	// the key, or when the key is new to the page and the config sends new keys of it there.
+	const newKeysInOverrides = new Set<string>(snapshot.newKeysInOverrides);
+	const writesKey = (page: SnapshotPage, key: string, had: boolean): void => {
+		if (
+			page.virtual ||
+			page.overridesKeys?.includes(key) === true ||
+			(!had && newKeysInOverrides.has(key))
+		) {
+			writesOverrides();
+		}
+	};
 	const riskOf = (page: SnapshotPage) => {
 		if (page.inputPath === null) {
 			return;
@@ -545,6 +594,7 @@ export function diff(snapshot: Snapshot, rows: readonly unknown[]): DiffResult {
 			});
 			found.movedUrl.push({ kind: 'movedUrl', from: page.url, to: row.url });
 			riskOf(page);
+			writesEntryOf(page);
 		}
 		if (page.virtual) {
 			if (row.virtual === false) {
@@ -647,6 +697,11 @@ export function diff(snapshot: Snapshot, rows: readonly unknown[]): DiffResult {
 				continue;
 			}
 			keys += 1;
+			// a key of a page that is made is new to it: it goes to pages.overrides when the
+			// config says so (a virtual page, and a page given its file after, wrote it above)
+			if (newKeysInOverrides.has(key)) {
+				writesOverrides();
+			}
 			edits.push({
 				url: row.url,
 				expect: NEW,
@@ -693,9 +748,7 @@ export function diff(snapshot: Snapshot, rows: readonly unknown[]): DiffResult {
 				problem(row, row.url, `the key ${key} cannot be changed: ${why}`);
 				continue;
 			}
-			if (page.virtual) {
-				writesOverrides();
-			}
+			writesKey(page, key, had);
 			edits.push({
 				url: page.url,
 				expect,
@@ -718,9 +771,7 @@ export function diff(snapshot: Snapshot, rows: readonly unknown[]): DiffResult {
 				problem(row, row.url, `the key ${key} cannot be removed: ${why}`);
 				continue;
 			}
-			if (page.virtual) {
-				writesOverrides();
-			}
+			writesKey(page, key, true);
 			edits.push({ url: page.url, expect, change: { op: 'delete', key } });
 			found.meta.push({ kind: 'meta', url: page.url, key, before });
 		}
@@ -734,6 +785,7 @@ export function diff(snapshot: Snapshot, rows: readonly unknown[]): DiffResult {
 		if (page.virtual) {
 			writesOverrides();
 		}
+		writesEntryOf(page);
 		edits.push({ url: page.url, expect: expectOf(page), change: { op: 'deletePage' } });
 		found.deleted.push({
 			kind: 'deleted',
@@ -749,15 +801,6 @@ export function diff(snapshot: Snapshot, rows: readonly unknown[]): DiffResult {
 		return { ok: false, problems, needsLocked: [...needsLocked] };
 	}
 
-	const order: readonly SyncChangeKind[] = [
-		'deleted',
-		'movedUrl',
-		'movedFile',
-		'virtualized',
-		'materialized',
-		'added',
-		'meta',
-	];
 	return {
 		ok: true,
 		edits,
@@ -771,7 +814,7 @@ export function diff(snapshot: Snapshot, rows: readonly unknown[]): DiffResult {
 				materialized: found.materialized.length,
 				meta: found.meta.length,
 			},
-			changes: order.flatMap((kind) => found[kind]),
+			changes: CHANGE_ORDER.flatMap((kind) => found[kind]),
 		},
 		filesAtRisk: [...filesAtRisk],
 		needsLocked: [...needsLocked],
