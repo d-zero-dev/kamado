@@ -1825,6 +1825,40 @@ html
 				]);
 			});
 
+			test('reads a front matter whose fences have spaces or tabs at the end of their lines, as kamado does', () => {
+				const bom = String.fromCodePoint(0xfe_ff);
+				const { output } = convertProject('layout-fences', {
+					'__assets/_libs/layouts/price.pug': 'html\n\tbody\n\t\tblock content\n',
+					'__assets/htdocs/open.html': '--- \nlayout: layouts/price.pug\n---\n<p>x</p>\n',
+					'__assets/htdocs/close.html':
+						'---\nlayout: layouts/price.pug\n--- \n<p>x</p>\n',
+					'__assets/htdocs/tab.html':
+						'---\t\nlayout: layouts/price.pug\n---\t\n<p>x</p>\n',
+					'__assets/htdocs/bom.html':
+						bom + '--- \nlayout: layouts/price.pug\n--- \n<p>x</p>\n',
+					// not a fence to kamado either: `----` does not close the front matter
+					'__assets/htdocs/dashes.html':
+						'---\nlayout: layouts/price.pug\n----\n<p>x</p>\n',
+					// an empty front matter is the whole of it: what follows is the body, even when
+					// it holds a line like a layout between two `---`
+					'__assets/htdocs/empty.html':
+						'---\n---\nlayout: layouts/price.pug\n---\n<p>x</p>\n',
+					'__assets/htdocs/empty-spaced.html':
+						'--- \n--- \nlayout: layouts/price.pug\n---\n<p>x</p>\n',
+				});
+				const copy = (file: string) =>
+					readFileSync(path.join(output, '__assets/htdocs', file), 'utf8');
+				expect(copy('open.html')).toBe('--- \nlayout: layouts/price\n---\n<p>x</p>\n');
+				expect(copy('close.html')).toBe('---\nlayout: layouts/price\n--- \n<p>x</p>\n');
+				expect(copy('tab.html')).toBe('---\t\nlayout: layouts/price\n---\t\n<p>x</p>\n');
+				expect(copy('bom.html')).toBe(
+					bom + '--- \nlayout: layouts/price\n--- \n<p>x</p>\n',
+				);
+				for (const file of ['dashes.html', 'empty.html', 'empty-spaced.html']) {
+					expect(existsSync(path.join(output, '__assets/htdocs', file))).toBe(false);
+				}
+			});
+
 			test('does not warn of a layout that a converted file is', () => {
 				const { said } = convertProject('layout-clean', layouts);
 				// Only `gone.json` of the fixture names a layout that no converted file is.

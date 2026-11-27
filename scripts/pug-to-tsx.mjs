@@ -2450,7 +2450,12 @@ function rewriteFrontMatterLayout(f) {
 	const text = readFileSync(f, 'utf8');
 	// A byte order mark in front of the `---` is not a part of the front matter.
 	const bom = text.startsWith(String.fromCodePoint(0xfe_ff)) ? 1 : 0;
-	const front = /^---\r?\n[\s\S]*?\r?\n---(?=\r?\n|$)/.exec(text.slice(bom))?.[0];
+	// The fences are the ones kamado reads (RFC section 4): spaces and tabs may end their lines,
+	// and nothing may be between them (`---` and `---`), which is a front matter that is empty;
+	// the first closing line closes it (`??`: the empty one is tried before one with lines).
+	const front = /^---[ \t]*\r?\n(?:[\s\S]*?\r?\n)??---[ \t]*(?=\r?\n|$)/.exec(
+		text.slice(bom),
+	)?.[0];
 	if (front === undefined) return;
 	const line =
 		/^layout[ \t]*:[ \t]*(["']?)([^"'\s#][^"'\r\n#]*?\.pug)\1(?=[ \t]*(?:#.*)?\r?$)/m.exec(
