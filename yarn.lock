@@ -2792,44 +2792,44 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@oxlint-tsgolint/darwin-arm64@npm:7.0.2007":
-  version: 7.0.2007
-  resolution: "@oxlint-tsgolint/darwin-arm64@npm:7.0.2007"
+"@oxlint-tsgolint/darwin-arm64@npm:7.0.2008":
+  version: 7.0.2008
+  resolution: "@oxlint-tsgolint/darwin-arm64@npm:7.0.2008"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"@oxlint-tsgolint/darwin-x64@npm:7.0.2007":
-  version: 7.0.2007
-  resolution: "@oxlint-tsgolint/darwin-x64@npm:7.0.2007"
+"@oxlint-tsgolint/darwin-x64@npm:7.0.2008":
+  version: 7.0.2008
+  resolution: "@oxlint-tsgolint/darwin-x64@npm:7.0.2008"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"@oxlint-tsgolint/linux-arm64@npm:7.0.2007":
-  version: 7.0.2007
-  resolution: "@oxlint-tsgolint/linux-arm64@npm:7.0.2007"
+"@oxlint-tsgolint/linux-arm64@npm:7.0.2008":
+  version: 7.0.2008
+  resolution: "@oxlint-tsgolint/linux-arm64@npm:7.0.2008"
   conditions: os=linux & cpu=arm64
   languageName: node
   linkType: hard
 
-"@oxlint-tsgolint/linux-x64@npm:7.0.2007":
-  version: 7.0.2007
-  resolution: "@oxlint-tsgolint/linux-x64@npm:7.0.2007"
+"@oxlint-tsgolint/linux-x64@npm:7.0.2008":
+  version: 7.0.2008
+  resolution: "@oxlint-tsgolint/linux-x64@npm:7.0.2008"
   conditions: os=linux & cpu=x64
   languageName: node
   linkType: hard
 
-"@oxlint-tsgolint/win32-arm64@npm:7.0.2007":
-  version: 7.0.2007
-  resolution: "@oxlint-tsgolint/win32-arm64@npm:7.0.2007"
+"@oxlint-tsgolint/win32-arm64@npm:7.0.2008":
+  version: 7.0.2008
+  resolution: "@oxlint-tsgolint/win32-arm64@npm:7.0.2008"
   conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
 
-"@oxlint-tsgolint/win32-x64@npm:7.0.2007":
-  version: 7.0.2007
-  resolution: "@oxlint-tsgolint/win32-x64@npm:7.0.2007"
+"@oxlint-tsgolint/win32-x64@npm:7.0.2008":
+  version: 7.0.2008
+  resolution: "@oxlint-tsgolint/win32-x64@npm:7.0.2008"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
@@ -8209,7 +8209,7 @@ __metadata:
     npm-run-all2: "npm:9.1.0"
     oxfmt: "npm:0.79.0"
     oxlint: "npm:1.94.0"
-    oxlint-tsgolint: "npm:7.0.2007"
+    oxlint-tsgolint: "npm:7.0.2008"
     postcss: "npm:8.5.25"
     postcss-custom-media: "npm:12.0.1"
     postcss-import: "npm:16.1.1"
@@ -9960,16 +9960,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"oxlint-tsgolint@npm:7.0.2007":
-  version: 7.0.2007
-  resolution: "oxlint-tsgolint@npm:7.0.2007"
+"oxlint-tsgolint@npm:7.0.2008":
+  version: 7.0.2008
+  resolution: "oxlint-tsgolint@npm:7.0.2008"
   dependencies:
-    "@oxlint-tsgolint/darwin-arm64": "npm:7.0.2007"
-    "@oxlint-tsgolint/darwin-x64": "npm:7.0.2007"
-    "@oxlint-tsgolint/linux-arm64": "npm:7.0.2007"
-    "@oxlint-tsgolint/linux-x64": "npm:7.0.2007"
-    "@oxlint-tsgolint/win32-arm64": "npm:7.0.2007"
-    "@oxlint-tsgolint/win32-x64": "npm:7.0.2007"
+    "@oxlint-tsgolint/darwin-arm64": "npm:7.0.2008"
+    "@oxlint-tsgolint/darwin-x64": "npm:7.0.2008"
+    "@oxlint-tsgolint/linux-arm64": "npm:7.0.2008"
+    "@oxlint-tsgolint/linux-x64": "npm:7.0.2008"
+    "@oxlint-tsgolint/win32-arm64": "npm:7.0.2008"
+    "@oxlint-tsgolint/win32-x64": "npm:7.0.2008"
   dependenciesMeta:
     "@oxlint-tsgolint/darwin-arm64":
       optional: true
@@ -9985,7 +9985,7 @@ __metadata:
       optional: true
   bin:
     tsgolint: ./bin/tsgolint.js
-  checksum: 10c0/bd18daa58909dd0f1b7e17d302c7e04d316e84166e74854add9467f29c4aebcd7e58dba6ac29d953678fb06023bddef2e62bfbc2585ed64ef3ab0b99580a4f4d
+  checksum: 10c0/bb7f67d540df7d91355eb8dcac38d56b2990d426e7ea58945c4a95f9894c1a24b9e9d7adf6c08049b77c65fa84105951290762f359e2f2d5f7b9429cb1d2d13d
   languageName: node
   linkType: hard
 
